@@ -102,6 +102,35 @@ public sealed class CreatureDisplayCoordinatorTests
         }
         finally { cleanup.TrySetResult(); }
     }
+    [Fact]
+    public async Task LastStopDuringItsOwnLocalStepStillWaitsActualPrerequisiteCleanup()
+    {
+        // Regression for #11: the last owner is stopped while its own re-probe runs, so the stop surfaces
+        // as that step's cancellation inside the worker instead of at the worker's cancellation check.
+        var source = new Sources(); source.DisplayByCreature["2"] = "200";
+        var entered = Signal(); var cleanupEntered = Signal(); var cleanup = Signal(); var never = Signal(); var reprobing = Signal();
+        var secondProbes = 0; var released = false;
+        source.Prepare = async (_, token) =>
+        { entered.SetResult(); try { await never.Task.WaitAsync(token); } finally { cleanupEntered.SetResult(); await cleanup.Task; } };
+        source.BeforeProbe = async (_, id, token) =>
+        { if (id == "200" && Interlocked.Increment(ref secondProbes) == 2) { reprobing.SetResult(); await never.Task.WaitAsync(token); } };
+        await using var store = new CreatureDisplayMetadataStore(source); using var firstStop = new CancellationTokenSource(); using var secondStop = new CancellationTokenSource();
+        try
+        {
+            var first = store.PrepareDisplayAsync(Request, Progress, firstStop.Token); await entered.Task.WaitAsync(Deadline);
+            var second = store.PrepareDisplayAsync(Request with { CreatureId = "2" }, Progress, secondStop.Token);
+            var completedAfterRelease = second.ContinueWith(_ => Volatile.Read(ref released), TaskContinuationOptions.ExecuteSynchronously);
+            // The first stop wakes the worker, which re-probes the still-live second consumer and holds there.
+            firstStop.Cancel(); await reprobing.Task.WaitAsync(Deadline); Assert.False(cleanupEntered.Task.IsCompleted);
+            secondStop.Cancel(); await cleanupEntered.Task.WaitAsync(Deadline); Assert.False(second.IsCompleted);
+            Assert.Equal("CREATURES_BUSY", (await Assert.ThrowsAsync<DiscoveryException>(() => store.PrepareDisplayAsync(Request, Progress, default))).Code);
+            Volatile.Write(ref released, true); cleanup.SetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second);
+            Assert.True(await completedAfterRelease.WaitAsync(Deadline));
+        }
+        finally { cleanup.TrySetResult(); }
+    }
     [Theory]
     [InlineData("complete", CreatureDisplayAbsence.AbsentFromCompleteSource)]
     [InlineData("unencryptedSections", CreatureDisplayAbsence.UnknownOutsideReadableScope)]

@@ -30,9 +30,12 @@ internal sealed partial class CreatureDisplayCoordinator(ICreatureDisplaySources
     internal (int Consumers, bool Stopping, bool Worker) Pressure
     { get { lock (gate) return (consumers.Count, producerStopping, worker is not null); } }
     private enum Phase { Accepted, Display, Model, Terminal }
-    private sealed class Consumer(CreatureDisplayMetadataRequest request, Func<CreaturesPreparationProgress, Task> progress, CancellationToken token)
+    private sealed class Consumer(CreatureDisplayMetadataRequest request, Func<CreaturesPreparationProgress, Task> progress,
+        CancellationToken token, bool shared = false)
     {
         internal readonly CreatureDisplayMetadataRequest Request = request;
+        /// <summary>Owned by the worker, so a stop may leave it subscribed to a retiring prerequisite.</summary>
+        internal readonly bool Shared = shared;
         internal readonly CreatureDisplayProgressObserver Progress = new(progress);
         internal readonly CancellationToken CallerToken = token;
         internal readonly CancellationTokenSource Cancellation = new();
@@ -63,7 +66,7 @@ internal sealed partial class CreatureDisplayCoordinator(ICreatureDisplaySources
         Func<CreaturesPreparationProgress, Task> progress, CancellationToken token)
     {
         CreatureDisplayMetadataService.Validate(request); token.ThrowIfCancellationRequested();
-        var consumer = new Consumer(request, progress, token);
+        var consumer = new Consumer(request, progress, token, shared: true);
         lock (gate)
         {
             if (closed) throw Stopping();
@@ -146,6 +149,9 @@ internal sealed partial class CreatureDisplayCoordinator(ICreatureDisplaySources
                 }
                 if (prerequisite is not null)
                 {
+                    // Capture stops before the live-demand decision. A consumer stopped after that decision
+                    // counted as live here, so it may settle only on a later pass that sees it as stopped.
+                    var stopped = current.Where(c => Canceled(c) && c.Phase != Phase.Terminal).ToArray();
                     if (!current.Any(c => Needs(c, prerequisite.Role) && !Canceled(c)) && prerequisite.Notification is null)
                     {
                         lock (gate) producerStopping = !consumers.Any(c => c.Phase != Phase.Terminal && !Canceled(c));
@@ -154,13 +160,13 @@ internal sealed partial class CreatureDisplayCoordinator(ICreatureDisplaySources
                     // A canceled last work owner retains its subscription until actual source retirement.
                     var sourceStillRetiring = prerequisite.Notification is not null &&
                         (!prerequisite.Work.IsCompleted || !prerequisite.Notification.IsCompleted);
-                    foreach (var consumer in current.Where(c => Canceled(c) && c.Phase != Phase.Terminal))
-                        if (!sourceStillRetiring) CompleteFailure(consumer, new OperationCanceledException(consumer.Token));
+                    if (!sourceStillRetiring)
+                        foreach (var consumer in stopped) Terminate(consumer, new OperationCanceledException(consumer.Token));
                 }
                 else
                 {
                     foreach (var consumer in current.Where(c => Canceled(c) && c.Phase != Phase.Terminal))
-                        CompleteFailure(consumer, new OperationCanceledException(consumer.Token));
+                        Terminate(consumer, new OperationCanceledException(consumer.Token));
                     CreaturesContext? nextContext = null;
                     lock (gate)
                     {
@@ -201,7 +207,7 @@ internal sealed partial class CreatureDisplayCoordinator(ICreatureDisplaySources
             }
             lock (gate)
             {
-                foreach (var consumer in consumers) CompleteFailure(consumer, error);
+                foreach (var consumer in consumers) Terminate(consumer, error);
                 producerStopping = false; worker = null;
             }
         }
@@ -309,7 +315,14 @@ internal sealed partial class CreatureDisplayCoordinator(ICreatureDisplaySources
         var problem = CreatureDisplayPolicy.Problem(error, role);
         await SettleAsync(consumer, CreatureDisplayPolicy.FailureState(error), problem: problem);
     }
-    private static void CompleteFailure(Consumer consumer, Exception error)
+    private void CompleteFailure(Consumer consumer, Exception error)
+    {
+        // A stop can surface as the cancellation of the consumer's own local step. A stopped shared
+        // consumer still settles only in RunAsync's retirement pass, after any source it owns retired.
+        if (consumer.Shared && error is OperationCanceledException && Canceled(consumer)) return;
+        Terminate(consumer, error);
+    }
+    private static void Terminate(Consumer consumer, Exception error)
     {
         consumer.Phase = Phase.Terminal;
         if (error is OperationCanceledException canceled) consumer.Completion.TrySetCanceled(canceled.CancellationToken);
