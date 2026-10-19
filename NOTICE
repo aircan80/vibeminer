@@ -15,14 +15,20 @@ is included. The separately attributed WoWDBDefs manifest and twelve definition
 files at revision b9a63096cdd99b26967f17f9515377ae62cadfd7 are community data
 under CC BY-SA 4.0 (WoWDBDefs contributors). Original source URLs, digests,
 NOTICE and full upstream LICENSE accompany these unmodified resources in
-src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/ and in local
-packages under third-party/WoWDBDefs/. Application parsing code is original.
+src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/ and in
+packages under resources/legal/third-party/WoWDBDefs/. Application parsing code
+is original.
 
 Three.js 0.186.1 is a graphics runtime under the MIT License, copyright
 2010-2026 three.js authors. Its unmodified license and dependency attribution
-are retained in docs/third-party/three/ and copied to third-party/three/ in
-local packages. Acquisition, game decoding and geometry interpretation remain
-original VibeMiner code.
+are retained in docs/third-party/three/ and copied to
+resources/legal/third-party/three/ in packages. Acquisition, game decoding and
+geometry interpretation remain original VibeMiner code.
+
+Packages also bundle Electron, the .NET runtime and npm and NuGet runtime
+packages, each under its own license. Electron's licenses are in
+resources/legal/electron/; the .NET, npm and NuGet licenses and inventories are
+in resources/legal/third-party/.
 
 No Blizzard or other upstream endorsement is implied. The project license
 grants no rights to Blizzard game content or trademarks.

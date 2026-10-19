@@ -1,0 +1,218 @@
+# Manual release: builds, tests, packages and smoke-checks each platform on its own runner,
+# then creates a DRAFT GitHub release v<version>. The owner reviews and publishes it by hand.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the leading v, e.g. 0.2.0. Must equal the version in package.json.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: Check version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Version matches package.json and is unused
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Version '$VERSION' is not MAJOR.MINOR.PATCH[-prerelease]."; exit 1
+          fi
+          manifest="$(jq -r .version package.json)"
+          if [[ "$manifest" != "$VERSION" ]]; then
+            echo "::error::package.json is $manifest. Commit the version bump to $VERSION first."; exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag v$VERSION already exists."; exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win-x64
+            runner: windows-2025
+            executable: artifacts/desktop/VibeMiner-win32-x64/vibeminer.exe
+          - target: mac-arm64
+            runner: macos-15
+            executable: artifacts/desktop/VibeMiner-darwin-arm64/VibeMiner.app/Contents/MacOS/vibeminer
+          - target: mac-x64
+            runner: macos-15-intel
+            executable: artifacts/desktop/VibeMiner-darwin-x64/VibeMiner.app/Contents/MacOS/vibeminer
+          - target: linux-x64
+            runner: ubuntu-24.04
+            executable: artifacts/desktop/VibeMiner-linux-x64/vibeminer
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      # electron-builder must not pick up a signing identity on its own; signing is opt-in (see BUILDING.md).
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      # .gitattributes uses text=auto; keep LF on Windows so hashed fixtures and generated contracts match.
+      - name: Keep LF line endings
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Check pinned toolchain
+        run: |
+          set -euo pipefail
+          expected_npm="$(node -p "require('./package.json').packageManager.split('@')[1]")"
+          echo "node $(node --version), npm $(npm --version), dotnet $(dotnet --version)"
+          [[ "$(node --version)" == "v$(cat .nvmrc)" ]] || { echo "::error::Node does not match .nvmrc"; exit 1; }
+          [[ "$(npm --version)" == "$expected_npm" ]] || { echo "::error::npm is not $expected_npm"; exit 1; }
+      - name: Install dependencies
+        run: |
+          npm ci
+          node tools/dotnet.mjs restore VibeMiner.slnx --locked-mode
+      - name: Build
+        run: npm run build
+      - name: Test (contracts, backend, desktop, engine contract)
+        run: npm test
+      - name: Package app with self-contained engine
+        env:
+          VIBEMINER_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+          # Signing hook: Developer ID / Authenticode secrets go here once tools/package-desktop.mjs signs.
+        run: node tools/package-desktop.mjs --release
+      - name: Allow Chromium sandbox in CI
+        if: runner.os == 'Linux'
+        run: |
+          # Ubuntu 24.04 blocks unprivileged user namespaces, which Chromium's sandbox needs.
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Smoke check package
+        env:
+          VIBEMINER_DATA_DIR: ${{ runner.temp }}/vibeminer-smoke-data
+          EXECUTABLE: ${{ matrix.executable }}
+        run: npm run smoke:package -- "$EXECUTABLE"
+      - name: Make installers and portable archive
+        # Signing hook: installer signing env (CSC_LINK, CSC_KEY_PASSWORD) goes here.
+        run: npm run package:installers
+      - name: Smoke check installers and portable archive
+        env:
+          VIBEMINER_DATA_DIR: ${{ runner.temp }}/vibeminer-smoke-data
+        run: npm run smoke:installers
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-${{ matrix.target }}
+          path: artifacts/package-smoke/
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ matrix.target }}
+          path: artifacts/release/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  release:
+    name: Create draft release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Add license, notice and source; write checksums
+        run: |
+          set -euo pipefail
+          cp LICENSE NOTICE release/
+          git archive --format=tar.gz --prefix="VibeMiner-$VERSION/" -o "release/VibeMiner-$VERSION-source.tar.gz" "$GITHUB_SHA"
+          expected=(
+            "VibeMiner-$VERSION-win-x64-setup.exe" "VibeMiner-$VERSION-win-x64.zip"
+            "VibeMiner-$VERSION-mac-arm64.dmg" "VibeMiner-$VERSION-mac-arm64.zip"
+            "VibeMiner-$VERSION-mac-x64.dmg" "VibeMiner-$VERSION-mac-x64.zip"
+            "VibeMiner-$VERSION-linux-x64.AppImage" "VibeMiner-$VERSION-linux-amd64.deb" "VibeMiner-$VERSION-linux-x64.tar.gz"
+            "VibeMiner-$VERSION-source.tar.gz" LICENSE NOTICE
+          )
+          cd release
+          for file in "${expected[@]}"; do [[ -f "$file" ]] || { echo "::error::Missing $file"; exit 1; }; done
+          actual="$(ls -1 | sort)"
+          wanted="$(printf '%s\n' "${expected[@]}" | sort)"
+          [[ "$actual" == "$wanted" ]] || { echo "::error::Unexpected release files:"; diff <(echo "$wanted") <(echo "$actual") || true; exit 1; }
+          sha256sum "${expected[@]}" > SHA256SUMS
+          cat SHA256SUMS
+      - name: Write release notes
+        run: |
+          set -euo pipefail
+          source_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$GITHUB_SHA"
+          cat > notes.md <<EOF
+          VibeMiner $VERSION, built from [\`${GITHUB_SHA:0:12}\`]($source_url).
+
+          **These builds are unsigned.** Windows SmartScreen and macOS Gatekeeper will warn before the first launch.
+          - Windows: choose *More info*, then *Run anyway*.
+          - macOS: the app is ad-hoc signed, not notarized. Open it once, then allow it under *System Settings > Privacy & Security*.
+          - Linux: make the AppImage executable (\`chmod +x\`), or install the .deb.
+
+          | Platform | Installer | Portable |
+          | --- | --- | --- |
+          | Windows x64 | \`VibeMiner-$VERSION-win-x64-setup.exe\` | \`VibeMiner-$VERSION-win-x64.zip\` |
+          | macOS Apple silicon | \`VibeMiner-$VERSION-mac-arm64.dmg\` | \`VibeMiner-$VERSION-mac-arm64.zip\` |
+          | macOS Intel | \`VibeMiner-$VERSION-mac-x64.dmg\` | \`VibeMiner-$VERSION-mac-x64.zip\` |
+          | Linux x64 | \`VibeMiner-$VERSION-linux-x64.AppImage\`, \`VibeMiner-$VERSION-linux-amd64.deb\` | \`VibeMiner-$VERSION-linux-x64.tar.gz\` |
+
+          Check downloads with \`sha256sum -c SHA256SUMS\`.
+
+          VibeMiner is GPL-3.0-or-later (see LICENSE and NOTICE). Corresponding source is \`VibeMiner-$VERSION-source.tar.gz\` and $source_url. Each package carries \`resources/legal/\` (\`Contents/Resources/legal/\` on macOS): Electron's licenses in \`electron/\`, and in \`third-party/\` the .NET runtime license and notices, the license files of the bundled npm packages, the MIT or Apache-2.0 text with copyright line for each bundled NuGet package, and the WoWDBDefs and Three.js notices. VibeMiner contains no Blizzard game content and is not endorsed by Blizzard.
+          EOF
+      - name: Create draft release
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag v$VERSION already exists."; exit 1
+          fi
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::A release named v$VERSION already exists (possibly a draft). Delete it first."; exit 1
+          fi
+          gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "VibeMiner $VERSION" --notes-file notes.md release/*

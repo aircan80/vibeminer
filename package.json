@@ -4,6 +4,7 @@
   "private": true,
   "description": "VibeMiner Electron desktop and C# engine workspace",
   "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/aircan80/vibeminer",
   "workspaces": [
     "apps/desktop"
   ],
@@ -22,7 +23,9 @@
     "test:e2e": "npm run build:desktop-fixture && playwright test --config tests/desktop/playwright.config.ts",
     "start": "npm run start --workspace @vibeminer/desktop",
     "package:desktop": "npm run build && node tools/package-desktop.mjs",
+    "package:installers": "node tools/make-installers.mjs",
     "smoke:package": "node tools/smoke-package.mjs",
+    "smoke:installers": "node tools/smoke-installers.mjs",
     "test": "npm run contracts:check && npm run test:backend && npm run test:desktop && npm run test:contracts",
     "build:desktop-fixture": "node tests/desktop/backend-fixture/build.mjs"
   },
@@ -30,12 +33,14 @@
     "@electron/packager": "20.3.0",
     "@playwright/test": "1.64.1",
     "ajv": "8.20.0",
+    "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
     "json-schema-to-typescript": "16.0.0"
   },
   "allowScripts": {
     "electron@44.9.0": true,
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "electron-winstaller": false
   },
   "packageManager": "npm@11.19.1",
   "type": "module"

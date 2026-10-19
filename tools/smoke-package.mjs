@@ -26,7 +26,7 @@ try {
   const page = await application.firstWindow();
   expect(await application.evaluate(({ app }) => app.isPackaged)).toBe(true);
   const icon = await application.evaluate(({ app, nativeImage }) => {
-    const image = nativeImage.createFromPath(`${app.getAppPath()}/dist/assets/vibeminer.png`);
+    const image = nativeImage.createFromPath([app.getAppPath(), 'dist', 'assets', 'vibeminer.png'].join(process.platform === 'win32' ? '\\' : '/'));
     return { empty: image.isEmpty(), size: image.getSize() };
   });
   expect(icon).toEqual({ empty: false, size: { width: 512, height: 512 } });
