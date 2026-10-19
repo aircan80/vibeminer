@@ -1,6 +1,6 @@
 # VibeMiner UI design references
 
-The selected starting UI is **guided build discovery**: [`build-discovery/index.html?concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow). The repository keeps that exact HTML and its local navigation dependencies. The other concepts in its selector are historical alternatives. The older standalone `mockups/atlas` prototype is superseded and is not a reference.
+The first screen follows **[desktop discovery](desktop-discovery/index.html)** ([D059](../DECISIONS.md)). It replaced the layout of **guided build discovery** ([`build-discovery/index.html?concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow)), whose meaning it keeps. The repository keeps that exact HTML and its local navigation dependencies. The other concepts in its selector are historical alternatives. The older standalone `mockups/atlas` prototype is superseded and is not a reference.
 
 Cross-screen rules (tokens, states, progress, focus, verification) are in [UI guidelines](../UI-GUIDELINES.md).
 
@@ -8,7 +8,8 @@ Cross-screen rules (tokens, states, progress, focus, verification) are in [UI gu
 
 | View | Reference | Role |
 | --- | --- | --- |
-| Guided discovery | [`concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow) | Selected starting UI |
+| Desktop discovery | [`desktop-discovery/index.html`](desktop-discovery/index.html) (states via `?state=`; see its [README](desktop-discovery/README.md)) | Selected first screen |
+| Guided discovery | [`concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow) | Superseded layout; its discovery contract still applies |
 | Preparation | [`option=dedicated&state=indexUnknown`](build-preparation/index.html?option=dedicated&state=indexUnknown) | Selected in Java; carried forward |
 | C build overview (Home) | [`concept=archive&state=ready`](build-mining-home/index.html?concept=archive&state=ready) | Selected in Java; discovery's destination |
 | Home and Tables with area navigation | [Home](top-navigation/home.html), [Tables](top-navigation/tables.html) | Selected horizontal shell and Tables workbench |
@@ -44,7 +45,7 @@ The HTML files can contain older alternatives. Only the views above guide the ap
 ## Fidelity
 
 - Carry the selected mockups' HTML structure, fonts, sizes, weights and colours into React faithfully ([D021](../DECISIONS.md)).
-- Discovery keeps its full-height tinted right inspector, its left-column question and product, underlined navigation, inline desktop filters and three-column build cards.
+- Discovery follows the desktop reference: toolbar, build listbox, pinned-action inspector and status bar in a window that never scrolls.
 - Fix real accessibility or usability defects on purpose and record them. Don't drift silently.
 - Record future redesigns as new design references instead of editing the imported source. Then compare the implementation against the new reference.
 - Compare real Electron captures with the reference at 1280×800 and 1440×1100, 100% and 200% text. A copied HTML file is a reference asset, not implemented UI.

@@ -64,7 +64,7 @@ These are local development packages. Signing, notarization, complete dependency
 
 Run `npm run smoke:package` after packaging for a fresh launch and proxy-blocked local reopen check. `npm run smoke:package -- --live` additionally performs one explicit official `wow` discovery refresh, verifies the selected build/CDN configurations and Home, then verifies saved-history/selection and Home reopening with HTTP proxies blocked; this live check is separate from normal offline tests. Both use an isolated temporary catalog and omit the local SDK from the engine-launch environment. Package-specific NuGet locks stay in staging so native publication does not rewrite development lockfiles.
 
-`node tools/capture-discovery-reference.mjs` renders the immutable guided mockup using Electron at the same reference sizes, excluding only its design concept/state controls. Pass `home` or `preparation` to capture the related immutable references. Compare those captures under `artifacts/design-reference/` with the actual application captures from `npm run test:e2e`.
+`node tools/capture-discovery-reference.mjs` renders the immutable guided mockup using Electron at the same reference sizes, excluding only its design concept/state controls. Pass `desktop` for the current desktop discovery reference, or `home` or `preparation` for the related immutable references. Compare those captures under `artifacts/design-reference/` with the actual application captures from `npm run test:e2e`.
 
 `npm start` loads built files and has no hot reload. After changing frontend sources, run `npm run build:desktop`, close the application and start it again. After backend changes, also run `npm run build:backend`.
 

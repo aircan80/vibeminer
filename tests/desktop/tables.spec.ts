@@ -6,7 +6,7 @@ import { launch, root } from './helpers';
 async function opened() {
   const session = await launch(true);
   await session.page.locator('.build-row').first().click();
-  await session.page.getByRole('button', { name: 'Open Build', exact: true }).click();
+  await session.page.getByRole('button', { name: 'Open build', exact: true }).click();
   await writeFile(path.join(session.data, 'release-open'), 'release');
   await expect(session.page.getByRole('heading', { name: 'Build overview', exact: true })).toBeVisible();
   return session;

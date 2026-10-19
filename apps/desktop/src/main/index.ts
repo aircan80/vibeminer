@@ -120,6 +120,10 @@ async function openWindow(): Promise<void> {
   const icon = nativeImage.createFromPath(path.join(__dirname, '../assets/vibeminer.png'));
   if (process.platform === 'darwin') app.dock?.setIcon(icon);
   window = new BrowserWindow({ width: 1280, height: 800, minWidth: 600, minHeight: 480, title: 'VibeMiner', icon, backgroundColor: '#f5f3ed', webPreferences: { preload: path.join(__dirname, '../preload/index.cjs'), session:session.defaultSession, contextIsolation: true, nodeIntegration: false, sandbox: true, additionalArguments: process.env.VIBEMINER_AUTHORED_FIXTURES === '1' ? ['--vibeminer-authored-fixtures'] : [] } });
+  // Hide the bar but keep the default menu so edit, zoom, close and quit accelerators still work.
+  window.setMenuBarVisibility(false);
+  // The default zoomIn accelerator is Ctrl+Plus (Ctrl+Shift+= on most layouts); also accept plain Ctrl+=. Chromium clamps the level at its 500% maximum.
+  window.webContents.on('before-input-event',(event,input)=>{if(input.type==='keyDown'&&(input.control||input.meta)&&!input.alt&&!input.shift&&input.key==='='){event.preventDefault();const contents=window!.webContents;contents.setZoomLevel(contents.getZoomLevel()+0.5);}});
   window.webContents.on('did-start-navigation',(_event,_url,inPlace,mainFrame)=>{if(mainFrame&&!inPlace){geometry.invalidate('documentReplaced');void icons.revokeDocument().catch(iconCleanupFailure);}});
   window.webContents.on('frame-created',(_event,details)=>{if(!details.frame||details.frame.parent){geometryDocumentBlocked=true;geometry.invalidate('documentReplaced');}});
   window.webContents.on('did-navigate',()=>geometryDocumentGone());

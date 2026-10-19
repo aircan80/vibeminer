@@ -1,0 +1,156 @@
+/* Desktop discovery: docs/design/desktop-discovery. Root is 15px, so rem = px / 15. Type scale 11 / 13 / 14 / 19px. */
+.discovery-screen{--dv-muted:#586a64;--dv-line-soft:#e9ece5;--dv-hover:#eef4ef;--dv-pill:#b9d5c8;--dv-gold-ink:#7d561b;--dv-gold-line:#e4cfa5;--dv-gold-bg:#fbf5e8;--dv-warn-bg:#fbf3e4;--dv-warn-line:#e7c98f;--dv-err-bg:#fbeeea;--dv-err-line:#e3b5a8;--dv-err-ink:#8a3a26;--dv-toolbar:#fbfaf6;--dv-status:#eceae2;--dv-s:.733333rem;--dv-m:.866667rem;--dv-b:.933333rem;--dv-l:1.266667rem;--dv-pane-head:3.2rem;--dv-thead:1.866667rem;
+  height:100vh;font-size:var(--dv-b);line-height:1.45;user-select:none}
+.discovery-screen[hidden]{display:none}
+.discovery-screen .dv-window{height:100%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto}
+.discovery-screen .mono,.discovery-screen code{font-family:ui-monospace,monospace}
+.discovery-screen .dv-selectable{user-select:text;cursor:text}
+.discovery-screen :focus-visible{outline:3px solid #e6ad46;outline-offset:2px}
+
+/* Toolbar */
+.discovery-screen .dv-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.8rem;min-height:2.933333rem;padding:.4rem .8rem;background:var(--dv-toolbar);border-bottom:1px solid var(--line)}
+.discovery-screen .dv-brand{display:flex;align-items:center;gap:.466667rem;font-weight:700;font-size:var(--dv-b);white-space:nowrap}
+.discovery-screen .dv-brand img{width:1.466667rem;height:1.466667rem;display:block;flex:none}
+.discovery-screen .dv-word span{color:var(--teal)}
+.discovery-screen .dv-divider{width:1px;align-self:stretch;background:var(--line);margin:.14rem 0}
+.discovery-screen .dv-field{display:flex;align-items:center;gap:.466667rem;min-width:0}
+.discovery-screen .dv-field>label{font-size:var(--dv-m);color:var(--dv-muted);white-space:nowrap}
+.discovery-screen .dv-control{height:2rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .6rem;min-width:0;font-size:var(--dv-b)}
+.discovery-screen .dv-control:disabled{opacity:.55;cursor:default}
+.discovery-screen .dv-product{width:auto;max-width:22.4rem;font-weight:600}
+.discovery-screen .dv-btn{height:2rem;display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);padding:0 .733333rem;white-space:nowrap;flex:none;font-size:var(--dv-b)}
+.discovery-screen .dv-btn:hover:not(:disabled):not([aria-disabled="true"]){background:var(--dv-hover);border-color:#c5d3cb}
+.discovery-screen .dv-btn.primary{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+.discovery-screen .dv-btn.primary:hover:not(:disabled){background:#125b54}
+.discovery-screen .dv-btn:disabled,.discovery-screen .dv-btn[aria-disabled="true"]{opacity:.55;cursor:default}
+.discovery-screen .dv-spacer{flex:1}
+.discovery-screen .dv-fixture{font-size:var(--dv-s);color:#76632e;background:#f5efd9;border:1px solid #e7dfc3;border-radius:5px;padding:.133333rem .466667rem;white-space:nowrap}
+.discovery-screen .dv-chip{display:inline-flex;align-items:center;gap:.466667rem;height:2rem;padding:0 .7rem;border:1px solid var(--dv-pill);border-radius:6px;background:var(--mint);color:var(--teal);font-weight:600;font-size:var(--dv-b);white-space:nowrap;flex:none}
+.discovery-screen .dv-chip:hover{background:#d9ece1;border-color:var(--teal)}
+.discovery-screen .dv-chip.attention{border-color:var(--dv-warn-line);background:var(--dv-warn-bg);color:var(--dv-gold-ink)}
+.discovery-screen .dv-chip[aria-expanded="true"]{box-shadow:inset 0 0 0 1px currentColor}
+.discovery-screen .dv-chip-short{display:none}
+.discovery-screen .dv-count{min-width:1.2rem;height:1.2rem;border-radius:999px;display:grid;place-items:center;padding:0 .28rem;font-size:var(--dv-s)}
+.discovery-screen .dv-chip .dv-count{color:#fff;background:var(--teal)}
+.discovery-screen .dv-chip.attention .dv-count{background:var(--dv-gold-ink)}
+.discovery-screen .dv-pulse{display:inline-block;width:.466667rem;height:.466667rem;border-radius:50%;background:currentColor;animation:dv-pulse 1.6s ease-in-out infinite;flex:none;vertical-align:middle;margin-left:.4rem}
+.discovery-screen .dv-chip .dv-pulse,.discovery-screen .dv-busy .dv-pulse{margin-left:0}
+@keyframes dv-pulse{50%{opacity:.35}}
+
+/* Activity panel docked after the toolbar entry: it covers the inspector column between toolbar and status bar. */
+.discovery-screen .dv-panel-slot{display:contents}
+.discovery-screen aside.download-activity-panel{top:var(--dv-panel-top,2.933333rem);bottom:var(--dv-panel-bottom,1.633333rem);right:0;left:auto;width:clamp(16.8rem,24.733333rem,44%);border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:-8px 0 24px rgba(36,59,58,.08);font-size:var(--dv-m)}
+.discovery-screen aside.download-activity-panel .download-panel-heading{padding:.56rem .933333rem;align-items:center}
+.discovery-screen aside.download-activity-panel .download-panel-heading h2{font-size:var(--dv-b);margin:0 0 .4rem}
+.discovery-screen aside.download-activity-panel .download-task{border:1px solid var(--line);border-radius:6px;padding:.6rem .7rem;margin:.6rem .933333rem}
+.discovery-screen aside.download-activity-panel .download-task button{height:1.9rem;padding:0 .6rem;border-radius:6px;font-size:var(--dv-m)}
+.discovery-screen aside.download-activity-panel .download-panel-heading>button{height:1.866667rem;padding:0 .733333rem;border-radius:6px}
+
+/* Body: list pane | inspector */
+.discovery-screen .dv-body{display:grid;grid-template-columns:minmax(0,1fr) clamp(16.8rem,24.733333rem,44%);min-height:0;max-width:none;margin:0}
+.discovery-screen .dv-body.no-inspector{grid-template-columns:minmax(0,1fr)}
+.discovery-screen .dv-pane{display:flex;flex-direction:column;min-height:0;min-width:0}
+.discovery-screen .dv-pane-head{flex:none;display:flex;align-items:center;gap:.56rem;min-height:var(--dv-pane-head);padding:.4rem .8rem;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--bg)}
+.discovery-screen .dv-pane-head h1{font-size:var(--dv-b);letter-spacing:0;line-height:1.45;margin:0;font-weight:700;white-space:nowrap}
+.discovery-screen .dv-n{color:var(--dv-muted);margin:0 .28rem 0 -.28rem}
+.discovery-screen .dv-search{width:14rem;max-width:100%}
+.discovery-screen .dv-segmented{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper)}
+.discovery-screen .dv-segmented button{border:0;border-radius:0;background:none;height:1.913rem;padding:0 .7rem;white-space:nowrap;font-size:var(--dv-b);color:var(--ink)}
+.discovery-screen .dv-segmented button+button{border-left:1px solid var(--line)}
+.discovery-screen .dv-segmented button[aria-pressed="true"]{background:var(--mint);color:var(--teal);font-weight:600}
+.discovery-screen .dv-notice{flex:none;margin:.56rem .8rem 0;padding:.513rem .7rem;border-radius:6px;border:1px solid var(--dv-warn-line);background:var(--dv-warn-bg);font-size:var(--dv-m);display:flex;gap:.747rem;align-items:flex-start;overflow-wrap:anywhere}
+.discovery-screen .dv-notice.error{border-color:var(--dv-err-line);background:var(--dv-err-bg)}
+.discovery-screen .dv-notice.info{border-color:var(--dv-pill);background:var(--mint);padding:0;border:0}
+.discovery-screen .dv-notice.info .dv-state{flex:1}
+.discovery-screen .dv-notice>div{flex:1}
+.discovery-screen .dv-notice strong{display:block}
+.discovery-screen .dv-notice ul{margin:.187rem 0 0;padding-left:1.027rem}
+.discovery-screen .dv-notice code{font-size:var(--dv-s)}
+.discovery-screen .dv-notice .dv-btn{height:1.773rem}
+
+/* Build list: a listbox laid out in columns. */
+.discovery-screen .dv-list{position:relative;flex:1;overflow:auto;min-height:0;background:var(--paper);scroll-padding-top:var(--dv-thead);margin-top:.56rem;border-top:1px solid var(--line)}
+.discovery-screen .dv-list.flush{margin-top:0;border-top:0}
+.discovery-screen .dv-cols{display:grid;grid-template-columns:minmax(7rem,1.1fr) minmax(3.733333rem,.55fr) minmax(8.4rem,1.4fr) minmax(6.066667rem,.95fr) minmax(7.466667rem,1.05fr) minmax(7.933333rem,1.15fr);align-items:center;column-gap:.8rem;padding:0 .8rem}
+.discovery-screen .dv-thead{position:sticky;top:0;z-index:1;height:var(--dv-thead);background:var(--dv-toolbar);border-bottom:1px solid var(--line);font-size:var(--dv-s);font-weight:600;color:var(--dv-muted);letter-spacing:.02em;white-space:nowrap}
+.discovery-screen [role="listbox"]:focus-visible{outline:none}
+.discovery-screen [role="option"]{position:relative;min-height:2.427rem;border-bottom:1px solid var(--dv-line-soft);font-size:var(--dv-m);white-space:nowrap;cursor:default}
+.discovery-screen [role="option"]>span{overflow:hidden;text-overflow:ellipsis}
+.discovery-screen [role="option"]:hover{background:var(--dv-hover)}
+.discovery-screen [role="option"][aria-selected="true"]{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+.discovery-screen [role="listbox"]:focus-visible [role="option"].active{outline:3px solid #e6ad46;outline-offset:-3px}
+.discovery-screen .dv-version{font-weight:600}
+.discovery-screen .dv-dim{color:var(--dv-muted)}
+.discovery-screen .dv-pill{display:inline-block;padding:0 .373rem;border-radius:4px;border:1px solid var(--dv-pill);background:var(--paper);color:var(--teal);font-size:var(--dv-s);font-weight:600;line-height:1.5;margin-right:.187rem}
+.discovery-screen .dv-pill.gold{border-color:var(--dv-gold-line);background:var(--dv-gold-bg);color:var(--dv-gold-ink)}
+.discovery-screen .dv-meter{display:inline-flex;align-items:center;gap:.466667rem}
+.discovery-screen .dv-track{width:3.36rem;height:.333333rem;border-radius:999px;background:var(--dv-line-soft);overflow:hidden;flex:none}
+.discovery-screen .dv-track i{display:block;height:100%;background:var(--teal)}
+.discovery-screen .dv-meter.done{color:var(--teal);font-weight:600}
+.discovery-screen [role="option"] .dv-pulse{color:var(--teal)}
+.discovery-screen .dv-load-more{display:flex;align-items:center;gap:.747rem;padding:.653rem .8rem;font-size:var(--dv-m);color:var(--dv-muted)}
+.discovery-screen .dv-empty{display:grid;place-items:center;height:100%;padding:1.866667rem;text-align:center;color:var(--dv-muted)}
+.discovery-screen .dv-empty h2{color:var(--ink);font-size:var(--dv-b);letter-spacing:0;margin:0 0 .28rem}
+.discovery-screen .dv-empty p{margin:0 auto .747rem;max-width:26.133333rem;font-size:var(--dv-m)}
+
+/* Inspector: header, scrolling details, pinned actions. The header ends where the list header ends. */
+.discovery-screen .dv-inspector{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;min-width:0;border-left:1px solid var(--line);background:#f9f8f3}
+.discovery-screen .dv-insp-head{min-height:calc(var(--dv-pane-head) + var(--dv-thead) + 1px);padding:.513rem .933333rem;border-bottom:1px solid var(--line);display:flex;flex-direction:column;justify-content:center}
+.discovery-screen .dv-label{font-size:var(--dv-s);letter-spacing:.06em;text-transform:uppercase;color:var(--dv-muted);font-weight:700}
+.discovery-screen .dv-insp-head h2{margin:0;font-size:var(--dv-l);letter-spacing:0;font-weight:700;line-height:1.25}
+.discovery-screen .dv-insp-head p{margin:0;color:var(--dv-muted);font-size:var(--dv-m)}
+.discovery-screen .dv-insp-head code{font-size:inherit}
+.discovery-screen .dv-insp-body{overflow:auto;padding:.747rem .933333rem;min-height:0}
+.discovery-screen .dv-insp-body .dv-label{margin:.933333rem 0 .373rem}
+.discovery-screen .dv-insp-body dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.327rem .84rem;margin:0;font-size:var(--dv-m)}
+.discovery-screen .dv-insp-body dt{color:var(--dv-muted);white-space:nowrap}
+.discovery-screen .dv-insp-body dd{margin:0;overflow-wrap:anywhere}
+.discovery-screen .dv-insp-body dd.mono{font-size:var(--dv-s);line-height:1.7}
+.discovery-screen .dv-note{margin:.56rem 0 0;font-size:var(--dv-s);color:var(--dv-muted)}
+.discovery-screen .dv-state{border:1px solid #cfe2d6;background:var(--mint);border-radius:6px;padding:.513rem .653rem;font-size:var(--dv-m)}
+.discovery-screen .dv-state strong{display:block}
+.discovery-screen .dv-row{display:flex;gap:.373rem;margin-top:.42rem;flex-wrap:wrap}
+.discovery-screen .dv-row .dv-btn{height:1.773rem}
+.discovery-screen .dv-insp-foot{grid-row:3;padding:.7rem .933333rem;border-top:1px solid var(--line);background:var(--paper);display:flex;flex-wrap:wrap;gap:.513rem;align-items:center}
+.discovery-screen .dv-insp-foot .dv-field{flex:1 1 100%}
+.discovery-screen .dv-insp-foot .dv-field select{flex:1}
+.discovery-screen .dv-insp-foot .primary{flex:1}
+.discovery-screen .dv-reason{flex:1 1 100%;margin:0;font-size:var(--dv-s);color:var(--dv-muted)}
+.discovery-screen .dv-insp-empty{grid-row:2;display:grid;place-items:center;text-align:center;color:var(--dv-muted);padding:1.4rem;font-size:var(--dv-m)}
+.discovery-screen .dv-insp-empty strong{color:var(--ink)}
+.discovery-screen .dv-insp-empty p{margin:.187rem 0 0}
+
+/* Status bar: always one line. */
+.discovery-screen .dv-statusbar{display:flex;align-items:center;gap:1.027rem;height:1.633333rem;padding:0 .8rem;background:var(--dv-status);border-top:1px solid var(--line);font-size:var(--dv-s);color:var(--dv-muted);white-space:nowrap;overflow:hidden}
+.discovery-screen .dv-statusbar strong{color:var(--ink);font-weight:600}
+.discovery-screen .dv-statusbar>span{overflow:hidden;text-overflow:ellipsis}
+.discovery-screen .dv-busy{display:inline-flex;align-items:center;gap:.373rem;color:var(--teal);font-weight:600}
+.discovery-screen .dv-warn{color:var(--dv-gold-ink);font-weight:600}
+
+/* Enlarged text or a narrow window, narrower than 65.333333rem (980px at 100%). App.tsx sets .dv-compact from the window width and the current root text size, so this follows text enlargement immediately. The window still never scrolls. */
+.discovery-screen .dv-compact .dv-toolbar{gap:.56rem}
+.discovery-screen .dv-compact .dv-word,.discovery-screen .dv-compact .dv-divider,.discovery-screen .dv-compact .dv-fixture span{display:none}
+.discovery-screen .dv-compact .dv-toolbar .dv-field>label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.discovery-screen .dv-compact .dv-toolbar .dv-field{flex:1 1 7.466667rem}
+.discovery-screen .dv-compact .dv-product{width:100%}
+.discovery-screen .dv-compact .dv-chip-long{display:none}
+.discovery-screen .dv-compact .dv-chip-short{display:inline}
+.discovery-screen .dv-compact .dv-cols{grid-template-columns:minmax(6.066667rem,1.1fr) minmax(4.666667rem,1.2fr) minmax(5.133333rem,.9fr) minmax(5.133333rem,.9fr) minmax(5.6rem,1fr)}
+.discovery-screen .dv-compact .dv-cols>:nth-child(2){display:none}
+.discovery-screen .dv-compact .dv-list{overflow-x:hidden}
+.discovery-screen .dv-compact .dv-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1.2fr) minmax(0,1fr)}
+.discovery-screen .dv-compact .dv-body.no-inspector{grid-template-rows:minmax(0,1fr)}
+.discovery-screen .dv-compact .dv-inspector{border-left:0;border-top:1px solid var(--line)}
+.discovery-screen .dv-compact .dv-insp-head{min-height:0;padding:.327rem .933333rem}
+.discovery-screen .dv-compact .dv-insp-head .dv-label,.discovery-screen .dv-compact .dv-insp-head p{display:none}
+.discovery-screen .dv-compact .dv-insp-foot{padding:.42rem .933333rem}
+.discovery-screen .dv-compact .dv-insp-foot .dv-field{flex:1 1 auto}
+.discovery-screen .dv-compact .dv-insp-foot .dv-reason{display:none}
+.discovery-screen .dv-compact .dv-insp-foot.blocked .dv-reason{display:block}
+.discovery-screen .dv-compact .dv-notice{max-height:3.08rem;overflow:auto;margin-top:.28rem}
+.discovery-screen .dv-compact .dv-statusbar .dv-secondary{display:none}
+.discovery-screen .dv-compact aside.download-activity-panel{width:100%}
+/* Last resort for very small windows: the pane scrolls as a whole so notices and rows stay reachable. */
+.discovery-screen .dv-compact .dv-pane{overflow-y:auto}
+.discovery-screen .dv-compact .dv-list{flex:1 1 0;min-height:6.4rem}
+

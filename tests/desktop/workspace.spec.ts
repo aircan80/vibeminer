@@ -13,18 +13,18 @@ test('Open verifies an exact context, preserves discovery on Back, and exposes h
   try {
     const { page } = session;
     await expect(page.locator('.build-row')).toHaveCount(2);
-    await page.locator('.build-row').first().focus(); await page.keyboard.press('Enter');
+    await page.getByRole('listbox', { name: 'Builds' }).focus(); await page.keyboard.press('Enter');
     await expect(page.locator('.build-row').first()).toContainText('New to VibeMiner');
     await page.getByLabel('Version or build number').fill('70448');
     await expect(page.getByLabel('Download source', { exact: true })).toHaveValue('us');
-    await page.getByRole('button', { name: 'Open Build', exact: true }).click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await expect.poll(() => existsSync(path.join(session.data, 'waiting-open'))).toBe(true);
     await expect(page.locator('.preparation-view')).toBeVisible();
     await page.getByRole('button', { name: /Back to build list/ }).click();
     await expect(page.getByLabel('Version or build number')).toHaveValue('70448');
-    await expect(page.locator('.build-row').first()).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByRole('button', { name: 'Open Build', exact: true })).toBeFocused();
-    await page.getByRole('button', { name: 'Open Build', exact: true }).click();
+    await expect(page.locator('.build-row').first()).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('button', { name: 'Open build', exact: true })).toBeFocused();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await expect(page.locator('.preparation-view')).toBeVisible();
     expect((await requests(session.data)).filter(request => request.method === 'workspace.open')).toHaveLength(1);
     await writeFile(path.join(session.data, 'release-open'), 'release');
@@ -40,9 +40,9 @@ test('Open verifies an exact context, preserves discovery on Back, and exposes h
     await expect(page.getByRole('button', { name: 'View metadata details' })).toBeFocused();
     await page.getByRole('button', { name: /Choose build/ }).click();
     await expect(page.getByLabel('Version or build number')).toHaveValue('70448');
-    await expect(page.locator('.build-row').first()).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.build-row').first()).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('.build-row').first()).not.toContainText('New to VibeMiner');
-    await page.getByRole('button', { name: 'Open Build', exact: true }).click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await expect(heading).toBeVisible();
     const calls = await requests(session.data);
     expect(calls.filter(request => request.method === 'workspace.open')).toHaveLength(2);
@@ -55,7 +55,7 @@ test('detached preparation cannot navigate after a product change', async () => 
   try {
     const { page } = session;
     await page.locator('.build-row').first().click();
-    await page.getByRole('button', { name: 'Open Build', exact: true }).click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await expect(page.locator('.preparation-view')).toBeVisible();
     await page.getByRole('button', { name: /Back to build list/ }).click();
     await page.getByLabel('Product', { exact: true }).selectOption('wowt');
@@ -81,7 +81,7 @@ test('cancel waits for preparation retirement and a failed exact build can be re
     const { page } = session;
     await writeFile(path.join(session.data, 'hold-open-cancel'), 'hold');
     await page.locator('.build-row').first().click();
-    await page.getByRole('button', { name: 'Open Build', exact: true }).click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await page.getByRole('button', { name: 'Cancel preparation', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Stopping preparation…', exact: true })).toHaveAttribute('aria-disabled', 'true');
     await expect(page.locator('.home-view')).toHaveCount(0);
@@ -102,7 +102,7 @@ test('preparation and C Home preserve reference layout with enlarged text', asyn
     const { page, app } = session;
     await page.locator('.build-row').first().click();
     const baseFontSize = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
-    await page.getByRole('button', { name: 'Open Build', exact: true }).click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await expect(page.locator('.preparation-view')).toBeVisible();
     for (const view of ['preparation', 'home']) {
       if (view === 'home') {
@@ -126,7 +126,7 @@ test('Download objects pages a pinned local ledger and returns focus to Home', a
   try {
     const { page, app } = session;
     await page.locator('.build-row').first().click();
-    await page.getByRole('button', { name: 'Open Build', exact: true }).click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await writeFile(path.join(session.data, 'release-open'), 'release');
     await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Browse download objects', exact: true }).click();

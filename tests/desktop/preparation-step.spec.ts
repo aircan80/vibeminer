@@ -11,7 +11,7 @@ test('preparation numbers actual stages, preserves them on reattach, and retires
     await mkdir(captures, { recursive: true });
     await writeFile(path.join(session.data, 'hold-open-cancel'), 'hold');
     await page.locator('.build-row').first().click();
-    await page.getByRole('button', { name: 'Open Build', exact: true }).click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
     const phase = page.locator('.preparation-view .phase');
     await expect(phase).toContainText('[1/…] Checking saved configuration');
     await expect(phase).toContainText('Check the exact saved source and configuration documents. The stage count is determined after the configuration check.');
@@ -23,7 +23,7 @@ test('preparation numbers actual stages, preserves them on reattach, and retires
     await expect(phase.locator('.phase-description')).toHaveText('Deduplicate full encoding keys and their published encoded sizes.');
     await expect(phase).not.toContainText('stage count is determined');
     await expect(page.locator('.preparation-view .progress')).toHaveCount(0);
-    await page.locator('.download-activity-trigger:visible').click();
+    await page.locator('.download-activity-trigger:visible, .dv-chip:visible').click();
     const task = page.locator('#download-activity-panel article[data-activity-key^="workspace:"]');
     await expect(task.getByText('2 of 6 objects · 33% of current stage', {exact: true})).toBeVisible();
     await expect(phase).toHaveAttribute('aria-live', 'off');
@@ -31,8 +31,8 @@ test('preparation numbers actual stages, preserves them on reattach, and retires
     await page.keyboard.press('Escape');
     await expect(page.locator('.stage-announcement')).toHaveAttribute('aria-live', 'polite');
     await page.getByRole('button', { name: /Back to build list/ }).click();
-    await expect(page.getByRole('button', { name: 'Open Build', exact: true })).toBeFocused();
-    await page.getByRole('button', { name: 'Open Build', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Open build', exact: true })).toBeFocused();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await expect(phase).toContainText('[3/5] Building download ledger');
     const calls = (await readFile(path.join(session.data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
     expect(calls.filter(call => call.method === 'workspace.open')).toHaveLength(1);

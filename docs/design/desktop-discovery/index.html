@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeMiner · Desktop discovery</title>
+<link rel="icon" type="image/svg+xml" href="../../../branding/vibeminer.svg">
+<style>
+/* Type scale: 11 / 13 / 14 / 19px at 100%. */
+:root{--bg:#f5f3ed;--paper:#fffefa;--ink:#243b3a;--muted:#586a64;--line:#dce2d9;--line-soft:#e9ece5;--teal:#176e66;--mint:#e4f1e9;--hover:#eef4ef;--pill:#b9d5c8;--gold-ink:#7d561b;--gold-line:#e4cfa5;--gold-bg:#fbf5e8;--warn-bg:#fbf3e4;--warn-line:#e7c98f;--err-bg:#fbeeea;--err-line:#e3b5a8;--focus:#e6ad46;--toolbar:#fbfaf6;--status:#eceae2;
+  --fs-s:.786rem;--fs-m:.929rem;--fs-l:1.357rem;--pane-head:3.43rem;--thead:2rem;font-size:14px}
+:root[data-text="200"]{font-size:28px}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:1rem/1.45 system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.mono{font-family:ui-monospace,monospace}
+.selectable{user-select:text;-webkit-user-select:text;cursor:text}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip{position:absolute;left:.5rem;top:-3rem;z-index:20;background:var(--paper);padding:.3rem .6rem;border-radius:6px}
+.skip:focus{top:.5rem}
+
+/* Window: fixed chrome, only panes scroll. */
+.app{height:100vh;container:window/inline-size;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+
+/* Toolbar */
+.toolbar{display:flex;align-items:center;gap:.86rem;min-height:3.15rem;padding:.43rem .86rem;background:var(--toolbar);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:.5rem;font-weight:700;font-size:1rem;white-space:nowrap}
+.brand img{width:1.57rem;height:1.57rem;display:block;flex:none}
+.brand .word span{color:var(--teal)}
+.divider{width:1px;align-self:stretch;background:var(--line);margin:.15rem 0}
+.field{display:flex;align-items:center;gap:.5rem;min-width:0}
+.field>label{font-size:var(--fs-m);color:var(--muted);white-space:nowrap}
+.control{height:2.15rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .65rem;min-width:0}
+.control:disabled{opacity:.55}
+#product{width:auto;max-width:24rem;font-weight:600}
+.btn{height:2.15rem;display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .8rem;cursor:pointer;white-space:nowrap;flex:none}
+.btn:hover:not(:disabled){background:var(--hover);border-color:#c5d3cb}
+.btn.primary{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+.btn.primary:hover:not(:disabled){background:#125b54}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.55;cursor:default}
+.spacer{flex:1}
+.activity-chip{display:inline-flex;align-items:center;gap:.5rem;height:2.15rem;padding:0 .75rem;border:1px solid var(--pill);border-radius:6px;background:var(--mint);color:var(--teal);font-weight:600;cursor:pointer;white-space:nowrap;flex:none}
+.chip-short{display:none}
+.activity-chip .count{min-width:1.3rem;height:1.3rem;border-radius:999px;background:var(--teal);color:#fff;font-size:var(--fs-s);display:grid;place-items:center;padding:0 .3rem}
+.activity-chip.attention{border-color:var(--warn-line);background:var(--warn-bg);color:var(--gold-ink)}
+.activity-chip.attention .count{background:var(--gold-ink)}
+.activity-chip[aria-expanded="true"]{box-shadow:inset 0 0 0 1px currentColor}
+.pulse{width:.5rem;height:.5rem;border-radius:50%;background:currentColor;animation:pulse 1.6s ease-in-out infinite;flex:none}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+
+/* Body: list pane | inspector */
+.body{display:grid;grid-template-columns:minmax(0,1fr) clamp(18rem,26.5rem,44%);min-height:0}
+.body.no-inspector{grid-template-columns:minmax(0,1fr)}
+.pane{display:flex;flex-direction:column;min-height:0;min-width:0}
+.pane-head{display:flex;align-items:center;gap:.6rem;min-height:var(--pane-head);padding:.43rem .86rem;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--bg)}
+.pane-head h1{font-size:1rem;margin:0 .3rem 0 0;font-weight:700;white-space:nowrap}
+.pane-head h1 .n{color:var(--muted);font-weight:400;margin-left:.3rem}
+#search{width:15rem;max-width:100%}
+.segmented{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper)}
+.segmented button{border:0;background:none;height:2.05rem;padding:0 .75rem;cursor:pointer;white-space:nowrap}
+.segmented button+button{border-left:1px solid var(--line)}
+.segmented button[aria-pressed="true"]{background:var(--mint);color:var(--teal);font-weight:600}
+.segmented button:disabled{opacity:.55;cursor:default}
+.notice{margin:.6rem .86rem 0;padding:.55rem .75rem;border-radius:6px;border:1px solid var(--warn-line);background:var(--warn-bg);font-size:var(--fs-m);display:flex;gap:.8rem;align-items:flex-start}
+.notice.error{border-color:var(--err-line);background:var(--err-bg)}
+.notice .text{flex:1}
+.notice strong{display:block}
+.notice ul{margin:.2rem 0 0;padding-left:1.1rem}
+.notice code{font-size:var(--fs-s)}
+.notice .btn{height:1.9rem}
+
+/* Build list: listbox with column layout. */
+.list-scroll{position:relative;flex:1;overflow:auto;min-height:0;background:var(--paper);scroll-padding-top:var(--thead);margin-top:.6rem;border-top:1px solid var(--line)}
+.list-scroll.flush{margin-top:0;border-top:0}
+.cols{display:grid;grid-template-columns:minmax(7.5rem,1.1fr) minmax(4rem,.55fr) minmax(9rem,1.4fr) minmax(6.5rem,.95fr) minmax(8rem,1.05fr) minmax(8.5rem,1.15fr);align-items:center;column-gap:.86rem;padding:0 .86rem}
+.thead{position:sticky;top:0;z-index:1;height:var(--thead);background:var(--toolbar);border-bottom:1px solid var(--line);font-size:var(--fs-s);font-weight:600;color:var(--muted);letter-spacing:.02em;white-space:nowrap}
+[role="listbox"]:focus-visible{outline:none}
+[role="option"]{position:relative;min-height:2.6rem;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m);white-space:nowrap;cursor:default}
+[role="option"]>span{overflow:hidden;text-overflow:ellipsis}
+[role="option"]:hover{background:var(--hover)}
+[role="option"][aria-selected="true"]{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+[role="listbox"]:focus-visible [role="option"].active{outline:3px solid var(--focus);outline-offset:-3px}
+.version{font-weight:600}
+.dim{color:var(--muted)}
+.pill{display:inline-block;padding:0 .4rem;border-radius:4px;border:1px solid var(--pill);background:var(--paper);color:var(--teal);font-size:var(--fs-s);font-weight:600;line-height:1.5;margin-right:.2rem}
+.pill.gold{border-color:var(--gold-line);background:var(--gold-bg);color:var(--gold-ink)}
+.meter{display:inline-flex;align-items:center;gap:.5rem}
+.meter .track{width:3.6rem;height:.36rem;border-radius:999px;background:var(--line-soft);overflow:hidden;flex:none}
+.meter .track i{display:block;height:100%;background:var(--teal)}
+.meter.done{color:var(--teal);font-weight:600}
+.meter .live{color:var(--teal)}
+.load-more{display:flex;align-items:center;gap:.8rem;padding:.7rem .86rem;font-size:var(--fs-m);color:var(--muted)}
+.empty{display:grid;place-items:center;height:100%;padding:2rem;text-align:center;color:var(--muted)}
+.empty h2{color:var(--ink);font-size:1rem;margin:0 0 .3rem}
+.empty p{margin:0 0 .8rem;max-width:28rem;font-size:var(--fs-m)}
+
+/* Inspector: header, scrolling details, pinned actions. Its head ends where the list header ends. */
+.inspector[hidden]{display:none}
+.inspector{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;border-left:1px solid var(--line);background:#f9f8f3}
+.insp-head{min-height:calc(var(--pane-head) + var(--thead) + 1px);padding:.55rem 1rem;border-bottom:1px solid var(--line);display:flex;flex-direction:column;justify-content:center}
+.label{font-size:var(--fs-s);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.insp-head h2{margin:0;font-size:var(--fs-l);font-weight:700;line-height:1.25}
+.insp-head p{margin:0;color:var(--muted);font-size:var(--fs-m)}
+.insp-body{overflow:auto;padding:.8rem 1rem;min-height:0}
+.insp-body .label{margin:1rem 0 .4rem}
+dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.35rem .9rem;margin:0;font-size:var(--fs-m)}
+dt{color:var(--muted);white-space:nowrap}
+dd{margin:0;overflow-wrap:anywhere}
+dd.mono{font-size:var(--fs-s);line-height:1.7}
+.state-box{border:1px solid #cfe2d6;background:var(--mint);border-radius:6px;padding:.55rem .7rem;font-size:var(--fs-m)}
+.state-box strong{display:block}
+.state-box .row{display:flex;gap:.4rem;margin-top:.45rem;flex-wrap:wrap}
+.state-box .btn{height:1.9rem}
+.insp-foot{padding:.75rem 1rem;border-top:1px solid var(--line);background:var(--paper);display:flex;flex-wrap:wrap;gap:.55rem;align-items:center}
+.insp-foot .field{flex:1 1 100%}
+.insp-foot .field select{flex:1}
+.insp-foot .primary{flex:1}
+.insp-foot .btn{justify-content:center}
+.reason{flex:1 1 100%;margin:0;font-size:var(--fs-s);color:var(--muted)}
+
+/* Activity panel: nonmodal, follows the chip in DOM order, covers the inspector column. */
+.activity-panel{position:fixed;right:0;width:clamp(18rem,26.5rem,44%);background:var(--paper);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(36,59,58,.08);display:flex;flex-direction:column;z-index:3;white-space:normal;font-weight:400;color:var(--ink);text-align:left}
+.activity-panel header{display:flex;align-items:center;justify-content:space-between;padding:.6rem 1rem;border-bottom:1px solid var(--line)}
+.activity-panel h2{margin:0;font-size:1rem}
+.activity-panel .rows{overflow:auto;padding:.4rem 1rem .8rem;flex:1}
+.activity-panel .label{margin:.6rem 0 .4rem}
+.task{border:1px solid var(--line);border-radius:6px;padding:.6rem .7rem;margin-bottom:.6rem;font-size:var(--fs-m)}
+.task.failed{border-color:var(--err-line);background:var(--err-bg)}
+.task .t{font-weight:600}
+.task .s{color:var(--muted)}
+.bar{height:.36rem;background:var(--line-soft);border-radius:999px;margin:.45rem 0 .3rem;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--teal);border-radius:999px}
+.task .row{display:flex;gap:.4rem;margin-top:.45rem;flex-wrap:wrap}
+.task .btn{height:1.9rem;font-size:var(--fs-m)}
+
+/* Status bar: always one line. */
+.statusbar{display:flex;align-items:center;gap:1.1rem;height:1.75rem;padding:0 .86rem;background:var(--status);border-top:1px solid var(--line);font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden}
+.statusbar strong{color:var(--ink);font-weight:600}
+.statusbar .busy{display:inline-flex;align-items:center;gap:.4rem;color:var(--teal);font-weight:600}
+.statusbar .warn{color:var(--gold-ink);font-weight:600}
+
+/* Enlarged text or narrow window: the window still never scrolls. */
+@container window (max-width:70rem){
+  .toolbar{gap:.6rem}
+  .brand .word,.toolbar .divider{display:none}
+  .toolbar .field>label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .toolbar .field{flex:1 1 8rem}
+  #product{width:100%}
+  .chip-long{display:none}
+  .chip-short{display:inline}
+  .cols{grid-template-columns:minmax(6.5rem,1.1fr) minmax(5rem,1.2fr) minmax(5.5rem,.9fr) minmax(5.5rem,.9fr) minmax(6rem,1fr)}
+  .cols>:nth-child(2){display:none}
+  .list-scroll{overflow-x:hidden}
+  .body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1.2fr) minmax(0,1fr)}
+  .body.no-inspector{grid-template-rows:minmax(0,1fr)}
+  .inspector{border-left:0;border-top:1px solid var(--line)}
+  .insp-head{min-height:0;padding:.35rem 1rem}
+  .insp-head .label,.insp-head p{display:none}
+  .insp-foot{flex-wrap:nowrap;padding:.45rem 1rem}
+  .insp-foot .field{flex:1 1 auto}
+  .insp-foot{flex-wrap:wrap}
+  .insp-foot .reason{display:none}
+  .insp-foot.blocked .reason{display:block}
+  .activity-panel{width:100%}
+  .notice{max-height:3.3rem;overflow:auto;margin-top:.3rem}
+  .statusbar .secondary{display:none}
+}
+
+/* Mockup-only state control. Not part of the design. */
+.mock{position:fixed;left:.6rem;bottom:2.3rem;z-index:10;max-width:calc(100vw - 1.2rem);background:#243b3a;color:#fff;border-radius:6px;padding:.35rem .5rem;font:12px/1.6 system-ui,sans-serif;display:flex;flex-wrap:wrap;gap:.2rem;align-items:center;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.mock a{color:#cde7dc;text-decoration:none;padding:0 .35rem;border-radius:4px}
+.mock a[aria-current="true"]{background:#176e66;color:#fff}
+</style></head>
+<body>
+<a class="skip" href="#builds">Skip to builds</a>
+<div class="app">
+  <header class="toolbar">
+    <div class="brand"><img src="../../../branding/vibeminer.svg" alt="VibeMiner"><span class="word" aria-hidden="true">Vibe<span>Miner</span></span></div>
+    <div class="divider" aria-hidden="true"></div>
+    <div class="field"><label for="product">Product</label><select id="product" class="control"></select></div>
+    <button class="btn" id="refresh"></button>
+    <div class="spacer"></div>
+    <span id="activity-slot"></span>
+  </header>
+
+  <main class="body" id="body">
+    <section class="pane" aria-labelledby="builds-title">
+      <div class="pane-head" id="pane-head">
+        <h1 id="builds-title">Builds<span class="n" id="count"></span></h1>
+        <input id="search" class="control" type="search" placeholder="Filter version or build" aria-label="Filter version or build number" aria-keyshortcuts="Control+F">
+        <select id="region" class="control" aria-label="Advertisement region"><option>All regions</option><option>US</option><option>EU</option><option>KR</option><option>TW</option><option>SG</option></select>
+        <div class="segmented" role="group" aria-label="Build visibility"><button aria-pressed="true">All</button><button aria-pressed="false">Prepared</button><button aria-pressed="false">Advertised</button></div>
+      </div>
+      <div id="notices"></div>
+      <div class="list-scroll" id="list"></div>
+    </section>
+    <aside class="inspector" id="inspector" aria-labelledby="insp-title"></aside>
+  </main>
+
+  <footer class="statusbar" id="statusbar"></footer>
+</div>
+
+<nav class="mock" aria-label="Mockup state (not part of the design)" id="mock"></nav>
+
+<script>
+const p=new URLSearchParams(location.search);
+const state=p.get('state')||'idle'; // idle refreshing stopping offline partial filtered opening downloading attention empty
+let panelOpen=p.get('panel')==='open';
+if(p.get('text')==='200')document.documentElement.dataset.text='200';
+if(p.get('chrome')==='0')document.getElementById('mock').remove();
+
+// Labels from the reviewed product registry (src/backend/VibeMiner.Domain/Discovery.cs).
+const products=[['wow','Retail'],['wowt','PTR'],['wowxptr','PTR'],['wow_beta','Beta'],['wow_classic','Classic Progression'],['wow_classic_ptr','Classic Progression PTR'],['wow_classic_era','Classic Era'],['wow_classic_era_ptr','Classic Era PTR'],['wow_anniversary','Anniversary'],['wow_classic_beta','Classic Beta'],['wow_cn_beta','Edition unconfirmed'],['wowf','Edition unconfirmed'],['wow_classic_titan','Edition unconfirmed']];
+document.getElementById('product').innerHTML=products.map(([id,l])=>`<option>${id} · World of Warcraft · ${l}</option>`).join('');
+
+const hex=seed=>{let h='',x=(seed*2654435761)>>>0;for(let i=0;i<32;i++){x=(x*1103515245+12345)>>>0;h+='0123456789abcdef'[x>>>28];}return h;};
+// adv: regions with a versions row at last check. routes: regions with a matching cdns row (offered as Download source). SG has no CDN row.
+const raw=[
+  ['12.1.5.70448','70448',['US','EU','KR','SG'],['US','EU','KR'],{isNew:true}],
+  ['12.1.5.70448','70448',['TW'],['TW'],{isNew:true,sameConfig:true}],
+  ['12.1.5.70402','70402',[],['US'],{prepared:true,ret:{pct:25,present:'1.2',total:'4.8',live:true}}],
+  ['12.1.0.70011','70011',[],['US'],{prepared:true,noKeyRing:true,ret:{pct:100,present:'4.6',total:'4.6'}}],
+  ['12.0.7.69810','69810',[],['US','EU'],{prepared:true,ret:{pct:41,present:'1.9',total:'4.7'}}],['12.0.5.69402','69402',[],[],{}],['12.0.1.68890','68890',[],['US'],{prepared:true,ret:{notChecked:true,total:'4.5'}}],
+  ['12.0.0.68210','68210',[],[],{noKeyRing:true,noProduct:true}],['11.2.7.67542','67542',[],['EU'],{emptyKeyRing:true}],['11.2.5.66192','66192',[],[],{}],
+  ['11.2.0.65299','65299',[],[],{}],['11.1.7.64978','64978',[],[],{}],['11.1.5.64280','64280',[],[],{}],['11.1.0.63003','63003',[],[],{}],
+  ['11.0.7.61967','61967',[],[],{}],['11.0.5.60122','60122',[],[],{}],['11.0.2.56647','56647',[],[],{}],['11.0.0.54988','54988',[],[],{}]];
+const builds=raw.map(([v,b,adv,routes,o],i)=>({v,b,adv,routes,isNew:!!o.isNew,prepared:!!o.prepared,ret:o.ret||null,
+  cfg:o.sameConfig?hex(1):hex(i+1),cdn:hex(i+101),product:o.noProduct?null:hex(i+201),keyRing:o.noKeyRing?null:o.emptyKeyRing?'':hex(i+301),id:hex(i+401)}));
+let list=state==='empty'?[]:builds;
+let sel=list.length?0:-1, active=Math.max(sel,0);
+let hiddenSel=null;
+if(state==='filtered'){list=builds.filter(x=>x.v.startsWith('11.2'));hiddenSel=builds[0];sel=-1;active=0;}
+const short=h=>h.slice(0,8)+'…';
+const pub=x=>x.adv.length?'<span class="pill">Advertised</span>':'<span class="dim">Not advertised</span>';
+const here=x=>[x.prepared?'<span class="pill">Prepared</span>':'',x.isNew?'<span class="pill gold">New to VibeMiner</span>':''].join(' ')||'<span class="dim">—</span>';
+const busy=['refreshing','stopping'].includes(state);
+// Downloaded: share of the build's download manifest (all variants, encoded bytes) present at the last complete check.
+const dl=x=>{const r=x.ret;if(!r)return '<span class="dim">Not opened</span>';if(r.notChecked)return '<span class="dim">Not checked</span>';
+  const live=r.live&&state==='downloading';
+  return `<span class="meter${r.pct===100?' done':''}"><span class="track" aria-hidden="true"><i style="width:${r.pct}%"></i></span>${r.pct===100?'100%':r.pct+'%'}${live?'<span class="pulse live" aria-hidden="true"></span><span class="visually-hidden">, downloading</span>':''}</span>`;};
+
+function renderNotices(){
+  const n=document.getElementById('notices');let h='';
+  if(state==='offline')h=`<div class="notice error" role="alert"><div class="text"><strong>Refresh unavailable</strong>Showing saved observations. A failed check does not remove earlier advertisements.<ul><li>US, EU, KR, TW, SG: official metadata could not be reached <code>(NETWORK_UNAVAILABLE)</code></li></ul></div><button class="btn">Retry discovery</button></div>`;
+  if(state==='partial')h=`<div class="notice"><div class="text"><strong>Some discovery evidence is incomplete</strong>Showing what was checked. Retry discovery checks the whole product again.<ul><li>KR: versions response was malformed <code>(VERSIONS_MALFORMED)</code></li></ul></div><button class="btn">Retry discovery</button></div>`;
+  if(state==='filtered')h=`<div class="notice"><div class="text"><strong>Selected build is hidden by these filters</strong>12.1.5.70448 is still selected. Clear filters to see it in the list.</div><button class="btn">Clear filters</button></div>`;
+  n.innerHTML=h;
+  document.getElementById('list').classList.toggle('flush',!h);
+  if(state==='filtered')document.getElementById('search').value='11.2';
+}
+
+function renderList(){
+  document.getElementById('count').textContent=list.length?String(list.length):'';
+  const el=document.getElementById('list');
+  document.querySelectorAll('#pane-head input,#pane-head select,#pane-head .segmented button').forEach(c=>c.disabled=state==='empty');
+  if(!list.length){el.innerHTML=`<div class="empty"><div><h2>No saved builds for wow</h2><p>Nothing has been checked for this product yet. Refresh builds checks Blizzard's official version service.</p><button class="btn primary">↻ Refresh builds</button></div></div>`;return;}
+  el.innerHTML=`<div class="cols thead" aria-hidden="true"><span>Version</span><span>Build</span><span>Advertised in</span><span>Publication</span><span>Downloaded</span><span>In VibeMiner</span></div>
+  <div role="listbox" id="builds" aria-label="Builds" tabindex="0" aria-activedescendant="opt-${active}">${list.map((x,i)=>`<div role="option" id="opt-${i}" class="cols${i===active?' active':''}" aria-selected="${i===sel}" data-i="${i}">
+    <span class="version">${x.v}</span><span class="dim"><span class="visually-hidden">Build </span>${x.b}</span>
+    <span><span class="visually-hidden">Advertised in </span>${x.adv.length?x.adv.map(r=>`<span class="pill">${r}</span>`).join(''):'<span class="dim">None at last check</span>'}</span>
+    <span>${pub(x)}</span><span><span class="visually-hidden">Downloaded </span>${dl(x)}</span><span>${here(x)}</span></div>`).join('')}</div>
+  <div class="load-more"><button class="btn">Load more builds</button><span>Filters apply to loaded builds only.</span></div>`;
+  const lb=document.getElementById('builds');
+  const move=i=>{active=Math.max(0,Math.min(list.length-1,i));sel=active;hiddenSel=null;renderList();renderInspector();const l=document.getElementById('builds');l.focus();document.getElementById('opt-'+active).scrollIntoView({block:'nearest'});};
+  lb.querySelectorAll('[role=option]').forEach(o=>o.onclick=()=>move(+o.dataset.i));
+  lb.onkeydown=e=>{const t={ArrowDown:active+1,ArrowUp:active-1,Home:0,End:list.length-1,PageDown:active+10,PageUp:active-10}[e.key];if(t!==undefined){e.preventDefault();move(t);}};
+}
+
+function renderInspector(){
+  const body=document.getElementById('body'),el=document.getElementById('inspector');
+  body.classList.toggle('no-inspector',state==='empty');
+  el.hidden=state==='empty';
+  el.inert=panelOpen;
+  if(state==='empty')return;
+  const x=hiddenSel||list[sel];
+  const route=x.routes.length, opening=state==='opening';
+  const box=opening?`<div class="state-box" role="status"><strong>Opening build</strong>[1/3] Verifying build configuration · US<div class="row"><button class="btn">View preparation</button><button class="btn">Cancel opening</button></div></div>`
+    :x.prepared?`<div class="state-box"><strong>Prepared locally</strong>Local evidence recorded. Game content stays on demand.</div>`
+    :`<div class="state-box"><strong>Not prepared</strong>Opening verifies configs and measures download size.</div>`;
+  const ns=v=>v===null?'<span class="dim">Not supplied</span>':v===''?'<span class="dim">(empty value)</span>':v;
+  el.innerHTML=`<div class="insp-head"><div class="label">Selected build</div><h2 id="insp-title" class="selectable">${x.v}</h2><p>World of Warcraft · Retail · <span class="mono">wow</span></p></div>
+  <div class="insp-body">${box}
+    <div class="label">Identity</div>
+    <dl><dt>Build</dt><dd class="selectable">${x.b}</dd>
+    <dt>Build config</dt><dd class="mono selectable">${x.cfg}</dd>
+    <dt>CDN config</dt><dd class="mono selectable">${x.cdn}</dd>
+    <dt>Product config</dt><dd class="mono selectable">${ns(x.product)}</dd>
+    <dt>Key ring</dt><dd class="mono selectable">${ns(x.keyRing)}</dd>
+    <dt>Identity</dt><dd class="mono selectable">${x.id}</dd></dl>
+    ${x.ret?`<div class="label">Download</div><dl><dt>Downloaded</dt><dd>${x.ret.notChecked?'Not checked':`${x.ret.present} of ${x.ret.total} GiB · ${x.ret.pct}%`}</dd><dt>Scope</dt><dd>Download manifest, all variants (encoded)</dd><dt>Checked</dt><dd>${x.ret.notChecked?'Never':'Oct 18, 2026, 8:00 AM'}</dd></dl>`:''}
+    <div class="label">Observation</div>
+    <dl><dt>Publication</dt><dd>${x.adv.length?'Advertised at last check':'Not advertised at last check'}</dd>
+    <dt>Advertised in</dt><dd>${x.adv.length?x.adv.join(', '):'None at last check'}</dd>
+    <dt>CDN routes</dt><dd>${route?x.routes.join(', '):'None recorded'}${x.adv.includes('SG')?' · SG has no CDN route':''}</dd>
+    <dt>Last seen</dt><dd>Oct 18, 2026, 8:00 AM</dd>
+    <dt>File availability</dt><dd>Not checked</dd></dl>
+    ${x.keyRing?'<p class="reason" style="margin-top:.6rem">A key ring reference does not mean its keys are available.</p>':''}
+  </div>
+  <div class="insp-foot${route?'':' blocked'}">
+    <div class="field"><label for="source">Download source</label><select id="source" class="control"${route?'':' disabled'}>${route?x.routes.map(r=>`<option>${r}</option>`).join(''):'<option>No recorded source route</option>'}</select></div>
+    <button class="btn primary"${route&&!opening?'':' disabled'}${route?'':' aria-describedby="open-reason"'}>Open build</button><button class="btn">Source details</button>
+    <p class="reason" id="open-reason">${route?'Browsing never downloads game content.':'Open needs a recorded CDN route. Refresh builds to check again.'}</p>
+  </div>`;
+}
+
+function panelHtml(attention){
+  return `<section class="activity-panel" id="activity" aria-labelledby="act-title"><header><h2 id="act-title">Downloads &amp; activity</h2><button class="btn" id="activity-close" style="height:1.9rem">Close</button></header><div class="rows">${attention?`
+    <div class="label">Recent outcome</div>
+    <div class="task failed"><div class="t">12.0.7.69810 · Download all</div><div class="s">Failed at [2/3] Downloading archives · EU</div><div class="s">CDN returned 404 for 3 archives <code>(ARCHIVE_NOT_FOUND)</code></div><div class="row"><button class="btn">Retry this build</button><button class="btn">Dismiss outcome</button></div></div>`:`
+    <div class="label">Build downloads</div>
+    <div class="task"><div class="t">12.1.5.70402 · Download all</div><div class="s">[2/3] Downloading archives · US</div><div class="bar"><i style="width:25%"></i></div><div class="s">1.2 of 4.8 GiB · 25% of current stage</div><div class="row"><button class="btn">Pause</button><button class="btn">On demand</button></div></div>`}
+  </div></section>`;
+}
+
+function renderChrome(){
+  const downloading=state==='downloading',attention=state==='attention',show=downloading||attention;
+  const r=document.getElementById('refresh');
+  r.setAttribute('aria-disabled',String(state==='stopping'));
+  r.innerHTML=state==='refreshing'?'<span aria-hidden="true">✕</span> Cancel refresh':state==='stopping'?'Stopping discovery…':['offline','partial'].includes(state)?'<span aria-hidden="true">↻</span> Retry discovery':'<span aria-hidden="true">↻</span> Refresh builds';
+  r.setAttribute('aria-keyshortcuts','F5');
+  // The entry exists only while work is active, paused, waiting, or has an outcome still to dismiss.
+  document.getElementById('activity-slot').innerHTML=show?`<button class="activity-chip${attention?' attention':''}" id="chip" aria-expanded="${panelOpen}" aria-controls="activity">${downloading?'<span class="pulse" aria-hidden="true"></span>':''}<span class="chip-long">${attention?'Needs attention':'Downloads &amp; activity'}</span><span class="chip-short">${attention?'Attention':'Activity'}</span><span class="count" aria-label="${attention?'1 outcome to review':'1 active task'}">1</span></button>${panelOpen?panelHtml(attention):''}`:'';
+  const tb=document.querySelector('.toolbar'),sb=document.getElementById('statusbar');
+  const sum=downloading&&!panelOpen?'<span class="busy"><span class="pulse" aria-hidden="true"></span>12.1.5.70402 · Downloading archives · 25% of current stage</span>':attention&&!panelOpen?'<span class="warn">1 needs attention · 12.0.7.69810 download failed</span>':'';
+  sb.innerHTML=`${busy?`<span class="busy" role="status"><span class="pulse" aria-hidden="true"></span>${state==='stopping'?'Stopping discovery…':'Checking US, EU, KR, TW, SG…'}</span>`:''}
+    ${state==='empty'?'<span>Not checked yet</span>':`<span class="secondary">Checked regions <strong>US, EU, KR, TW, SG</strong></span><span>Last check <strong>Oct 18, 2026, 8:00 AM</strong></span>${busy||state==='offline'?'':'<span class="secondary">Not refreshed this session</span>'}`}
+    <span class="spacer"></span>${sum}`;
+  const panel=document.getElementById('activity');
+  if(panel){panel.style.top=tb.getBoundingClientRect().bottom+'px';panel.style.bottom=sb.offsetHeight+'px';}
+  const chip=document.getElementById('chip');
+  if(chip)chip.onclick=()=>{panelOpen=!panelOpen;renderChrome();renderInspector();document.getElementById(panelOpen?'activity-close':'chip').focus();};
+  const close=document.getElementById('activity-close');
+  if(close)close.onclick=()=>{panelOpen=false;renderChrome();renderInspector();document.getElementById('chip').focus();};
+}
+
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&panelOpen){panelOpen=false;renderChrome();renderInspector();document.getElementById('chip').focus();}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'){e.preventDefault();document.getElementById('search').focus();}
+  if(e.key==='F5'){e.preventDefault();/* Starts Refresh builds only when idle; never cancels or retries a running refresh. */}
+});
+addEventListener('resize',renderChrome);
+
+const mock=document.getElementById('mock');
+if(mock){const link=(k,v,label)=>{const q=new URLSearchParams(p);q.set(k,v);if(k==='state')q.delete('panel');const cur=(p.get(k)||(k==='state'?'idle':'100'))===v;return `<a href="?${q}" aria-current="${cur}">${label}</a>`;};
+  mock.innerHTML='<strong style="margin-right:.2rem">Mockup</strong>'+[['idle','Idle'],['refreshing','Refreshing'],['stopping','Stopping'],['offline','Offline'],['partial','Partial'],['filtered','Hidden selection'],['opening','Opening'],['downloading','Downloading'],['attention','Needs attention'],['empty','Empty']].map(([v,l])=>link('state',v,l)).join('')+'<span style="opacity:.5">|</span>'+link('text','100','100%')+link('text','200','200%');}
+
+renderNotices();renderList();renderInspector();renderChrome();
+</script>
+</body></html>

@@ -21,7 +21,7 @@ test('unknown download sizing enters honest Home and restores Discovery without 
   try {
     await writeFile(path.join(session.data, 'download-unavailable'), 'unavailable');
     await session.page.locator('.build-row').first().click();
-    const open = session.page.getByRole('button', { name: 'Open Build', exact: true }); await open.focus(); await session.page.keyboard.press('Enter');
+    const open = session.page.getByRole('button', { name: 'Open build', exact: true }); await open.focus(); await session.page.keyboard.press('Enter');
     await writeFile(path.join(session.data, 'release-open'), 'release');
     await expect(session.page.getByRole('heading', { name: 'Build overview' })).toBeFocused();
     await expect(session.page.getByText('Published download size is unknown.', { exact: true })).toBeVisible();
@@ -38,7 +38,7 @@ test('download object paging retains rows and keyboard anchor during local reads
   const session = await launch(true);
   try {
     const { page } = session;
-    await page.locator('.build-row').first().click(); await page.getByRole('button', { name: 'Open Build', exact: true }).click();
+    await page.locator('.build-row').first().click(); await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await writeFile(path.join(session.data, 'release-open'), 'release');
     await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
     await capture(page, session.app, 'download-home');

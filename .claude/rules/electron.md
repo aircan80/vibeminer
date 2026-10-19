@@ -13,7 +13,7 @@ paths:
 - Drop stale results after a product, build or locale change. Async completion never moves focus, scroll or selection.
 - Large binary data never travels as JSON or base64. Use the approved handles.
 - Follow [UI-GUIDELINES](../../docs/UI-GUIDELINES.md).
-  - The selected reference is `docs/design/build-discovery/index.html?concept=guided&state=ready&product=wow`, along with the preparation, Home and top-navigation references.
+  - Discovery follows `docs/design/desktop-discovery/index.html`. Preparation, Home and top navigation keep their selected references.
   - Keep its HTML structure, fonts, sizes, weights and colours.
 - UI changes need:
   - real Electron captures compared with the reference at matching sizes

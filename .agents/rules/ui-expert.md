@@ -7,7 +7,7 @@ Skip when: nothing on screen changes.
 
 Read:
 - [docs/UI-GUIDELINES.md](../../docs/UI-GUIDELINES.md)
-- [docs/design/README.md](../../docs/design/README.md). The selected reference is `docs/design/build-discovery/index.html?concept=guided&state=ready&product=wow`, plus the preparation, Home and top-navigation references.
+- [docs/design/README.md](../../docs/design/README.md). Discovery follows `docs/design/desktop-discovery/index.html` (capture it with `node tools/capture-discovery-reference.mjs desktop`), plus the preparation, Home and top-navigation references.
 
 ## Checklist
 - Compare real Electron captures with the reference at matching sizes (1280×800, 1440×1100) and 100% text.

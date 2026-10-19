@@ -16,7 +16,9 @@ Rules every screen follows. Use them when building or reviewing renderer changes
 
 Views keep their own scoped tokens. Don't merge them into one palette, and don't let one view's stylesheet override another's.
 
-| Token | Discovery (`:root`, `styles.css`) | Preparation (`.preparation-view`) | Home (`.home-view`) | Tables (`.tables-explorer`) |
+Discovery has its own reference ([desktop discovery](design/desktop-discovery/README.md)): 14px base (`.933333rem`), 11/13/14/19px scale, muted `#586a64`, scoped in `discovery.css`. The columns below cover the shared `:root` tokens and the views that still follow D021.
+
+| Token | Shared `:root` (`styles.css`) | Preparation (`.preparation-view`) | Home (`.home-view`) | Tables (`.tables-explorer`) |
 | --- | --- | --- | --- | --- |
 | Body | 15px / 1.5 | 15px / 1.5 | 15px / 1.5 | 14px / 1.5 (`.933333rem`) |
 | bg / paper | `#f5f3ed` / `#fffefa` | same | same | same |
@@ -38,6 +40,7 @@ Items, Effects, the activity header/panel and the geometry view use the `#dda33a
 ### Shell and navigation
 
 - The build header holds Product / Build / Source / Locale / Status, a labelled **Download mode**, the **Downloads & activity** entry and **Choose build**.
+- Discovery is a fixed window: one toolbar row, panes that scroll on their own, a one-line status bar. The window never scrolls; at very small sizes only the list pane scrolls as a whole. The menu bar is hidden but the application menu stays for edit, zoom, close and quit accelerators.
 - Area navigation is a horizontal bar directly under the build header: 12px text, muted `#657870`, active item teal with weight 750 and a 3px bottom rule. It uses `aria-current="page"` and scrolls on its own when narrow.
 - There is no global sidebar. Areas own their internal navigation, such as the Tables catalogue on the left. Home utilities (Metadata, Storage) stay inside Home.
 - The Tables workbench is one rounded surface: catalogue `224px`, flexible center, inspector `340px`. Other inspectors follow their own reference (Discovery and Preparation use `330px`).
@@ -94,6 +97,7 @@ Items, Effects, the activity header/panel and the geometry view use the `#dda33a
 ### Activity
 
 - There's one compact **Downloads & activity** entry and one nonmodal side panel for all background work. Individual screens don't add their own progress bars.
+- On Discovery the entry exists only while something is active, paused or waiting, needs attention (it then reads **Needs attention**), or has an outcome to dismiss. Finished or canceled work with nothing to dismiss doesn't keep it. With nothing to show there is no entry, no badge and no floating button. The Home build header keeps its always-present entry for now.
 - A screen that needs missing data says so in place ("Waiting for required data") and links to the exact task with **View task**.
 - The activity entry and panel never open themselves, steal focus, navigate or reorder rows while you read.
 
@@ -160,5 +164,5 @@ Items, Effects, the activity header/panel and the geometry view use the `#dda33a
 
 ## Known gaps
 
-- Muted text is below WCAG AA for normal text. `#697b76` on `#f5f3ed` is about 4.0:1, and Tables `#697b72` is about the same. Home's `#657870` is about 4.2:1 on the background and 4.65:1 on paper. The colours are kept for mockup fidelity ([D021](DECISIONS.md)). Changing them is an open decision; don't fold it silently into fidelity work.
+- Discovery's muted `#586a64` meets AA on every surface it uses. Elsewhere, muted text is below WCAG AA for normal text. `#697b76` on `#f5f3ed` is about 4.0:1, and Tables `#697b72` is about the same. Home's `#657870` is about 4.2:1 on the background and 4.65:1 on paper. The colours are kept for mockup fidelity ([D021](DECISIONS.md)). Changing them is an open decision; don't fold it silently into fidelity work.
 - `retention.css` uses a 2px teal focus outline on retention activity controls, which breaks the gold-ring rule above.
