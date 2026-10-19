@@ -1,0 +1,40 @@
+{
+  "target": {
+    "productId": "wow",
+    "buildIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sourceRegion": "us",
+    "ledgerId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "jobId": "authored-retention-job",
+  "revision": "9007199254740993",
+  "mode": "downloadAll",
+  "paused": false,
+  "state": "running",
+  "scope": "downloadManifestAllVariants",
+  "objectCount": "3",
+  "totalEncodedBytes": "90",
+  "coverage": {
+    "receiptObjects": "2",
+    "receiptBytes": "60",
+    "receiptedAt": "2026-10-19T00:00:00Z",
+    "presenceState": "assessing",
+    "presenceAssessedAt": null,
+    "observedObjects": "2",
+    "presentObjects": "1",
+    "presentBytes": "30",
+    "missingObjects": "1",
+    "corruptObjects": "0"
+  },
+  "progress": {
+    "stage": "Downloading build objects",
+    "unit": "bytes",
+    "completed": "7",
+    "total": null
+  },
+  "pendingObjects": 1,
+  "wireBytesThisSession": "7",
+  "unresolvedObjects": "0",
+  "failedObjects": "0",
+  "queuePosition": null,
+  "problem": null
+}

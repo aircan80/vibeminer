@@ -1,0 +1,213 @@
+{
+  "context": {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "researchLocale": "enUS"
+  },
+  "artifactId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "creatureId": "7",
+  "slot": 0,
+  "opening": {
+    "generation": "1",
+    "region": "us",
+    "versionsSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "versionsRowOrdinal": 0,
+    "cdnsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "cdnsRowOrdinal": 0
+  },
+  "policy": "creature-source-geometry-v1",
+  "state": "ready",
+  "metadata": {
+    "state": "metadataResolved",
+    "creatureSource": {
+      "tableId": "c9d6b6b3",
+      "artifactId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "rowId": "7",
+      "columnIndex": null
+    },
+    "creatureCoverage": {
+      "scope": "unencryptedSections",
+      "declaredRecords": "4",
+      "physicalRows": "2",
+      "copyRows": "1",
+      "excludedKeyedSections": "1",
+      "excludedDeclaredRecords": "2",
+      "declaredCopyRecords": "1",
+      "excludedPhysicalRecords": "2",
+      "excludedCopyRecords": "0"
+    },
+    "selected": {
+      "slot": 0,
+      "displayId": "23",
+      "probability": "0.25",
+      "state": "declared",
+      "displayField": {
+        "tableId": "c9d6b6b3",
+        "columnIndex": 8
+      },
+      "probabilityField": {
+        "tableId": "c9d6b6b3",
+        "columnIndex": 12
+      }
+    },
+    "absence": null,
+    "modelId": "19",
+    "modelFileDataId": "123456",
+    "requiredTableId": null,
+    "appearance": "notEvaluated",
+    "targets": [
+      {
+        "role": "display",
+        "tableId": "bfdaf9f1",
+        "artifactId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "coverage": {
+          "scope": "unencryptedSections",
+          "declaredRecords": "4",
+          "physicalRows": "2",
+          "copyRows": "1",
+          "excludedKeyedSections": "1",
+          "excludedDeclaredRecords": "2",
+          "declaredCopyRecords": "1",
+          "excludedPhysicalRecords": "2",
+          "excludedCopyRecords": "0"
+        },
+        "matchCount": "1",
+        "row": {
+          "source": {
+            "tableId": "bfdaf9f1",
+            "artifactId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "rowId": "23",
+            "columnIndex": 0
+          },
+          "isCopy": true,
+          "copySourceId": "11",
+          "edgeValue": {
+            "tableId": "bfdaf9f1",
+            "columnIndex": 0,
+            "value": "19"
+          }
+        }
+      },
+      {
+        "role": "model",
+        "tableId": "7f695fa5",
+        "artifactId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "coverage": {
+          "scope": "complete",
+          "declaredRecords": "2",
+          "physicalRows": "2",
+          "copyRows": "1",
+          "excludedKeyedSections": "0",
+          "excludedDeclaredRecords": "0",
+          "declaredCopyRecords": "1",
+          "excludedPhysicalRecords": "0",
+          "excludedCopyRecords": "0"
+        },
+        "matchCount": "1",
+        "row": {
+          "source": {
+            "tableId": "7f695fa5",
+            "artifactId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "rowId": "19",
+            "columnIndex": 0
+          },
+          "isCopy": false,
+          "copySourceId": null,
+          "edgeValue": {
+            "tableId": "7f695fa5",
+            "columnIndex": 0,
+            "value": "123456"
+          }
+        }
+      }
+    ]
+  },
+  "sources": [
+    {
+      "role": "model",
+      "fileDataId": "123456",
+      "contentKey": "11111111111111111111111111111111",
+      "encodingKey": "22222222222222222222222222222222",
+      "encodedSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "encodedBytes": 100,
+      "decodedBytes": 516,
+      "fullVerifierRevision": "content-blte-v1",
+      "associationSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "variantPolicy": "all-root-variants-consistent-asset-v1",
+      "encodingLookupRevision": "encoding-native-file-v1",
+      "rootLookupRevision": "root-native-file-v1",
+      "encodingSelectionPolicy": "lexicographic-complete-encoding-v1"
+    },
+    {
+      "role": "skin",
+      "fileDataId": "900",
+      "contentKey": "11111111111111111111111111111111",
+      "encodingKey": "22222222222222222222222222222222",
+      "encodedSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "encodedBytes": 100,
+      "decodedBytes": 516,
+      "fullVerifierRevision": "content-blte-v1",
+      "associationSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "variantPolicy": "all-root-variants-consistent-asset-v1",
+      "encodingLookupRevision": "encoding-native-file-v1",
+      "rootLookupRevision": "root-native-file-v1",
+      "encodingSelectionPolicy": "lexicographic-complete-encoding-v1"
+    }
+  ],
+  "manifest": {
+    "artifactId": "4444444444444444444444444444444444444444444444444444444444444444",
+    "bindingSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "byteLength": 320,
+    "formatVersion": 1,
+    "headerBytes": 128,
+    "scope": "unfiltered-declared-sections",
+    "coordinatePolicy": "native-m2-position-normal-uv-winding-v1",
+    "evaluations": {
+      "material": "notEvaluated",
+      "pose": "notEvaluated",
+      "visibility": "notEvaluated",
+      "appearance": "notEvaluated"
+    },
+    "vertexCount": 4,
+    "vertexLookupCount": 3,
+    "sourceTriangleIndexCount": 6,
+    "sectionIndexCount": 6,
+    "lineIndexCount": 12,
+    "sectionCount": 3,
+    "positions": {
+      "offset": 128,
+      "byteLength": 48
+    },
+    "lineIndices": {
+      "offset": 176,
+      "byteLength": 48
+    },
+    "sections": {
+      "offset": 224,
+      "byteLength": 96
+    },
+    "bounds": {
+      "min": [
+        -6,
+        -4,
+        0
+      ],
+      "max": [
+        3,
+        7,
+        8
+      ]
+    },
+    "modelFileDataId": 123456,
+    "skinFileDataId": 900,
+    "mainSkinOrdinal": 0,
+    "modelReaderRevision": "m2-static-native-v1",
+    "skinReaderRevision": "m2-skin-geometry-v1",
+    "interpretationPolicy": "skin-unfiltered-source-geometry-v1",
+    "artifactRevision": "model-geometry-vmg1-v1",
+    "edgePolicy": "all-sections-triangle-edges-v1"
+  },
+  "problem": null
+}

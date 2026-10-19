@@ -1,0 +1,863 @@
+{
+  "context": {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "researchLocale": "enUS"
+  },
+  "artifactId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "preparedAt": "2026-10-19T12:00:00Z",
+  "featureRevision": "items-projection-v1",
+  "queryPolicy": "ordinal-ignorecase-contains-v1",
+  "itemSource": {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "tableId": "50238ec2",
+    "researchLocale": "enUS",
+    "artifactId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "preparedAt": "2026-10-19T12:00:00Z",
+    "layoutHash": "996192AA",
+    "definitionSha256": "076ea4c7e80c891b399cc77f285c807071080c0fed95701e447f7c98024ae120",
+    "providerRevision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+    "decoderRevision": "authored-wdc5-v1",
+    "source": {
+      "contentKey": "66666666666666666666666666666666",
+      "encodingKey": "77777777777777777777777777777777",
+      "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+      "encodedBytes": "402",
+      "decodedBytes": "2048",
+      "sourceUrl": "https://fixture.invalid/authored-table",
+      "retrievedAt": "2026-10-19T11:00:00Z",
+      "verifiedAt": "2026-10-19T12:00:00Z",
+      "verifierRevision": "content-blte-projection-v1",
+      "location": {
+        "kind": "archive",
+        "offset": "100",
+        "sourceBytes": "402",
+        "archiveKey": "99999999999999999999999999999999"
+      },
+      "projection": {
+        "policy": "blte-clear-chunks-v1",
+        "identitySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "readableRanges": [
+          {
+            "offset": "0",
+            "byteLength": "1024",
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        ],
+        "unavailableRanges": [
+          {
+            "offset": "1024",
+            "byteLength": "1024",
+            "chunkOrdinal": 1,
+            "keyName": "1234567890ABCDEF"
+          }
+        ]
+      }
+    },
+    "association": {
+      "fileDataId": "841626",
+      "researchLocale": "enUS",
+      "variantPolicy": "All matching enUS memberships",
+      "encodingSource": {
+        "role": "encoding",
+        "contentKey": "11111111111111111111111111111111",
+        "encodingKey": "22222222222222222222222222222222",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "encodedBytes": "50",
+        "decodedBytes": "100",
+        "sourceUrl": "https://fixture.invalid/data/download",
+        "retrievedAt": "2026-10-18T12:00:01Z",
+        "verifiedAt": "2026-10-18T12:00:01Z",
+        "parserRevision": "download-v1"
+      },
+      "rootSource": {
+        "role": "root",
+        "contentKey": "33333333333333333333333333333333",
+        "encodingKey": "44444444444444444444444444444444",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "encodedBytes": "50",
+        "decodedBytes": "100",
+        "sourceUrl": "https://fixture.invalid/data/download",
+        "retrievedAt": "2026-10-18T12:00:01Z",
+        "verifiedAt": "2026-10-18T12:00:01Z",
+        "parserRevision": "download-v1"
+      },
+      "memberships": [
+        {
+          "blockOrdinal": "0",
+          "entryOrdinal": "0",
+          "contentKey": "66666666666666666666666666666666",
+          "localeFlags": "2",
+          "contentFlags": "0",
+          "rawFirst": "0",
+          "rawSecond": "0",
+          "rawThird": "0",
+          "nameHash": null
+        }
+      ]
+    },
+    "columns": [
+      {
+        "name": "ID",
+        "family": "integer",
+        "isId": true,
+        "reference": null
+      },
+      {
+        "name": "ClassID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "ItemClass",
+          "column": "ClassID"
+        }
+      },
+      {
+        "name": "SubclassID",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "Material",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "Material",
+          "column": "ID"
+        }
+      },
+      {
+        "name": "InventoryType",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "SheatheType",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "Sound_override_subclassID",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "IconFileDataID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "FileData",
+          "column": "ID"
+        }
+      },
+      {
+        "name": "ItemGroupSoundsID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "ItemGroupSounds",
+          "column": "ID"
+        }
+      },
+      {
+        "name": "ContentTuningID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "ContentTuning",
+          "column": "ID"
+        }
+      },
+      {
+        "name": "ModifiedCraftingReagentItemID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "ModifiedCraftingReagentItem",
+          "column": "ID"
+        }
+      },
+      {
+        "name": "Field_12_0_0_63534_010",
+        "family": "integer",
+        "isId": false,
+        "reference": null,
+        "interpretation": {
+          "policy": "raw-physical-integer-v1",
+          "physicalBits": 32,
+          "physicalSigned": false,
+          "candidateBits": 8,
+          "candidateUnsigned": true,
+          "warning": "The unverified DBD uint8 hint does not cover the stored 32-bit value. Values remain exact raw physical integers."
+        }
+      },
+      {
+        "name": "CraftingQualityID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "CraftingQuality",
+          "column": "ID"
+        }
+      },
+      {
+        "name": "ItemSquishEraID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "ItemSquishEra",
+          "column": "ID"
+        }
+      },
+      {
+        "name": "RecraftReagentCountPercentage",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "OrderSource",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      }
+    ],
+    "coverage": {
+      "scope": "unencryptedSections",
+      "declaredRecords": "70",
+      "declaredCopyRecords": "2",
+      "physicalRows": "60",
+      "copyRows": "0",
+      "excludedPhysicalRecords": "10",
+      "excludedCopyRecords": "2",
+      "excludedDeclaredRecords": "12",
+      "excludedKeyedSections": "1"
+    },
+    "rowCount": "60"
+  },
+  "sparseSource": {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "tableId": "919be54e",
+    "researchLocale": "enUS",
+    "artifactId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "preparedAt": "2026-10-19T12:00:00Z",
+    "layoutHash": "1234ABCD",
+    "definitionSha256": "6e0517e1ae17d3528aefe3eac6ad2b417ae7361d8d5ad77d0c743ffd4d126151",
+    "providerRevision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+    "decoderRevision": "authored-wdc5-v1",
+    "source": {
+      "contentKey": "66666666666666666666666666666666",
+      "encodingKey": "77777777777777777777777777777777",
+      "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+      "encodedBytes": "402",
+      "decodedBytes": "755",
+      "sourceUrl": "https://fixture.invalid/authored-table",
+      "retrievedAt": "2026-10-19T11:00:00Z",
+      "verifiedAt": "2026-10-19T12:00:00Z",
+      "verifierRevision": "content-blte-v1",
+      "location": {
+        "kind": "archive",
+        "offset": "100",
+        "sourceBytes": "402",
+        "archiveKey": "99999999999999999999999999999999"
+      }
+    },
+    "association": {
+      "fileDataId": "1572924",
+      "researchLocale": "enUS",
+      "variantPolicy": "All matching enUS memberships",
+      "encodingSource": {
+        "role": "encoding",
+        "contentKey": "11111111111111111111111111111111",
+        "encodingKey": "22222222222222222222222222222222",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "encodedBytes": "50",
+        "decodedBytes": "100",
+        "sourceUrl": "https://fixture.invalid/data/download",
+        "retrievedAt": "2026-10-18T12:00:01Z",
+        "verifiedAt": "2026-10-18T12:00:01Z",
+        "parserRevision": "download-v1"
+      },
+      "rootSource": {
+        "role": "root",
+        "contentKey": "33333333333333333333333333333333",
+        "encodingKey": "44444444444444444444444444444444",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "encodedBytes": "50",
+        "decodedBytes": "100",
+        "sourceUrl": "https://fixture.invalid/data/download",
+        "retrievedAt": "2026-10-18T12:00:01Z",
+        "verifiedAt": "2026-10-18T12:00:01Z",
+        "parserRevision": "download-v1"
+      },
+      "memberships": [
+        {
+          "blockOrdinal": "0",
+          "entryOrdinal": "0",
+          "contentKey": "66666666666666666666666666666666",
+          "localeFlags": "2",
+          "contentFlags": "0",
+          "rawFirst": "0",
+          "rawSecond": "0",
+          "rawThird": "0",
+          "nameHash": null
+        }
+      ]
+    },
+    "columns": [
+      {
+        "name": "ID",
+        "family": "integer",
+        "isId": true,
+        "reference": null
+      },
+      {
+        "name": "Display_lang",
+        "family": "string",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "Description_lang",
+        "family": "string",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "OverallQualityID",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "ItemLevel",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "InventoryType",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "RequiredLevel",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "BuyPrice",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "SellPrice",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "Stackable",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "Bonding",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "AllowableClass[0]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "AllowableClass[1]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatModifier_bonusStat[0]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatModifier_bonusStat[1]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatModifier_bonusStat[2]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatModifier_bonusStat[3]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatModifier_bonusStat[4]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatModifier_bonusStat[5]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatModifier_bonusStat[6]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatModifier_bonusStat[7]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatModifier_bonusStat[8]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatModifier_bonusStat[9]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentEditor[0]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentEditor[1]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentEditor[2]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentEditor[3]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentEditor[4]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentEditor[5]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentEditor[6]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentEditor[7]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentEditor[8]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentEditor[9]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentageOfSocket[0]",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentageOfSocket[1]",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentageOfSocket[2]",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentageOfSocket[3]",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentageOfSocket[4]",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentageOfSocket[5]",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentageOfSocket[6]",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentageOfSocket[7]",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentageOfSocket[8]",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "StatPercentageOfSocket[9]",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "SocketType[0]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "SocketType[1]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "SocketType[2]",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      }
+    ],
+    "coverage": {
+      "scope": "complete",
+      "declaredRecords": "60",
+      "physicalRows": "60",
+      "copyRows": "0",
+      "excludedKeyedSections": "0",
+      "excludedDeclaredRecords": "0",
+      "declaredCopyRecords": "0",
+      "excludedPhysicalRecords": "0",
+      "excludedCopyRecords": "0"
+    },
+    "rowCount": "60",
+    "textIssueCount": "2"
+  },
+  "counts": {
+    "itemRows": "60",
+    "sparseRows": "60",
+    "matchedRows": "58",
+    "itemWithoutSparseRows": "2",
+    "sparseOnlyRows": "2",
+    "validNames": "56",
+    "emptyNames": "1",
+    "invalidNames": "1"
+  },
+  "propertyGroups": [
+    {
+      "key": "identity",
+      "fields": [
+        {
+          "tableId": "50238ec2",
+          "columnIndex": 0
+        },
+        {
+          "tableId": "50238ec2",
+          "columnIndex": 7
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 0
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 1
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 2
+        }
+      ]
+    },
+    {
+      "key": "classification",
+      "fields": [
+        {
+          "tableId": "50238ec2",
+          "columnIndex": 1
+        },
+        {
+          "tableId": "50238ec2",
+          "columnIndex": 2
+        },
+        {
+          "tableId": "50238ec2",
+          "columnIndex": 4
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 3
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 4
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 5
+        }
+      ]
+    },
+    {
+      "key": "otherInputs",
+      "fields": [
+        {
+          "tableId": "50238ec2",
+          "columnIndex": 9
+        }
+      ]
+    },
+    {
+      "key": "requirements",
+      "fields": [
+        {
+          "tableId": "919be54e",
+          "columnIndex": 6
+        }
+      ]
+    },
+    {
+      "key": "inventoryEconomy",
+      "fields": [
+        {
+          "tableId": "919be54e",
+          "columnIndex": 7
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 8
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 9
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 10
+        }
+      ]
+    },
+    {
+      "key": "restrictions",
+      "fields": [
+        {
+          "tableId": "919be54e",
+          "columnIndex": 11
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 12
+        }
+      ]
+    },
+    {
+      "key": "socketsStats",
+      "fields": [
+        {
+          "tableId": "919be54e",
+          "columnIndex": 13
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 14
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 15
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 16
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 17
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 18
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 19
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 20
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 21
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 22
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 23
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 24
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 25
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 26
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 27
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 28
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 29
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 30
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 31
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 32
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 33
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 34
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 35
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 36
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 37
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 38
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 39
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 40
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 41
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 42
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 43
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 44
+        },
+        {
+          "tableId": "919be54e",
+          "columnIndex": 45
+        }
+      ]
+    }
+  ]
+}

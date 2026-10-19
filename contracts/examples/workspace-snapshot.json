@@ -1,0 +1,92 @@
+{
+  "build": {
+    "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "productId": "wow",
+    "version": "12.1.5.70448",
+    "buildId": "70448",
+    "buildConfig": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "cdnConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "productConfig": null,
+    "identityFields": {
+      "BuildConfig": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "CDNConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "BuildId": "70448",
+      "VersionsName": "12.1.5.70448",
+      "KeyRing": ""
+    },
+    "regions": [
+      "us"
+    ],
+    "advertisedRegions": [
+      "us"
+    ],
+    "routeRegions": [
+      "us"
+    ],
+    "firstSeenAt": "2026-10-18T12:00:00Z",
+    "lastSeenAt": "2026-10-18T12:00:00Z",
+    "isNew": false,
+    "isAdvertised": true,
+    "isLocal": false,
+    "availability": "unknown",
+    "sourceReceipts": [
+      {
+        "region": "us",
+        "role": "versions",
+        "url": "https://metadata.invalid/v2/products/wow/versions",
+        "retrievedAt": "2026-10-18T12:00:00Z",
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "byteLength": 200,
+        "rowOrdinal": 0
+      },
+      {
+        "region": "us",
+        "role": "cdns",
+        "url": "https://fixture.invalid/cdns",
+        "retrievedAt": "2026-10-18T12:00:00Z",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "byteLength": 128,
+        "rowOrdinal": 0
+      }
+    ]
+  },
+  "openedAt": "2026-10-18T12:00:01Z",
+  "readiness": "configurationReady",
+  "metadataState": "configurationsVerified",
+  "inventoryState": "notPrepared",
+  "retentionState": "unknown",
+  "downloadPolicy": "onDemand",
+  "researchLocale": null,
+  "platformScope": null,
+  "preparationProfile": "home-configurations-v1",
+  "sourceReference": {
+    "generation": "1",
+    "region": "us",
+    "versionsSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "versionsRowOrdinal": 0,
+    "cdnsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "cdnsRowOrdinal": 0
+  },
+  "configurations": [
+    {
+      "role": "buildConfig",
+      "key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "byteLength": 128,
+      "sourceUrl": "https://fixture.invalid/config/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "retrievedAt": "2026-10-18T12:00:00Z",
+      "verifiedAt": "2026-10-18T12:00:01Z",
+      "parsedFieldCount": 2
+    },
+    {
+      "role": "cdnConfig",
+      "key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "byteLength": 128,
+      "sourceUrl": "https://fixture.invalid/config/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "retrievedAt": "2026-10-18T12:00:00Z",
+      "verifiedAt": "2026-10-18T12:00:01Z",
+      "parsedFieldCount": 2
+    }
+  ]
+}

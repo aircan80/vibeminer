@@ -1,0 +1,39 @@
+# Private agent and tool state
+.agent/
+.agents/workspace/
+.claude/settings.local.json
+.claude/worktrees/
+CLAUDE.local.md
+.codex/
+.aws/
+.env
+.env.*
+!.env.example
+*.user
+*.suo
+.vs/
+.idea/
+
+# Generated builds and installed dependencies
+**/node_modules/
+**/bin/
+**/obj/
+**/dist/
+**/out/
+**/coverage/
+**/TestResults/
+**/test-results/
+**/playwright-report/
+artifacts/
+
+# Local app data and authored test outputs
+.local/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db

@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/Backend/">
+    <Project Path="src/backend/VibeMiner.Domain/VibeMiner.Domain.csproj" />
+    <Project Path="src/backend/VibeMiner.Application/VibeMiner.Application.csproj" />
+    <Project Path="src/backend/VibeMiner.Protocols.Tact/VibeMiner.Protocols.Tact.csproj" />
+    <Project Path="src/backend/VibeMiner.Formats.Wow/VibeMiner.Formats.Wow.csproj" />
+    <Project Path="src/backend/VibeMiner.Infrastructure/VibeMiner.Infrastructure.csproj" />
+    <Project Path="src/backend/VibeMiner.Host/VibeMiner.Host.csproj" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="tests/backend/VibeMiner.Backend.Tests/VibeMiner.Backend.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup><ItemGroup>
+  <ProjectReference Include="../VibeMiner.Application/VibeMiner.Application.csproj" />
+  <ProjectReference Include="../VibeMiner.Infrastructure/VibeMiner.Infrastructure.csproj" />
+</ItemGroup></Project>

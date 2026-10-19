@@ -1,0 +1,3 @@
+import type {CreaturesSnapshot,CreaturesPage,CreatureSummary,CreatureDetail} from '../../../../contracts/generated/discovery';
+export type CreatureView={snapshot:CreaturesSnapshot|null;page:CreaturesPage|null;mode:'browse'|'name'|'id';nameDraft:string;idDraft:string;history:(string|undefined)[];cursor:string|undefined;selected:CreatureSummary|null;detail:CreatureDetail|null;metadataSlot:number|null;notice:string;scroll:number};
+export const emptyCreatureView=():CreatureView=>({snapshot:null,page:null,mode:'browse',nameDraft:'',idDraft:'',history:[],cursor:undefined,selected:null,detail:null,metadataSlot:null,notice:'',scroll:0});

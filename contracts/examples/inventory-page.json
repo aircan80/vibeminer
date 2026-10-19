@@ -1,0 +1,24 @@
+{
+  "productId": "wow",
+  "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "sourceRegion": "us",
+  "generation": "1",
+  "entries": [
+    {
+      "id": "1",
+      "family": "root",
+      "name": null,
+      "fileDataId": "12345",
+      "contentKey": "11111111111111111111111111111111",
+      "encodingKey": "44444444444444444444444444444444",
+      "decodedBytes": "300",
+      "encodedBytes": "100",
+      "retained": true,
+      "localeFlags": "2",
+      "contentFlags": "0",
+      "nameHash": null
+    }
+  ],
+  "totalCount": "6",
+  "nextCursor": "1"
+}

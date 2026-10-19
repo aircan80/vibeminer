@@ -1,0 +1,91 @@
+{
+  "provider": "WoWDBDefs contributors",
+  "revision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+  "definitionLicense": "CC-BY-SA-4.0",
+  "resources": [
+    {
+      "path": "manifest.json",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/manifest.json",
+      "sha256": "f7b752a991d6a0321d07ecb7f06e62cd94694c1594d2fe5ce0cb7b243c71559a",
+      "byteLength": 149833
+    },
+    {
+      "path": "LICENSE.md",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/LICENSE.md",
+      "sha256": "bab6b1d3130b236c5af360ee7bfa00d8757329d054323441ed6a5eb367cd1f32",
+      "byteLength": 17689
+    },
+    {
+      "path": "definitions/Item.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/Item.dbd",
+      "sha256": "076ea4c7e80c891b399cc77f285c807071080c0fed95701e447f7c98024ae120",
+      "byteLength": 34931
+    },
+    {
+      "path": "definitions/ItemClass.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemClass.dbd",
+      "sha256": "6e0517e1ae17d3528aefe3eac6ad2b417ae7361d8d5ad77d0c743ffd4d126151",
+      "byteLength": 25666
+    },
+    {
+      "path": "definitions/Material.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/Material.dbd",
+      "sha256": "94332b8ef22c9efa431f6ec35690a92896daf05c7f677fa6ce049006ab487ae7",
+      "byteLength": 25527
+    },
+    {
+      "path": "definitions/ItemGroupSounds.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemGroupSounds.dbd",
+      "sha256": "e108620add5ef881b6189ee7f8c0bb0962c59254ec0dfe405abc889c9061f6de",
+      "byteLength": 24942
+    },
+    {
+      "path": "definitions/ItemSparse.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemSparse.dbd",
+      "sha256": "8664c3b5862dfe4c3a4322941b48b032c57b90412c070deb2028f3e448cf674a",
+      "byteLength": 75858
+    },
+    {
+      "path": "definitions/ItemSubClass.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemSubClass.dbd",
+      "sha256": "e06461a556669dd560dc8908e417fac9343894f4fd4d446e2d3dc721a908891c",
+      "byteLength": 28231
+    },
+    {
+      "path": "definitions/ItemXItemEffect.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemXItemEffect.dbd",
+      "sha256": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb",
+      "byteLength": 11271
+    },
+    {
+      "path": "definitions/Creature.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/Creature.dbd",
+      "sha256": "3644a603aae0eed595de31933c49e7bd8abea32bc1a1c32f9d754afbfb8f5682",
+      "byteLength": 28281
+    },
+    {
+      "path": "definitions/CreatureDisplayInfo.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/CreatureDisplayInfo.dbd",
+      "sha256": "64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425",
+      "byteLength": 38876
+    },
+    {
+      "path": "definitions/CreatureModelData.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/CreatureModelData.dbd",
+      "sha256": "ace9dfbb1acdec0eae7899273a4e983d851d2de8d6471fd8eb95ac8e70584e2a",
+      "byteLength": 40383
+    },
+    {
+      "path": "definitions/ItemEffect.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemEffect.dbd",
+      "sha256": "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c",
+      "byteLength": 27918
+    },
+    {
+      "path": "definitions/SpellName.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/SpellName.dbd",
+      "sha256": "d48ae2eb0455a30451cadda1c63627b9ad4ad4e9c4e473cd3444def1981fa667",
+      "byteLength": 23534
+    }
+  ]
+}

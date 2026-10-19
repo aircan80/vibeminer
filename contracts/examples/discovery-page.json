@@ -1,0 +1,64 @@
+{
+  "productId": "wow",
+  "builds": [
+    {
+      "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "productId": "wow",
+      "version": "12.1.5.70448",
+      "buildId": "70448",
+      "buildConfig": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "cdnConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "productConfig": null,
+      "identityFields": {
+        "BuildConfig": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "CDNConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "BuildId": "70448",
+        "VersionsName": "12.1.5.70448",
+        "KeyRing": ""
+      },
+      "regions": [
+        "us"
+      ],
+      "advertisedRegions": [
+        "us"
+      ],
+      "routeRegions": [
+        "us"
+      ],
+      "firstSeenAt": "2026-10-18T12:00:00Z",
+      "lastSeenAt": "2026-10-18T12:00:00Z",
+      "isNew": false,
+      "isAdvertised": true,
+      "isLocal": false,
+      "availability": "unknown",
+      "sourceReceipts": [
+        {
+          "region": "us",
+          "role": "versions",
+          "url": "https://metadata.invalid/v2/products/wow/versions",
+          "retrievedAt": "2026-10-18T12:00:00Z",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "byteLength": 200,
+          "rowOrdinal": 0
+        },
+        {
+          "region": "us",
+          "role": "cdns",
+          "url": "https://fixture.invalid/cdns",
+          "retrievedAt": "2026-10-18T12:00:00Z",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "byteLength": 128,
+          "rowOrdinal": 0
+        }
+      ]
+    }
+  ],
+  "nextCursor": null,
+  "lastCheckedAt": "2026-10-18T12:00:00Z",
+  "checkedRegions": [
+    "us"
+  ],
+  "errors": [],
+  "hasSavedHistory": true,
+  "connection": "online"
+}

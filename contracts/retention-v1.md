@@ -1,0 +1,19 @@
+# Durable build retention v1
+
+`retention-v1` advertises three bounded local methods. These methods never own the engine job's lifetime. No bulk transfer starts from Open, table navigation, a local read or a list request.
+
+- `retention.read`: exact `productId`, `buildIdentity`, `sourceRegion`, `ledgerId`; returns one `RetentionSnapshot` for the admitted DL capability.
+- `retention.list`: empty parameters; returns `{jobs:[...]}`, at most nine durable intents including paused jobs and active cleanup.
+- `retention.set`: exact target plus `action` (`downloadAll`, `pause`, `resume`, `onDemand`) and optional canonical decimal-string `expectedRevision`. Returns the committed snapshot immediately. Request cancellation after commit does not withdraw intent. `RETENTION_STALE` requires a new local read; it does not retry the stale action automatically.
+
+Snapshot `revision` changes only with effective user intent, never frequent driver progress. Counts, sizes and progress numerators/denominators are exact canonical nonnegative decimal strings. Pending objects and queue position are small bounded integers. Public modes/states use explicit camel-case names; no implementation enum numbers or database rows cross the wire.
+
+Scope is exactly `downloadManifestAllVariants`: unique EKeys and encoded sizes in the admitted authenticated DL ledger. It does not establish installed size, complete research coverage or decoded readability. Verified encrypted encoded bytes can qualify. Immutable source/configuration/ledger receipts pin the original build and routes across later discovery refreshes.
+
+Historical `coverage.receiptObjects/receiptBytes` describe committed encoded proofs uniquely credited to this ledger. They do not assert current possession. Presence counters are a separately dated existence/length assessment: `notAssessed`, `assessing`, `assessed`, `interrupted`. Stat observations never claim current SHA verification. Known corruption remains unusable until current verification/repair; same-length corruption can only be discovered by actual verification. Do not infer an overall current retained percentage from an incomplete pass. Completed requires full historical credit and a complete dated presence pass with no unresolved/failed/missing/corrupt members, not just an enumeration cursor at EOF.
+
+`progress` is an independent stage with measured units and optional denominator. Unknown totals remain null. Transfer progress is not durable credit. `wireBytesThisSession` measures payload response bytes observed by the shared producer, including retries; archive lookup metadata is excluded, so label it as transferred payload rather than total network usage.
+
+Pause and On demand can return `stopping` until subscriptions and sessions retire. They remove only the job's consumers, preserving independent foreground demand and verified objects. Resume creates a new generation while retaining original intent/source identity and historical credit. Waiting/failed jobs require deliberate Resume; there is no infinite automatic fast retry. Shutdown preserves intent and restore resumes only unpaused Download all jobs.
+
+Desktop polling is a visible-surface local read at most once per second, without overlap, and stops at stable states. View generations discard stale replies. Polling does not drive downloads. Purposeful controls are exposed only with working engine composition and reviewed UI; the schema alone is not delivery of the retention surface.

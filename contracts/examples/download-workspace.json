@@ -1,0 +1,118 @@
+{
+  "build": {
+    "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "productId": "wow",
+    "version": "12.1.5.70448",
+    "buildId": "70448",
+    "buildConfig": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "cdnConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "productConfig": null,
+    "identityFields": {
+      "BuildConfig": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "CDNConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "BuildId": "70448",
+      "VersionsName": "12.1.5.70448",
+      "KeyRing": ""
+    },
+    "regions": [
+      "us"
+    ],
+    "advertisedRegions": [
+      "us"
+    ],
+    "routeRegions": [
+      "us"
+    ],
+    "firstSeenAt": "2026-10-18T12:00:00Z",
+    "lastSeenAt": "2026-10-18T12:00:00Z",
+    "isNew": false,
+    "isAdvertised": true,
+    "isLocal": false,
+    "availability": "unknown",
+    "sourceReceipts": [
+      {
+        "region": "us",
+        "role": "versions",
+        "url": "https://metadata.invalid/v2/products/wow/versions",
+        "retrievedAt": "2026-10-18T12:00:00Z",
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "byteLength": 200,
+        "rowOrdinal": 0
+      },
+      {
+        "region": "us",
+        "role": "cdns",
+        "url": "https://fixture.invalid/cdns",
+        "retrievedAt": "2026-10-18T12:00:00Z",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "byteLength": 128,
+        "rowOrdinal": 0
+      }
+    ]
+  },
+  "openedAt": "2026-10-18T12:00:01Z",
+  "readiness": "partial",
+  "metadataState": "verified",
+  "inventoryState": "notPrepared",
+  "retentionState": "measured",
+  "downloadPolicy": "onDemand",
+  "researchLocale": null,
+  "platformScope": null,
+  "preparationProfile": "home-download-v1",
+  "sourceReference": {
+    "generation": "1",
+    "region": "us",
+    "versionsSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "versionsRowOrdinal": 0,
+    "cdnsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "cdnsRowOrdinal": 0
+  },
+  "configurations": [
+    {
+      "role": "buildConfig",
+      "key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "byteLength": 128,
+      "sourceUrl": "https://fixture.invalid/config/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "retrievedAt": "2026-10-18T12:00:00Z",
+      "verifiedAt": "2026-10-18T12:00:01Z",
+      "parsedFieldCount": 2
+    },
+    {
+      "role": "cdnConfig",
+      "key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "byteLength": 128,
+      "sourceUrl": "https://fixture.invalid/config/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "retrievedAt": "2026-10-18T12:00:00Z",
+      "verifiedAt": "2026-10-18T12:00:01Z",
+      "parsedFieldCount": 2
+    }
+  ],
+  "inventory": null,
+  "metadata": [
+    {
+      "role": "download",
+      "contentKey": "11111111111111111111111111111111",
+      "encodingKey": "77777777777777777777777777777777",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "encodedBytes": "50",
+      "decodedBytes": "100",
+      "sourceUrl": "https://fixture.invalid/data/encoding",
+      "retrievedAt": "2026-10-18T12:00:01Z",
+      "verifiedAt": "2026-10-18T12:00:01Z",
+      "parserRevision": "download-v1"
+    }
+  ],
+  "downloadProblem": null,
+  "download": {
+    "ledgerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scope": "downloadManifestAllVariants",
+    "objectCount": "3",
+    "totalEncodedBytes": "450",
+    "verifiedEncodedBytes": "100",
+    "remainingEncodedBytes": "350",
+    "assessedAt": "2026-10-18T12:00:01Z",
+    "metadataEncodedBytes": "306"
+  }
+}

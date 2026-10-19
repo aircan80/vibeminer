@@ -1,0 +1,243 @@
+{
+  "source_repository": "vibeminer_java",
+  "source_commit": "8f353d046d961108f7acc86bfe1381004467afd5",
+  "source_tracked_changes_at_inspection": false,
+  "inspected_date": "2026-10-18",
+  "purpose": "Continue VibeMiner with Electron and an original async-first C# engine; preserve design and requirements provenance without depending on the sibling checkout.",
+  "selected_design": "docs/design/build-discovery/index.html?concept=guided&state=ready&product=wow",
+  "imports": [
+    {
+      "source_path": "LICENSE",
+      "destination_path": "LICENSE",
+      "sha256": "e57f1c320b8cf8798a7d2ff83a6f9e06a33a03585f6e065fea97f1d86db84052",
+      "bytes": 35150,
+      "kind": "unchanged project material"
+    },
+    {
+      "source_path": "branding/vibeminer.svg",
+      "destination_path": "branding/vibeminer.svg",
+      "sha256": "7c9455b59bf2d8dea0d45fe8b2c947d303b59e4e8c92d05b44ad23511600484c",
+      "bytes": 722,
+      "kind": "unchanged project material"
+    },
+    {
+      "source_path": "docs/design/build-discovery/index.html",
+      "destination_path": "docs/design/build-discovery/index.html",
+      "sha256": "e9cc99a1007762ce61e4d58223b5162725fa1d91a6bec1cf3b0188bbdac07b46",
+      "bytes": 32256,
+      "kind": "unchanged project material"
+    },
+    {
+      "source_path": "docs/design/build-preparation/index.html",
+      "destination_path": "docs/design/build-preparation/index.html",
+      "sha256": "ddf1d35520442c50db575335fd13e4b67cb964c3d642c695f16f8828a8d5a633",
+      "bytes": 31554,
+      "kind": "unchanged project material"
+    },
+    {
+      "source_path": "docs/design/build-mining-home/index.html",
+      "destination_path": "docs/design/build-mining-home/index.html",
+      "sha256": "c72b34f5f1e31d148607e7d5aa94936fa4a18f53b11b63e9fd30e7bed6319635",
+      "bytes": 38686,
+      "kind": "unchanged project material"
+    },
+    {
+      "source_path": "branding/icons/vibeminer.png",
+      "destination_path": "branding/icons/vibeminer.png",
+      "sha256": "69b356899ca6bb3bb15c5af265cb91abb21cf141389908aa92e3316ffc356daf",
+      "bytes": 34317,
+      "kind": "unchanged original project application icon"
+    },
+    {
+      "source_path": "branding/icons/vibeminer.ico",
+      "destination_path": "branding/icons/vibeminer.ico",
+      "sha256": "8aa4c8c50bd25ccbe20a6e6c2ac14ec5f614598536ebeab8f395d7b31d756d1e",
+      "bytes": 34137,
+      "kind": "unchanged original project application icon"
+    },
+    {
+      "source_path": "branding/icons/vibeminer.icns",
+      "destination_path": "branding/icons/vibeminer.icns",
+      "sha256": "2f7756f3bb12298833112f19e72fd0b31603a7aa0627384526e9863d97ebcaab",
+      "bytes": 196221,
+      "kind": "unchanged original project application icon"
+    },
+    {
+      "source_path": "docs/design/top-navigation/home.html",
+      "destination_path": "docs/design/top-navigation/home.html",
+      "source_commit": "8f353d046d961108f7acc86bfe1381004467afd5",
+      "sha256": "e4e7ff762c68617c8f5e2637d04ba1018412bbb378dd7f7e37d47654813a4a26",
+      "bytes": 38669,
+      "kind": "unchanged selected navigation reference; imported for work item0011"
+    },
+    {
+      "source_path": "docs/design/top-navigation/tables.html",
+      "destination_path": "docs/design/top-navigation/tables.html",
+      "source_commit": "8f353d046d961108f7acc86bfe1381004467afd5",
+      "sha256": "2f2984580d552aac84d8cb839b34e0543bbfa5621e78b2c8d5662e0bb7d326c2",
+      "bytes": 24788,
+      "kind": "unchanged selected navigation reference; imported for work item0011"
+    },
+    {
+      "source_path": "docs/design/top-navigation/home.png",
+      "destination_path": "docs/design/top-navigation/home.png",
+      "source_commit": "8f353d046d961108f7acc86bfe1381004467afd5",
+      "sha256": "046dd059aa70696f75c4e565d6b72b083b61eb59a23d766569d204126c2f8b65",
+      "bytes": 174367,
+      "kind": "unchanged selected navigation reference; imported for work item0011"
+    },
+    {
+      "source_path": "docs/design/top-navigation/tables.png",
+      "destination_path": "docs/design/top-navigation/tables.png",
+      "source_commit": "8f353d046d961108f7acc86bfe1381004467afd5",
+      "sha256": "9f0a4e6efc7a737f2d0cc9138dbdb33234aead735d223222d30131fcf5394242",
+      "bytes": 146721,
+      "kind": "unchanged selected navigation reference; imported for work item0011"
+    },
+    {
+      "source_path": "docs/design/top-navigation/README.md",
+      "destination_path": "docs/design/top-navigation/README.md",
+      "source_commit": "8f353d046d961108f7acc86bfe1381004467afd5",
+      "sha256": "2f7e47c124852ef27063329dbcb2b5eb4f3f259ab92c3a5c2000f64cd8f68663",
+      "bytes": 2018,
+      "kind": "unchanged selected navigation reference; imported for work item0011"
+    },
+    {
+      "source_path": "docs/TABLES-STORIES.md",
+      "destination_path": "docs/migration/java-tables/TABLES-STORIES.md",
+      "source_commit": "8f353d046d961108f7acc86bfe1381004467afd5",
+      "sha256": "7296bbd4e5aa8c5c5d94a937621f30841d5d31e659ce98c057596ee7761ca931",
+      "bytes": 12526,
+      "kind": "unchanged historical Tables specification; current accepted scope in0011"
+    },
+    {
+      "source_path": "docs/TABLE-RELATION-LABELS.md",
+      "destination_path": "docs/migration/java-tables/TABLE-RELATION-LABELS.md",
+      "source_commit": "8f353d046d961108f7acc86bfe1381004467afd5",
+      "sha256": "373bbd929e63f9bf7dc3c2aa32fd2875bad5abf858a06ebf833312e4f05fc348",
+      "bytes": 10332,
+      "kind": "unchanged historical Tables specification; current accepted scope in0011"
+    },
+    {
+      "source_path": "docs/design/tables/RESEARCH.md",
+      "destination_path": "docs/design/tables/RESEARCH.md",
+      "source_commit": "8f353d046d961108f7acc86bfe1381004467afd5",
+      "sha256": "02e50815f0f996458861b4db41fdbc9c697a2d85bd128d9d09b095e9d1a927b1",
+      "bytes": 12020,
+      "kind": "unchanged historical Tables specification; current accepted scope in0011"
+    }
+  ],
+  "requirements_references": [
+    {
+      "source_path": "README.md",
+      "sha256": "1cf284ee5691391a1672d43277f44e5995e245f6821d42325a7c4b9d23936155",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "AGENTS.md",
+      "sha256": "2420d78513997eb38e86bf0274529b18ceb4d8aa6ee0b1eefa89cb642732bd3f",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "BUILDING.md",
+      "sha256": "5c4362b7614b5def57f7e73b54397e519bbbed7ed6d40fd0afa4b95b3f74162f",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/ARCHITECTURE.md",
+      "sha256": "ebe65b42dddde428ac8ae63834c20d9a7796feebe3a898dba7be575a4b9cc123",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/BUILD-BROWSER-IMPLEMENTATION.md",
+      "sha256": "b38b9115b1692ff97a0f4017428bb09380316779d02356db3601e6cfdc8c183b",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/BUILD-OPENING.md",
+      "sha256": "c8869a35d2ee6f4e2926f5c6726b574884a6edf80d15102a7b2f68c830a4dcbc",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/BUILD-METADATA-DECLARATIONS.md",
+      "sha256": "35aeb4cdc43dbd3501671e7d24485107c3982e5850c8d133559f475327c921e8",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/BUILD-PREPARATION.md",
+      "sha256": "846ba51b7ce8c3af3c80d61f55db748ec5c9408ad30424884b6e2e0d171fc9d3",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/STORAGE.md",
+      "sha256": "f6493854b5b77d09ed08be541cf0891ed54a995fbab1ddef0e3e4025533a0457",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/PUBLISHER-OWNERSHIP.md",
+      "sha256": "b1ffe7ec33325c07e3beb7b94671bbfe10964590d5e11a70fb5a26831d364c7f",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/BUILD-INVENTORY-FORMATS.md",
+      "sha256": "70692cffd956fa9d39b74993acc475cbbe9555710c3b75c427cd9d5b7932b2c5",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/FORMATS.md",
+      "sha256": "6bb5e45daaf66e6ad7a4d097de30c65bc5a78f4b6ebf033767484222ef180684",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/SQLITE-INVENTORY-PERFORMANCE.md",
+      "sha256": "c3113462493e5459a28ac19c5af997184d4c3c5fba27113ff7c796193841e477",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/TABLES-STORIES.md",
+      "sha256": "7296bbd4e5aa8c5c5d94a937621f30841d5d31e659ce98c057596ee7761ca931",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/TABLE-RELATION-LABELS.md",
+      "sha256": "373bbd929e63f9bf7dc3c2aa32fd2875bad5abf858a06ebf833312e4f05fc348",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/RESEARCH-AREAS.md",
+      "sha256": "f808f95f3a42b77ac91f2bb1dd194f86f9bac0be12a54e660b63651e852d32af",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/TESTING.md",
+      "sha256": "1474fe04851b0368f39b4d54e9d3375466af3c4140a29228fbdafe55209bbc3d",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/LICENSING.md",
+      "sha256": "2654fa0bd93fb4e9f0c05911fdf3a0b3f07a96116e896bc7a5f02db30e0ec95c",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/design/build-discovery/README.md",
+      "sha256": "f4dd31d4c95a605ef3beb16e3405b12708c51825b88a1bba5fbee89a040f291c",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/design/build-discovery/REVIEW.md",
+      "sha256": "3cc94783db47cb31e8a68a0096cb4a94edb7824552033f965531c39ed99125ba",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/design/build-preparation/README.md",
+      "sha256": "89c1f022fdfafa9d089ad97eb223f5c5794efc27ff9b3f97bd898964fdb3c3ff",
+      "kind": "requirements reference; not copied"
+    },
+    {
+      "source_path": "docs/design/build-mining-home/README.md",
+      "sha256": "1a9987f07eb3ac511f24214f308181481a512fb37c82c5c10bd483279682d696",
+      "kind": "requirements reference; not copied"
+    }
+  ],
+  "interpretation": "Source tests, release evidence, implementation claims, and benchmark timings do not qualify the new stack. Related preparation and C overview mockups carry forward the Java workflow; alternate concepts remain history."
+}

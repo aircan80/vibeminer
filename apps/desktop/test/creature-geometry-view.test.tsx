@@ -1,0 +1,55 @@
+import {afterEach,expect,it,vi} from 'vitest';
+import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import readyJson from '../../../contracts/examples/creature-geometry-ready.json';
+import type {CreatureGeometryResult} from '../../../contracts/generated/discovery';
+import {CreatureGeometryView} from '../src/renderer/CreatureGeometryView';
+import {CreatureGeometryActivity} from '../src/renderer/CreatureGeometryActivity';
+import {captureGeometryAnchor,type GeometryViewState} from '../src/renderer/geometry-state';
+import type {GeometryFlow} from '../src/renderer/useCreatureGeometry';
+const result=readyJson as CreatureGeometryResult;
+function fixture(phase:GeometryViewState['phase']='ready'){
+ const intent={selection:{...result.context,artifactId:result.artifactId,creatureId:result.creatureId,slot:result.slot},anchor:captureGeometryAnchor(result.opening,result.metadata),label:{name:'Authored Creature',buildVersion:'Authored build'},origin:{key:'exact',invoker:null,windowScroll:[0,0] as const,innerScroll:[]}};
+ const view:GeometryViewState={intent,generation:1,phase,message:phase==='ready'?'Unposed source edges drawn':'Drawing geometry',result,canMount:true,error:null,sections:[],sectionOffset:0};
+ const session={attachCanvas:vi.fn(()=>vi.fn()),move:vi.fn(),sectionPage:vi.fn(),retry:vi.fn(),stopPreparation:vi.fn(),dismissActivity:vi.fn()};
+ return{flow:{session,snapshot:{view,operation:null,retirement:null,iconsSuspended:true}} as unknown as GeometryFlow,session,view};
+}
+afterEach(cleanup);
+it('commits the sole real canvas in Drawing before drawn without exposing premature controls',()=>{
+ const {flow,session}=fixture('validating'),onReturn=vi.fn();const {rerender,container}=render(<CreatureGeometryView flow={flow} onReturn={onReturn}/>);
+ expect(container.querySelectorAll('canvas')).toHaveLength(1);expect(session.attachCanvas).toHaveBeenCalledTimes(1);expect(screen.getByRole('status')).toHaveTextContent('Drawing geometry');expect(screen.queryByRole('group',{name:'Geometry camera'})).not.toBeInTheDocument();
+ rerender(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,phase:'ready'}}}} onReturn={onReturn}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Rotate left'}));expect(session.move).toHaveBeenCalledWith({kind:'rotate',yaw:-Math.PI/12,elevation:0});expect(session.attachCanvas).toHaveBeenCalledTimes(1);expect(screen.queryByRole('button',{name:/Stop/})).not.toBeInTheDocument();
+});
+it('displays scoped original facts and working exact raw-record callbacks without model-path controls',()=>{
+ const {flow}=fixture(),onSource=vi.fn();render(<CreatureGeometryView flow={flow} onReturn={()=>{}} onSource={onSource}/>);
+ expect(screen.getByText('Unposed source edges · appearance not evaluated')).toBeVisible();expect(screen.getByText('All declared main-view sections')).toBeVisible();expect(screen.getByText('Copy target 23 from 11 · column 0 = 19')).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'View CreatureDisplayInfo source record'}));expect(onSource).toHaveBeenCalledWith(result.metadata.targets[0]!.row!.source);
+ expect(screen.queryByRole('button',{name:/export|texture|portrait|skin source/i})).not.toBeInTheDocument();
+ expect(screen.getByText('Section triangle references').nextElementSibling).toHaveTextContent('2');expect(screen.getByText('Emitted edge pairs').nextElementSibling).toHaveTextContent('6');
+});
+it('pages only bounded section evidence and never remounts or changes all-section drawing',async()=>{
+ const {flow,session}=fixture(),rows=Array.from({length:16},(_,ordinal)=>({ordinal,id:ordinal+50,level:0,vertexStart:0,vertexCount:3,triangleStart:0,triangleCount:3,lineStart:ordinal*6,lineCount:6}));
+ const extended={...result,manifest:{...result.manifest!,sectionCount:33}};
+ const {rerender,container}=render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:extended}}}} onReturn={()=>{}}/>);
+ fireEvent.click(screen.getByText('Declared section evidence'));await waitFor(()=>expect(session.sectionPage).toHaveBeenCalledWith(0));
+ rerender(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:extended,sections:rows}}}} onReturn={()=>{}}/>);
+ expect(container.querySelectorAll('tbody tr')).toHaveLength(16);fireEvent.click(screen.getByRole('button',{name:'Next section records'}));expect(session.sectionPage).toHaveBeenLastCalledWith(16);expect(session.attachCanvas).toHaveBeenCalledTimes(1);expect(session.move).not.toHaveBeenCalled();
+});
+it('gives Q0 and empty-source failure useful metadata without fabricated manifest or verified asset facts',()=>{
+ const {flow}=fixture('outcome');const q0={...result,state:'noDeclaredTriangles' as const,manifest:null};const {rerender,container}=render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:q0,message:'Declared main-view sections reference no triangles',canMount:false}}}} onReturn={()=>{}}/>);
+ expect(container.querySelector('canvas')).toBeNull();expect(screen.queryByText('Declared section evidence')).not.toBeInTheDocument();expect(screen.queryByText('Declared geometry')).not.toBeInTheDocument();expect(screen.getByText('Model · full verified source')).toBeVisible();
+ rerender(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:{...q0,state:'protected',sources:[],problem:{code:'PROTECTED',message:'Authored protected source',retryable:false,dependency:'skin',target:null}},canMount:false}}}} onReturn={()=>{}}/>);
+ expect(screen.queryByText(/full verified source/)).not.toBeInTheDocument();expect(screen.getByText('Model FileDataID · source value')).toBeVisible();
+});
+it('keeps original-context closing/blocked activity and no misleading dismiss or retry through debt',()=>{
+ const {flow,view}=fixture();render(<CreatureGeometryActivity flow={{...flow,snapshot:{...flow.snapshot,view:null,retirement:{intent:view.intent,phase:'blocked',error:{code:'CLEANUP_FAILED',message:'Authored uncertain close',retryable:false}}}}}/>);
+ expect(screen.getByRole('region',{name:'Geometry activity'})).toHaveTextContent('wow · build Authored build · source US');expect(screen.getByText('Geometry cleanup needs attention')).toBeVisible();expect(screen.getByText(/Icons are paused/)).toBeVisible();expect(screen.queryByRole('button')).not.toBeInTheDocument();
+});
+it('does not offer empty early section inspection, then preserves the focused pager at both boundaries',async()=>{
+ const {flow,session}=fixture('validating'),extended={...result,manifest:{...result.manifest!,sectionCount:33}},initial={...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:extended}}};
+ const {rerender}=render(<CreatureGeometryView flow={initial} onReturn={()=>{}}/>);expect(screen.queryByText('Declared section evidence')).not.toBeInTheDocument();
+ const readyFlow={...initial,snapshot:{...initial.snapshot,view:{...initial.snapshot.view!,phase:'ready' as const}}};rerender(<CreatureGeometryView flow={readyFlow} onReturn={()=>{}}/>);fireEvent.click(screen.getByText('Declared section evidence'));await waitFor(()=>expect(session.sectionPage).toHaveBeenCalledWith(0));
+ const next=screen.getByRole('button',{name:'Next section records'});next.focus();rerender(<CreatureGeometryView flow={{...readyFlow,snapshot:{...readyFlow.snapshot,view:{...readyFlow.snapshot.view!,sectionOffset:32,sections:[{ordinal:32,id:5,level:0,vertexStart:0,vertexCount:3,triangleStart:0,triangleCount:3,lineStart:0,lineCount:6}]}}}} onReturn={()=>{}}/>);expect(next).toHaveFocus();expect(next).toHaveAttribute('aria-disabled','true');session.sectionPage.mockClear();fireEvent.click(next);expect(session.sectionPage).not.toHaveBeenCalled();
+ const previous=screen.getByRole('button',{name:'Previous section records'});previous.focus();rerender(<CreatureGeometryView flow={readyFlow} onReturn={()=>{}}/>);expect(previous).toHaveFocus();expect(previous).toHaveAttribute('aria-disabled','true');fireEvent.click(previous);expect(session.sectionPage).not.toHaveBeenCalled();
+});

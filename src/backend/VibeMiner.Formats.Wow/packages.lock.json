@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "vibeminer.domain": {
+        "type": "Project"
+      },
+      "vibeminer.protocols.tact": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Domain": "[1.0.0, )"
+        }
+      }
+    }
+  }
+}

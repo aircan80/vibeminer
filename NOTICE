@@ -1,0 +1,30 @@
+VibeMiner
+Copyright (C) 2026 aircan80 and VibeMiner contributors
+
+Original VibeMiner software, documentation, and artwork are licensed under
+the GNU General Public License, version 3 or (at your option) any later version
+(GPL-3.0-or-later). See LICENSE. VibeMiner is distributed without warranty.
+
+This repository continues the original Java VibeMiner project. Preserved design
+HTML and branding/vibeminer.svg are original project materials. Their source
+checkpoint and digests are recorded in docs/migration/java-reference.json.
+
+Third-party dependencies and separately identified resources retain their own
+licenses. No third-party game parser, runtime distribution or downloaded Blizzard content
+is included. The separately attributed WoWDBDefs manifest and twelve definition
+files at revision b9a63096cdd99b26967f17f9515377ae62cadfd7 are community data
+under CC BY-SA 4.0 (WoWDBDefs contributors). Original source URLs, digests,
+NOTICE and full upstream LICENSE accompany these unmodified resources in
+src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/ and in local
+packages under third-party/WoWDBDefs/. Application parsing code is original.
+
+Three.js 0.186.1 is a graphics runtime under the MIT License, copyright
+2010-2026 three.js authors. Its unmodified license and dependency attribution
+are retained in docs/third-party/three/ and copied to third-party/three/ in
+local packages. Acquisition, game decoding and geometry interpretation remain
+original VibeMiner code.
+
+No Blizzard or other upstream endorsement is implied. The project license
+grants no rights to Blizzard game content or trademarks.
+
+See docs/LICENSING.md for reference, dependency, and distribution responsibilities.

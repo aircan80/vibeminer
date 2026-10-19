@@ -1,0 +1,14 @@
+{
+  "description": "Authored malformed UTF-8 cell evidence. No downloaded game bytes.",
+  "textIssueCount": "2",
+  "columns": [
+    {"name":"ID","family":"integer","isId":true,"reference":null},
+    {"name":"Name","family":"string","isId":false,"reference":null},
+    {"name":"Description[0]","family":"string","isId":false,"reference":null},
+    {"name":"Description[1]","family":"string","isId":false,"reference":null}
+  ],
+  "rows": [
+    {"id":"7","isCopy":false,"copySourceId":null,"values":["7","Authored usable name","",""],"textIssues":[{"columnIndex":2,"code":"DB2_TEXT_ENCODING_INVALID","rawBytesHex":"c328"}]},
+    {"id":"8","isCopy":true,"copySourceId":"7","values":["8","Authored usable name","",""],"textIssues":[{"columnIndex":2,"code":"DB2_TEXT_ENCODING_INVALID","rawBytesHex":"c328"}]}
+  ]
+}

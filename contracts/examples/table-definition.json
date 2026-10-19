@@ -1,0 +1,165 @@
+{
+  "productId": "wow",
+  "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "sourceRegion": "us",
+  "buildVersion": "12.1.5.70448",
+  "provider": {
+    "name": "WoWDBDefs contributors",
+    "revision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+    "manifestSha256": "f7b752a991d6a0321d07ecb7f06e62cd94694c1594d2fe5ce0cb7b243c71559a",
+    "license": "CC-BY-SA-4.0",
+    "sourceUrl": "https://github.com/wowdev/WoWDBDefs/blob/b9a63096cdd99b26967f17f9515377ae62cadfd7/manifest.json"
+  },
+  "entry": {
+    "tableId": "b977271e",
+    "name": "ItemClass",
+    "db2FileDataId": "1140189",
+    "definitionState": "bundled",
+    "sourceState": "notChecked",
+    "rowsState": "notPrepared"
+  },
+  "definition": {
+    "sha256": "6e0517e1ae17d3528aefe3eac6ad2b417ae7361d8d5ad77d0c743ffd4d126151",
+    "sourceUrl": "https://github.com/wowdev/WoWDBDefs/blob/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemClass.dbd",
+    "columns": [
+      {
+        "name": "ID",
+        "family": "int",
+        "integerBits": null,
+        "unsigned": null,
+        "arrayLength": 1,
+        "isId": false,
+        "nonInline": false,
+        "relationStorage": false,
+        "verifiedName": true,
+        "comment": null,
+        "reference": null
+      },
+      {
+        "name": "ClassName_lang",
+        "family": "locstring",
+        "integerBits": null,
+        "unsigned": null,
+        "arrayLength": 1,
+        "isId": false,
+        "nonInline": false,
+        "relationStorage": false,
+        "verifiedName": true,
+        "comment": null,
+        "reference": null
+      },
+      {
+        "name": "ClassID",
+        "family": "int",
+        "integerBits": null,
+        "unsigned": null,
+        "arrayLength": 1,
+        "isId": false,
+        "nonInline": false,
+        "relationStorage": false,
+        "verifiedName": true,
+        "comment": null,
+        "reference": null
+      },
+      {
+        "name": "PriceModifier",
+        "family": "float",
+        "integerBits": null,
+        "unsigned": null,
+        "arrayLength": 1,
+        "isId": false,
+        "nonInline": false,
+        "relationStorage": false,
+        "verifiedName": true,
+        "comment": null,
+        "reference": null
+      },
+      {
+        "name": "Flags",
+        "family": "int",
+        "integerBits": null,
+        "unsigned": null,
+        "arrayLength": 1,
+        "isId": false,
+        "nonInline": false,
+        "relationStorage": false,
+        "verifiedName": true,
+        "comment": null,
+        "reference": null
+      }
+    ],
+    "candidates": [
+      {
+        "layoutHash": "35680EB8",
+        "fields": [
+          {
+            "name": "ID",
+            "family": "int",
+            "integerBits": 32,
+            "unsigned": false,
+            "arrayLength": 1,
+            "isId": true,
+            "nonInline": true,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ClassName_lang",
+            "family": "locstring",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ClassID",
+            "family": "int",
+            "integerBits": 8,
+            "unsigned": false,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "PriceModifier",
+            "family": "float",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "Flags",
+            "family": "int",
+            "integerBits": 32,
+            "unsigned": false,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          }
+        ]
+      }
+    ]
+  },
+  "problem": null
+}

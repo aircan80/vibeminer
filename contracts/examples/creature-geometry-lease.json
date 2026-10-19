@@ -1,0 +1,57 @@
+{
+  "leaseId": "77777777777777777777777777777777",
+  "manifest": {
+    "artifactId": "4444444444444444444444444444444444444444444444444444444444444444",
+    "bindingSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "byteLength": 320,
+    "formatVersion": 1,
+    "headerBytes": 128,
+    "scope": "unfiltered-declared-sections",
+    "coordinatePolicy": "native-m2-position-normal-uv-winding-v1",
+    "evaluations": {
+      "material": "notEvaluated",
+      "pose": "notEvaluated",
+      "visibility": "notEvaluated",
+      "appearance": "notEvaluated"
+    },
+    "vertexCount": 4,
+    "vertexLookupCount": 3,
+    "sourceTriangleIndexCount": 6,
+    "sectionIndexCount": 6,
+    "lineIndexCount": 12,
+    "sectionCount": 3,
+    "positions": {
+      "offset": 128,
+      "byteLength": 48
+    },
+    "lineIndices": {
+      "offset": 176,
+      "byteLength": 48
+    },
+    "sections": {
+      "offset": 224,
+      "byteLength": 96
+    },
+    "bounds": {
+      "min": [
+        -6,
+        -4,
+        0
+      ],
+      "max": [
+        3,
+        7,
+        8
+      ]
+    },
+    "modelFileDataId": 123456,
+    "skinFileDataId": 900,
+    "mainSkinOrdinal": 0,
+    "modelReaderRevision": "m2-static-native-v1",
+    "skinReaderRevision": "m2-skin-geometry-v1",
+    "interpretationPolicy": "skin-unfiltered-source-geometry-v1",
+    "artifactRevision": "model-geometry-vmg1-v1",
+    "edgePolicy": "all-sections-triangle-edges-v1"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "context": {
+    "productId": "wow",
+    "buildIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sourceRegion": "us",
+    "researchLocale": "enUS"
+  },
+  "artifactId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "query": "",
+  "exactItemId": null,
+  "entries": [
+    {
+      "id": "0",
+      "name": {
+        "state": "valid",
+        "value": "Authored fixture display"
+      },
+      "baseValues": [],
+      "iconFileDataId": null
+    },
+    {
+      "id": "7",
+      "name": {
+        "state": "empty",
+        "value": ""
+      },
+      "baseValues": [],
+      "iconFileDataId": null
+    },
+    {
+      "id": "8",
+      "name": {
+        "state": "invalid",
+        "value": null
+      },
+      "baseValues": [],
+      "iconFileDataId": null
+    },
+    {
+      "id": "4294967295",
+      "name": {
+        "state": "missingSparse",
+        "value": null
+      },
+      "baseValues": [],
+      "iconFileDataId": null
+    }
+  ],
+  "nextCursor": null
+}

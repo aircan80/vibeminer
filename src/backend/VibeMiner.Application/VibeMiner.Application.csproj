@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../VibeMiner.Domain/VibeMiner.Domain.csproj" /></ItemGroup></Project>

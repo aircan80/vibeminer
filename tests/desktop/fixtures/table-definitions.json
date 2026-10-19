@@ -1,0 +1,1156 @@
+{
+  "provenance": "Pinned community metadata, exported offline through the original C# DBD reader for synthetic desktop contexts. No game records.",
+  "definitions": {
+    "50238ec2": {
+      "productId": "wow",
+      "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "sourceRegion": "us",
+      "buildVersion": "12.1.5.70448",
+      "provider": {
+        "name": "WoWDBDefs contributors",
+        "revision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+        "manifestSha256": "f7b752a991d6a0321d07ecb7f06e62cd94694c1594d2fe5ce0cb7b243c71559a",
+        "license": "CC-BY-SA-4.0",
+        "sourceUrl": "https://github.com/wowdev/WoWDBDefs/blob/b9a63096cdd99b26967f17f9515377ae62cadfd7/manifest.json"
+      },
+      "entry": {
+        "tableId": "50238ec2",
+        "name": "Item",
+        "db2FileDataId": "841626",
+        "definitionState": "bundled",
+        "sourceState": "notChecked",
+        "rowsState": "notPrepared"
+      },
+      "definition": {
+        "sha256": "076ea4c7e80c891b399cc77f285c807071080c0fed95701e447f7c98024ae120",
+        "sourceUrl": "https://github.com/wowdev/WoWDBDefs/blob/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/Item.dbd",
+        "columns": [
+          {
+            "name": "ID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ClassID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": {
+              "table": "ItemClass",
+              "column": "ClassID"
+            }
+          },
+          {
+            "name": "IconFileDataID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": {
+              "table": "FileData",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "InventoryType",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ItemGroupSoundsID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": {
+              "table": "ItemGroupSounds",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "Material",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": {
+              "table": "Material",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "SheatheType",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "Sound_override_subclassID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "SubclassID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "DisplayInfoID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "MaxDurability",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "AmmunitionType",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "MinDamage",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "MaxDamage",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "DamageType",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "Resistances",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ModifiedCraftingReagentItemID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": {
+              "table": "ModifiedCraftingReagentItem",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "RequiredLevel",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "RandomSelect",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ItemRandomSuffixGroupID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ContentTuningID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": {
+              "table": "ContentTuning",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "CraftingQualityID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": {
+              "table": "CraftingQuality",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "ScalingStatDistributionID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": {
+              "table": "ScalingStatDistribution",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "ScalingStatValue",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "Field_12_0_0_63534_010",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "RecraftReagentCountPercentage",
+            "family": "float",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "OrderSource",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ItemSquishEraID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": {
+              "table": "ItemSquishEra",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "Field_5_5_4_67090_015",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ItemPetFoodID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": false,
+            "comment": "matched against CreatureFamily::PetFoodMask by C_PetInfo.CanPetEatItem",
+            "reference": {
+              "table": "ItemPetFood",
+              "column": "ID"
+            }
+          }
+        ],
+        "candidates": [
+          {
+            "layoutHash": "996192AA",
+            "fields": [
+              {
+                "name": "ID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": true,
+                "nonInline": true,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "ClassID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": {
+                  "table": "ItemClass",
+                  "column": "ClassID"
+                }
+              },
+              {
+                "name": "SubclassID",
+                "family": "int",
+                "integerBits": 8,
+                "unsigned": true,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "Material",
+                "family": "int",
+                "integerBits": 8,
+                "unsigned": true,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": {
+                  "table": "Material",
+                  "column": "ID"
+                }
+              },
+              {
+                "name": "InventoryType",
+                "family": "int",
+                "integerBits": 8,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "SheatheType",
+                "family": "int",
+                "integerBits": 8,
+                "unsigned": true,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "Sound_override_subclassID",
+                "family": "int",
+                "integerBits": 8,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "IconFileDataID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": {
+                  "table": "FileData",
+                  "column": "ID"
+                }
+              },
+              {
+                "name": "ItemGroupSoundsID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": true,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": {
+                  "table": "ItemGroupSounds",
+                  "column": "ID"
+                }
+              },
+              {
+                "name": "ContentTuningID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": false,
+                "comment": null,
+                "reference": {
+                  "table": "ContentTuning",
+                  "column": "ID"
+                }
+              },
+              {
+                "name": "ModifiedCraftingReagentItemID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": false,
+                "comment": null,
+                "reference": {
+                  "table": "ModifiedCraftingReagentItem",
+                  "column": "ID"
+                }
+              },
+              {
+                "name": "Field_12_0_0_63534_010",
+                "family": "int",
+                "integerBits": 8,
+                "unsigned": true,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": false,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "CraftingQualityID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": false,
+                "comment": null,
+                "reference": {
+                  "table": "CraftingQuality",
+                  "column": "ID"
+                }
+              },
+              {
+                "name": "ItemSquishEraID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": false,
+                "comment": null,
+                "reference": {
+                  "table": "ItemSquishEra",
+                  "column": "ID"
+                }
+              },
+              {
+                "name": "RecraftReagentCountPercentage",
+                "family": "float",
+                "integerBits": null,
+                "unsigned": null,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": false,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "OrderSource",
+                "family": "int",
+                "integerBits": 8,
+                "unsigned": true,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": false,
+                "comment": null,
+                "reference": null
+              }
+            ]
+          }
+        ]
+      },
+      "problem": null
+    },
+    "b977271e": {
+      "productId": "wow",
+      "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "sourceRegion": "us",
+      "buildVersion": "12.1.5.70448",
+      "provider": {
+        "name": "WoWDBDefs contributors",
+        "revision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+        "manifestSha256": "f7b752a991d6a0321d07ecb7f06e62cd94694c1594d2fe5ce0cb7b243c71559a",
+        "license": "CC-BY-SA-4.0",
+        "sourceUrl": "https://github.com/wowdev/WoWDBDefs/blob/b9a63096cdd99b26967f17f9515377ae62cadfd7/manifest.json"
+      },
+      "entry": {
+        "tableId": "b977271e",
+        "name": "ItemClass",
+        "db2FileDataId": "1140189",
+        "definitionState": "bundled",
+        "sourceState": "notChecked",
+        "rowsState": "notPrepared"
+      },
+      "definition": {
+        "sha256": "6e0517e1ae17d3528aefe3eac6ad2b417ae7361d8d5ad77d0c743ffd4d126151",
+        "sourceUrl": "https://github.com/wowdev/WoWDBDefs/blob/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemClass.dbd",
+        "columns": [
+          {
+            "name": "ClassID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "Flags",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "PriceModifier",
+            "family": "float",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ClassName_lang",
+            "family": "locstring",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "ID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "SubclassMapID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          }
+        ],
+        "candidates": [
+          {
+            "layoutHash": "35680EB8",
+            "fields": [
+              {
+                "name": "ID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": true,
+                "nonInline": true,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "ClassName_lang",
+                "family": "locstring",
+                "integerBits": null,
+                "unsigned": null,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "ClassID",
+                "family": "int",
+                "integerBits": 8,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "PriceModifier",
+                "family": "float",
+                "integerBits": null,
+                "unsigned": null,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "Flags",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              }
+            ]
+          }
+        ]
+      },
+      "problem": null
+    },
+    "a4c11069": {
+      "productId": "wow",
+      "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "sourceRegion": "us",
+      "buildVersion": "12.1.5.70448",
+      "provider": {
+        "name": "WoWDBDefs contributors",
+        "revision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+        "manifestSha256": "f7b752a991d6a0321d07ecb7f06e62cd94694c1594d2fe5ce0cb7b243c71559a",
+        "license": "CC-BY-SA-4.0",
+        "sourceUrl": "https://github.com/wowdev/WoWDBDefs/blob/b9a63096cdd99b26967f17f9515377ae62cadfd7/manifest.json"
+      },
+      "entry": {
+        "tableId": "a4c11069",
+        "name": "Material",
+        "db2FileDataId": "1294217",
+        "definitionState": "bundled",
+        "sourceState": "notChecked",
+        "rowsState": "notPrepared"
+      },
+      "definition": {
+        "sha256": "94332b8ef22c9efa431f6ec35690a92896daf05c7f677fa6ce049006ab487ae7",
+        "sourceUrl": "https://github.com/wowdev/WoWDBDefs/blob/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/Material.dbd",
+        "columns": [
+          {
+            "name": "ID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "Flags",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "FoleySoundID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": {
+              "table": "SoundKit",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "SheatheSoundID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": {
+              "table": "SoundKit",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "UnsheatheSoundID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": {
+              "table": "SoundKit",
+              "column": "ID"
+            }
+          },
+          {
+            "name": "MaterialID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": {
+              "table": "Material",
+              "column": "ID"
+            }
+          }
+        ],
+        "candidates": [
+          {
+            "layoutHash": "BE3E0E4C",
+            "fields": [
+              {
+                "name": "ID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": true,
+                "nonInline": true,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "Flags",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "FoleySoundID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": true,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": {
+                  "table": "SoundKit",
+                  "column": "ID"
+                }
+              },
+              {
+                "name": "SheatheSoundID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": true,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": {
+                  "table": "SoundKit",
+                  "column": "ID"
+                }
+              },
+              {
+                "name": "UnsheatheSoundID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": true,
+                "arrayLength": 1,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": {
+                  "table": "SoundKit",
+                  "column": "ID"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "problem": null
+    },
+    "9f4206c9": {
+      "productId": "wow",
+      "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "sourceRegion": "us",
+      "buildVersion": "12.1.5.70448",
+      "provider": {
+        "name": "WoWDBDefs contributors",
+        "revision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+        "manifestSha256": "f7b752a991d6a0321d07ecb7f06e62cd94694c1594d2fe5ce0cb7b243c71559a",
+        "license": "CC-BY-SA-4.0",
+        "sourceUrl": "https://github.com/wowdev/WoWDBDefs/blob/b9a63096cdd99b26967f17f9515377ae62cadfd7/manifest.json"
+      },
+      "entry": {
+        "tableId": "9f4206c9",
+        "name": "ItemGroupSounds",
+        "db2FileDataId": "1283023",
+        "definitionState": "bundled",
+        "sourceState": "notChecked",
+        "rowsState": "notPrepared"
+      },
+      "definition": {
+        "sha256": "e108620add5ef881b6189ee7f8c0bb0962c59254ec0dfe405abc889c9061f6de",
+        "sourceUrl": "https://github.com/wowdev/WoWDBDefs/blob/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemGroupSounds.dbd",
+        "columns": [
+          {
+            "name": "ID",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          },
+          {
+            "name": "Sound",
+            "family": "int",
+            "integerBits": null,
+            "unsigned": null,
+            "arrayLength": 1,
+            "isId": false,
+            "nonInline": false,
+            "relationStorage": false,
+            "verifiedName": true,
+            "comment": null,
+            "reference": null
+          }
+        ],
+        "candidates": [
+          {
+            "layoutHash": "A7CEF530",
+            "fields": [
+              {
+                "name": "ID",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": false,
+                "arrayLength": 1,
+                "isId": true,
+                "nonInline": true,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              },
+              {
+                "name": "Sound",
+                "family": "int",
+                "integerBits": 32,
+                "unsigned": true,
+                "arrayLength": 4,
+                "isId": false,
+                "nonInline": false,
+                "relationStorage": false,
+                "verifiedName": true,
+                "comment": null,
+                "reference": null
+              }
+            ]
+          }
+        ]
+      },
+      "problem": null
+    }
+  }
+}

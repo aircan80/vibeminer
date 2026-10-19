@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
+  <ProjectReference Include="../VibeMiner.Application/VibeMiner.Application.csproj" />
+  <ProjectReference Include="../VibeMiner.Protocols.Tact/VibeMiner.Protocols.Tact.csproj" />
+  <ProjectReference Include="../VibeMiner.Formats.Wow/VibeMiner.Formats.Wow.csproj" />
+  <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
+  <EmbeddedResource Include="Tables/Resources/WoWDBDefs/**/*" />
+</ItemGroup></Project>

@@ -1,0 +1,42 @@
+{
+  "name": "vibeminer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VibeMiner Electron desktop and C# engine workspace",
+  "license": "GPL-3.0-or-later",
+  "workspaces": [
+    "apps/desktop"
+  ],
+  "engines": {
+    "node": ">=24.22.0 <25"
+  },
+  "scripts": {
+    "contracts:generate": "node tools/generate-contracts.mjs",
+    "contracts:check": "node tools/generate-contracts.mjs --check",
+    "build:backend": "node tools/dotnet.mjs build VibeMiner.slnx",
+    "test:backend": "node tools/dotnet.mjs test VibeMiner.slnx",
+    "build:desktop": "npm run build --workspace @vibeminer/desktop",
+    "build": "npm run contracts:check && npm run build:backend && npm run build:desktop",
+    "test:desktop": "npm run test --workspace @vibeminer/desktop",
+    "test:contracts": "node --test tests/contracts/*.test.mjs",
+    "test:e2e": "npm run build:desktop-fixture && playwright test --config tests/desktop/playwright.config.ts",
+    "start": "npm run start --workspace @vibeminer/desktop",
+    "package:desktop": "npm run build && node tools/package-desktop.mjs",
+    "smoke:package": "node tools/smoke-package.mjs",
+    "test": "npm run contracts:check && npm run test:backend && npm run test:desktop && npm run test:contracts",
+    "build:desktop-fixture": "node tests/desktop/backend-fixture/build.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@playwright/test": "1.64.1",
+    "ajv": "8.20.0",
+    "esbuild": "0.28.2",
+    "json-schema-to-typescript": "16.0.0"
+  },
+  "allowScripts": {
+    "electron@44.9.0": true,
+    "esbuild@0.28.2": true
+  },
+  "packageManager": "npm@11.19.1",
+  "type": "module"
+}

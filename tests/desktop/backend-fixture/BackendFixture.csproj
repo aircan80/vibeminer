@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/backend/VibeMiner.Host/VibeMiner.Host.csproj" />
+    <Compile Include="../../backend/VibeMiner.Backend.Tests/InventoryFixture.cs" Link="AuthoredInventoryFixture.cs" />
+  </ItemGroup>
+</Project>

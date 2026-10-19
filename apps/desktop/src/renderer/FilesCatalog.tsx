@@ -1,0 +1,56 @@
+import { useEffect, useRef, useState } from 'react';
+import type { InventoryEntry, InventoryPage, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
+import type { DiscoveryBridge } from '../shared/bridge';
+import { exactBytes, exactCount, inventoryPageMatches, type InventoryReadParams } from '../shared/inventory';
+type Prepared = WorkspaceSnapshot & { inventory: InventorySummary };
+const families = { root: 'ROOT', install: 'Install (IN)', download: 'Download (DL)', size: 'Size (DS)' } as const;
+export function FilesCatalog({ snapshot, bridge, active, onReopen, onReturn }: { snapshot: Prepared; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void }) {
+  const [page, setPage] = useState<InventoryPage | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<{ code: string; message: string; retryable: boolean } | null>(null);
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [history, setHistory] = useState<(string | undefined)[]>([]);
+  const [selected, setSelected] = useState<InventoryEntry | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const retryButton = useRef<HTMLButtonElement>(null);
+  const alive = useRef(true), request = useRef(0), loading = useRef(false);
+  const lastAttempt = useRef<{ after: string | undefined; movement: 'initial' | 'next' | 'previous' | 'first' | 'retry' }>({ after: undefined, movement: 'initial' });
+  const latestCursor = useRef(cursor); latestCursor.current = cursor;
+  const context: InventoryReadParams = { productId: snapshot.build.productId, buildIdentity: snapshot.build.id, sourceRegion: snapshot.sourceReference.region, generation: snapshot.inventory.generation, limit: 50 };
+  useEffect(() => { alive.current = true; return () => { alive.current = false; request.current++; }; }, []);
+  useEffect(() => { if (active) { heading.current?.focus({ preventScroll: true }); window.scrollTo(0, 0); if (!page && !loading.current) void read(undefined, 'initial'); } }, [active]);
+  async function read(after: string | undefined, movement: 'initial' | 'next' | 'previous' | 'first' | 'retry') {
+    if (loading.current) return;
+    if (movement !== 'retry') lastAttempt.current = { after, movement };
+    const generation = ++request.current;
+    loading.current = true; setBusy(true);
+    const params = { ...context, ...(after === undefined ? {} : { after }) };
+    try {
+      const reply = await bridge.inventory(params);
+      if (!alive.current || generation !== request.current) return;
+      if (!reply.ok) { setError(reply.error); return; }
+      if (!inventoryPageMatches(reply.value, params) || reply.value.totalCount !== snapshot.inventory.membershipCount) { setError({ code: 'INVENTORY_CONTEXT_MISMATCH', message: 'The returned catalog page does not match this exact prepared generation. Previous rows are preserved.', retryable: false }); return; }
+      const retryFocused = document.activeElement === retryButton.current;
+      setPage(reply.value); setCursor(after); setError(null);
+      if (retryFocused) requestAnimationFrame(() => { if (alive.current && document.activeElement === document.body && !heading.current?.closest('[hidden]')) heading.current?.focus(); });
+      if (movement === 'next') setHistory(previous => [...previous.slice(-127), latestCursor.current]);
+      if (movement === 'previous') setHistory(previous => previous.slice(0, -1));
+      if (movement === 'first') setHistory([]);
+    } catch { if (alive.current && generation === request.current) setError({ code: 'ENGINE_UNAVAILABLE', message: 'The local catalog could not be read. Previous rows are preserved.', retryable: true }); }
+    finally { if (alive.current && generation === request.current) { loading.current = false; setBusy(false); } }
+  }
+  function pageControls(below: boolean) {
+    return <CatalogPageControls below={below} busy={busy} canFirst={cursor !== undefined} canPrevious={history.length > 0} canNext={!!page?.nextCursor} onFirst={() => { void read(undefined, 'first'); }} onPrevious={() => { void read(history.at(-1), 'previous'); }} onNext={() => { if (page?.nextCursor) void read(page.nextCursor, 'next'); }}/>;
+  }
+  return <section className="files-catalog" hidden={!active} aria-labelledby="files-heading">{onReturn && <button className="return-home" onClick={onReturn}>← Return to build overview</button>}<div className="heading"><div><h1 ref={heading} id="files-heading" tabIndex={-1}>Files</h1><p className="muted">All published variants · local catalog · {snapshot.build.productId} · {snapshot.build.version} · {snapshot.sourceReference.region.toUpperCase()} source</p></div></div><div className="catalog-context"><span>Prepared generation <b>{snapshot.inventory.generation}</b></span><span>Scope: <b>All published variants</b></span><span>Locale / platform: <b>Not selected</b></span></div><p className="muted">Rows are original catalog memberships. Multiple variants can share a FileDataID, content key or exact encoded object. Names are shown only when present in the install metadata.</p>{error && <div className="notice" role="alert"><strong>{error.code}</strong><br/>{error.message}<p>This view will not substitute another build or prepared generation. Reopen this exact build to revalidate its metadata.</p>{error.retryable && <button ref={retryButton} onClick={() => void read(lastAttempt.current.after, lastAttempt.current.movement)} aria-disabled={busy}>Retry page</button>}<button onClick={onReopen}>Reopen this build</button></div>}<div className="catalog-toolbar"><p role="status" aria-live="polite">{busy ? 'Reading the prepared local catalog…' : page ? `${page.entries.length} memberships on this page · ${exactCount(page.totalCount)} total` : 'No catalog page has been read yet.'}</p>{pageControls(false)}</div><div className="panel inventory-table-panel" aria-busy={busy}><table className="catalog inventory-table"><caption className="visually-hidden">Prepared catalog memberships for {snapshot.build.productId} build {snapshot.build.version}, all published variants, generation {snapshot.inventory.generation}</caption><thead><tr><th scope="col">Entry / exact identities</th><th scope="col">Source family</th><th scope="col">Encoded size</th><th scope="col">Local encoded object</th><th scope="col">Details</th></tr></thead><tbody>{page?.entries.map(entry => <tr key={entry.id}><td><strong>{entry.family === 'install' && entry.name !== null ? entry.name : entry.family === 'root' && entry.fileDataId !== null ? `FileDataID ${entry.fileDataId}` : `Encoded object · membership ${entry.id}`}</strong>{entry.family === 'root' && <small>Name not supplied</small>}<code className="catalog-key">EKey {entry.encodingKey}</code>{entry.contentKey !== null && <code className="catalog-key">CKey {entry.contentKey}</code>}{(entry.localeFlags !== null || entry.contentFlags !== null) && <small>Locale flags: {entry.localeFlags ?? 'Not supplied'} · Content flags: {entry.contentFlags ?? 'Not supplied'}</small>}</td><td>{families[entry.family]}</td><td>{exactBytes(entry.encodedBytes)}</td><td>{entry.retained ? 'Verified retained' : 'Not retained'}</td><td><button onClick={() => setSelected(entry)} aria-label={`Details for membership ${entry.id}`}>Details</button></td></tr>)}</tbody></table>{page?.entries.length === 0 && <p className="muted catalog-empty">{page.totalCount === '0' ? 'This prepared inventory has zero published memberships.' : 'No further memberships are returned after this source-row cursor.'}</p>}</div><div className="catalog-toolbar catalog-toolbar-bottom"><p>{page ? `${page.entries.length} memberships on this page · ${exactCount(page.totalCount)} total` : 'Prepared local catalog'}</p>{pageControls(true)}</div><p className="tiny">Each page reads at most 50 memberships from this sealed local generation. No global search, sorting, file download or remote availability check is performed. Not retained does not establish whether an upstream payload is still available.</p>{selected && <InventoryEntryDialog entry={selected} snapshot={snapshot} onClose={() => setSelected(null)}/>}</section>;
+}
+export function CatalogPageControls({ below, busy, canFirst, canPrevious, canNext, onFirst, onPrevious, onNext }: { below: boolean; busy: boolean; canFirst: boolean; canPrevious: boolean; canNext: boolean; onFirst: () => void; onPrevious: () => void; onNext: () => void }) {
+  const suffix = below ? ' below results' : '';
+  return <div className="catalog-pages" role="group" aria-label={`Catalog pages${suffix}`}><button aria-label={`First page${suffix}`} aria-disabled={busy || !canFirst} onClick={() => { if (!busy && canFirst) onFirst(); }}>First page</button><button aria-label={`Previous page${suffix}`} aria-disabled={busy || !canPrevious} onClick={() => { if (!busy && canPrevious) onPrevious(); }}>Previous page</button><button aria-label={`Next page${suffix}`} aria-disabled={busy || !canNext} onClick={() => { if (!busy && canNext) onNext(); }}>Next page</button></div>;
+}
+function InventoryEntryDialog({ entry, snapshot, onClose }: { entry: InventoryEntry; snapshot: Prepared; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null), origin = useRef<HTMLElement | null>(null);
+  useEffect(() => { origin.current = document.activeElement as HTMLElement; dialog.current?.showModal(); return () => { dialog.current?.close(); if (origin.current?.isConnected) origin.current.focus(); else document.getElementById('files-heading')?.focus(); }; }, []);
+  const fields: [string, string][] = [['Product', snapshot.build.productId], ['Exact build identity', snapshot.build.id], ['Source region', snapshot.sourceReference.region], ['Prepared generation', snapshot.inventory.generation], ['Scope', 'All published variants'], ['Membership ID', entry.id], ['Source family', families[entry.family]], ['Install name', entry.family === 'install' && entry.name !== null ? entry.name : 'Not supplied'], ['ROOT FileDataID', entry.fileDataId ?? 'Not supplied'], ['Content key (CKey)', entry.contentKey ?? 'Not declared · encoded-only membership'], ['Encoding key (EKey)', entry.encodingKey], ['Logical decoded length', entry.decodedBytes === null ? 'Not declared' : exactBytes(entry.decodedBytes)], ['Exact encoded length', exactBytes(entry.encodedBytes)], ['Local encoded object', entry.retained ? 'Verified retained' : 'Not retained'], ['Raw locale flags', entry.localeFlags ?? 'Not supplied'], ['Raw content flags', entry.contentFlags ?? 'Not supplied'], ['Raw name hash', entry.nameHash ?? 'Not supplied']];
+  return <dialog className="evidence-dialog" ref={dialog} aria-labelledby="entry-title" onCancel={event => { event.preventDefault(); onClose(); }}><header><h2 id="entry-title">Catalog membership {entry.id}</h2><button autoFocus onClick={onClose} aria-label="Close dialog">✕</button></header><p className="muted">An original membership is separate from a unique file, content identity or exact download object. A name hash is not a filename.</p><dl className="detail-list">{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p className="tiny">Decoded length is a logical metadata fact, not proof of retained decoded bytes or working decoder support. Availability has not been assessed.</p></dialog>;
+}

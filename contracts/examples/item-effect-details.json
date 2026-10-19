@@ -1,0 +1,471 @@
+{
+  "selection": {
+    "context": {
+      "productId": "wow",
+      "buildIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sourceRegion": "us",
+      "researchLocale": "enUS"
+    },
+    "itemsArtifactId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "itemId": "0"
+  },
+  "bridgeIndexArtifactId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "policyRevision": "item-effect-inputs-v1",
+  "source": {
+    "role": "effect",
+    "state": "ready",
+    "snapshot": {
+      "productId": "wow",
+      "buildIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sourceRegion": "us",
+      "tableId": "4002a5b1",
+      "researchLocale": "enUS",
+      "artifactId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "preparedAt": "2026-10-19T12:00:00Z",
+      "layoutHash": "4CA77678",
+      "definitionSha256": "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c",
+      "providerRevision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+      "decoderRevision": "wdc5-values-v7+table-admission-projection-v4",
+      "source": {
+        "contentKey": "66666666666666666666666666666666",
+        "encodingKey": "77777777777777777777777777777777",
+        "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "encodedBytes": "402",
+        "decodedBytes": "2048",
+        "sourceUrl": "https://fixture.invalid/authored-table",
+        "retrievedAt": "2026-10-19T11:00:00Z",
+        "verifiedAt": "2026-10-19T12:00:00Z",
+        "verifierRevision": "content-blte-projection-v1",
+        "location": {
+          "kind": "archive",
+          "offset": "100",
+          "sourceBytes": "402",
+          "archiveKey": "99999999999999999999999999999999"
+        },
+        "projection": {
+          "policy": "blte-clear-chunks-v1",
+          "identitySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "readableRanges": [
+            {
+              "offset": "0",
+              "byteLength": "1024",
+              "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
+          ],
+          "unavailableRanges": [
+            {
+              "offset": "1024",
+              "byteLength": "1024",
+              "chunkOrdinal": 1,
+              "keyName": "1234567890ABCDEF"
+            }
+          ]
+        }
+      },
+      "association": {
+        "fileDataId": "969941",
+        "researchLocale": "enUS",
+        "variantPolicy": "All matching enUS memberships",
+        "encodingSource": {
+          "role": "encoding",
+          "contentKey": "11111111111111111111111111111111",
+          "encodingKey": "22222222222222222222222222222222",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "encodedBytes": "50",
+          "decodedBytes": "100",
+          "sourceUrl": "https://fixture.invalid/data/download",
+          "retrievedAt": "2026-10-18T12:00:01Z",
+          "verifiedAt": "2026-10-18T12:00:01Z",
+          "parserRevision": "download-v1"
+        },
+        "rootSource": {
+          "role": "root",
+          "contentKey": "33333333333333333333333333333333",
+          "encodingKey": "44444444444444444444444444444444",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "encodedBytes": "50",
+          "decodedBytes": "100",
+          "sourceUrl": "https://fixture.invalid/data/download",
+          "retrievedAt": "2026-10-18T12:00:01Z",
+          "verifiedAt": "2026-10-18T12:00:01Z",
+          "parserRevision": "download-v1"
+        },
+        "memberships": [
+          {
+            "blockOrdinal": "0",
+            "entryOrdinal": "0",
+            "contentKey": "66666666666666666666666666666666",
+            "localeFlags": "2",
+            "contentFlags": "0",
+            "rawFirst": "0",
+            "rawSecond": "0",
+            "rawThird": "0",
+            "nameHash": null
+          }
+        ]
+      },
+      "columns": [
+        {
+          "name": "ID",
+          "family": "integer",
+          "isId": true,
+          "reference": null,
+          "interpretation": null
+        },
+        {
+          "name": "LegacySlotIndex",
+          "family": "integer",
+          "isId": false,
+          "reference": null,
+          "interpretation": null
+        },
+        {
+          "name": "TriggerType",
+          "family": "integer",
+          "isId": false,
+          "reference": null,
+          "interpretation": null
+        },
+        {
+          "name": "Charges",
+          "family": "integer",
+          "isId": false,
+          "reference": null,
+          "interpretation": {
+            "policy": "raw-physical-integer-v1",
+            "physicalBits": 32,
+            "physicalSigned": false,
+            "candidateBits": 16,
+            "candidateUnsigned": false,
+            "warning": "Physical raw evidence; the selected candidate width does not establish a semantic key."
+          }
+        },
+        {
+          "name": "CoolDownMSec",
+          "family": "integer",
+          "isId": false,
+          "reference": null,
+          "interpretation": null
+        },
+        {
+          "name": "CategoryCoolDownMSec",
+          "family": "integer",
+          "isId": false,
+          "reference": null,
+          "interpretation": null
+        },
+        {
+          "name": "SpellCategoryID",
+          "family": "integer",
+          "isId": false,
+          "reference": null,
+          "interpretation": {
+            "policy": "raw-physical-integer-v1",
+            "physicalBits": 32,
+            "physicalSigned": false,
+            "candidateBits": 16,
+            "candidateUnsigned": true,
+            "warning": "Physical raw evidence; the selected candidate width does not establish a semantic key."
+          }
+        },
+        {
+          "name": "SpellID",
+          "family": "integer",
+          "isId": false,
+          "reference": {
+            "table": "Spell",
+            "column": "ID"
+          },
+          "interpretation": null
+        },
+        {
+          "name": "ChrSpecializationID",
+          "family": "integer",
+          "isId": false,
+          "reference": null,
+          "interpretation": {
+            "policy": "raw-physical-integer-v1",
+            "physicalBits": 32,
+            "physicalSigned": false,
+            "candidateBits": 16,
+            "candidateUnsigned": true,
+            "warning": "Physical raw evidence; the selected candidate width does not establish a semantic key."
+          }
+        },
+        {
+          "name": "PlayerConditionID",
+          "family": "integer",
+          "isId": false,
+          "reference": {
+            "table": "PlayerCondition",
+            "column": "ID"
+          },
+          "interpretation": null
+        }
+      ],
+      "coverage": {
+        "scope": "unencryptedSections",
+        "declaredRecords": "2",
+        "physicalRows": "1",
+        "copyRows": "1",
+        "excludedKeyedSections": "1",
+        "excludedDeclaredRecords": "1",
+        "declaredCopyRecords": "1",
+        "excludedPhysicalRecords": "1",
+        "excludedCopyRecords": "0"
+      },
+      "rowCount": "2",
+      "textIssueCount": "0"
+    },
+    "historicalArtifactId": null,
+    "problem": null
+  },
+  "outcomes": [
+    {
+      "key": {
+        "indexOrdinal": "0"
+      },
+      "itemEffectId": "0",
+      "state": "observedReady",
+      "observedCandidates": "1",
+      "target": {
+        "tableId": "4002a5b1",
+        "artifactId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "rowId": "0",
+        "isCopy": true,
+        "copySourceId": "1",
+        "sourceOrdinal": null,
+        "columnIndex": null
+      },
+      "fields": [
+        {
+          "name": "LegacySlotIndex",
+          "columnIndex": 1,
+          "value": "255",
+          "evidence": "strictNumeric",
+          "interpretation": null,
+          "candidateReference": null
+        },
+        {
+          "name": "TriggerType",
+          "columnIndex": 2,
+          "value": "0",
+          "evidence": "strictNumeric",
+          "interpretation": null,
+          "candidateReference": null
+        },
+        {
+          "name": "Charges",
+          "columnIndex": 3,
+          "value": "4294967295",
+          "evidence": "rawPhysicalInteger",
+          "interpretation": {
+            "policy": "raw-physical-integer-v1",
+            "physicalBits": 32,
+            "physicalSigned": false,
+            "candidateBits": 16,
+            "candidateUnsigned": false,
+            "warning": "Physical raw evidence; the selected candidate width does not establish a semantic key."
+          },
+          "candidateReference": null
+        },
+        {
+          "name": "CoolDownMSec",
+          "columnIndex": 4,
+          "value": "-2147483648",
+          "evidence": "strictNumeric",
+          "interpretation": null,
+          "candidateReference": null
+        },
+        {
+          "name": "CategoryCoolDownMSec",
+          "columnIndex": 5,
+          "value": "2147483647",
+          "evidence": "strictNumeric",
+          "interpretation": null,
+          "candidateReference": null
+        },
+        {
+          "name": "SpellCategoryID",
+          "columnIndex": 6,
+          "value": "4294967295",
+          "evidence": "rawPhysicalInteger",
+          "interpretation": {
+            "policy": "raw-physical-integer-v1",
+            "physicalBits": 32,
+            "physicalSigned": false,
+            "candidateBits": 16,
+            "candidateUnsigned": true,
+            "warning": "Physical raw evidence; the selected candidate width does not establish a semantic key."
+          },
+          "candidateReference": {
+            "table": "SpellCategory",
+            "column": "ID"
+          }
+        },
+        {
+          "name": "SpellID",
+          "columnIndex": 7,
+          "value": "0",
+          "evidence": "strictNumeric",
+          "interpretation": null,
+          "candidateReference": null
+        },
+        {
+          "name": "ChrSpecializationID",
+          "columnIndex": 8,
+          "value": "4294967295",
+          "evidence": "rawPhysicalInteger",
+          "interpretation": {
+            "policy": "raw-physical-integer-v1",
+            "physicalBits": 32,
+            "physicalSigned": false,
+            "candidateBits": 16,
+            "candidateUnsigned": true,
+            "warning": "Physical raw evidence; the selected candidate width does not establish a semantic key."
+          },
+          "candidateReference": {
+            "table": "ChrSpecialization",
+            "column": "ID"
+          }
+        },
+        {
+          "name": "PlayerConditionID",
+          "columnIndex": 9,
+          "value": "-1",
+          "evidence": "unverifiedCandidate",
+          "interpretation": null,
+          "candidateReference": {
+            "table": "PlayerCondition",
+            "column": "ID"
+          }
+        }
+      ],
+      "absence": null,
+      "problem": null
+    },
+    {
+      "key": {
+        "indexOrdinal": "1"
+      },
+      "itemEffectId": "0",
+      "state": "observedReady",
+      "observedCandidates": "1",
+      "target": {
+        "tableId": "4002a5b1",
+        "artifactId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "rowId": "0",
+        "isCopy": true,
+        "copySourceId": "1",
+        "sourceOrdinal": null,
+        "columnIndex": null
+      },
+      "fields": [
+        {
+          "name": "LegacySlotIndex",
+          "columnIndex": 1,
+          "value": "255",
+          "evidence": "strictNumeric",
+          "interpretation": null,
+          "candidateReference": null
+        },
+        {
+          "name": "TriggerType",
+          "columnIndex": 2,
+          "value": "0",
+          "evidence": "strictNumeric",
+          "interpretation": null,
+          "candidateReference": null
+        },
+        {
+          "name": "Charges",
+          "columnIndex": 3,
+          "value": "4294967295",
+          "evidence": "rawPhysicalInteger",
+          "interpretation": {
+            "policy": "raw-physical-integer-v1",
+            "physicalBits": 32,
+            "physicalSigned": false,
+            "candidateBits": 16,
+            "candidateUnsigned": false,
+            "warning": "Physical raw evidence; the selected candidate width does not establish a semantic key."
+          },
+          "candidateReference": null
+        },
+        {
+          "name": "CoolDownMSec",
+          "columnIndex": 4,
+          "value": "-2147483648",
+          "evidence": "strictNumeric",
+          "interpretation": null,
+          "candidateReference": null
+        },
+        {
+          "name": "CategoryCoolDownMSec",
+          "columnIndex": 5,
+          "value": "2147483647",
+          "evidence": "strictNumeric",
+          "interpretation": null,
+          "candidateReference": null
+        },
+        {
+          "name": "SpellCategoryID",
+          "columnIndex": 6,
+          "value": "4294967295",
+          "evidence": "rawPhysicalInteger",
+          "interpretation": {
+            "policy": "raw-physical-integer-v1",
+            "physicalBits": 32,
+            "physicalSigned": false,
+            "candidateBits": 16,
+            "candidateUnsigned": true,
+            "warning": "Physical raw evidence; the selected candidate width does not establish a semantic key."
+          },
+          "candidateReference": {
+            "table": "SpellCategory",
+            "column": "ID"
+          }
+        },
+        {
+          "name": "SpellID",
+          "columnIndex": 7,
+          "value": "0",
+          "evidence": "strictNumeric",
+          "interpretation": null,
+          "candidateReference": null
+        },
+        {
+          "name": "ChrSpecializationID",
+          "columnIndex": 8,
+          "value": "4294967295",
+          "evidence": "rawPhysicalInteger",
+          "interpretation": {
+            "policy": "raw-physical-integer-v1",
+            "physicalBits": 32,
+            "physicalSigned": false,
+            "candidateBits": 16,
+            "candidateUnsigned": true,
+            "warning": "Physical raw evidence; the selected candidate width does not establish a semantic key."
+          },
+          "candidateReference": {
+            "table": "ChrSpecialization",
+            "column": "ID"
+          }
+        },
+        {
+          "name": "PlayerConditionID",
+          "columnIndex": 9,
+          "value": "-1",
+          "evidence": "unverifiedCandidate",
+          "interpretation": null,
+          "candidateReference": {
+            "table": "PlayerCondition",
+            "column": "ID"
+          }
+        }
+      ],
+      "absence": null,
+      "problem": null
+    }
+  ]
+}

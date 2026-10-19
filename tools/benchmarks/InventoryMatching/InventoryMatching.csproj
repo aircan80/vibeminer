@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>VibeMiner.InventoryMatching.Benchmark</AssemblyName></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../../src/backend/VibeMiner.Infrastructure/VibeMiner.Infrastructure.csproj" /></ItemGroup>
+</Project>
