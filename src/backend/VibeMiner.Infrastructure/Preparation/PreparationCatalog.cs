@@ -28,28 +28,46 @@ public sealed partial class DiscoveryCatalog
             """, transaction);
         transaction.Commit();
     }
-    public Task<CapturedOpeningContext> ResolveOpeningAsync(WorkspaceRequest request, CancellationToken token) => Schedule(() =>
+    /// <summary>
+    /// The context of the build as it is open now: the CDN configuration of the latest workspace admission for
+    /// this build and region. A newer advertised CDN configuration only applies after an explicit new open.
+    /// Without any admission this is the newest CDN configuration the region advertised.
+    /// </summary>
+    public Task<CapturedOpeningContext> ResolveOpeningAsync(WorkspaceRequest request, CancellationToken token) =>
+        Schedule(() => ResolveOpeningCore(request, latest: false, token), token);
+    /// <summary>The context for a new open: the newest CDN configuration the selected region advertised.</summary>
+    public Task<CapturedOpeningContext> ResolveLatestOpeningAsync(WorkspaceRequest request, CancellationToken token) =>
+        Schedule(() => ResolveOpeningCore(request, latest: true, token), token);
+    private CapturedOpeningContext ResolveOpeningCore(WorkspaceRequest request, bool latest, CancellationToken token)
     {
         WorkspaceService.Validate(request);
         var build = ReadCore(request.ProductId, "all", 1, null, token, request.BuildIdentity).Builds.SingleOrDefault()
             ?? throw new DiscoveryException("BUILD_NOT_FOUND", "This exact saved build is unavailable. Refresh discovery and select it again.", true);
-        long generation; int ordinal; int cdnsOrdinal;
+        var admitted = latest ? null : Scalar("""
+            SELECT c.key FROM workspace_admissions a
+            JOIN workspace_configurations c ON c.admission_id=a.id AND c.role='cdnConfig'
+            WHERE a.product=$p AND a.build_id=$id AND a.region=$region ORDER BY a.id DESC LIMIT 1
+            """, null, ("$p", request.ProductId), ("$id", request.BuildIdentity), ("$region", request.SourceRegion)) as string;
+        long generation; int ordinal; int cdnsOrdinal; string cdnConfig;
         using (var command = Command("""
-            SELECT r.generation,r.ordinal,r.cdns_ordinal FROM build_regions r
+            SELECT r.generation,r.ordinal,o.cdns_ordinal,r.cdn_config FROM build_cdn_config_regions r
                 JOIN observations o ON o.generation=r.generation AND o.ordinal=r.ordinal
-            WHERE r.build_id=$id AND r.region=$region AND o.build_id=$id AND o.region=$region
-            """, null, ("$id", request.BuildIdentity), ("$region", request.SourceRegion)))
+            WHERE r.build_id=$id AND r.region=$region AND o.build_id=$id AND o.region=$region AND o.cdn_config=r.cdn_config
+                AND ($cdn IS NULL OR r.cdn_config=$cdn)
+            ORDER BY r.generation DESC,r.ordinal LIMIT 1
+            """, null, ("$id", request.BuildIdentity), ("$region", request.SourceRegion), ("$cdn", admitted)))
         using (var reader = command.ExecuteReader())
         {
             if (!reader.Read() || reader.IsDBNull(2))
                 throw new DiscoveryException("SOURCE_UNAVAILABLE", "The selected saved region has no unambiguous CDN route.", true);
-            generation = reader.GetInt64(0); ordinal = reader.GetInt32(1); cdnsOrdinal = reader.GetInt32(2);
+            generation = reader.GetInt64(0); ordinal = reader.GetInt32(1); cdnsOrdinal = reader.GetInt32(2); cdnConfig = reader.GetString(3);
         }
         var documents = ReadOpeningSourceDocuments(generation, token);
         var versions = documents["versions"]; var cdns = documents["cdns"];
-        return new CapturedOpeningContext(build, new(generation.ToString(CultureInfo.InvariantCulture), request.SourceRegion,
+        // The context is bound to the CDN configuration of its own versions row, not the build's newest one.
+        return new CapturedOpeningContext(build with { CdnConfig = cdnConfig }, new(generation.ToString(CultureInfo.InvariantCulture), request.SourceRegion,
             versions.Sha256, ordinal, cdns.Sha256, cdnsOrdinal), versions, cdns);
-    }, token);
+    }
     // Both declared size and the actual SQLite value are checked before any body/text getter.
     // This is a narrow source-document bound, not a whole ReadCore/identity graph bound.
     private const string OpeningSourceRowValid = """
@@ -112,8 +130,15 @@ public sealed partial class DiscoveryCatalog
     }
     public Task<bool> HasAdmissionAsync(CapturedOpeningContext context, CancellationToken token) => Schedule(() =>
     {
-        var value = Scalar("SELECT id FROM workspace_admissions WHERE build_id=$id AND region=$region AND profile IN ($profile,'home-inventory-v1','home-download-v1') ORDER BY id DESC LIMIT 1", null,
-            ("$id", context.Build.Id), ("$region", context.Reference.Region), ("$profile", ConfigurationWorkspacePreparer.Profile));
+        // Each admission keeps the CDN configuration it was made with. One made with another CDN configuration
+        // of the same build does not admit this context; it is not a broken proof either.
+        var value = Scalar("""
+            SELECT a.id FROM workspace_admissions a
+            JOIN workspace_configurations c ON c.admission_id=a.id AND c.role='cdnConfig' AND c.key=$cdn
+            WHERE a.build_id=$id AND a.region=$region AND a.profile IN ($profile,'home-inventory-v1','home-download-v1')
+            ORDER BY a.id DESC LIMIT 1
+            """, null, ("$id", context.Build.Id), ("$region", context.Reference.Region),
+            ("$profile", ConfigurationWorkspacePreparer.Profile), ("$cdn", context.Build.CdnConfig));
         if (value is null) return false;
         var roles = new Dictionary<string, string>(StringComparer.Ordinal);
         using var command = Command("SELECT role,key FROM workspace_configurations WHERE admission_id=$id", null, ("$id", value));
@@ -174,9 +199,10 @@ public sealed partial class DiscoveryCatalog
             ("$build", context.Build.Id), ("$time", openedAt), ("$id", admission));
         token.ThrowIfCancellationRequested(); transaction.Commit();
         var build = ReadCore(context.Build.ProductId, "all", 1, null, CancellationToken.None, context.Build.Id).Builds.Single();
-        // A concurrent discovery refresh may have newer projection receipts. Opening keeps the pair it actually used.
+        // A concurrent discovery refresh may have newer projection receipts or a newer CDN configuration.
+        // Opening keeps the pair and the CDN configuration it actually used.
         var reference = context.Reference;
-        build = build with { SourceReceipts = build.SourceReceipts.Where(receipt => receipt.Region != reference.Region).Concat(new[]
+        build = build with { CdnConfig = context.Build.CdnConfig, SourceReceipts = build.SourceReceipts.Where(receipt => receipt.Region != reference.Region).Concat(new[]
         {
             new SourceReceipt(reference.Region, "versions", context.Versions.Url, context.Versions.RetrievedAt,
                 context.Versions.Sha256, context.Versions.Bytes.Length, reference.VersionsRowOrdinal),

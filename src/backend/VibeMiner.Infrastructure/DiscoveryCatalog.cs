@@ -35,46 +35,63 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         try { await catalog.Schedule(() => { catalog.Initialize(dataDirectory); return true; }, token); return catalog; }
         catch { await catalog.DisposeAsync(); throw; }
     }
+    /// <summary>Catalog schema version. Version 15 is the first with build identity v2 (CDNConfig outside the identity).</summary>
+    internal const int CatalogVersion = 15;
+    /// <summary>Written once when a fresh catalog is created. Older catalogs never have it and are refused, never migrated.</summary>
+    internal const string CatalogLineage = "build-identity-v2";
     private void Initialize(string dataDirectory)
     {
         Directory.CreateDirectory(dataDirectory);
+        // Recognise an existing catalog on a read-only connection first. A read-write connection would checkpoint a
+        // pending -wal of an older catalog into the main file on close; a refused catalog must stay byte-for-byte.
+        if (File.Exists(databasePath))
+        {
+            using var probe = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false, DefaultTimeout = 5 }.ToString());
+            probe.Open();
+            RecogniseCatalog(probe);
+        }
         connection = new SqliteConnection(new SqliteConnectionStringBuilder
         { DataSource = databasePath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false, DefaultTimeout = 5 }.ToString());
         Db.Open();
+        // The file can only have been created or replaced in between by another writer; check again before any write.
+        var version = RecogniseCatalog(Db);
         Execute("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA cache_size=-32768; PRAGMA temp_store=FILE; PRAGMA max_page_count=4194304;");
-        var version = Convert.ToInt32(Scalar("PRAGMA user_version;"));
-        if (version > 14) throw new DiscoveryException("CATALOG_VERSION", "This catalog requires a newer engine.");
-        if (version == 14) return;
-        if (version == 13) { UpgradeCreatureGeometry(); return; }
-        if (version == 12) { UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 11) { UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 10) { UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 9) { UpgradeItemIcons(); UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 8) { UpgradeRetention(); UpgradeItemIcons(); UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 7) { UpgradeEncodedReceipts(); UpgradeRetention(); UpgradeItemIcons(); UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 6) { UpgradeTablesData(); UpgradeEncodedReceipts(); UpgradeRetention(); UpgradeItemIcons(); UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 5) { UpgradeDownloads(); UpgradeTablesData(); UpgradeEncodedReceipts(); UpgradeRetention(); UpgradeItemIcons(); UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 4) { UpgradeInventoryCheckpoints(); UpgradeDownloads(); UpgradeTablesData(); UpgradeEncodedReceipts(); UpgradeRetention(); UpgradeItemIcons(); UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 3) { UpgradeInventory(); UpgradeInventoryCheckpoints(); UpgradeDownloads(); UpgradeTablesData(); UpgradeEncodedReceipts(); UpgradeRetention(); UpgradeItemIcons(); UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 2) { UpgradeWorkspace(); UpgradeInventory(); UpgradeInventoryCheckpoints(); UpgradeDownloads(); UpgradeTablesData(); UpgradeEncodedReceipts(); UpgradeRetention(); UpgradeItemIcons(); UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return; }
-        if (version == 1)
-        {
-            using var upgrade = Db.BeginTransaction();
-            Execute("""
-                CREATE TABLE build_regions(build_id TEXT NOT NULL,region TEXT NOT NULL,generation INTEGER NOT NULL,
-                    ordinal INTEGER NOT NULL,cdns_ordinal INTEGER,PRIMARY KEY(build_id,region),
-                    FOREIGN KEY(build_id) REFERENCES builds(id),
-                    FOREIGN KEY(generation,ordinal) REFERENCES observations(generation,ordinal));
-                INSERT INTO build_regions
-                    SELECT build_id,region,generation,ordinal,cdns_ordinal FROM (
-                        SELECT *,ROW_NUMBER() OVER(PARTITION BY build_id,region ORDER BY generation DESC,ordinal) AS rank
-                        FROM observations) WHERE rank=1;
-                PRAGMA user_version=2;
-                """, upgrade);
-            upgrade.Commit(); UpgradeWorkspace(); UpgradeInventory(); UpgradeInventoryCheckpoints(); UpgradeDownloads(); UpgradeTablesData(); UpgradeEncodedReceipts(); UpgradeRetention(); UpgradeItemIcons(); UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry(); return;
-        }
+        if (version == CatalogVersion) return;
+        if (version == 0) CreateDiscoverySchema();
+        // Each step commits its own user_version. A fresh catalog interrupted between steps resumes here.
+        Action[] steps = [UpgradeWorkspace, UpgradeInventory, UpgradeInventoryCheckpoints, UpgradeDownloads, UpgradeTablesData,
+            UpgradeEncodedReceipts, UpgradeRetention, UpgradeItemIcons, UpgradeItemClassifications, UpgradeCreatures,
+            UpgradeItemEffects, UpgradeCreatureGeometry, CompleteCatalog];
+        for (var current = Math.Max(version, 2); current < CatalogVersion; current++) steps[current - 2]();
+    }
+    /// <summary>Read-only recognition: returns the version, or refuses a catalog this engine must not read or change.</summary>
+    private static int RecogniseCatalog(SqliteConnection db)
+    {
+        object? Read(string sql) { using var command = db.CreateCommand(); command.CommandText = sql; return command.ExecuteScalar(); }
+        Read("PRAGMA busy_timeout=5000;");
+        var version = Convert.ToInt32(Read("PRAGMA user_version;"));
+        if (version > CatalogVersion) throw new DiscoveryException("CATALOG_VERSION", "This catalog requires a newer engine.");
+        if (version == 0) return version;
+        var lineage = Convert.ToInt64(Read("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='catalog_lineage')")) == 1 &&
+            Read("SELECT CASE WHEN typeof(revision)='text' AND length(revision)<=64 THEN revision END FROM catalog_lineage WHERE id=1") as string == CatalogLineage;
+        if (!lineage)
+            throw new DiscoveryException("CATALOG_RESET_REQUIRED",
+                "This catalog was written by an older engine that grouped builds by CDN configuration. It was not read or changed. Start VibeMiner with a fresh catalog.");
+        return version;
+    }
+    private void CompleteCatalog()
+    {
         using var transaction = Db.BeginTransaction();
-        Execute("""
+        Execute($"PRAGMA user_version={CatalogVersion};", transaction);
+        transaction.Commit();
+    }
+    private void CreateDiscoverySchema()
+    {
+        using var transaction = Db.BeginTransaction();
+        Execute($$"""
+            CREATE TABLE catalog_lineage(id INTEGER PRIMARY KEY CHECK(id=1), revision TEXT NOT NULL);
+            INSERT INTO catalog_lineage VALUES(1,'{{CatalogLineage}}');
             CREATE TABLE sequence(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL);
             INSERT INTO sequence VALUES(1,0);
             CREATE TABLE products(product TEXT PRIMARY KEY, generation INTEGER NOT NULL,
@@ -92,25 +109,34 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
                 identity_fields TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
                 first_generation INTEGER NOT NULL, last_generation INTEGER NOT NULL, is_new INTEGER NOT NULL);
             CREATE INDEX builds_product_id ON builds(product,id);
+            CREATE TABLE build_cdn_configs(build_id TEXT NOT NULL, cdn_config TEXT NOT NULL,
+                first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+                first_generation INTEGER NOT NULL, last_generation INTEGER NOT NULL,
+                PRIMARY KEY(build_id,cdn_config), FOREIGN KEY(build_id) REFERENCES builds(id));
             CREATE TABLE observations(generation INTEGER NOT NULL, ordinal INTEGER NOT NULL, region TEXT NOT NULL,
                 build_id TEXT NOT NULL, cdns_ordinal INTEGER, original_fields TEXT NOT NULL, route_fields TEXT,
+                cdn_config TEXT NOT NULL,
                 PRIMARY KEY(generation,ordinal), FOREIGN KEY(generation) REFERENCES events(generation),
-                FOREIGN KEY(build_id) REFERENCES builds(id));
+                FOREIGN KEY(build_id,cdn_config) REFERENCES build_cdn_configs(build_id,cdn_config));
             CREATE INDEX observations_build_region ON observations(build_id,region,generation DESC,ordinal);
             CREATE TABLE build_regions(build_id TEXT NOT NULL,region TEXT NOT NULL,generation INTEGER NOT NULL,
                 ordinal INTEGER NOT NULL,cdns_ordinal INTEGER,PRIMARY KEY(build_id,region),
                 FOREIGN KEY(build_id) REFERENCES builds(id),
                 FOREIGN KEY(generation,ordinal) REFERENCES observations(generation,ordinal));
+            CREATE TABLE build_cdn_config_regions(build_id TEXT NOT NULL,cdn_config TEXT NOT NULL,region TEXT NOT NULL,
+                generation INTEGER NOT NULL,ordinal INTEGER NOT NULL,PRIMARY KEY(build_id,cdn_config,region),
+                FOREIGN KEY(build_id,cdn_config) REFERENCES build_cdn_configs(build_id,cdn_config),
+                FOREIGN KEY(generation,ordinal) REFERENCES observations(generation,ordinal));
+            CREATE INDEX build_cdn_config_regions_latest ON build_cdn_config_regions(build_id,region,generation DESC,ordinal);
             CREATE TABLE baselines(product TEXT NOT NULL, region TEXT NOT NULL, generation INTEGER NOT NULL,
                 PRIMARY KEY(product,region), FOREIGN KEY(product) REFERENCES products(product));
             CREATE TABLE advertisements(product TEXT NOT NULL, region TEXT NOT NULL, build_id TEXT NOT NULL,
-                has_route INTEGER NOT NULL, generation INTEGER NOT NULL,
-                PRIMARY KEY(product,region,build_id), FOREIGN KEY(build_id) REFERENCES builds(id));
+                has_route INTEGER NOT NULL, generation INTEGER NOT NULL, cdn_config TEXT NOT NULL,
+                PRIMARY KEY(product,region,build_id,cdn_config), FOREIGN KEY(build_id) REFERENCES builds(id));
             CREATE INDEX advertisements_build ON advertisements(build_id,region);
             PRAGMA user_version=2;
             """, transaction);
         transaction.Commit();
-        UpgradeWorkspace(); UpgradeInventory(); UpgradeInventoryCheckpoints(); UpgradeDownloads(); UpgradeTablesData(); UpgradeEncodedReceipts(); UpgradeRetention(); UpgradeItemIcons(); UpgradeItemClassifications(); UpgradeCreatures(); UpgradeItemEffects(); UpgradeCreatureGeometry();
     }
     private async Task<T> Schedule<T>(Func<T> operation, CancellationToken token)
     {
@@ -194,6 +220,12 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
                 """, transaction, ("$id", identity.Id), ("$p", product), ("$canonical", identity.Canonical),
                 ("$fields", Serialize(identity.Fields)), ("$time", completedAt), ("$g", generation),
                 ("$new", group.Any(row => priorBaselines.Contains(row.Region)) ? 1 : 0));
+            // A republished CDN configuration joins the same build's history instead of making a new build.
+            foreach (var cdnConfig in group.Select(row => row.CdnConfig).Distinct(StringComparer.Ordinal))
+                Execute("""
+                    INSERT INTO build_cdn_configs VALUES($id,$cdn,$time,$time,$g,$g)
+                    ON CONFLICT(build_id,cdn_config) DO UPDATE SET last_seen=$time,last_generation=$g
+                    """, transaction, ("$id", identity.Id), ("$cdn", cdnConfig), ("$time", completedAt), ("$g", generation));
         }
         foreach (var region in attempt.SuccessfulRegions)
         {
@@ -205,18 +237,29 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         foreach (var row in attempt.Observations)
         {
             token.ThrowIfCancellationRequested();
-            Execute("INSERT INTO observations VALUES($g,$ordinal,$region,$id,$cdn,$fields,$route)", transaction,
+            var cdnConfig = row.CdnConfig;
+            Execute("""
+                INSERT INTO observations(generation,ordinal,region,build_id,cdns_ordinal,original_fields,route_fields,cdn_config)
+                VALUES($g,$ordinal,$region,$id,$cdn,$fields,$route,$config)
+                """, transaction,
                 ("$g", generation), ("$ordinal", row.VersionsOrdinal), ("$region", row.Region), ("$id", row.Identity.Id),
                 ("$cdn", row.CdnsOrdinal), ("$fields", Serialize(row.OriginalFields)),
-                ("$route", row.RouteFields is null ? null : Serialize(row.RouteFields)));
+                ("$route", row.RouteFields is null ? null : Serialize(row.RouteFields)), ("$config", cdnConfig));
             Execute("""
                 INSERT INTO build_regions VALUES($id,$region,$g,$ordinal,$cdn)
                 ON CONFLICT(build_id,region) DO UPDATE SET generation=$g,ordinal=$ordinal,cdns_ordinal=$cdn
                     WHERE build_regions.generation<$g OR (build_regions.generation=$g AND build_regions.ordinal>$ordinal)
                 """, transaction, ("$id", row.Identity.Id), ("$region", row.Region), ("$g", generation),
                 ("$ordinal", row.VersionsOrdinal), ("$cdn", row.CdnsOrdinal));
-            Execute("INSERT OR IGNORE INTO advertisements VALUES($p,$r,$id,$route,$g)", transaction,
-                ("$p", product), ("$r", row.Region), ("$id", row.Identity.Id), ("$route", row.CdnsOrdinal is null ? 0 : 1), ("$g", generation));
+            Execute("""
+                INSERT INTO build_cdn_config_regions VALUES($id,$config,$region,$g,$ordinal)
+                ON CONFLICT(build_id,cdn_config,region) DO UPDATE SET generation=$g,ordinal=$ordinal
+                    WHERE build_cdn_config_regions.generation<$g OR (build_cdn_config_regions.generation=$g AND build_cdn_config_regions.ordinal>$ordinal)
+                """, transaction, ("$id", row.Identity.Id), ("$config", cdnConfig), ("$region", row.Region), ("$g", generation),
+                ("$ordinal", row.VersionsOrdinal));
+            Execute("INSERT OR IGNORE INTO advertisements VALUES($p,$r,$id,$route,$g,$config)", transaction,
+                ("$p", product), ("$r", row.Region), ("$id", row.Identity.Id), ("$route", row.CdnsOrdinal is null ? 0 : 1), ("$g", generation),
+                ("$config", cdnConfig));
         }
         Execute("""
             UPDATE products SET last_checked=$time,checked_regions=$regions,errors=$errors,connection=$connection,
@@ -285,21 +328,21 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
             token.ThrowIfCancellationRequested();
             var fields = Deserialize<Dictionary<string, string>>(row.Fields);
             // Full canonical identity is retained and checked against its digest on every restore.
-            var identitySource = new Dictionary<string, string>(fields, StringComparer.Ordinal) { ["Region"] = "us" };
-            var restored = BuildIdentity.Create(product, identitySource);
+            var restored = BuildIdentity.FromFields(product, fields);
             if (restored.Id != row.Id || restored.Canonical != row.Canonical)
                 throw new DiscoveryException("CATALOG_INTEGRITY", "A saved build identity failed integrity verification.");
             var regions = new List<string>(); var advertised = new List<string>(); var routes = new List<string>();
             using (var command = Command("SELECT region FROM build_regions WHERE build_id=$id ORDER BY region", null, ("$id", row.Id)))
             using (var reader = command.ExecuteReader()) while (reader.Read()) regions.Add(reader.GetString(0));
-            using (var command = Command("SELECT region,has_route FROM advertisements WHERE build_id=$id ORDER BY region", null, ("$id", row.Id)))
+            using (var command = Command("SELECT region,MAX(has_route) FROM advertisements WHERE build_id=$id GROUP BY region ORDER BY region", null, ("$id", row.Id)))
             using (var reader = command.ExecuteReader()) while (reader.Read())
             { advertised.Add(reader.GetString(0)); if (reader.GetBoolean(1)) routes.Add(reader.GetString(0)); }
             if (regions.Count == 0) throw new DiscoveryException("CATALOG_INTEGRITY", "Saved build observations are missing.");
             var receipts = ReadReceipts(row.Id, verified, token);
+            var (cdnHistory, cdnHistoryCount) = ReadCdnConfigHistory(row.Id, verified, token);
             var build = new Build(row.Id, product, fields["VersionsName"], fields.GetValueOrDefault("BuildId", ""),
-                fields["BuildConfig"], fields["CDNConfig"], fields.GetValueOrDefault("ProductConfig") is { Length: > 0 } productConfig ? productConfig : null, fields,
-                regions, advertised, routes, row.First, row.Last, row.New, advertised.Count > 0, Convert.ToInt64(Scalar("SELECT EXISTS(SELECT 1 FROM inventory_generations WHERE build_id=$b AND state='ready') OR EXISTS(SELECT 1 FROM download_admissions d JOIN workspace_admissions a ON a.id=d.admission_id WHERE a.build_id=$b AND a.profile='home-download-v1' AND d.artifact_sha256 IS NOT NULL)", null, ("$b", row.Id))) == 1, "unknown", receipts);
+                fields["BuildConfig"], cdnHistory[0].CdnConfig, fields.GetValueOrDefault("ProductConfig") is { Length: > 0 } productConfig ? productConfig : null, fields,
+                regions, advertised, routes, row.First, row.Last, row.New, advertised.Count > 0, Convert.ToInt64(Scalar("SELECT EXISTS(SELECT 1 FROM inventory_generations WHERE build_id=$b AND state='ready') OR EXISTS(SELECT 1 FROM download_admissions d JOIN workspace_admissions a ON a.id=d.admission_id WHERE a.build_id=$b AND a.profile='home-download-v1' AND d.artifact_sha256 IS NOT NULL)", null, ("$b", row.Id))) == 1, "unknown", receipts, cdnHistory, cdnHistoryCount);
             var bytes = JsonSerializer.SerializeToUtf8Bytes(build, Json).Length;
             if (size + bytes > 750_000)
             {
@@ -360,6 +403,69 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         if (receipts.Count != expected || receipts.Count == 0)
             throw new DiscoveryException("CATALOG_INTEGRITY", "Saved source receipts are missing.");
         return receipts;
+    }
+    /// <summary>Every CDN configuration this build was advertised with, newest first, with the newest versions receipt per region.</summary>
+    /// <summary>The projection carries at most this many newest CDN configurations, so republishing can never push one build past the page budget.</summary>
+    internal const int MaxProjectedCdnConfigs = 16;
+    private (List<CdnConfigObservation> History, int Count) ReadCdnConfigHistory(string buildId, HashSet<string> verified, CancellationToken token)
+    {
+        var total = Convert.ToInt32(Scalar("SELECT count(*) FROM build_cdn_configs WHERE build_id=$id", null, ("$id", buildId)));
+        var configs = new List<(string Config, string First, string Last)>();
+        // Newest = seen most recently; a tie in the same check goes to the one that appeared later.
+        using (var command = Command("""
+            SELECT CASE WHEN typeof(cdn_config)='text' AND length(cdn_config)=32 AND cdn_config NOT GLOB '*[^0-9a-f]*' THEN cdn_config END,
+                first_seen,last_seen
+            FROM build_cdn_configs WHERE build_id=$id
+            ORDER BY last_generation DESC,first_generation DESC,cdn_config LIMIT $limit
+            """, null, ("$id", buildId), ("$limit", MaxProjectedCdnConfigs)))
+        using (var reader = command.ExecuteReader())
+            while (reader.Read())
+            {
+                token.ThrowIfCancellationRequested();
+                if (reader.IsDBNull(0)) throw new DiscoveryException("CATALOG_INTEGRITY", "A saved CDN configuration identity is invalid.");
+                configs.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+            }
+        if (configs.Count == 0) throw new DiscoveryException("CATALOG_INTEGRITY", "Saved CDN configuration history is missing.");
+        var history = new List<CdnConfigObservation>(configs.Count);
+        var checkedGenerations = new HashSet<long>();
+        foreach (var (config, first, last) in configs)
+        {
+            var regions = new List<string>(); var advertised = new List<string>(); var receipts = new List<SourceReceipt>();
+            using (var command = Command("SELECT region FROM advertisements WHERE build_id=$id AND cdn_config=$c ORDER BY region", null, ("$id", buildId), ("$c", config)))
+            using (var reader = command.ExecuteReader()) while (reader.Read()) advertised.Add(reader.GetString(0));
+            using (var command = Command($$"""
+                SELECT r.region,d.url,d.retrieved_at,d.sha256,b.byte_length,r.ordinal,
+                    CASE WHEN {{OpeningSourceRowValid}} THEN b.body END,r.generation,
+                    CASE WHEN {{OpeningSourceRowValid}} AND d.role='versions' AND typeof(r.generation)='integer'
+                        AND typeof(r.region)='text' AND length(CAST(r.region AS BLOB)) BETWEEN 2 AND 8
+                        AND r.region NOT GLOB '*[^a-z]*' AND typeof(r.ordinal)='integer' AND r.ordinal BETWEEN 0 AND 9999
+                        THEN 1 ELSE 0 END
+                FROM build_cdn_config_regions r JOIN documents d ON d.generation=r.generation AND d.role='versions'
+                    LEFT JOIN raw_documents b ON b.sha256=d.sha256
+                WHERE r.build_id=$id AND r.cdn_config=$c ORDER BY r.region
+                """, null, ("$id", buildId), ("$c", config)))
+            using (var reader = command.ExecuteReader())
+                while (reader.Read())
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (reader.GetInt32(8) != 1)
+                        throw new DiscoveryException("CATALOG_INTEGRITY", "A saved CDN configuration receipt exceeds its actual byte/type or receipt bounds.");
+                    var generation = reader.GetInt64(7);
+                    if (checkedGenerations.Add(generation)) ValidateOpeningSourceDocuments(generation, token, requireCdns: false);
+                    var hash = reader.GetString(3); var length = reader.GetInt32(4);
+                    if (verified.Add(hash))
+                    {
+                        var body = (byte[])reader[6];
+                        if (body.Length != length || Convert.ToHexStringLower(SHA256.HashData(body)) != hash)
+                            throw new DiscoveryException("CATALOG_INTEGRITY", "Saved source metadata failed integrity verification.");
+                    }
+                    regions.Add(reader.GetString(0));
+                    receipts.Add(new(reader.GetString(0), "versions", reader.GetString(1), reader.GetString(2), hash, length, reader.GetInt32(5)));
+                }
+            if (receipts.Count == 0) throw new DiscoveryException("CATALOG_INTEGRITY", "A saved CDN configuration has no original receipt.");
+            history.Add(new(config, first, last, regions, advertised, receipts));
+        }
+        return (history, total);
     }
     private SqliteCommand Command(string sql, SqliteTransaction? transaction = null, params (string, object?)[] parameters)
     {

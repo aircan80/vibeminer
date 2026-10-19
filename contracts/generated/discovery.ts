@@ -171,6 +171,7 @@ export type CreatureGeometryResult = CreatureGeometryResult1;
 export interface DiscoveryContract {
   product: Product;
   sourceReceipt: SourceReceipt;
+  cdnConfigObservation: CdnConfigObservation;
   build: Build;
   discoveryProblem: DiscoveryProblem;
   discoveryPage: DiscoveryPage;
@@ -275,12 +276,26 @@ export interface SourceReceipt {
   byteLength: number;
   rowOrdinal: number | null;
 }
+/**
+ * One CDN configuration the build was advertised with. CDNConfig is not part of the build identity; each republished one is kept with the newest versions-row receipt per region.
+ */
+export interface CdnConfigObservation {
+  cdnConfig: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  regions: string[];
+  advertisedRegions: string[];
+  sourceReceipts: SourceReceipt[];
+}
 export interface Build {
   id: string;
   productId: string;
   version: string;
   buildId: string;
   buildConfig: string;
+  /**
+   * The CDN configuration this projection is bound to: the newest advertised one in discovery pages, or the exact one an open or admission was made with.
+   */
   cdnConfig: string;
   productConfig: string | null;
   identityFields: {
@@ -296,6 +311,14 @@ export interface Build {
   isLocal: boolean;
   availability: 'unknown';
   sourceReceipts: SourceReceipt[];
+  /**
+   * Every CDN configuration this build was advertised with, newest first, capped to the newest 16.
+   */
+  cdnConfigHistory: CdnConfigObservation[];
+  /**
+   * How many CDN configurations the build has in total. When it exceeds cdnConfigHistory's length, the older ones are omitted from this projection but kept in the catalog.
+   */
+  cdnConfigHistoryCount: number;
 }
 export interface DiscoveryProblem {
   region: string | null;

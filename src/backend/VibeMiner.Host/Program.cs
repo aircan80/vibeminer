@@ -51,6 +51,12 @@ try
     finally { await retention.ShutdownAsync(); }
     return 0;
 }
+catch (VibeMiner.Domain.DiscoveryException exception) when (exception.Code is "CATALOG_RESET_REQUIRED" or "CATALOG_VERSION")
+{
+    // Typed catalog refusals carry fixed messages; the catalog file was not changed. The desktop maps the exit code.
+    await Console.Error.WriteLineAsync($"Engine startup refused the catalog ({exception.Code}): {exception.Message}");
+    return exception.Code == "CATALOG_RESET_REQUIRED" ? 3 : 4;
+}
 catch (Exception exception)
 {
     await Console.Error.WriteLineAsync($"Engine startup or transport failed ({exception.GetType().Name}).");

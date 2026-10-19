@@ -30,7 +30,8 @@ public sealed class ConfigurationWorkspacePreparer(IWorkspaceCatalog catalog, Ve
         try
         {
             await progress("Checking saved configurations");
-            var context = await catalog.ResolveOpeningAsync(request, lifetime.Token);
+            // A new open always uses the newest advertised CDN configuration; earlier admissions keep theirs.
+            var context = await catalog.ResolveLatestOpeningAsync(request, lifetime.Token);
             var route = await ParseAsync(() => ResolveRoute(context), lifetime.Token);
             var admitted = await catalog.HasAdmissionAsync(context, lifetime.Token);
             var configurations = new List<ConfigurationReceipt>(2);
@@ -146,9 +147,11 @@ public sealed class ConfigurationWorkspacePreparer(IWorkspaceCatalog catalog, Ve
             throw new DiscoveryException("CATALOG_INTEGRITY", "A saved source row ordinal is invalid.");
         var fields = versions.Rows[reference.VersionsRowOrdinal].Fields;
         var identity = BuildIdentity.Create(context.Build.ProductId, fields);
-        var source = new Dictionary<string, string>(context.Build.IdentityFields, StringComparer.Ordinal) { ["Region"] = reference.Region };
-        if (fields["Region"] != reference.Region || identity.Id != context.Build.Id || identity.Canonical != BuildIdentity.Create(context.Build.ProductId, source).Canonical)
+        if (fields["Region"] != reference.Region || identity.Id != context.Build.Id ||
+            identity.Canonical != BuildIdentity.FromFields(context.Build.ProductId, context.Build.IdentityFields).Canonical)
             throw new DiscoveryException("CATALOG_INTEGRITY", "The complete selected identity differs from its saved source row.");
+        if (BuildIdentity.ObservedCdnConfig(fields) != context.Build.CdnConfig)
+            throw new DiscoveryException("CATALOG_INTEGRITY", "The captured CDN configuration differs from its saved source row.");
         var matches = cdns.Rows.Where(row => row.Fields.GetValueOrDefault("Name") == reference.Region).ToArray();
         if (matches.Length != 1 || matches[0].Ordinal != reference.CdnsRowOrdinal)
             throw new DiscoveryException("SOURCE_UNAVAILABLE", "The selected region's saved CDN route is missing or ambiguous.");

@@ -56,14 +56,36 @@ public sealed class ParserIdentityTests
         var first = Fixtures.Fields(); var second = Fixtures.Fields(Fixtures.A.ToUpperInvariant()); second["Region"] = "eu";
         Assert.Equal(BuildIdentity.Create("wow", first).Canonical, BuildIdentity.Create("wow", first).Canonical);
         Assert.Equal(BuildIdentity.Create("wow", first).Id, BuildIdentity.Create("wow", second).Id);
-        foreach (var key in new[] { "BuildConfig", "CDNConfig", "VersionsName", "BuildId", "Opaque", "KeyRing", "ProductConfig" })
+        foreach (var key in new[] { "BuildConfig", "VersionsName", "BuildId", "Opaque", "KeyRing", "ProductConfig" })
         {
-            var changed = Fixtures.Fields(); changed[key] = key is "BuildConfig" or "CDNConfig" or "ProductConfig" ? Fixtures.C : "changed";
+            var changed = Fixtures.Fields(); changed[key] = key is "BuildConfig" or "ProductConfig" ? Fixtures.C : "changed";
             Assert.NotEqual(BuildIdentity.Create("wow", first).Id, BuildIdentity.Create("wow", changed).Id);
         }
         var empty = Fixtures.Fields(); empty["ProductConfig"] = "";
         Assert.NotEqual(BuildIdentity.Create("wow", first).Id, BuildIdentity.Create("wow", empty).Id);
         Assert.NotEqual(BuildIdentity.Create("wow", first).Id, BuildIdentity.Create("wowt", first).Id);
+    }
+    [Fact]
+    public void CdnConfigIsRequiredAndNormalizedButNotPartOfTheIdentity()
+    {
+        var first = Fixtures.Fields(); var republished = Fixtures.Fields(); republished["CDNConfig"] = Fixtures.C.ToUpperInvariant();
+        var identity = BuildIdentity.Create("wow", first);
+        Assert.Equal(identity.Id, BuildIdentity.Create("wow", republished).Id);
+        Assert.Equal(identity.Canonical, BuildIdentity.Create("wow", republished).Canonical);
+        Assert.DoesNotContain("CDNConfig", identity.Fields.Keys); Assert.DoesNotContain("Region", identity.Fields.Keys);
+        Assert.StartsWith("27:vibeminer-build-identity-v2", identity.Canonical, StringComparison.Ordinal);
+        Assert.Equal(Fixtures.C, BuildIdentity.ObservedCdnConfig(republished));
+        var missing = Fixtures.Fields(); missing.Remove("CDNConfig");
+        Assert.Equal("INVALID_IDENTITY", Assert.Throws<DiscoveryException>(() => BuildIdentity.Create("wow", missing)).Code);
+        var broken = Fixtures.Fields(); broken["CDNConfig"] = "broken";
+        Assert.Equal("INVALID_IDENTITY", Assert.Throws<DiscoveryException>(() => BuildIdentity.Create("wow", broken)).Code);
+        // Saved identity fields restore the same identity, and never accept the excluded columns back.
+        Assert.Equal(identity, BuildIdentity.FromFields("wow", identity.Fields) with { Fields = identity.Fields });
+        Assert.Equal(identity.Id, BuildIdentity.FromFields("wow", identity.Fields).Id);
+        var withCdn = new Dictionary<string, string>(identity.Fields) { ["CDNConfig"] = Fixtures.B };
+        Assert.Equal("INVALID_IDENTITY", Assert.Throws<DiscoveryException>(() => BuildIdentity.FromFields("wow", withCdn)).Code);
+        var withRegion = new Dictionary<string, string>(identity.Fields) { ["Region"] = "us" };
+        Assert.Equal("INVALID_IDENTITY", Assert.Throws<DiscoveryException>(() => BuildIdentity.FromFields("wow", withRegion)).Code);
     }
     [Fact]
     public void LengthFramedIdentityDoesNotAliasDelimiterValues()

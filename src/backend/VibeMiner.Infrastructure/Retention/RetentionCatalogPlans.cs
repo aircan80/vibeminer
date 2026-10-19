@@ -53,10 +53,21 @@ public sealed partial class DiscoveryCatalog
             ("$b", plan.Target.BuildIdentity), ("$p", plan.Target.ProductId)) as string;
         if (identity is null) throw RetentionIntegrity("A pinned retention build is missing.");
         var fields = Deserialize<Dictionary<string, string>>(identity);
+        var source = plan.SourceReference;
+        // The plan keeps the CDN configuration its admission was made with: the pinned observation's own one.
+        var observedCdnConfig = Scalar("""
+            SELECT cdn_config FROM observations WHERE generation=$g AND ordinal=$o AND build_id=$b AND region=$r
+            """, transaction, ("$g", DownloadNumber(source.Generation)), ("$o", source.VersionsRowOrdinal),
+            ("$b", plan.Target.BuildIdentity), ("$r", plan.Target.SourceRegion)) as string;
         foreach (var receipt in plan.Configurations)
         {
-            var field = receipt.Role == "buildConfig" ? "BuildConfig" : "CDNConfig";
-            if (!fields.TryGetValue(field, out var key) || key != receipt.Key)
+            var expected = receipt.Role switch
+            {
+                "buildConfig" => fields.GetValueOrDefault("BuildConfig"),
+                "cdnConfig" => observedCdnConfig,
+                _ => null
+            };
+            if (expected is null || expected != receipt.Key)
                 throw RetentionIntegrity("Pinned configuration roles differ from the exact retained build.");
             using var command = Command("SELECT sha256,byte_length,source_url,retrieved_at,verifier_revision FROM configuration_objects WHERE key=$k", transaction, ("$k", receipt.Key));
             using var reader = command.ExecuteReader();
@@ -64,7 +75,6 @@ public sealed partial class DiscoveryCatalog
                 reader.GetString(3) != receipt.RetrievedAt || reader.GetString(4) != ConfigurationWorkspacePreparer.VerifierRevision)
                 throw RetentionIntegrity("Pinned configuration evidence differs from its original verified receipt.");
         }
-        var source = plan.SourceReference;
         using var binding = Command("""
             SELECT v.sha256,c.sha256 FROM observations o
             JOIN documents v ON v.generation=o.generation AND v.role='versions'

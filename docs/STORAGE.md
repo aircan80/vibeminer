@@ -24,11 +24,13 @@ A legacy metadata receipt with a null `Location` means a loose object at offset 
 
 The catalog is `discovery-v1.sqlite3` in the engine data directory. It opens with `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=FULL`, `busy_timeout=5000` and file-backed temp storage. One worker runs all SQLite work with at most 64 queued operations. The engine refuses a catalog with a newer `user_version` than it knows (`CATALOG_VERSION`).
 
-The schema is at `user_version` 14. Migrations are additive and each lives with its feature:
+The schema is at `user_version` 15, the first with build identity v2 ([D061](DECISIONS.md)). There is no migration from older catalogs: a fresh catalog writes `catalog_lineage` = `build-identity-v2`, and any catalog without it is refused with `CATALOG_RESET_REQUIRED`. The version and lineage are read on a read-only connection before any read-write open, so a refused catalog, including a pending `-wal` an older engine left behind, stays byte-for-byte unchanged (a read-write close would checkpoint it). The host exits with code 3 (code 4 for a newer catalog) and the code on stderr; the desktop shows it as a typed notice that names the catalog folder and the user's step (close VibeMiner, move or rename the folder, start again). It offers no delete, retry or refresh. Starting over means a fresh data directory; never erase the owner's profile without their OK.
+
+Fresh creation still runs the steps below in order, each committing its own `user_version`, so a creation interrupted between steps resumes. Each lives with its feature:
 
 | Version | Adds |
 | --- | --- |
-| 2 | Discovery: products, raw documents, builds, observations, regions, baselines, advertisements |
+| 2 | Discovery: lineage, products, raw documents, builds, per-build CDN config history (`build_cdn_configs`, `build_cdn_config_regions`), observations with their CDN config, regions, baselines, advertisements per CDN config |
 | 3 | Configuration objects, workspace admissions, Open acknowledgements |
 | 4–5 | Legacy full inventory tables and preparation checkpoints |
 | 6 | `home-download-v1`: download artifacts/sources/admissions, resolver artifacts |
@@ -40,6 +42,7 @@ The schema is at `user_version` 14. Migrations are additive and each lives with 
 | 12 | `creatures_artifacts`, `creatures_admissions` |
 | 13 | `item_effects_bridge_artifacts`, `item_effects_bridge_admissions` |
 | 14 | `geometry_artifacts`, `geometry_source_locators` |
+| 15 | Marks creation complete |
 
 The catalog stores observed builds and raw source references; per-region observations; first-seen/baseline/Open acknowledgements; verified object aliases and build memberships; artifact generations and source bindings; admitted inventories; retention policy and job checkpoints; and bounded query indexes.
 
@@ -58,6 +61,10 @@ The port does not open Java catalogs in place. The Java schema and serialized pr
 ### Gotcha: reading BLOBs
 
 `SqliteDataReader.GetBytes` aborted the native test host when used to probe and incrementally read cast BLOB columns; the exact cause was not established. Check `length()` in SQL first, then read one bounded `byte[]` with `GetFieldValue<byte[]>`. Don't use `GetBytes`.
+
+### CDN configuration per admission
+
+A build's CDN config can be republished without a new build ([D061](DECISIONS.md)). Each observation keeps the CDN config of its own versions row, and every admission records its `cdnConfig` receipt. A context resolved for an open build uses the CDN config of the latest workspace admission for that build and region; a new open uses the newest one the region advertised. Retention plans and pinned downloads resolve their pinned observation, so they keep theirs. Commit and admission checks compare against the CDN config captured with the context, never the build's newest one.
 
 ### Open acknowledgement
 

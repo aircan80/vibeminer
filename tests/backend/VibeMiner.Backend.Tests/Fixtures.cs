@@ -14,8 +14,8 @@ internal static class Fixtures
     public const string C = "cccccccccccccccccccccccccccccccc";
     public const string Header = "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|KeyRing!HEX:16|BuildId!DEC:4|VersionsName!String:0|ProductConfig!HEX:16|Opaque!STRING:0";
     public static string Versions(params string[] rows) => Header + "\n## seqn = 00012\n" + string.Join('\n', rows) + "\n";
-    public static string Row(string region = "us", string config = A, string unknown = "opaque", string productConfig = C) =>
-        $"{region}|{config}|{B}||00123|1.2.3.00123|{productConfig}|{unknown}";
+    public static string Row(string region = "us", string config = A, string unknown = "opaque", string productConfig = C, string cdn = B) =>
+        $"{region}|{config}|{cdn}||00123|1.2.3.00123|{productConfig}|{unknown}";
     public static string Cdns(params string[] regions) => "Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0\n" +
         string.Join('\n', regions.Select(region => $"{region}|tpr/wow|cdn.invalid|https://cdn.invalid/?opaque=1")) + "\n";
     public static byte[] Utf8(string value) => Encoding.UTF8.GetBytes(value);

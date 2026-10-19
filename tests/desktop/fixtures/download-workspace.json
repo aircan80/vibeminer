@@ -9,7 +9,6 @@
     "productConfig": null,
     "identityFields": {
       "BuildConfig": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "CDNConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "BuildId": "70448",
       "VersionsName": "12.1.5.70448",
       "KeyRing": ""
@@ -48,7 +47,32 @@
         "byteLength": 128,
         "rowOrdinal": 0
       }
-    ]
+    ],
+    "cdnConfigHistory": [
+      {
+        "cdnConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "firstSeenAt": "2026-10-18T12:00:00Z",
+        "lastSeenAt": "2026-10-18T12:00:00Z",
+        "regions": [
+          "us"
+        ],
+        "advertisedRegions": [
+          "us"
+        ],
+        "sourceReceipts": [
+          {
+            "region": "us",
+            "role": "versions",
+            "url": "https://metadata.invalid/v2/products/wow/versions",
+            "retrievedAt": "2026-10-18T12:00:00Z",
+            "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "byteLength": 200,
+            "rowOrdinal": 0
+          }
+        ]
+      }
+    ],
+    "cdnConfigHistoryCount": 1
   },
   "openedAt": "2026-10-18T12:00:01Z",
   "readiness": "partial",

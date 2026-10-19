@@ -100,6 +100,7 @@
 .discovery-screen .dv-insp-head h2{margin:0;font-size:var(--dv-l);letter-spacing:0;font-weight:700;line-height:1.25}
 .discovery-screen .dv-insp-head p{margin:0;color:var(--dv-muted);font-size:var(--dv-m)}
 .discovery-screen .dv-insp-head code{font-size:inherit}
+.discovery-screen .dv-note code{font-size:inherit}
 .discovery-screen .dv-insp-body{overflow:auto;padding:.747rem .933333rem;min-height:0}
 .discovery-screen .dv-insp-body .dv-label{margin:.933333rem 0 .373rem}
 .discovery-screen .dv-insp-body dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.327rem .84rem;margin:0;font-size:var(--dv-m)}
@@ -148,6 +149,9 @@
 .discovery-screen .dv-compact .dv-insp-foot .dv-reason{display:none}
 .discovery-screen .dv-compact .dv-insp-foot.blocked .dv-reason{display:block}
 .discovery-screen .dv-compact .dv-notice{max-height:3.08rem;overflow:auto;margin-top:.28rem}
+/* A refused catalog leaves nothing else to read: show the whole notice, selectable and wrapping. */
+.discovery-screen .dv-notice.refusal,.discovery-screen .dv-compact .dv-notice.refusal{max-height:none;overflow:visible;overflow-wrap:anywhere}
+.discovery-screen .dv-notice.refusal .dv-path{font-family:ui-monospace,monospace;overflow-wrap:anywhere}
 .discovery-screen .dv-compact .dv-statusbar .dv-secondary{display:none}
 .discovery-screen .dv-compact aside.download-activity-panel{width:100%}
 /* Last resort for very small windows: the pane scrolls as a whole so notices and rows stay reachable. */

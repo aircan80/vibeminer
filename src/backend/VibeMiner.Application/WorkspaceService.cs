@@ -5,12 +5,19 @@ namespace VibeMiner.Application;
 public sealed record WorkspaceRequest(string ProductId, string BuildIdentity, string SourceRegion);
 public sealed record PreparationStep(int Index, int? Total, string Description);
 public sealed record WorkspacePreparationProgress(string Stage, PreparationStep? Step = null);
+/// <summary>
+/// One exact opening source. Build.CdnConfig is the CDN configuration of the referenced versions row, captured
+/// with the context; it is not the build's newest advertised CDN configuration.
+/// </summary>
 public sealed record CapturedOpeningContext(Build Build, OpeningSourceReference Reference,
     SourceDocument Versions, SourceDocument Cdns);
 public sealed record StoredConfiguration(string Key, string Sha256, int ByteLength, string SourceUrl, string RetrievedAt);
 public interface IWorkspaceCatalog
 {
+    /// <summary>The build as it is open now: the CDN configuration of its latest admission.</summary>
     Task<CapturedOpeningContext> ResolveOpeningAsync(WorkspaceRequest request, CancellationToken token);
+    /// <summary>A new open: the newest CDN configuration the selected region advertised.</summary>
+    Task<CapturedOpeningContext> ResolveLatestOpeningAsync(WorkspaceRequest request, CancellationToken token);
     Task<bool> HasAdmissionAsync(CapturedOpeningContext context, CancellationToken token);
     Task<StoredConfiguration?> FindConfigurationAsync(string key, CancellationToken token);
     Task RecordConfigurationAsync(StoredConfiguration configuration, CancellationToken token);

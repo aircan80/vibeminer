@@ -19,7 +19,7 @@ public sealed class ItemEffectsMigrationTests
             "INSERT INTO item_classification_artifacts VALUES('old-label','original-label-proof');" +
             "INSERT INTO creatures_artifacts VALUES('old-creature','original-creature-proof');" + RemoveEffects);
         await h.Restart();
-        Assert.Equal(14, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(15, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(2, await h.Scalar("SELECT count(*) FROM encoded_objects"));
         foreach (var (table, descriptor) in new[] { ("items_artifacts", "original-item-proof"),
             ("icon_artifacts", "original-icon-proof"), ("item_classification_artifacts", "original-label-proof"),
@@ -40,7 +40,7 @@ public sealed class ItemEffectsMigrationTests
         await h.Execute("INSERT INTO item_effects_bridge_artifacts VALUES('original-index','original-index-proof');" +
             "INSERT INTO item_effects_bridge_admissions SELECT id,'us','original-reference','enUS','original-index','original-time' FROM builds LIMIT 1;");
         await h.Restart(); await h.Restart();
-        Assert.Equal(14, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(15, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(1, await h.Scalar("SELECT count(*) FROM item_effects_bridge_artifacts WHERE content_key='original-index' AND descriptor='original-index-proof'"));
         Assert.Equal(1, await h.Scalar("SELECT count(*) FROM item_effects_bridge_admissions WHERE content_key='original-index' AND source_reference='original-reference' AND prepared_at='original-time'"));
     }
@@ -56,7 +56,7 @@ public sealed class ItemEffectsMigrationTests
         Assert.Equal(1, await h.Scalar("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='item_effects_bridge_admissions'"));
         await h.Execute("DROP TABLE item_effects_bridge_admissions");
         await h.Restart();
-        Assert.Equal(14, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(15, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(0, await h.Scalar("SELECT count(*) FROM item_effects_bridge_artifacts"));
         Assert.Equal(0, await h.Scalar("SELECT count(*) FROM pragma_foreign_key_check"));
     }

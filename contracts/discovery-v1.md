@@ -38,15 +38,22 @@ type SourceReceipt = {
   retrievedAt: string; sha256: string; byteLength: number;
   rowOrdinal: number | null;
 };
+type CdnConfigObservation = {
+  cdnConfig: string; firstSeenAt: string; lastSeenAt: string;
+  regions: string[]; advertisedRegions: string[];
+  sourceReceipts: SourceReceipt[]; // newest versions-row receipt per region
+};
 type Build = {
   id: string; productId: string; version: string; buildId: string;
   buildConfig: string; cdnConfig: string; productConfig: string | null;
-  identityFields: Record<string, string>;
+  identityFields: Record<string, string>; // never contains Region or CDNConfig
   regions: string[]; advertisedRegions: string[]; routeRegions: string[];
   firstSeenAt: string; lastSeenAt: string;
   isNew: boolean; isAdvertised: boolean; isLocal: boolean;
   availability: "unknown";
   sourceReceipts: SourceReceipt[];
+  cdnConfigHistory: CdnConfigObservation[]; // newest first, at most 16
+  cdnConfigHistoryCount: number; // total; older entries beyond the cap are omitted, not lost
 };
 type DiscoveryProblem = { region: string | null; code: string; message: string };
 type DiscoveryPage = {
@@ -57,13 +64,15 @@ type DiscoveryPage = {
 };
 ```
 
+In a discovery page `cdnConfig` is the newest entry of `cdnConfigHistory`. In a workspace snapshot it is the CDN config that open or admission was made with. Whether switching would change anything is decided per source region: only when the open's own region now advertises a different CDN config (its `advertisedRegions`, else its newest `sourceReceipts` for that region) is a new Open worth it. Entries with the same first and last check are a same-check tie ordered only by key; that order means nothing. The projection holds at most the newest 16 entries; `cdnConfigHistoryCount` is the total.
+
 `connection` describes the latest explicit attempt, not a general connectivity probe. Local reads make no HTTP calls. An engine/network failure cannot masquerade as successful empty results. `isLocal` is false for discovery-only observations; Local can be empty until actual preparation exists. Render availability as Not checked, never infer payload readiness or locale.
 
 ## Discovery source and identity policy
 
 Use the fixed official metadata origin `https://us.version.battle.net`, requesting one `/v2/products/{productId}/versions` and `/cdns` pair per refresh. Each pair already contains regional rows; do not fan out the same URLs once per region. `products.list` uses the reviewed exact WoW registry; no implicit remote summary check on startup. Preserve observed rows for all bounded valid advertised regions; matching CDN rows establish route evidence, and missing/ambiguous routes become region-specific problems without erasing the advertisement. Never substitute US routing.
 
-Group identity includes exact product and Published channel, version, raw BuildId, normalized known configuration hashes, and all additional versions fields including KeyRing/unknown values. Exclude Region and route. Preserve original documents, exact fields and row ordinals with immutable event receipts. Use canonical length-framed/sorted identity serialization with a revision; a digest is not permission to discard full identity data.
+Group identity includes exact product and Published channel, version, raw BuildId, normalized BuildConfig/ProductConfig hashes, and all additional versions fields including KeyRing/unknown values. Exclude Region, route and CDNConfig ([D061](../docs/DECISIONS.md)). CDNConfig is required and kept per observation and in the build's CDN config history. Preserve original documents, exact fields and row ordinals with immutable event receipts. Use canonical length-framed/sorted identity serialization with a revision; a digest is not permission to discard full identity data.
 
 Maintain successful regional baselines and a product-visit marker. First successful check of a region is neutral; later new identities can be New to VibeMiner. Repeated discovery never acknowledges Open. Failed/canceled scopes preserve prior successful advertisement evidence. Use persisted monotonic check generations rather than wall clocks to fence stale attempts and paginate a stable snapshot. Cursors bind product/filter/generation and refuse stale mismatches rather than mix pages.
 

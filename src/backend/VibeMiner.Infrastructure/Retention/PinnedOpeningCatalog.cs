@@ -24,7 +24,7 @@ public sealed partial class DiscoveryCatalog
             sourceReference.CdnsRowOrdinal is < 0 or >= MetadataParser.MaxRows)
             throw PinnedError("SOURCE_REFERENCE_INVALID", "The pinned source identity, region or row geometry is invalid.");
 
-        string originalFields, originalRoute;
+        string originalFields, originalRoute, observedCdnConfig;
         using (var command = Command("""
             SELECT o.region,o.build_id,o.cdns_ordinal,o.original_fields,o.route_fields,e.product,
                 CASE WHEN typeof(o.region)='text' AND length(CAST(o.region AS BLOB)) BETWEEN 2 AND 8
@@ -32,7 +32,8 @@ public sealed partial class DiscoveryCatalog
                     AND typeof(e.product)='text' AND length(CAST(e.product AS BLOB)) BETWEEN 1 AND 16
                     AND typeof(o.original_fields)='text' AND length(CAST(o.original_fields AS BLOB))<=131072
                     AND (o.route_fields IS NULL OR typeof(o.route_fields)='text' AND length(CAST(o.route_fields AS BLOB))<=131072)
-                    THEN 1 ELSE 0 END
+                    AND typeof(o.cdn_config)='text' AND length(o.cdn_config)=32 AND o.cdn_config NOT GLOB '*[^0-9a-f]*'
+                    THEN 1 ELSE 0 END,o.cdn_config
             FROM observations o JOIN events e ON e.generation=o.generation
             WHERE o.generation=$generation AND o.ordinal=$ordinal
             """, null, ("$generation", generation), ("$ordinal", sourceReference.VersionsRowOrdinal)))
@@ -45,7 +46,7 @@ public sealed partial class DiscoveryCatalog
                 reader.IsDBNull(2) || reader.GetInt32(2) != sourceReference.CdnsRowOrdinal ||
                 reader.IsDBNull(4) || reader.GetString(5) != request.ProductId)
                 throw PinnedError("SOURCE_REFERENCE_UNAVAILABLE", "The exact retained observation does not match this pinned build, region and route.");
-            originalFields = reader.GetString(3); originalRoute = reader.GetString(4);
+            originalFields = reader.GetString(3); originalRoute = reader.GetString(4); observedCdnConfig = reader.GetString(7);
             if (originalFields.Length > 131072 || originalRoute.Length > 131072)
                 throw PinnedError("CATALOG_INTEGRITY", "A retained observation exceeds its bounded field representation.");
         }
@@ -64,7 +65,10 @@ public sealed partial class DiscoveryCatalog
         var versionFields = parsedVersions.Rows[sourceReference.VersionsRowOrdinal].Fields;
         var routeFields = parsedCdns.Rows[sourceReference.CdnsRowOrdinal].Fields;
         var identity = BuildIdentity.Create(request.ProductId, versionFields);
+        // The pinned row's own CDN configuration, never the build's newest one.
+        var cdnConfig = BuildIdentity.ObservedCdnConfig(versionFields);
         if (identity.Id != request.BuildIdentity || versionFields.GetValueOrDefault("Region") != request.SourceRegion ||
+            cdnConfig != observedCdnConfig ||
             routeFields.GetValueOrDefault("Name") != request.SourceRegion ||
             parsedCdns.Rows.Count(row => row.Fields.GetValueOrDefault("Name") == request.SourceRegion) != 1 ||
             !PinnedFieldsEqual(originalFields, versionFields) || !PinnedFieldsEqual(originalRoute, routeFields))
@@ -80,6 +84,14 @@ public sealed partial class DiscoveryCatalog
                 throw PinnedError("CATALOG_INTEGRITY", "The pinned source differs from the saved complete build identity.");
             first = reader.GetString(2); last = reader.GetString(3);
         }
+        string configFirst, configLast;
+        using (var command = Command("SELECT first_seen,last_seen FROM build_cdn_configs WHERE build_id=$id AND cdn_config=$c",
+            null, ("$id", request.BuildIdentity), ("$c", cdnConfig)))
+        using (var reader = command.ExecuteReader())
+        {
+            if (!reader.Read()) throw PinnedError("CATALOG_INTEGRITY", "The pinned CDN configuration is missing from the build's history.");
+            configFirst = reader.GetString(0); configLast = reader.GetString(1);
+        }
         // This internal projection is source-bound. Reading latest discovery receipts here would
         // let a later refresh alter or break an otherwise valid historical retention plan.
         var receipts = new SourceReceipt[]
@@ -91,8 +103,9 @@ public sealed partial class DiscoveryCatalog
         };
         var fields = identity.Fields;
         var build = new Build(identity.Id, request.ProductId, fields["VersionsName"], fields.GetValueOrDefault("BuildId", ""),
-            fields["BuildConfig"], fields["CDNConfig"], fields.GetValueOrDefault("ProductConfig") is { Length: > 0 } product ? product : null,
-            fields, [request.SourceRegion], [], [request.SourceRegion], first, last, false, false, false, "unknown", receipts);
+            fields["BuildConfig"], cdnConfig, fields.GetValueOrDefault("ProductConfig") is { Length: > 0 } product ? product : null,
+            fields, [request.SourceRegion], [], [request.SourceRegion], first, last, false, false, false, "unknown", receipts,
+            [new CdnConfigObservation(cdnConfig, configFirst, configLast, [request.SourceRegion], [], [receipts[0]])], 1);
         var result = new CapturedOpeningContext(build, sourceReference, versions, cdns);
         _ = ConfigurationWorkspacePreparer.ResolveRoute(result);
         token.ThrowIfCancellationRequested(); return result;

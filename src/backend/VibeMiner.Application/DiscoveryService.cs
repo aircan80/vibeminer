@@ -6,7 +6,11 @@ public sealed record SourceDocument(string Role, string Url, string RetrievedAt,
     string ParserRevision = "text-metadata-v1");
 public sealed record BuildObservation(BuildIdentity Identity, string Region, int VersionsOrdinal,
     int? CdnsOrdinal, IReadOnlyDictionary<string, string> OriginalFields,
-    IReadOnlyDictionary<string, string>? RouteFields);
+    IReadOnlyDictionary<string, string>? RouteFields)
+{
+    /// <summary>The CDN configuration this exact row advertised. It is not part of the build identity.</summary>
+    public string CdnConfig => BuildIdentity.ObservedCdnConfig(OriginalFields);
+}
 public sealed record DiscoveryAttempt(IReadOnlyList<SourceDocument> Documents,
     IReadOnlyList<BuildObservation> Observations, IReadOnlyList<string> SuccessfulRegions,
     IReadOnlyList<string> CheckedRegions, IReadOnlyList<DiscoveryProblem> Errors, string Connection);

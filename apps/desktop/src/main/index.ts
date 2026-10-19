@@ -55,7 +55,7 @@ function createEngine(): EngineClient {
   const dataDirectory = engineDataDirectory();
   const args = ['--data-dir', path.resolve(dataDirectory)];
   const child = enginePath.endsWith('.dll') ? spawn(dotnet, [enginePath, ...args], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }) : spawn(enginePath, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-  return new EngineClient(child);
+  return new EngineClient(child, { dataDirectory: engineDataDirectory() });
 }
 function registerBridge(): void {
   ipcMain.handle('discovery:invoke', async (event, method: string, params: unknown, requestId?: unknown): Promise<BridgeReply<unknown>> => {

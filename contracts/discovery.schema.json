@@ -10,6 +10,9 @@
     "sourceReceipt": {
       "$ref": "#/definitions/SourceReceipt"
     },
+    "cdnConfigObservation": {
+      "$ref": "#/definitions/CdnConfigObservation"
+    },
     "build": {
       "$ref": "#/definitions/Build"
     },
@@ -281,6 +284,7 @@
   "required": [
     "product",
     "sourceReceipt",
+    "cdnConfigObservation",
     "build",
     "discoveryProblem",
     "discoveryPage",
@@ -377,6 +381,50 @@
       ],
       "additionalProperties": false
     },
+    "CdnConfigObservation": {
+      "title": "CdnConfigObservation",
+      "description": "One CDN configuration the build was advertised with. CDNConfig is not part of the build identity; each republished one is kept with the newest versions-row receipt per region.",
+      "type": "object",
+      "properties": {
+        "cdnConfig": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "firstSeenAt": {
+          "type": "string"
+        },
+        "lastSeenAt": {
+          "type": "string"
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "advertisedRegions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sourceReceipts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SourceReceipt"
+          }
+        }
+      },
+      "required": [
+        "cdnConfig",
+        "firstSeenAt",
+        "lastSeenAt",
+        "regions",
+        "advertisedRegions",
+        "sourceReceipts"
+      ],
+      "additionalProperties": false
+    },
     "Build": {
       "title": "Build",
       "type": "object",
@@ -401,7 +449,8 @@
         },
         "cdnConfig": {
           "type": "string",
-          "pattern": "^[0-9a-f]{32}$"
+          "pattern": "^[0-9a-f]{32}$",
+          "description": "The CDN configuration this projection is bound to: the newest advertised one in discovery pages, or the exact one an open or admission was made with."
         },
         "productConfig": {
           "anyOf": [
@@ -461,6 +510,18 @@
           "items": {
             "$ref": "#/definitions/SourceReceipt"
           }
+        },
+        "cdnConfigHistory": {
+          "description": "Every CDN configuration this build was advertised with, newest first, capped to the newest 16.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CdnConfigObservation"
+          }
+        },
+        "cdnConfigHistoryCount": {
+          "description": "How many CDN configurations the build has in total. When it exceeds cdnConfigHistory's length, the older ones are omitted from this projection but kept in the catalog.",
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
@@ -481,7 +542,9 @@
         "isAdvertised",
         "isLocal",
         "availability",
-        "sourceReceipts"
+        "sourceReceipts",
+        "cdnConfigHistory",
+        "cdnConfigHistoryCount"
       ],
       "additionalProperties": false
     },

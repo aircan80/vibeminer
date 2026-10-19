@@ -16,6 +16,7 @@ import type { RetentionTarget, RetentionSnapshot, RetentionList, HelloResult } f
 import { validTableData, validTableRows, tableDataMatches, tableRowsMatch, type TableDataParams, type TableRowsParams } from '../shared/table-data';
 import type { TableDataSnapshot, TableDataReadiness, TableDataPage } from '../../../../contracts/generated/discovery';
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Readable, Writable } from 'node:stream';
 import Ajv from 'ajv';
@@ -33,6 +34,21 @@ const check = (name: string, value: unknown) => ajv.getSchema(`${schema.$id}#/de
 export class EngineFailure extends Error {
   constructor(public code: string, message: string, public retryable = false) { super(message); }
 }
+/** Host exit codes for a refused catalog (VibeMiner.Host Program.cs). The catalog file is left unchanged. */
+export const CATALOG_RESET_EXIT = 3, CATALOG_NEWER_EXIT = 4;
+/**
+ * Classify an engine exit. A refused catalog is a typed, non-retryable state that names the catalog folder and the
+ * user's own step; the app never offers to change or remove it.
+ */
+export function engineExitFailure(code: number | null | undefined, dataDirectory?: string): EngineFailure {
+  const folder = dataDirectory ? `The catalog folder is ${dataDirectory}.` : 'The catalog folder is the engine data folder.';
+  const step = `Close VibeMiner, move or rename that folder (for example to ${dataDirectory ? path.basename(dataDirectory) : 'engine-v1'}.old), then start VibeMiner again.`;
+  if (code === CATALOG_RESET_EXIT) return new EngineFailure('CATALOG_RESET_REQUIRED', `The saved catalog was made by an older VibeMiner and cannot be opened by this version. A fresh catalog is needed. ${folder} ${step} The old catalog was left unchanged.`);
+  if (code === CATALOG_NEWER_EXIT) return new EngineFailure('CATALOG_VERSION', `The saved catalog was made by a newer VibeMiner. Use that version, or start this one with a fresh catalog. ${folder} ${step} The saved catalog was left unchanged.`);
+  return new EngineFailure('ENGINE_EXITED', 'The local engine stopped. Restart VibeMiner to reconnect.', true);
+}
+/** How long a closed pipe waits for the process exit that explains it. */
+const EXIT_GRACE_MS = 2000;
 export interface EngineProcess extends EventEmitter { stdin: Writable; stdout: Readable; stderr: Readable; kill(signal?: NodeJS.Signals): boolean }
 type IconExpected=IconBatchParams|IconOpenParams|{leaseId:string};
 type EffectsExpected=ItemEffectsSelectionParams|ItemEffectsPageParams|ItemEffectDetailsParams|ItemEffectNamesParams;
@@ -53,19 +69,20 @@ export class EngineClient extends EventEmitter {
   private failure: EngineFailure | null = null;
   private closing = false;
   private exited = false;
+  private lostTimer?: ReturnType<typeof setTimeout>;
   private exitResolve!: () => void;
   private exitPromise = new Promise<void>(resolve => { this.exitResolve = resolve; });
   private sequences = new Map<string, number>();
   private latestProgress = new Map<string, EngineProgress>();
   private progressTimer?: ReturnType<typeof setTimeout>;
-  constructor(private child: EngineProcess) {
+  constructor(private child: EngineProcess, private readonly options: { dataDirectory?: string } = {}) {
     super();
     child.stdout.on('data', (data: Buffer) => this.receive(data));
-    child.stdout.on('end', () => this.fail(new EngineFailure('ENGINE_EXITED', 'The local engine stopped. Restart VibeMiner to reconnect.', true)));
+    child.stdout.on('end', () => this.lost(new EngineFailure('ENGINE_EXITED', 'The local engine stopped. Restart VibeMiner to reconnect.', true)));
     child.stderr.on('data', () => { /* Drain bounded OS pipe; do not expose diagnostics/source data to renderer. */ });
     child.on('error', () => this.fail(new EngineFailure('ENGINE_UNAVAILABLE', 'The local engine could not be started. Check the desktop setup and restart VibeMiner.', true)));
-    child.on('exit', () => { this.exited = true; this.exitResolve(); this.emit('terminated'); this.fail(new EngineFailure('ENGINE_EXITED', 'The local engine stopped. Restart VibeMiner to reconnect.', true)); });
-    child.stdin.on('error', () => this.fail(new EngineFailure('ENGINE_UNAVAILABLE', 'The local engine connection closed.', true)));
+    child.on('exit', (code: number | null) => { this.exited = true; clearTimeout(this.lostTimer); this.exitResolve(); this.emit('terminated'); this.fail(engineExitFailure(code, this.options.dataDirectory)); });
+    child.stdin.on('error', () => this.lost(new EngineFailure('ENGINE_UNAVAILABLE', 'The local engine connection closed.', true)));
   }
   async hello(): Promise<void> { await this.request('hello', {}); }
   request<T = unknown>(method: RequestMethod, params: object, id: string = randomUUID()): Promise<T> {
@@ -108,7 +125,7 @@ export class EngineClient extends EventEmitter {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => this.fail(new EngineFailure('ENGINE_TIMEOUT', 'The local engine did not respond. Restart VibeMiner to reconnect.', true)), method === 'hello' || method==='items.icon.open' ? 15000 : (method === 'workspace.open' || method === 'tables.prepare' || method === 'items.prepare' || method==='items.icons' || method==='items.classifications'||method==='creatures.prepare'||method==='creatures.display.prepare'||method==='creatures.geometry.prepare'||effectsPrepare(method)) ? 21 * 60 * 1000 : 180000);
       this.pending.set(id, { method,...(geometryMethod(method)?{expectedGeometry:{...params} as GeometryExpected}:{}),...(effectsMethod(method)?{expectedEffects:{...params,...('edges' in params?{edges:(params as ItemEffectDetailsParams).edges.map(e=>({...e}))}:{})} as EffectsExpected}:{}),...(method.startsWith('creatures.')&&!geometryMethod(method)?{expectedCreatures:{...params} as CreaturesContext|CreaturePageParams|CreatureInspectParams|CreatureDisplayParams}:{}),...(method==='items.classifications'?{expectedClassifications:{...params,itemIds:[...(params as ClassificationParams).itemIds]} as ClassificationParams}:{}), ...((method==='items.icons'||method.startsWith('items.icon.'))?{expectedIcon:{...params} as IconExpected}:{}), ...(method.startsWith('items.')&&!effectsMethod(method) ? {expectedItems:{...params} as ItemsContext | ItemsPageParams | ItemInspectParams} : {}), ...((method === 'retention.read' || method === 'retention.set') ? {expectedRetention: {...params} as RetentionTarget | RetentionSet} : {}), ...((method === 'tables.prepare' || method === 'tables.data') ? {expectedTableData:{...params} as TableDataParams} : {}), ...(method === 'tables.rows' ? {expectedTableRows:{...params} as TableRowsParams} : {}), ...(method === 'tables.catalog' ? { expectedCatalog: { ...params } as TablesCatalogParams } : {}), ...(method === 'tables.definition' ? { expectedDefinition: { ...params } as TableDefinitionParams } : {}), ...(method === 'download.read' ? { expectedDownload: { ...params } as DownloadReadParams } : {}), ...(method === 'inventory.read' ? { expectedInventory: { ...params } as InventoryReadParams } : {}), ...(method === 'workspace.open' ? { expectedOpen: { ...params } as OpenParams } : {}), resolve: value => resolve(value as T), reject, timer });
-      this.child.stdin.write(data, error => { if (error) this.fail(new EngineFailure('ENGINE_UNAVAILABLE', 'The local engine connection closed.', true)); });
+      this.child.stdin.write(data, error => { if (error) this.lost(new EngineFailure('ENGINE_UNAVAILABLE', 'The local engine connection closed.', true)); });
     });
   }
   private receive(chunk: Buffer): void {
@@ -204,8 +221,15 @@ export class EngineClient extends EventEmitter {
     if (method === 'request.cancel') return typeof record.requested === 'boolean' && Object.keys(record).length === 1;
     return record.stopping === true && Object.keys(record).length === 1;
   }
+  /** A closed pipe usually precedes the exit code that explains it, so wait briefly for that exit before failing generically. */
+  private lost(error: EngineFailure): void {
+    if (this.failure || this.lostTimer) return;
+    if (this.exited) { this.fail(error); return; }
+    this.lostTimer = setTimeout(() => this.fail(error), EXIT_GRACE_MS);
+  }
   private fail(error: EngineFailure): void {
     if (this.failure) return;
+    clearTimeout(this.lostTimer);
     this.failure = error;
     for (const operation of this.pending.values()) { clearTimeout(operation.timer); operation.reject(error); }
     this.pending.clear(); this.latestProgress.clear(); this.sequences.clear(); this.remainder = Buffer.alloc(0);

@@ -36,14 +36,15 @@ public sealed class ItemEffectsStoreResourceTests(ITestOutputHelper output)
         var compact = ItemEffectsStore.CompactItemsProof(original);
         Assert.Empty(compact.Opening.Build.IdentityFields); Assert.Empty(compact.Opening.Build.Regions);
         Assert.Empty(compact.Opening.Build.AdvertisedRegions); Assert.Empty(compact.Opening.Build.RouteRegions);
-        Assert.Empty(compact.Opening.Build.SourceReceipts);
+        Assert.Empty(compact.Opening.Build.SourceReceipts); Assert.Empty(compact.Opening.Build.CdnConfigHistory);
+        Assert.Equal(original.Opening.Build.CdnConfig, compact.Opening.Build.CdnConfig);
         Assert.Same(original.Opening.Reference, compact.Opening.Reference);
         Assert.Same(original.Opening.Versions, compact.Opening.Versions); Assert.Same(original.Opening.Cdns, compact.Opening.Cdns);
         Assert.Same(original.Artifact, compact.Artifact); Assert.Same(original.Snapshot, compact.Snapshot);
         Assert.Same(original.Item, compact.Item); Assert.Same(original.Configurations, compact.Configurations);
         Assert.Equal(build with { IdentityFields = compact.Opening.Build.IdentityFields, Regions = compact.Opening.Build.Regions,
             AdvertisedRegions = compact.Opening.Build.AdvertisedRegions, RouteRegions = compact.Opening.Build.RouteRegions,
-            SourceReceipts = compact.Opening.Build.SourceReceipts }, compact.Opening.Build);
+            SourceReceipts = compact.Opening.Build.SourceReceipts, CdnConfigHistory = compact.Opening.Build.CdnConfigHistory }, compact.Opening.Build);
         Assert.Equal(before, JsonSerializer.Serialize(original.Opening.Build, ItemEffectsBridgePolicy.Json));
         Assert.Empty(await f.H.Catalog.ReauthorizeItemEffectsAsync(compact, null, [], default));
         if (poisonConfiguration)

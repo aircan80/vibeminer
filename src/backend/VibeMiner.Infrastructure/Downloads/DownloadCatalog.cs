@@ -391,7 +391,8 @@ public sealed partial class DiscoveryCatalog
     {
         var build = ReadCore(context.Build.ProductId, "all", 1, null, CancellationToken.None, context.Build.Id).Builds.Single();
         var reference = context.Reference;
-        return build with { IsLocal = isLocal, SourceReceipts = build.SourceReceipts.Where(receipt => receipt.Region != reference.Region).Concat(new[]
+        // The admission keeps the CDN configuration it was made with, even if a newer one is advertised by now.
+        return build with { CdnConfig = context.Build.CdnConfig, IsLocal = isLocal, SourceReceipts = build.SourceReceipts.Where(receipt => receipt.Region != reference.Region).Concat(new[]
         {
             new SourceReceipt(reference.Region, "versions", context.Versions.Url, context.Versions.RetrievedAt, context.Versions.Sha256, context.Versions.Bytes.Length, reference.VersionsRowOrdinal),
             new SourceReceipt(reference.Region, "cdns", context.Cdns.Url, context.Cdns.RetrievedAt, context.Cdns.Sha256, context.Cdns.Bytes.Length, reference.CdnsRowOrdinal)

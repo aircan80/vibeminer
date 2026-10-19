@@ -109,6 +109,27 @@ public sealed class HostTests
         Assert.Equal(0, process.ExitCode); Assert.Equal("", await stderr);
         Assert.Null(await process.StandardOutput.ReadLineAsync());
     }
+    [Theory]
+    [InlineData("DROP TABLE catalog_lineage; PRAGMA user_version=14;", 3, "CATALOG_RESET_REQUIRED", "fresh catalog")]
+    [InlineData("PRAGMA user_version=16;", 4, "CATALOG_VERSION", "newer engine")]
+    public async Task RealProcessRefusesAnOlderOrNewerCatalogWithItsTypedCode(string sql, int exitCode, string code, string text)
+    {
+        using var directory = new TempDirectory();
+        await using (var catalog = await DiscoveryCatalog.OpenAsync(directory.Path)) { }
+        using (var db = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(directory.Path, "discovery-v1.sqlite3")};Pooling=False"))
+        { db.Open(); using var command = db.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery(); }
+        var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+        var executable = dotnetRoot is null ? "dotnet" : Path.Combine(dotnetRoot, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+        var start = new ProcessStartInfo(executable) { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        start.ArgumentList.Add(typeof(ProtocolHost).Assembly.Location); start.ArgumentList.Add("--data-dir"); start.ArgumentList.Add(directory.Path);
+        using var process = Process.Start(start)!;
+        var stderr = process.StandardError.ReadToEndAsync(); var stdout = process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(exitCode, process.ExitCode); Assert.Equal("", await stdout);
+        var message = await stderr;
+        Assert.Contains(code, message, StringComparison.Ordinal);
+        Assert.Contains(text, message, StringComparison.Ordinal);
+    }
     [Fact]
     public async Task Table_data_dispatch_validates_exact_scope_and_reports_cancel_after_cleanup()
     {

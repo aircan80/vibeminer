@@ -317,3 +317,42 @@ it.each(['items.effects.data','items.effects.prepare','items.effects.page','item
 it('owns edge snapshots through async replies and refuses response order substitution',async()=>{const ready=(await import('../../../contracts/examples/item-effects-readiness.json')).default,value=structuredClone((await import('../../../contracts/examples/item-effect-details.json')).default),p={...ready.selection.context,itemsArtifactId:ready.selection.itemsArtifactId,itemId:ready.selection.itemId,bridgeIndexArtifactId:value.bridgeIndexArtifactId,edges:value.outcomes.map(o=>({...o.key}))};const{client,child}=await effectsSetup(),work=client.request('items.effects.details',p,'effects');p.edges[0].indexOrdinal='3';child.reply('effects',value);expect((await work as {outcomes:{key:{indexOrdinal:string}}[]}).outcomes[0].key.indexOrdinal).toBe('0');const bad=client.request('items.effects.details',{...p,edges:[{indexOrdinal:'0'},{indexOrdinal:'1'}]},'bad').catch(e=>e.code);value.outcomes.reverse();child.reply('bad',value);expect(await bad).toBe('PROTOCOL_ERROR');});
 it.each(['counter','table','missingTable','localProgress','region'] as const)('refuses dishonest effects progress %s before renderer delivery',async kind=>{const ready=(await import('../../../contracts/examples/item-effects-readiness.json')).default,p={...ready.selection.context,itemsArtifactId:ready.selection.itemsArtifactId,itemId:ready.selection.itemId};const{client,child}=await effectsSetup(),method=kind==='localProgress'?'items.effects.data':'items.effects.prepare',work=client.request(method,p,'effects').catch(e=>e.code),listener=vi.fn();client.on('progress',listener);const value:Record<string,unknown>={protocolVersion:1,type:'progress',requestId:'effects',sequence:1,stage:'Rows',region:null,unit:'rows',completed:1,total:2,tableId:'00cb674f'};if(kind==='counter')value.total=9007199254740992;if(kind==='table')value.tableId='50238ec2';if(kind==='missingTable')delete value.tableId;if(kind==='region')value.region='eu';child.stdout.write(JSON.stringify(value)+'\n');expect(await work).toBe('PROTOCOL_ERROR');expect(listener).not.toHaveBeenCalled();});
 it('bounds complete effects error envelopes with escaping and preserves independent cancel acknowledgement',async()=>{const ready=(await import('../../../contracts/examples/item-effects-readiness.json')).default,p={...ready.selection.context,itemsArtifactId:ready.selection.itemsArtifactId,itemId:ready.selection.itemId};const{client,child}=await effectsSetup(),id='\\'.repeat(262000),work=client.request('items.effects.data',p,id).catch(e=>e.code);child.stdout.write(JSON.stringify({protocolVersion:1,id,error:{code:'AUTHORED',message:'x'.repeat(1024),retryable:false}})+'\n');expect(await work).toBe('PROTOCOL_ERROR');const next=await effectsSetup(),pending=next.client.request('items.effects.prepare',p,'pending').catch(e=>e.code),cancel=next.client.request('request.cancel',{requestId:'pending'},'cancel-effects');next.child.reply('cancel-effects',{requested:true});await expect(cancel).resolves.toEqual({requested:true});expect(next.client.hasFailed).toBe(false);next.child.stdout.write(JSON.stringify({protocolVersion:1,id:'pending',error:{code:'CANCELED',message:'Canceled.',retryable:true}})+'\n');expect(await pending).toBe('CANCELED');});
+describe('refused catalog exit', () => {
+  it('reports an older catalog as a typed non-retryable state even when stdout closes before the exit code', async () => {
+    const { child, client } = setup(); const hello = client.hello().catch(error => error);
+    child.stdout.end(); await new Promise(resolve => setImmediate(resolve));
+    expect(client.hasFailed).toBe(false); child.emit('exit', 3);
+    const failure = await hello;
+    expect(failure).toMatchObject({ code: 'CATALOG_RESET_REQUIRED', retryable: false });
+    expect(failure.message).toMatch(/made by an older VibeMiner/); expect(failure.message).toMatch(/fresh catalog is needed/);
+    expect(failure.message).not.toMatch(/\bdelete\b|\berase\b|\breset\b/i);
+    await expect(client.request('products.list', {})).rejects.toMatchObject({ code: 'CATALOG_RESET_REQUIRED' });
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+  it('names the catalog folder and the user\'s own step, offering no change to it', async () => {
+    const child = new Child(); children.push(child); const client = new EngineClient(child, { dataDirectory: '/authored/profile/engine-v1' });
+    const hello = client.hello().catch(error => error); child.emit('exit', 3);
+    const failure = await hello;
+    expect(failure.message).toContain('The catalog folder is /authored/profile/engine-v1.');
+    expect(failure.message).toContain('Close VibeMiner, move or rename that folder (for example to engine-v1.old), then start VibeMiner again.');
+    expect(failure.message).not.toMatch(/\bdelete\b|\berase\b|\breset\b|\bremove\b/i);
+  });
+  it('classifies the exit code when it arrives before stdout closes', async () => {
+    const { child, client } = setup(); const hello = client.hello().catch(error => error);
+    child.emit('exit', 3); child.stdout.end();
+    expect(await hello).toMatchObject({ code: 'CATALOG_RESET_REQUIRED', retryable: false });
+  });
+  it('reports a newer catalog separately and other exits as the generic retryable stop', async () => {
+    const newer = setup(), crashed = setup();
+    const a = newer.client.hello().catch(error => error), b = crashed.client.hello().catch(error => error);
+    newer.child.emit('exit', 4); crashed.child.emit('exit', 1);
+    expect(await a).toMatchObject({ code: 'CATALOG_VERSION', retryable: false });
+    expect(await b).toMatchObject({ code: 'ENGINE_EXITED', retryable: true });
+  });
+  it('still fails a closed pipe without an exit after a bounded grace and stops the process', async () => {
+    vi.useFakeTimers(); const { child, client } = setup(); const hello = client.hello().catch(error => error);
+    child.stdout.end(); await vi.advanceTimersByTimeAsync(1999); expect(client.hasFailed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await hello).toMatchObject({ code: 'ENGINE_EXITED', retryable: true }); expect(child.kill).toHaveBeenCalled();
+  });
+});

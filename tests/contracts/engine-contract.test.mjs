@@ -29,6 +29,18 @@ test('authored discovery fixtures conform to the canonical wire schema', async (
   assert.equal(validator('DiscoveryPage')(page), false, 'exact build IDs cannot silently become JavaScript numbers');
 });
 
+test('a build carries its CDN configuration history outside its identity fields', async () => {
+  const page = JSON.parse(await readFile(path.join(root, 'contracts/examples/discovery-page.json'), 'utf8'));
+  const build = page.builds[0], [current] = build.cdnConfigHistory;
+  assert.equal(current.cdnConfig, build.cdnConfig, 'the newest history entry is the build projection CDN configuration');
+  assert.equal('CDNConfig' in build.identityFields, false, 'CDNConfig is not a build identity field');
+  validate('Build', { ...build, cdnConfigHistory: [current, { ...current, cdnConfig: 'c'.repeat(32), advertisedRegions: [] }] });
+  const { cdnConfigHistory, ...withoutHistory } = build;
+  assert.equal(validator('Build')(withoutHistory), false, 'every build projection states its CDN configuration history');
+  assert.equal(validator('Build')({ ...build, cdnConfigHistory: [{ ...current, cdnConfig: 'B'.repeat(32) }] }), false, 'history keys are normalized lowercase hashes');
+  assert.equal(validator('Build')({ ...build, cdnConfigHistory: [{ ...current, extra: true }] }), false, 'history entries are closed');
+});
+
 test('Home configuration admission cannot claim a prepared inventory or invent a scope', async () => {
   const snapshot = JSON.parse(await readFile(path.join(root, 'contracts/examples/workspace-snapshot.json'), 'utf8'));
   validate('WorkspaceSnapshot', snapshot);

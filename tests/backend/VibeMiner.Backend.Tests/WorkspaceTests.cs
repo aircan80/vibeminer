@@ -211,7 +211,7 @@ public sealed class WorkspaceTests
         var page = await upgraded.Catalog.ReadAsync("wow", "all", 50, null, CancellationToken.None);
         var request = new WorkspaceRequest("wow", page.Builds[0].Id, "us");
         Assert.Equal("configurationReady", (await upgraded.Service.OpenAsync(request)).Readiness);
-        Assert.Equal(14L, upgraded.Scalar("PRAGMA user_version"));
+        Assert.Equal(15L, upgraded.Scalar("PRAGMA user_version"));
     }
 
     [Fact]
@@ -455,11 +455,24 @@ public sealed class WorkspaceTests
         public List<string> Calls { get; } = [];
         public string BuildKey { get; private set; } = "";
         public string CdnKey { get; private set; } = "";
+        /// <summary>A republished CDN configuration for the same build, listing one more archive.</summary>
+        public string RepublishedCdnKey { get; private set; } = "";
         private byte[] buildBytes = [];
         private byte[] cdnBytes = [];
+        private byte[] republishedCdnBytes = [];
+        private string cdnsDocument = "";
         public Func<string, HttpResponseMessage>? Response;
         public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? AsyncResponse;
-        public HttpResponseMessage GoodResponse(string key) => new(HttpStatusCode.OK) { Content = new ByteArrayContent(key == BuildKey ? buildBytes : key == CdnKey ? cdnBytes : throw new InvalidOperationException("Unexpected configuration key.")) };
+        public HttpResponseMessage GoodResponse(string key) => new(HttpStatusCode.OK) { Content = new ByteArrayContent(key == BuildKey ? buildBytes : key == CdnKey ? cdnBytes : key == RepublishedCdnKey ? republishedCdnBytes : throw new InvalidOperationException("Unexpected configuration key.")) };
+        /// <summary>Commit a refresh that advertises the selected build with another CDN configuration.</summary>
+        public Task<DiscoveryPage> RepublishAsync(string? cdnKey = null) =>
+            CommitDiscoveryAsync(Fixtures.Versions($"us|{BuildKey}|{cdnKey ?? RepublishedCdnKey}||00123|1.2.3.00123||selected"));
+        public async Task<DiscoveryPage> CommitDiscoveryAsync(string versions)
+        {
+            var attempt = await Fixtures.Attempt(versions, cdnsDocument);
+            var generation = await Catalog.BeginRefreshAsync("wow", CancellationToken.None);
+            return await Catalog.CommitAsync("wow", generation, attempt, Clock.Now.ToString("O"), CancellationToken.None);
+        }
         public static async Task<OpeningFixture> CreateAsync(string? buildText = null, string server = "https://us.cdn.blizzard.com/?maxhosts=2", bool duplicateRows = false, TempDirectory? directory = null, bool seed = true)
         {
             var temporary = directory ?? new TempDirectory();
@@ -469,6 +482,8 @@ public sealed class WorkspaceTests
             fixture.cdnBytes = Encoding.UTF8.GetBytes("# authored CDN config\narchives = " + Fixtures.C + "\nunknown-field = retained\n");
             fixture.BuildKey = Convert.ToHexStringLower(MD5.HashData(fixture.buildBytes));
             fixture.CdnKey = Convert.ToHexStringLower(MD5.HashData(fixture.cdnBytes));
+            fixture.republishedCdnBytes = Encoding.UTF8.GetBytes("# authored republished CDN config\narchives = " + Fixtures.C + " " + Fixtures.A + "\nunknown-field = retained\n");
+            fixture.RepublishedCdnKey = Convert.ToHexStringLower(MD5.HashData(fixture.republishedCdnBytes));
             fixture.client = new HttpClient(new Handler(async (request, token) =>
             {
                 var uri = request.RequestUri!.AbsoluteUri; fixture.Calls.Add(uri);
@@ -476,21 +491,15 @@ public sealed class WorkspaceTests
                 if (fixture.AsyncResponse is not null) return await fixture.AsyncResponse(request, token);
                 var key = request.RequestUri.Segments[^1]; return fixture.Response?.Invoke(key) ?? fixture.GoodResponse(key);
             }));
+            fixture.cdnsDocument = "Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0|ConfigPath!STRING:0\nus|tpr/wow|us.cdn.blizzard.com|" + server + "|tpr/configs/data\n";
             fixture.Preparer = new(fixture.Catalog, fixture.Objects, fixture.client, fixture.Clock);
             fixture.Service = new(fixture.Preparer);
             if (seed)
             {
                 string Row(string unknown) => $"us|{fixture.BuildKey}|{fixture.CdnKey}||00123|1.2.3.00123||{unknown}";
-                var cdns = "Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0|ConfigPath!STRING:0\nus|tpr/wow|us.cdn.blizzard.com|" + server + "|tpr/configs/data\n";
-                await Commit(Fixtures.Versions(Row("baseline")));
-                var page = await Commit(Fixtures.Versions(duplicateRows ? [Row("selected"), Row("selected")] : [Row("selected")]));
+                await fixture.CommitDiscoveryAsync(Fixtures.Versions(Row("baseline")));
+                var page = await fixture.CommitDiscoveryAsync(Fixtures.Versions(duplicateRows ? [Row("selected"), Row("selected")] : [Row("selected")]));
                 fixture.Request = new("wow", page.Builds.Single(build => build.IdentityFields["Opaque"] == "selected").Id, "us");
-                async Task<DiscoveryPage> Commit(string versions)
-                {
-                    var attempt = await Fixtures.Attempt(versions, cdns);
-                    var generation = await fixture.Catalog.BeginRefreshAsync("wow", CancellationToken.None);
-                    return await fixture.Catalog.CommitAsync("wow", generation, attempt, fixture.Clock.Now.ToString("O"), CancellationToken.None);
-                }
             }
             return fixture;
         }

@@ -249,7 +249,7 @@ public sealed class RetentionCatalogTests
     {
         await using var h = await Harness.Create(); await h.RecordPayloads();
         await h.Execute(CatalogMigrationFixture.RemoveV9 + "PRAGMA user_version=8");
-        await h.Restart(); Assert.Equal(14, await h.Scalar("PRAGMA user_version"));
+        await h.Restart(); Assert.Equal(15, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(2, await h.Scalar("SELECT COUNT(*) FROM encoded_objects"));
         Assert.Equal(0, await h.Scalar("SELECT COUNT(*) FROM retention_jobs"));
         Assert.Equal(0, await h.Scalar("SELECT COUNT(*) FROM retention_coverage"));
@@ -263,7 +263,7 @@ public sealed class RetentionCatalogTests
         var saved = await h.Set(RetentionAction.Pause);
         await h.Execute(CatalogMigrationFixture.RemoveV10 + "PRAGMA user_version=9");
         await h.Restart();
-        Assert.Equal(14, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(15, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(2, await h.Scalar("SELECT COUNT(*) FROM encoded_objects"));
         Assert.Equal(0, await h.Scalar("SELECT COUNT(*) FROM icon_artifacts"));
         Assert.Equal(0, await h.Scalar("SELECT COUNT(*) FROM item_icon_admissions"));
@@ -282,7 +282,7 @@ public sealed class RetentionCatalogTests
             "INSERT INTO icon_artifacts VALUES('original-icon','icon-evidence');" +
             CatalogMigrationFixture.RemoveV11 + "PRAGMA user_version=10");
         await h.Restart();
-        Assert.Equal(14, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(15, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(2, await h.Scalar("SELECT COUNT(*) FROM encoded_objects"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM items_artifacts WHERE descriptor='item-evidence'"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM icon_artifacts WHERE descriptor='icon-evidence'"));
@@ -304,7 +304,7 @@ public sealed class RetentionCatalogTests
             "INSERT INTO item_classification_artifacts VALUES('original-label','label-evidence');" +
             CatalogMigrationFixture.RemoveV12 + "PRAGMA user_version=11");
         await h.Restart();
-        Assert.Equal(14, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(15, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(2, await h.Scalar("SELECT COUNT(*) FROM encoded_objects"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM items_artifacts WHERE descriptor='item-evidence'"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM icon_artifacts WHERE descriptor='icon-evidence'"));
@@ -370,6 +370,42 @@ public sealed class RetentionCatalogTests
         await using var h = await Harness.Create(); await h.Execute(mutation);
         await Assert.ThrowsAsync<DiscoveryException>(() => h.Set(RetentionAction.DownloadAll));
         Assert.Equal(0, await h.Scalar("SELECT COUNT(*) FROM retention_jobs"));
+    }
+
+    [Fact]
+    public async Task Download_all_plan_keeps_its_admitted_CDN_config_after_the_build_is_republished()
+    {
+        await using var h = await Harness.Create();
+        await h.Set(RetentionAction.DownloadAll);
+        var job = (await h.Driver.ClaimNextRetentionAsync(default))!;
+        Assert.Equal(h.Fixture.CdnKey, job.Plan.Configurations.Single(c => c.Role == "cdnConfig").Key);
+        await h.Driver.SettleRetentionAsync(job.Binding, RetentionPassOutcome.Waiting, new("OFFLINE", "Offline.", true), default);
+
+        // Same build, republished CDN configuration: one build row, newest config first, the plan unchanged.
+        var republished = new string('e', 32);
+        var attempt = h.Fixture.Discovery; var row = attempt.Observations.Single();
+        var fields = row.OriginalFields.ToDictionary(p => p.Key, p => p.Value); fields["CDNConfig"] = republished;
+        var docs = attempt.Documents.Select(d =>
+        {
+            if (d.Role != "versions") return d;
+            var bytes = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(d.Bytes).Replace(h.Fixture.CdnKey, republished, StringComparison.Ordinal));
+            return d with { Bytes = bytes, Sha256 = Harness.Sha(bytes) };
+        }).ToArray();
+        var generation = await h.Catalog.BeginRefreshAsync("wow", default);
+        var page = await h.Catalog.CommitAsync("wow", generation, attempt with { Documents = docs, Observations = [row with { OriginalFields = fields }] }, "2026-10-19T01:00:00Z", default);
+        var build = Assert.Single(page.Builds);
+        Assert.Equal(h.Target.BuildIdentity, build.Id); Assert.Equal(republished, build.CdnConfig);
+        Assert.Equal(new[] { republished, h.Fixture.CdnKey }, build.CdnConfigHistory.Select(entry => entry.CdnConfig));
+
+        var resumed = await h.Set(RetentionAction.Resume); Assert.Equal(RetentionState.Queued, resumed.State);
+        var current = (await h.Driver.ClaimNextRetentionAsync(default))!;
+        Assert.Equal(job.Plan.SourceReference, current.Plan.SourceReference);
+        Assert.Equal(h.Fixture.CdnKey, current.Plan.Configurations.Single(c => c.Role == "cdnConfig").Key);
+        var pinned = await h.Catalog.ResolveOpeningAsync(new("wow", h.Target.BuildIdentity, "us"), current.Plan.SourceReference, default);
+        Assert.Equal(h.Fixture.CdnKey, pinned.Build.CdnConfig);
+        // A plan whose CDN configuration differs from its pinned observation is refused.
+        await h.Execute($"UPDATE observations SET cdn_config='{republished}' WHERE generation={job.Plan.SourceReference.Generation} AND ordinal={job.Plan.SourceReference.VersionsRowOrdinal}");
+        Assert.Equal("RETENTION_STORAGE_INTEGRITY", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Read())).Code);
     }
 
     [Fact]

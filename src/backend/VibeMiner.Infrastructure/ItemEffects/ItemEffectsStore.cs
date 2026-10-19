@@ -152,7 +152,8 @@ public sealed partial class ItemEffectsStore : IItemEffectsStore, IAsyncDisposab
             {
                 IdentityFields = System.Collections.ObjectModel.ReadOnlyDictionary<string, string>.Empty,
                 Regions = Array.Empty<string>(), AdvertisedRegions = Array.Empty<string>(),
-                RouteRegions = Array.Empty<string>(), SourceReceipts = Array.Empty<SourceReceipt>()
+                RouteRegions = Array.Empty<string>(), SourceReceipts = Array.Empty<SourceReceipt>(),
+                CdnConfigHistory = Array.Empty<CdnConfigObservation>()
             }
         }
     };

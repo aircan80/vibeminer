@@ -62,6 +62,30 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 describe('verified inventory opening and preserved discovery', () => {
+  it('keeps the open build on its CDN configuration and shows a newer advertised one after refresh', async () => {
+    const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    const opened = routed(), newer = 'e'.repeat(32);
+    vi.mocked(bridge.refresh).mockResolvedValue(success({ ...pageFixture, builds: [{ ...opened, cdnConfig: newer, cdnConfigHistory: [{ ...opened.cdnConfigHistory[0], cdnConfig: newer, firstSeenAt: '2026-10-18T13:00:00Z', lastSeenAt: '2026-10-18T13:00:00Z' }, { ...opened.cdnConfigHistory[0], advertisedRegions: [] }] }] } as DiscoveryPage));
+    fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); fireEvent.click(await screen.findByRole('button', { name: 'Refresh builds' }));
+    await screen.findByText(/Discovery complete/); await select();
+    const note = screen.getByText('US now advertises a different CDN configuration.').closest('[role="note"]')!;
+    expect(within(note as HTMLElement).getByText(`${opened.cdnConfig.slice(0, 10)}…${opened.cdnConfig.slice(-4)}`)).toBeVisible();
+    expect(within(note as HTMLElement).getByText(/Open again to switch/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Source details' }));
+    const marked = within(screen.getByRole('dialog')).getAllByRole('heading', { level: 4 }).filter(h => /Used by the open build/.test(h.textContent || ''));
+    expect(marked.map(h => h.textContent)).toEqual([`Earlier · ${opened.cdnConfig.slice(0, 10)}…${opened.cdnConfig.slice(-4)} · Used by the open build`]);
+    expect(bridge.open).toHaveBeenCalledTimes(1);
+  });
+  it('does not tell a US open about a CDN configuration only another region advertises in the same check', async () => {
+    const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    const opened = routed(), entry = opened.cdnConfigHistory[0], other = '0'.repeat(32);
+    // us keeps the open configuration; eu advertises another in the same check, which wins only by key order.
+    vi.mocked(bridge.refresh).mockResolvedValue(success({ ...pageFixture, builds: [{ ...opened, cdnConfig: other, cdnConfigHistory: [{ ...entry, cdnConfig: other, advertisedRegions: ['eu'], regions: ['eu'], sourceReceipts: entry.sourceReceipts.map(r => ({ ...r, region: 'eu' })) }, entry] }] } as DiscoveryPage));
+    fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); fireEvent.click(await screen.findByRole('button', { name: 'Refresh builds' }));
+    await screen.findByText(/Discovery complete/); await select();
+    expect(screen.queryByText(/now advertises a different CDN configuration/)).not.toBeInTheDocument();
+    expect(screen.getByText('Several CDN configurations in one check.')).toBeVisible();
+  });
   it('opens exact verified Home immediately without a synthetic preparation frame or fake readiness', async () => {
     const { bridge } = setup(); await begin();
     const heading = await screen.findByRole('heading', { name: 'Build overview' }); await waitFor(() => expect(heading).toHaveFocus());
