@@ -160,6 +160,8 @@ public sealed class CreatureDisplayServiceTests
             { bSeen.Add(p.Completed); if (p.Completed == 0) bFirst.TrySetResult(); if (p.Completed == 1000) bLatest.TrySetResult(); return Task.CompletedTask; });
             await emitA!(new("Reading", "rows", 0, 1000)); await emitB!(new("Reading", "rows", 0, 1000));
             await Task.WhenAll(aEntered.Task, bFirst.Task).WaitAsync(Deadline);
+            // B's pump arms its throttle timer after its first callback returns. Advancing before that would arm it at 200 ms, which never fires.
+            Assert.Equal(TimeSpan.FromMilliseconds(100).Ticks, await clock.FirstArmed.Task.WaitAsync(Deadline));
             for (var i = 1; i <= 1000; i++)
             { Assert.True(emitA(new("Reading", "rows", i, 1000)).IsCompletedSuccessfully); Assert.True(emitB(new("Reading", "rows", i, 1000)).IsCompletedSuccessfully); }
             clock.Advance(TimeSpan.FromMilliseconds(100)); await bLatest.Task.WaitAsync(Deadline);
@@ -171,7 +173,9 @@ public sealed class CreatureDisplayServiceTests
             await b.WaitAsync(Deadline); Assert.False(a.IsCompleted);
             await service.PrepareDisplayAsync(Request with { CreatureId = "125" }).WaitAsync(Deadline);
             var closing = service.DisposeAsync().AsTask(); Assert.False(closing.IsCompleted); aRelease.SetResult();
-            await a.WaitAsync(Deadline); await closing.WaitAsync(Deadline); Assert.Single(aSeen);
+            await a.WaitAsync(Deadline); await closing.WaitAsync(Deadline);
+            // A's close runs on its own continuation and can lose to the pump's next check, so A may get the one value it held. Never more.
+            Assert.True(aSeen.SequenceEqual([0]) || aSeen.SequenceEqual([0, 1000]), $"A saw [{string.Join(", ", aSeen)}]");
         }
         finally { sourceRelease.TrySetResult(); aRelease.TrySetResult(); await service.DisposeAsync(); }
     }
@@ -217,6 +221,7 @@ public sealed class CreatureDisplayServiceTests
     private sealed class Clock : TimeProvider
     {
         private readonly object gate = new(); private readonly List<Timer> timers = []; private long ticks;
+        internal readonly TaskCompletionSource<long> FirstArmed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
         public override long GetTimestamp() { lock (gate) return ticks; }
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
@@ -229,7 +234,11 @@ public sealed class CreatureDisplayServiceTests
         private sealed class Timer(Clock clock, TimerCallback callback, object? state) : ITimer
         {
             internal readonly TimerCallback Callback = callback; internal readonly object? State = state; internal long Due;
-            public bool Change(TimeSpan dueTime, TimeSpan period) { lock (clock.gate) Due = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : clock.ticks + dueTime.Ticks; return true; }
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                long due; lock (clock.gate) Due = due = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : clock.ticks + dueTime.Ticks;
+                if (due != long.MaxValue) clock.FirstArmed.TrySetResult(due); return true;
+            }
             public void Dispose() { lock (clock.gate) Due = long.MaxValue; }
             public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
         }
