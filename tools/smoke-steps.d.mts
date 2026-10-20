@@ -1,0 +1,14 @@
+import type { ElectronApplication, Page } from '@playwright/test';
+import type { WorkspaceSnapshot } from '../contracts/generated/discovery';
+export type SmokeOpening = { productId: string; buildIdentity: string; sourceRegion: string; version: string };
+export type SmokeCatalog = { builds: { productId: string; id: string; version: string }[]; products: { productId: string; lastCheckedAt: string | null; connection: string }[] };
+export const registeredProducts: number;
+export function launchApp(options: { executablePath?: string; appPath?: string; directory: string; env: Record<string, string | undefined>; offline?: boolean }): Promise<{ application: ElectronApplication; page: Page }>;
+export function expectEmptyDiscovery(page: Page, options?: { productCount?: number }): Promise<void>;
+export function refreshBuilds(page: Page, options: { timeout: number }): Promise<void>;
+export function readCatalog(page: Page): Promise<SmokeCatalog>;
+export function selectBuild(page: Page, options?: { productId?: string }): Promise<SmokeOpening>;
+export function openBuild(page: Page, options: { timeout: number }): Promise<void>;
+export function expectHome(page: Page, opening: SmokeOpening): Promise<WorkspaceSnapshot>;
+export function expectHomeDetails(page: Page, workspace: WorkspaceSnapshot): Promise<void>;
+export function expectStoredDiscovery(page: Page, expected: { catalog: SmokeCatalog; selected: SmokeOpening }): Promise<void>;

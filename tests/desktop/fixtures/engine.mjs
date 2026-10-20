@@ -27,6 +27,10 @@ const tableManifest = JSON.parse(readFileSync(path.join(root, `src/backend/VibeM
 const tableEntries = tableManifest.map(entry => ({ tableId: entry.tableHash.toLowerCase(), name: entry.tableName ?? null, db2FileDataId: entry.db2FileDataID === undefined ? null : String(entry.db2FileDataID), definitionState: tableDefinitions[entry.tableHash.toLowerCase()] ? 'bundled' : 'notBundled', sourceState: 'notChecked', rowsState: 'notPrepared' })).sort((a, b) => Number(b.definitionState === 'bundled') - Number(a.definitionState === 'bundled') || (a.name ?? '').localeCompare(b.name ?? '', 'en', { sensitivity: 'base' }) || a.tableId.localeCompare(b.tableId));
 const offlineEmpty = process.env.VIBEMINER_FIXTURE_OFFLINE_EMPTY === '1';
 const saved = new Map(offlineEmpty ? [] : [['wow', { ...seed, connection: 'notChecked' }]]);
+// VIBEMINER_FIXTURE_PERSIST=1 keeps saved observations in the control directory, so a relaunch sees them like a real catalog.
+const persisted = process.env.VIBEMINER_FIXTURE_PERSIST === '1' ? path.join(directory, 'persisted-catalog.json') : null;
+if (persisted && existsSync(persisted)) { saved.clear(); for (const [id, page] of JSON.parse(readFileSync(persisted, 'utf8'))) saved.set(id, page); }
+const persist = () => { if (persisted) writeFileSync(persisted, JSON.stringify([...saved])); };
 const active = new Map();
 const opened = new Map();
 const tableData = new Map();
@@ -300,7 +304,7 @@ async function dispatch(request) {
       snapshot.build = build;
       snapshot.build.isNew = false; snapshot.build.isLocal = true;
       const acknowledged = saved.get(params.productId)?.builds.find(row => row.id === build.id);
-      if (acknowledged) { acknowledged.isNew = false; acknowledged.isLocal = true; }
+      if (acknowledged) { acknowledged.isNew = false; acknowledged.isLocal = true; persist(); }
       snapshot.sourceReference = { generation: '1', region: params.sourceRegion, versionsSha256: versions.sha256, versionsRowOrdinal: versions.rowOrdinal, cdnsSha256: cdns.sha256, cdnsRowOrdinal: cdns.rowOrdinal };
       for (const receipt of snapshot.configurations) {
         receipt.key = receipt.role === 'buildConfig' ? build.buildConfig : build.cdnConfig;
@@ -329,7 +333,7 @@ async function dispatch(request) {
       await Promise.all(fixtureProducts.map(async product => {
         writeFileSync(path.join(directory, `waiting-${product.id}`), id);
         await waitForRelease(`release-${product.id}`, controller.signal);
-        saved.set(product.id, checkedPage(product.id));
+        saved.set(product.id, checkedPage(product.id)); persist();
         completed++; progress();
       }));
       reply(id, catalogFor());
@@ -343,7 +347,7 @@ async function dispatch(request) {
   writeFileSync(path.join(directory, `waiting-${params.productId}`), id);
   try {
     await waitForRelease(`release-${params.productId}`, controller.signal);
-    saved.set(params.productId, checkedPage(params.productId)); reply(id, pageFor(params.productId));
+    saved.set(params.productId, checkedPage(params.productId)); persist(); reply(id, pageFor(params.productId));
   } catch { fail(id, 'CANCELED', 'Discovery canceled.'); }
   finally { active.delete(id); }
 }
