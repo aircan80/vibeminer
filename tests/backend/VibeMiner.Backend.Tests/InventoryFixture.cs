@@ -37,6 +37,19 @@ internal sealed class InventoryFixture
     public long ExpectedDecodedBytes => PayloadA.Decoded.LongLength + PayloadB.Decoded.LongLength;
     public long ExpectedMetadataEncodedBytes => Metadata.Values.Sum(value => value.Encoded.LongLength);
 
+    // Ordered matching batches stop early after a 40 ms slice, so a "Resolving" frame carries
+    // whatever committed count first crossed the 16,384-entry step, not a fixed multiple of 1024.
+    // Tests that cancel from that frame read the count back instead of matching a literal.
+    public static long? ResolvingCount(string progress, string family)
+    {
+        var prefix = $"Resolving {family} inventory · ";
+        if (!progress.StartsWith(prefix, StringComparison.Ordinal)) return null;
+        var end = progress.IndexOf(" of ", prefix.Length, StringComparison.Ordinal);
+        if (end < 0) return null;
+        return long.Parse(progress.AsSpan(prefix.Length, end - prefix.Length),
+            System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     public static InventoryFixture Create()
     {
         var a = Object("payloadA", "authored inventory payload A\n"u8.ToArray());

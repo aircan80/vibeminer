@@ -33,13 +33,20 @@ public sealed class InventoryOrderedCheckpointTests
     [Fact]
     public async Task Interrupted_matching_restarts_only_matching_and_does_not_publish_orphan_units()
     {
-        const int total=17000;
+        // A crossing batch holds at most 1024 rows, so the first report at or past 16,384 can't
+        // be the final one and the pass is still matching when the callback cancels it.
+        const int total=20000;
         await using var fixture=await CheckpointFixture.CreateAsync("download",16,total);
-        using var cancel=new CancellationTokenSource();
+        using var cancel=new CancellationTokenSource();long canceledAt=-1;
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>fixture.Catalog.ResolveOrderedEncodedAsync(fixture.Generation,"download",total,text=>
-        {if(text.StartsWith("Resolving",StringComparison.Ordinal)&&text.Contains("16,384 of",StringComparison.Ordinal))cancel.Cancel();return Task.CompletedTask;},cancel.Token));
+        {
+            if(canceledAt<0&&InventoryFixture.ResolvingCount(text,"download") is >=16384 and var count){canceledAt=count;cancel.Cancel();}
+            return Task.CompletedTask;
+        },cancel.Token));
+        Assert.InRange(canceledAt,16384,total-1);
         Assert.Equal(0,fixture.Scalar("SELECT matched FROM inventory_merge_state"));
-        Assert.Equal(16384,fixture.Scalar("SELECT count(*) FROM inventory_merge_results"));
+        // Every reported batch committed, and none after the cancel observed at that boundary.
+        Assert.Equal(canceledAt,fixture.Scalar("SELECT count(*) FROM inventory_merge_results"));
         Assert.Equal(0,fixture.Scalar("SELECT count(*) FROM inventory_units"));
         Assert.Equal(0,fixture.Scalar("SELECT count(*) FROM inventory_origins WHERE ekey IS NOT NULL"));
         await fixture.RestartAsync();

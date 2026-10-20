@@ -239,12 +239,22 @@ public sealed class InventoryPreparationTests
         await using var h=await Harness.Create();
         var context=await h.Catalog.ResolveOpeningAsync(new("wow",h.Fixture.BuildIdentity,"us"),default);
         var g=await h.Catalog.StartInventoryAsync(context,default);var key=new string('a',32);
-        await h.Catalog.AddOriginsAsync(g,Enumerable.Range(1,17000).Select(id=>new InventoryOrigin(id,"download",null,null,null,key,16,10,null,null,null,null,"authored")).ToArray(),default);
-        using var ct=new CancellationTokenSource();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>h.Catalog.ResolveOrderedEncodedAsync(g,"download",17000,text=>{if(text.Contains("16,384 of",StringComparison.Ordinal))ct.Cancel();return Task.CompletedTask;},ct.Token));
+        // At most 1024 rows per batch: the first report at or past 16,384 is never the last one.
+        const int total=20000;
+        await h.Catalog.AddOriginsAsync(g,Enumerable.Range(1,total).Select(id=>new InventoryOrigin(id,"download",null,null,null,key,16,10,null,null,null,null,"authored")).ToArray(),default);
+        using var ct=new CancellationTokenSource();long canceledAt=-1;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>h.Catalog.ResolveOrderedEncodedAsync(g,"download",total,text=>
+        {
+            if(canceledAt<0&&InventoryFixture.ResolvingCount(text,"download") is >=16384 and var count){canceledAt=count;ct.Cancel();}
+            return Task.CompletedTask;
+        },ct.Token));
+        Assert.InRange(canceledAt,16384,total-1);
+        Assert.Equal(canceledAt,await h.Scalar($"SELECT count(*) FROM inventory_merge_results WHERE g={g}"));
+        Assert.Equal(0L,await h.Scalar($"SELECT matched FROM inventory_merge_state WHERE g={g}"));
         Assert.Equal(0L,await h.Scalar($"SELECT count(*) FROM inventory_origins WHERE g={g} AND ekey IS NOT NULL"));
-        await h.Catalog.ResolveOrderedEncodedAsync(g,"download",17000,_=>Task.CompletedTask,default);
-        Assert.Equal(17000L,await h.Scalar($"SELECT count(*) FROM inventory_origins WHERE g={g} AND ekey='{key}'"));
+        await h.Catalog.ResolveOrderedEncodedAsync(g,"download",total,_=>Task.CompletedTask,default);
+        Assert.Equal((long)total,await h.Scalar($"SELECT count(*) FROM inventory_origins WHERE g={g} AND ekey='{key}'"));
+        Assert.Equal(0L,await h.Scalar($"SELECT count(*) FROM inventory_merge_results WHERE g={g}"));
     }
     [Fact]
     public async Task Full_width_size_rows_can_declare_objects_absent_from_EN_and_still_detect_conflicting_duplicates()
