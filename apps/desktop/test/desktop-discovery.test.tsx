@@ -534,6 +534,9 @@ describe('status bar activity summary', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open build' }));
     await waitFor(() => expect(bridge.open).toHaveBeenCalledTimes(1));
     const requestId = vi.mocked(bridge.open).mock.calls[0][1];
+    // Check the build list's status bar while it is visible, not in the frame before preparation hides it.
+    fireEvent.click(await screen.findByRole('button', { name: '← Back to build list · preparation continues' }));
+    expect(document.querySelector('.discovery-screen')).not.toHaveAttribute('hidden');
     act(() => { for (const listener of listeners) listener({ protocolVersion: 1, type: 'progress', requestId, sequence: 2, stage: 'Building download ledger · 2 of 6 objects', region: 'us', completed: 2, total: 6, unit: 'objects' }); });
     const status = document.querySelector('.dv-statusbar .dv-busy:last-child')!;
     expect(status).toHaveTextContent(/^Build preparation · Building download ledger · 2 of 6 objects · 33% of current stage$/);
@@ -549,6 +552,10 @@ describe('status bar activity summary', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open build' }));
     await waitFor(() => expect(bridge.open).toHaveBeenCalledTimes(1));
     const openId = vi.mocked(bridge.open).mock.calls[0][1];
+    // A pending opening switches to preparation one frame later. Wait for that switch, then go back
+    // to the build list the way a user does, so Refresh builds never races the frame.
+    fireEvent.click(await screen.findByRole('button', { name: '← Back to build list · preparation continues' }));
+    expect(document.querySelector('.discovery-screen')).not.toHaveAttribute('hidden');
     fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
     const refreshId = vi.mocked(bridge.refreshAll).mock.calls[0][0];
     act(() => { for (const listener of listeners) {
