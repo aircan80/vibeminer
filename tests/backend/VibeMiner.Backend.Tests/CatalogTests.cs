@@ -352,6 +352,7 @@ public sealed class CatalogTests
             cancellation.Cancel(); return page;
         }
         public Task<DiscoveryPage> ReadAsync(string product, string filter, int limit, string? cursor, CancellationToken token) => inner.ReadAsync(product, filter, limit, cursor, token);
+        public Task<DiscoveryCatalogPage> ReadAllAsync(string? product, string filter, int limit, string? cursor, CancellationToken token) => inner.ReadAllAsync(product, filter, limit, cursor, token);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
     private sealed class NeverSource : IDiscoverySource

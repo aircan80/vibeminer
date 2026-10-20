@@ -20,7 +20,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { EngineClient, EngineFailure } from './engine-client';
-import { validProduct, validRead, validRequestId, validOpen } from '../shared/bridge';
+import { validProduct, validRead, validReadAll, validRequestId, validOpen } from '../shared/bridge';
 import { validTablesCatalog, validTableDefinition } from '../shared/tables';
 import { validDownloadRead } from '../shared/download';
 import { validInventoryRead } from '../shared/inventory';
@@ -96,6 +96,8 @@ function registerBridge(): void {
       else if (method === 'retention.read') { if (!validRetentionTarget(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid retention target.'); }
       else if (method === 'retention.set') { if (!validRetentionSet(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid retention command.'); }
       else if (method === 'discovery.read') { if (!validRead(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery query.'); }
+      else if (method === 'discovery.readAll') { if (!validReadAll(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery query.'); }
+      else if (method === 'discovery.refreshAll') { if (!params || typeof params !== 'object' || Object.keys(params).length || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery request.'); }
       else if (method === 'discovery.refresh') { if (!validProduct((params as { productId?: unknown })?.productId) || !validRequestId(requestId) || Object.keys(params as object).length !== 1) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery request.'); }
       else if (method === 'tables.prepare' || method === 'tables.data') { if (!validTableData(params) || method === 'tables.prepare' && !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact table and research locale enUS.'); }
       else if (method === 'tables.rows') { if (!validTableRows(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded table record query.'); }

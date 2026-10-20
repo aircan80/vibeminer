@@ -22,6 +22,21 @@
     "discoveryPage": {
       "$ref": "#/definitions/DiscoveryPage"
     },
+    "productDiscoveryStatus": {
+      "$ref": "#/definitions/ProductDiscoveryStatus"
+    },
+    "productRefreshProblem": {
+      "$ref": "#/definitions/ProductRefreshProblem"
+    },
+    "discoveryCatalogPage": {
+      "$ref": "#/definitions/DiscoveryCatalogPage"
+    },
+    "discoveryReadAllParams": {
+      "$ref": "#/definitions/DiscoveryReadAllParams"
+    },
+    "discoveryRefreshAllParams": {
+      "$ref": "#/definitions/DiscoveryRefreshAllParams"
+    },
     "engineProgress": {
       "$ref": "#/definitions/EngineProgress"
     },
@@ -288,6 +303,11 @@
     "build",
     "discoveryProblem",
     "discoveryPage",
+    "productDiscoveryStatus",
+    "productRefreshProblem",
+    "discoveryCatalogPage",
+    "discoveryReadAllParams",
+    "discoveryRefreshAllParams",
     "engineProgress",
     "engineError",
     "engineRequest",
@@ -634,6 +654,175 @@
       ],
       "additionalProperties": false
     },
+    "ProductDiscoveryStatus": {
+      "title": "ProductDiscoveryStatus",
+      "description": "The saved outcome of one product's latest check, the same facts a single-product DiscoveryPage carries without its builds.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "lastCheckedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checkedRegions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DiscoveryProblem"
+          }
+        },
+        "hasSavedHistory": {
+          "type": "boolean"
+        },
+        "connection": {
+          "enum": [
+            "notChecked",
+            "online",
+            "offline",
+            "partial"
+          ]
+        }
+      },
+      "required": [
+        "productId",
+        "lastCheckedAt",
+        "checkedRegions",
+        "errors",
+        "hasSavedHistory",
+        "connection"
+      ],
+      "additionalProperties": false
+    },
+    "ProductRefreshProblem": {
+      "title": "ProductRefreshProblem",
+      "description": "A product whose part of a cross-product refresh did not complete. Its saved evidence is unchanged.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "productId",
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "DiscoveryCatalogPage": {
+      "title": "DiscoveryCatalogPage",
+      "description": "One bounded page of builds across every registered product, ordered by registry product order, then numeric BuildId descending (missing or non-decimal last), then build identity.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "description": "The Product filter this page was read with; null reads every product.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "filter": {
+          "enum": [
+            "all",
+            "local",
+            "advertised"
+          ]
+        },
+        "builds": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/Build"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "products": {
+          "description": "Every registered product's saved status in registry order, whatever the Product filter.",
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/ProductDiscoveryStatus"
+          }
+        },
+        "refreshProblems": {
+          "description": "Products whose refresh attempt did not complete. Always empty for discovery.readAll.",
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/ProductRefreshProblem"
+          }
+        }
+      },
+      "required": [
+        "productId",
+        "filter",
+        "builds",
+        "nextCursor",
+        "products",
+        "refreshProblems"
+      ],
+      "additionalProperties": false
+    },
+    "DiscoveryReadAllParams": {
+      "title": "DiscoveryReadAllParams",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "filter": {
+          "enum": [
+            "all",
+            "local",
+            "advertised"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      },
+      "additionalProperties": false
+    },
+    "DiscoveryRefreshAllParams": {
+      "title": "DiscoveryRefreshAllParams",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "EngineProgress": {
       "title": "EngineProgress",
       "type": "object",
@@ -794,6 +983,8 @@
             "products.list",
             "discovery.read",
             "discovery.refresh",
+            "discovery.readAll",
+            "discovery.refreshAll",
             "workspace.open",
             "request.cancel",
             "shutdown",
@@ -847,6 +1038,38 @@
       ],
       "additionalProperties": false,
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "discovery.readAll"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/DiscoveryReadAllParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "discovery.refreshAll"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/DiscoveryRefreshAllParams"
+              }
+            }
+          }
+        },
         {
           "if": {
             "properties": {

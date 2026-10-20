@@ -34,6 +34,12 @@ public static class ProductRegistry
         if (!Products.Any(p => p.Id == product))
             throw new DiscoveryException("INVALID_PRODUCT", "Choose a product from the reviewed registry.");
     }
+    /// <summary>The product's position in the registry, which is the cross-product display order.</summary>
+    public static int Ordinal(string product)
+    {
+        for (var i = 0; i < Products.Count; i++) if (Products[i].Id == product) return i;
+        throw new DiscoveryException("INVALID_PRODUCT", "Choose a product from the reviewed registry.");
+    }
 }
 
 public sealed record SourceReceipt(string Region, string Role, string Url, string RetrievedAt,
@@ -57,6 +63,21 @@ public sealed record DiscoveryProblem(string? Region, string Code, string Messag
 public sealed record DiscoveryPage(string ProductId, IReadOnlyList<Build> Builds, string? NextCursor,
     string? LastCheckedAt, IReadOnlyList<string> CheckedRegions, IReadOnlyList<DiscoveryProblem> Errors,
     bool HasSavedHistory, string Connection);
+/// <summary>The saved outcome of one product's latest check: the same facts a single-product page carries, without builds.</summary>
+public sealed record ProductDiscoveryStatus(string ProductId, string? LastCheckedAt, IReadOnlyList<string> CheckedRegions,
+    IReadOnlyList<DiscoveryProblem> Errors, bool HasSavedHistory, string Connection);
+/// <summary>A product whose part of a cross-product refresh did not complete. Its saved evidence is unchanged.</summary>
+public sealed record ProductRefreshProblem(string ProductId, string Code, string Message);
+/// <summary>
+/// One bounded page of builds across every registered product, ordered by registry product order, then numeric
+/// BuildId descending (non-numeric last), then build identity. ProductId is the optional product filter (null = all).
+/// Products lists every registered product's saved status in registry order whatever the filter.
+/// RefreshProblems is empty for reads; a cross-product refresh lists the products whose attempt did not complete.
+/// </summary>
+public sealed record DiscoveryCatalogPage(string? ProductId, string Filter, IReadOnlyList<Build> Builds, string? NextCursor,
+    IReadOnlyList<ProductDiscoveryStatus> Products, IReadOnlyList<ProductRefreshProblem> RefreshProblems);
+/// <summary>Cross-product refresh progress: how many products have finished their check out of the registry total.</summary>
+public sealed record DiscoveryRefreshProgress(int Completed, int Total);
 
 /// <summary>
 /// Build identity v2: product + every versions field except Region and CDNConfig. CDNConfig only lists

@@ -1,8 +1,12 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { launch, root } from './helpers';
+
+async function calls(directory: string) {
+  return (await readFile(path.join(directory, 'requests.ndjson'), 'utf8')).trim().split('\n').map(x => JSON.parse(x) as { method: string; params: Record<string, unknown> });
+}
 
 test('real Electron and C# open fresh discovery without an implicit remote check', async () => {
   const session = await launch();
@@ -11,12 +15,17 @@ test('real Electron and C# open fresh discovery without an implicit remote check
     await expect(session.page.locator('.download-activity-trigger, .dv-chip')).toHaveCount(0);
     await expect(session.page.locator('.download-activity-floating')).toHaveCount(0);
     expect(await session.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMenuBarVisible())).toBe(false);
-    await expect(session.page.getByLabel('Product', { exact: true })).toHaveValue('wow');
-    await expect(session.page.getByRole('heading', { name: 'Your research starts with a build' })).toBeVisible();
+    await expect(session.page.locator('.dv-toolbar').getByRole('combobox')).toHaveCount(0);
+    await expect(session.page.getByLabel('Product', { exact: true })).toHaveValue('all');
+    await expect(session.page.getByLabel('Product', { exact: true })).toBeDisabled();
+    // The real engine's registry lists every product in the filter.
+    expect(await session.page.getByLabel('Product', { exact: true }).locator('option').count()).toBe(14);
+    await expect(session.page.getByRole('heading', { name: 'No saved builds yet' })).toBeVisible();
     await expect(session.page.getByRole('complementary')).toHaveCount(0);
     await expect(session.page.getByRole('button', { name: 'Open build', exact: true })).toHaveCount(0);
     await expect(session.page.getByRole('searchbox', { name: /Filter version or build number/ })).toBeDisabled();
-    await expect(session.page.getByRole('button', { name: 'Refresh builds', exact: true })).toBeEnabled();
+    await expect(session.page.locator('.dv-pane-head').getByRole('button', { name: 'Refresh builds', exact: true })).toBeEnabled();
+    await expect(session.page.locator('.dv-statusbar')).toContainText('Not checked yet');
     expect(await session.page.evaluate(() => typeof (window as any).require)).toBe('undefined');
   } finally { await session.close(); }
 });
@@ -52,33 +61,45 @@ test('authored exact builds preserve selection, filters, source dialog and keybo
     await expect(page.getByRole('heading', { name: 'No prepared builds' })).toBeVisible();
     await page.getByRole('button', { name: 'All', exact: true }).click();
     await expect(page.locator('.build-row')).toHaveCount(2);
-    const requests = (await readFile(path.join(session.data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(x => JSON.parse(x));
-    expect(requests.filter(x => x.method === 'discovery.refresh')).toHaveLength(0);
+    const requests = await calls(session.data);
+    expect(requests.filter(x => x.method.startsWith('discovery.refresh'))).toHaveLength(0);
+    expect(requests.filter(x => x.method === 'discovery.read')).toHaveLength(0);
+    expect(requests.filter(x => x.method === 'discovery.readAll').map(x => x.params.filter)).toEqual(['all', 'local', 'all']);
   } finally { await session.close(); }
 });
 
-test('refresh cancellation and product changes never substitute stale build data', async () => {
+test('one cancellable refresh checks every product, shows progress across products and keeps the Product filter', async () => {
   const session = await launch(true);
   try {
     const { page } = session;
     await expect(page.locator('.build-row')).toHaveCount(2);
     await page.getByRole('button', { name: 'Refresh builds', exact: true }).click();
-    await expect.poll(() => existsSync(path.join(session.data, 'waiting-wow'))).toBe(true);
+    await expect.poll(() => existsSync(path.join(session.data, 'waiting-wow')) && existsSync(path.join(session.data, 'waiting-wowt'))).toBe(true);
+    await expect(page.locator('.dv-statusbar')).toContainText('Checking 2 products · 0 of 2 done…');
     await page.getByRole('button', { name: 'Cancel refresh', exact: true }).click();
     await expect(page.getByRole('status')).toContainText('Discovery canceled');
+    await expect(page.locator('.dv-checks')).toHaveText('Checked 0 of 2 products · wow, wowt not checked');
     await expect(page.getByRole('button', { name: 'Refresh builds', exact: true })).toBeFocused();
     await expect(page.locator('.build-row')).toHaveCount(2);
     await page.getByRole('button', { name: 'Refresh builds', exact: true }).click();
     await page.getByLabel('Product', { exact: true }).selectOption('wowt');
-    await expect.poll(() => existsSync(path.join(session.data, 'waiting-wowt'))).toBe(true);
+    await expect(page.getByRole('heading', { name: 'Checking official metadata…' })).toBeVisible();
     await writeFile(path.join(session.data, 'release-wowt'), 'release');
-    await expect(page.getByRole('status')).toContainText('regional problems');
-    await expect(page.locator('.inspector-product')).toHaveCount(0);
+    await expect(page.locator('.dv-statusbar')).toContainText('Checking 2 products · 1 of 2 done…');
+    await writeFile(path.join(session.data, 'release-wow'), 'release');
+    await expect(page.getByRole('status')).toContainText('Check completed with problems for 1 of 2 products');
+    await expect(page.getByLabel('Product', { exact: true })).toHaveValue('wowt');
+    await expect(page.locator('.build-row')).toHaveCount(1);
+    await expect(page.locator('.dv-notice')).toContainText('wowt XX: Authored missing regional route (ROUTE_UNAVAILABLE)');
     await page.locator('.build-row').first().click();
     await expect(page.locator('.inspector-product')).toContainText('wowt');
-    await writeFile(path.join(session.data, 'release-wow'), 'release');
-    await expect(page.getByLabel('Product', { exact: true })).toHaveValue('wowt');
-    await expect(page.locator('.inspector-product')).toContainText('wowt');
+    await page.getByLabel('Product', { exact: true }).selectOption('all');
+    await expect(page.locator('.build-row')).toHaveCount(3);
+    await expect(page.locator('.build-row .dv-product')).toHaveText(['wow', 'wow', 'wowt']);
+    await expect(page.locator('.dv-statusbar')).toContainText('Checked 2 products');
+    const requests = await calls(session.data);
+    expect(requests.filter(x => x.method === 'discovery.refreshAll')).toHaveLength(2);
+    expect(requests.filter(x => x.method === 'discovery.refresh')).toHaveLength(0);
   } finally { await session.close(); }
 });
 
@@ -86,20 +107,130 @@ test('offline discovery with no history offers honest retry at enlarged text', a
   const session = await launch(true, true);
   try {
     const { page } = session;
-    await expect(page.getByRole('heading', { name: 'Your research starts with a build' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No saved builds yet' })).toBeVisible();
     await page.evaluate(() => { document.documentElement.style.fontSize = `${parseFloat(getComputedStyle(document.documentElement).fontSize) * 2}px`; });
     await page.getByRole('button', { name: 'Refresh builds', exact: true }).click();
     await expect.poll(() => existsSync(path.join(session.data, 'waiting-wow'))).toBe(true);
     await expect(page.getByRole('button', { name: 'Cancel refresh', exact: true })).toBeEnabled();
     await page.screenshot({ path: path.join(root, 'artifacts/electron-tests/loading-empty-200.png'), fullPage: true });
     await writeFile(path.join(session.data, 'release-wow'), 'release');
-    await expect(page.getByRole('heading', { name: 'Could not check wow', exact: true })).toBeVisible();
-    await expect(page.locator('.dv-toolbar').getByRole('button', { name: 'Retry discovery', exact: true })).toBeEnabled();
-    await expect(page.getByText('Official metadata could not be reached, and no saved observations are available.', { exact: false })).toBeVisible();
+    await writeFile(path.join(session.data, 'release-wowt'), 'release');
+    await expect(page.getByRole('heading', { name: 'Could not check any product', exact: true })).toBeVisible();
+    await expect(page.locator('.dv-refresh')).toHaveText(/Retry discovery/);
+    await expect(page.getByText('Official metadata could not be read for any product, and no saved observations are available.', { exact: false })).toBeVisible();
+    await expect(page.locator('.dv-notice')).toContainText('wow, wowt: Authored unavailable metadata source (NETWORK_UNAVAILABLE)');
     await page.locator('.dv-notice').getByRole('button', { name: 'Retry discovery', exact: true }).click();
-    await expect(page.locator('.dv-toolbar').getByRole('button', { name: /Cancel refresh|Retry discovery/ })).toBeFocused();
+    await expect(page.locator('.dv-refresh')).toBeFocused();
+    await expect(page.locator('.dv-refresh')).toHaveText(/Cancel refresh|Retry discovery/);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
     await page.screenshot({ path: path.join(root, 'artifacts/electron-tests/offline-empty-200.png'), fullPage: true });
+  } finally { await session.close(); }
+});
+
+test('products failing with HTTP 500 or offline read as could not be checked, never as checked with nothing advertised', async () => {
+  const session = await launch(true);
+  try {
+    const { page } = session;
+    await expect(page.locator('.build-row')).toHaveCount(2);
+    await writeFile(path.join(session.data, 'offline-wow'), 'offline');
+    await writeFile(path.join(session.data, 'http500-wowt'), 'http500');
+    await page.getByRole('button', { name: 'Refresh builds', exact: true }).click();
+    await writeFile(path.join(session.data, 'release-wow'), 'release');
+    await writeFile(path.join(session.data, 'release-wowt'), 'release');
+    await expect(page.getByRole('status')).toHaveText('Could not refresh. Earlier saved observations are kept for wow. wowt: no saved observations.');
+    await expect(page.locator('.dv-checks')).toHaveText('Checked 0 of 2 products · wow, wowt could not be checked');
+    await expect(page.locator('.dv-statusbar')).not.toContainText('Latest check');
+    const notice = page.locator('.dv-notice').filter({ hasText: 'Refresh unavailable' });
+    await expect(notice).toContainText('wow: Authored unavailable metadata source (NETWORK_UNAVAILABLE)');
+    await expect(notice).toContainText('wowt: Official metadata returned an unsuccessful HTTP status. (HTTP_STATUS)');
+    // A failed check keeps the earlier builds and their Current label; the inspector says the latest check failed.
+    await expect(page.locator('.build-row')).toHaveCount(2);
+    await expect(page.locator('.build-row').first().locator('.dv-pill.current')).toHaveText('Current');
+    await page.locator('.build-row').first().click();
+    await expect(page.locator('dt', { hasText: 'Publication' }).locator('xpath=following-sibling::dd[1]')).toHaveText(/^Current: advertised at the last completed check \(.+\) · latest check failed$/);
+    await page.getByLabel('Product', { exact: true }).selectOption('wowt');
+    await expect(page.getByRole('heading', { name: 'Could not check wowt', exact: true })).toBeVisible();
+    await expect(page.locator('.dv-empty')).toContainText('The latest check of wowt failed: Official metadata returned an unsuccessful HTTP status. (HTTP_STATUS)');
+    await page.getByRole('button', { name: 'Current', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Could not check wowt', exact: true })).toBeVisible();
+    await expect(page.locator('.dv-empty')).toContainText('No build of it is known to be current.');
+    await expect(page.locator('.dv-window')).not.toContainText(/no advertised builds|was advertised at the last check|Previous successful evidence|for every product/);
+  } finally { await session.close(); }
+});
+
+test('when only wowt fails with HTTP 500 and only wow has history, nothing claims evidence for wowt or every product', async () => {
+  const session = await launch(true);
+  try {
+    const { page } = session;
+    await expect(page.locator('.build-row')).toHaveCount(2);
+    await writeFile(path.join(session.data, 'http500-wowt'), 'http500');
+    await page.getByRole('button', { name: 'Refresh builds', exact: true }).click();
+    await writeFile(path.join(session.data, 'release-wow'), 'release');
+    await writeFile(path.join(session.data, 'release-wowt'), 'release');
+    await expect(page.getByRole('status')).toHaveText('Check completed with problems for 1 of 2 products. wowt: no saved observations.');
+    await expect(page.locator('.dv-checks')).toHaveText('Checked 1 of 2 products · wowt could not be checked');
+    const notice = page.locator('.dv-notice').filter({ hasText: 'Refresh incomplete' });
+    await expect(notice).toContainText('wowt: no saved observations.');
+    await expect(notice).toContainText('wowt: Official metadata returned an unsuccessful HTTP status. (HTTP_STATUS)');
+    await expect(page.locator('.dv-window')).not.toContainText(/for every product|kept for wowt|Previous successful evidence/);
+    // wow's check completed, so its inspector has no failure note.
+    await page.locator('.build-row').first().click();
+    await expect(page.locator('dt', { hasText: 'Publication' }).locator('xpath=following-sibling::dd[1]')).toHaveText(/^Current: advertised at the last completed check \(.+\)$/);
+  } finally { await session.close(); }
+});
+
+test('a fresh catalog where every product fails says no product could be checked', async () => {
+  const session = await launch(true, true);
+  try {
+    const { page } = session;
+    await expect(page.getByRole('heading', { name: 'No saved builds yet' })).toBeVisible();
+    await writeFile(path.join(session.data, 'http500-wowt'), 'http500');
+    await page.getByRole('button', { name: 'Refresh builds', exact: true }).click();
+    await writeFile(path.join(session.data, 'release-wow'), 'release');
+    await writeFile(path.join(session.data, 'release-wowt'), 'release');
+    await expect(page.getByRole('heading', { name: 'Could not check any product', exact: true })).toBeVisible();
+    await expect(page.getByRole('status')).toHaveText('Could not refresh. wow, wowt: no saved observations.');
+    await expect(page.locator('.dv-checks')).toHaveText('Checked 0 of 2 products · wow, wowt could not be checked');
+    await expect(page.locator('.dv-window')).not.toContainText(/No builds advertised|No builds were advertised|Previous successful evidence/);
+  } finally { await session.close(); }
+});
+
+/** Tab from the search box through the filter row; returns the accessible names in focus order. */
+async function filterRowTabOrder(page: Page) {
+  await page.getByRole('searchbox', { name: /Filter version or build number/ }).focus();
+  const names: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    names.push(await page.evaluate(() => { const active = document.activeElement as HTMLElement; return active.getAttribute('aria-label') || active.textContent?.replace('↻', '').trim() || ''; }));
+    await page.keyboard.press('Tab');
+  }
+  return names;
+}
+
+test('the filter row is one keyboard path from search to Refresh builds at 100% and 200% text', async () => {
+  const session = await launch(true);
+  try {
+    const { page } = session;
+    await expect(page.locator('.build-row')).toHaveCount(2);
+    const base = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+    for (const scale of [1, 2]) {
+      await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, base * scale);
+      expect(await filterRowTabOrder(page), `${scale * 100}% text`).toEqual(['Filter version or build number', 'Product', 'All', 'Prepared', 'Current', 'Refresh builds']);
+      // After Refresh builds, Tab reaches the build list.
+      await expect(page.getByRole('listbox', { name: 'Builds' })).toBeFocused();
+    }
+    await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, base);
+    const product = page.getByLabel('Product', { exact: true });
+    await product.focus();
+    await product.selectOption('wowt');
+    await expect(product).toBeFocused();
+    await expect(page.getByRole('heading', { name: 'No saved builds for wowt' })).toBeVisible();
+    await page.keyboard.press('F5');
+    await expect(page.locator('.dv-refresh')).toHaveText(/Cancel refresh/);
+    await expect(product).toBeFocused();
+    await writeFile(path.join(session.data, 'release-wow'), 'release');
+    await writeFile(path.join(session.data, 'release-wowt'), 'release');
+    await expect(page.getByRole('status')).toContainText('problems for 1 of 2 products');
+    await expect(product).toBeFocused();
   } finally { await session.close(); }
 });
 
@@ -115,12 +246,16 @@ test('desktop discovery keeps a fixed window with scrolling panes at reference s
       for (const scale of [1, 2]) {
         await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, baseFontSize * scale);
         await expect(page.getByRole('heading', { name: 'Builds', exact: true })).toBeVisible();
+        // Keep the pointer off the rows so hover does not change their background.
+        await page.mouse.move(1, 1);
         const layout = await page.evaluate(() => {
           const box = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
           const open = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open build')!.getBoundingClientRect();
           return {
             scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight, width: innerWidth, height: innerHeight,
-            toolbar: box('.dv-toolbar').height, status: box('.dv-statusbar'), list: box('.dv-list'), inspector: box('.dv-inspector'), listHead: box('.dv-thead'), inspectorHead: box('.dv-insp-head'), open,
+            toolbar: box('.dv-toolbar').height, status: box('.dv-statusbar'), paneHead: box('.dv-pane-head'), refresh: box('.dv-refresh'), search: box('#search'), brand: box('.dv-brand img'),
+            current: [...document.querySelectorAll<HTMLElement>('.build-row')].map(row => ({ selected: row.getAttribute('aria-selected') === 'true', current: row.classList.contains('current'), label: !!row.querySelector('.dv-pill.current'), background: getComputedStyle(row).backgroundColor })),
+            toolbarControls: document.querySelectorAll('.dv-toolbar select, .dv-toolbar .dv-refresh').length, list: box('.dv-list'), inspector: box('.dv-inspector'), listHead: box('.dv-thead'), inspectorHead: box('.dv-insp-head'), open,
             family: getComputedStyle(document.body).fontFamily, background: getComputedStyle(document.documentElement).backgroundColor, ink: getComputedStyle(document.body).color,
             muted: getComputedStyle(document.querySelector('.dv-insp-head p')!).color, base: getComputedStyle(document.querySelector('.discovery-screen')!).fontSize,
           };
@@ -131,8 +266,20 @@ test('desktop discovery keeps a fixed window with scrolling panes at reference s
         expect(layout.status.bottom, label).toBeLessThanOrEqual(layout.height + 1);
         expect(layout.open.bottom, label).toBeLessThanOrEqual(layout.status.top + 1);
         expect(layout.open.top, label).toBeGreaterThanOrEqual(0);
+        // Refresh builds ends the filter row, right-aligned in the list pane, and the toolbar has no product picker.
+        expect(layout.toolbarControls, label).toBe(0);
+        expect(layout.refresh.right, label).toBeLessThanOrEqual(layout.paneHead.right);
+        expect(layout.paneHead.right - layout.refresh.right, label).toBeLessThanOrEqual(scale * 15);
+        expect(layout.refresh.left, label).toBeGreaterThan(layout.search.left);
+        // Current rows carry the Current label whether or not they are selected; only unselected ones are tinted warm.
+        expect(layout.current.every(row => row.current && row.label), label).toBe(true);
+        expect(layout.current.find(row => row.selected)?.background, label).toBe('rgb(228, 241, 233)');
+        expect(layout.current.find(row => !row.selected)?.background, label).toBe('rgb(251, 247, 236)');
         if (scale === 1) {
           expect(layout.toolbar).toBeLessThanOrEqual(48);
+          expect(layout.brand.height).toBeCloseTo(28, 0);
+          // At 1280 and 1440 wide the whole filter row fits on one line.
+          expect(Math.abs(layout.refresh.top - layout.search.top)).toBeLessThanOrEqual(2);
           expect(Math.abs(layout.inspector.left - layout.list.right)).toBeLessThanOrEqual(2);
           expect(Math.abs(layout.inspectorHead.bottom - layout.listHead.bottom)).toBeLessThanOrEqual(1);
           expect(layout.inspector.width).toBeCloseTo(371, 0);
@@ -141,7 +288,12 @@ test('desktop discovery keeps a fixed window with scrolling panes at reference s
           expect(layout.background).toBe('rgb(245, 243, 237)');
           expect(layout.ink).toBe('rgb(36, 59, 58)');
           expect(layout.muted).toBe('rgb(88, 106, 100)');
-        } else expect(layout.inspector.top, label).toBeGreaterThanOrEqual(layout.list.bottom - 1);
+        } else {
+          expect(layout.inspector.top, label).toBeGreaterThanOrEqual(layout.list.bottom - 1);
+          // The product line stays in the stacked inspector header, so same-version builds of different products stay apart.
+          await expect(page.locator('.inspector-product'), label).toBeVisible();
+          await expect(page.locator('.inspector-product'), label).toContainText('World of Warcraft · Retail · wow');
+        }
         await page.screenshot({ path: path.join(root, `artifacts/electron-tests/discovery-${width}x${height}-${scale * 100}.png`) });
       }
     }

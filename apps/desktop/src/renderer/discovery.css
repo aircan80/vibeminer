@@ -9,15 +9,16 @@
 
 /* Toolbar */
 .discovery-screen .dv-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.8rem;min-height:2.933333rem;padding:.4rem .8rem;background:var(--dv-toolbar);border-bottom:1px solid var(--line)}
-.discovery-screen .dv-brand{display:flex;align-items:center;gap:.466667rem;font-weight:700;font-size:var(--dv-b);white-space:nowrap}
-.discovery-screen .dv-brand img{width:1.466667rem;height:1.466667rem;display:block;flex:none}
+/* Bigger brand: 28px mark, 17px wordmark. */
+.discovery-screen .dv-brand{display:flex;align-items:center;gap:.56rem;font-weight:700;font-size:1.133333rem;letter-spacing:-.01em;white-space:nowrap}
+.discovery-screen .dv-brand img{width:1.866667rem;height:1.866667rem;display:block;flex:none}
 .discovery-screen .dv-word span{color:var(--teal)}
 .discovery-screen .dv-divider{width:1px;align-self:stretch;background:var(--line);margin:.14rem 0}
 .discovery-screen .dv-field{display:flex;align-items:center;gap:.466667rem;min-width:0}
 .discovery-screen .dv-field>label{font-size:var(--dv-m);color:var(--dv-muted);white-space:nowrap}
 .discovery-screen .dv-control{height:2rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .6rem;min-width:0;font-size:var(--dv-b)}
 .discovery-screen .dv-control:disabled{opacity:.55;cursor:default}
-.discovery-screen .dv-product{width:auto;max-width:22.4rem;font-weight:600}
+.discovery-screen .dv-product-filter{width:13.066667rem;max-width:100%}
 .discovery-screen .dv-btn{height:2rem;display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);padding:0 .733333rem;white-space:nowrap;flex:none;font-size:var(--dv-b)}
 .discovery-screen .dv-btn:hover:not(:disabled):not([aria-disabled="true"]){background:var(--dv-hover);border-color:#c5d3cb}
 .discovery-screen .dv-btn.primary{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
@@ -58,6 +59,10 @@
 .discovery-screen .dv-segmented button{border:0;border-radius:0;background:none;height:1.913rem;padding:0 .7rem;white-space:nowrap;font-size:var(--dv-b);color:var(--ink)}
 .discovery-screen .dv-segmented button+button{border-left:1px solid var(--line)}
 .discovery-screen .dv-segmented button[aria-pressed="true"]{background:var(--mint);color:var(--teal);font-weight:600}
+.discovery-screen .dv-segmented button:disabled{opacity:.55;cursor:default}
+/* Refresh sits at the end of the filter row in a teal accent, distinct from the solid Open build action. */
+.discovery-screen .dv-pane-head .dv-refresh{margin-left:auto;background:var(--mint);border-color:var(--teal);color:var(--teal);font-weight:600}
+.discovery-screen .dv-pane-head .dv-refresh:hover:not(:disabled):not([aria-disabled="true"]){background:#d5eadf;border-color:var(--teal)}
 .discovery-screen .dv-notice{flex:none;margin:.56rem .8rem 0;padding:.513rem .7rem;border-radius:6px;border:1px solid var(--dv-warn-line);background:var(--dv-warn-bg);font-size:var(--dv-m);display:flex;gap:.747rem;align-items:flex-start;overflow-wrap:anywhere}
 .discovery-screen .dv-notice.error{border-color:var(--dv-err-line);background:var(--dv-err-bg)}
 .discovery-screen .dv-notice.info{border-color:var(--dv-pill);background:var(--mint);padding:0;border:0}
@@ -71,7 +76,8 @@
 /* Build list: a listbox laid out in columns. */
 .discovery-screen .dv-list{position:relative;flex:1;overflow:auto;min-height:0;background:var(--paper);scroll-padding-top:var(--dv-thead);margin-top:.56rem;border-top:1px solid var(--line)}
 .discovery-screen .dv-list.flush{margin-top:0;border-top:0}
-.discovery-screen .dv-cols{display:grid;grid-template-columns:minmax(7rem,1.1fr) minmax(3.733333rem,.55fr) minmax(8.4rem,1.4fr) minmax(6.066667rem,.95fr) minmax(7.466667rem,1.05fr) minmax(7.933333rem,1.15fr);align-items:center;column-gap:.8rem;padding:0 .8rem}
+/* Product | Version | Build | Downloaded | In VibeMiner */
+.discovery-screen .dv-cols{display:grid;grid-template-columns:minmax(7rem,1fr) minmax(8.4rem,1.3fr) minmax(3.733333rem,.6fr) minmax(7.466667rem,1fr) minmax(7.933333rem,1.15fr);align-items:center;column-gap:.8rem;padding:0 .8rem}
 .discovery-screen .dv-thead{position:sticky;top:0;z-index:1;height:var(--dv-thead);background:var(--dv-toolbar);border-bottom:1px solid var(--line);font-size:var(--dv-s);font-weight:600;color:var(--dv-muted);letter-spacing:.02em;white-space:nowrap}
 .discovery-screen [role="listbox"]:focus-visible{outline:none}
 .discovery-screen [role="option"]{position:relative;min-height:2.427rem;border-bottom:1px solid var(--dv-line-soft);font-size:var(--dv-m);white-space:nowrap;cursor:default}
@@ -83,6 +89,12 @@
 .discovery-screen .dv-dim{color:var(--dv-muted)}
 .discovery-screen .dv-pill{display:inline-block;padding:0 .373rem;border-radius:4px;border:1px solid var(--dv-pill);background:var(--paper);color:var(--teal);font-size:var(--dv-s);font-weight:600;line-height:1.5;margin-right:.187rem}
 .discovery-screen .dv-pill.gold{border-color:var(--dv-gold-line);background:var(--dv-gold-bg);color:var(--dv-gold-ink)}
+/* Current builds: advertised by Blizzard at the last check. A warm tint plus a Current label; selection stays mint with a teal edge. */
+.discovery-screen [role="option"].current{background:#fbf7ec}
+.discovery-screen [role="option"].current:hover{background:#f6f0dd}
+.discovery-screen [role="option"].current[aria-selected="true"]{background:var(--mint)}
+.discovery-screen .dv-pill.current{border-color:var(--dv-gold-line);background:var(--dv-gold-bg);color:var(--dv-gold-ink);margin-left:.373333rem}
+.discovery-screen .dv-product{font-family:ui-monospace,monospace;font-size:var(--dv-s);color:var(--dv-muted)}
 .discovery-screen .dv-meter{display:inline-flex;align-items:center;gap:.466667rem}
 .discovery-screen .dv-track{width:3.36rem;height:.333333rem;border-radius:999px;background:var(--dv-line-soft);overflow:hidden;flex:none}
 .discovery-screen .dv-track i{display:block;height:100%;background:var(--teal)}
@@ -133,17 +145,17 @@
 .discovery-screen .dv-compact .dv-word,.discovery-screen .dv-compact .dv-divider,.discovery-screen .dv-compact .dv-fixture span{display:none}
 .discovery-screen .dv-compact .dv-toolbar .dv-field>label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .discovery-screen .dv-compact .dv-toolbar .dv-field{flex:1 1 7.466667rem}
-.discovery-screen .dv-compact .dv-product{width:100%}
 .discovery-screen .dv-compact .dv-chip-long{display:none}
 .discovery-screen .dv-compact .dv-chip-short{display:inline}
-.discovery-screen .dv-compact .dv-cols{grid-template-columns:minmax(6.066667rem,1.1fr) minmax(4.666667rem,1.2fr) minmax(5.133333rem,.9fr) minmax(5.133333rem,.9fr) minmax(5.6rem,1fr)}
-.discovery-screen .dv-compact .dv-cols>:nth-child(2){display:none}
+.discovery-screen .dv-compact .dv-cols{grid-template-columns:minmax(5.133333rem,1fr) minmax(6.533333rem,1.3fr) minmax(5.133333rem,1fr) minmax(5.6rem,1.1fr)}
+.discovery-screen .dv-compact .dv-cols>:nth-child(3){display:none}
 .discovery-screen .dv-compact .dv-list{overflow-x:hidden}
 .discovery-screen .dv-compact .dv-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1.2fr) minmax(0,1fr)}
 .discovery-screen .dv-compact .dv-body.no-inspector{grid-template-rows:minmax(0,1fr)}
 .discovery-screen .dv-compact .dv-inspector{border-left:0;border-top:1px solid var(--line)}
 .discovery-screen .dv-compact .dv-insp-head{min-height:0;padding:.327rem .933333rem}
-.discovery-screen .dv-compact .dv-insp-head .dv-label,.discovery-screen .dv-compact .dv-insp-head p{display:none}
+/* The product line stays at enlarged text, so same-version builds of different products stay distinguishable. */
+.discovery-screen .dv-compact .dv-insp-head .dv-label{display:none}
 .discovery-screen .dv-compact .dv-insp-foot{padding:.42rem .933333rem}
 .discovery-screen .dv-compact .dv-insp-foot .dv-field{flex:1 1 auto}
 .discovery-screen .dv-compact .dv-insp-foot .dv-reason{display:none}

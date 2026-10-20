@@ -1,27 +1,34 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App, buildDownloads, downloadedPercent } from '../src/renderer/App';
+import { App, buildDownloads, checkLine, checkSummary, downloadedPercent, productProblems, retainedEvidence } from '../src/renderer/App';
 import { ActivityTrigger, DownloadActivity } from '../src/renderer/DownloadActivity';
 import { summaryLine, type ActivityTask } from '../src/renderer/download-activity-state';
 import type { BridgeReply, DiscoveryBridge } from '../src/shared/bridge';
-import type { DiscoveryPage, EngineProgress, RetentionSnapshot, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
+import type { DiscoveryCatalogPage, DiscoveryPage, EngineProgress, RetentionSnapshot, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
 import fixture from '../../../contracts/examples/discovery-page.json';
 import retained from '../../../contracts/examples/retention-snapshot.json';
+import { catalog, notChecked, statusOf, testProducts } from './catalog-page';
 const original = fixture as DiscoveryPage;
-const second = { ...original.builds[0], id: 'f'.repeat(64), buildConfig: 'c'.repeat(32), version: '12.1.0.70011', buildId: '70011', identityFields: {} };
+// A saved build that was not advertised at the last check.
+const second = { ...original.builds[0], id: 'f'.repeat(64), buildConfig: 'c'.repeat(32), version: '12.1.0.70011', buildId: '70011', identityFields: {}, advertisedRegions: [], isAdvertised: false };
+const ptr = { ...original.builds[0], id: 'e'.repeat(64), productId: 'wowt', buildConfig: 'b'.repeat(32), version: '12.2.0.70631', buildId: '70631' };
 const page: DiscoveryPage = { ...original, builds: [original.builds[0], second] };
 const success = <T,>(value: T): BridgeReply<T> => ({ ok: true, value });
 const unavailable = async () => ({ ok: false as const, error: { code: 'NOT_TESTED', message: 'Outside this test.', retryable: false } });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
-function bridgeMock(read: DiscoveryPage = page): DiscoveryBridge {
+/** Reads answer the Product and visibility filters the way the engine does. */
+function bridgeMock(read: DiscoveryPage = page, extra: DiscoveryCatalogPage['builds'] = []): DiscoveryBridge {
+  const answer = (productId?: string, filter: 'all' | 'local' | 'advertised' = 'all') => catalog(read, { productId: productId ?? null, filter, builds: [...read.builds, ...extra].filter(b => (!productId || b.productId === productId) && (filter === 'all' || filter === 'local' && b.isLocal || filter === 'advertised' && b.isAdvertised)) });
   return {
     itemsData: vi.fn(unavailable), itemsPrepare: vi.fn(unavailable), itemsPage: vi.fn(unavailable), itemInspect: vi.fn(unavailable),
-    products: vi.fn(async () => success({ products: [{ id: 'wow', label: 'Retail', description: 'World of Warcraft' }] })),
-    read: vi.fn(async params => success({ ...read, productId: params.productId })),
+    products: vi.fn(async () => success({ products: testProducts })),
+    read: vi.fn(unavailable), refresh: vi.fn(unavailable),
+    readAll: vi.fn(async params => success(answer(params.productId, params.filter))),
+    refreshAll: vi.fn(async () => success(answer())),
     tableData: vi.fn(async () => success({ snapshot: null })), tablePrepare: vi.fn(unavailable), tableRows: vi.fn(unavailable), tablesCatalog: vi.fn(unavailable), tableDefinition: vi.fn(unavailable),
     download: vi.fn(unavailable), inventory: vi.fn(unavailable), open: vi.fn(unavailable),
-    refresh: vi.fn(async () => success(read)), cancel: vi.fn(async () => success({ requested: true })), onProgress: vi.fn(() => () => {})
+    cancel: vi.fn(async () => success({ requested: true })), onProgress: vi.fn(() => () => {})
   };
 }
 beforeEach(() => { localStorage.clear(); });
@@ -117,15 +124,256 @@ describe('desktop discovery layout', () => {
     fireEvent.keyDown(list, { key: 'ArrowDown' });
     expect(within(list).getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
   });
-  it('keeps focus on Product after choosing another product', async () => {
-    const bridge = bridgeMock();
-    vi.mocked(bridge.products).mockResolvedValue(success({ products: [{ id: 'wow', label: 'Retail', description: 'World of Warcraft' }, { id: 'wowt', label: 'PTR', description: 'Public test' }] }));
+  it('lays the grid out as Product, Version, Build, Downloaded and In VibeMiner, one row per exact build across products', async () => {
+    await ready(bridgeMock(page, [ptr]));
+    const head = document.querySelector('.dv-thead')!;
+    expect([...head.children].map(cell => cell.textContent)).toEqual(['Product', 'Version', 'Build', 'Downloaded', 'In VibeMiner']);
+    expect(head).toHaveAttribute('aria-hidden', 'true');
+    const rows = within(screen.getByRole('listbox', { name: 'Builds' })).getAllByRole('option');
+    expect(rows.map(row => row.querySelector('.dv-product')!.textContent)).toEqual(['wow', 'wow', 'wowt']);
+    expect(rows.map(row => row.children.length)).toEqual([5, 5, 5]);
+    expect(rows[2].children[1]).toHaveTextContent('12.2.0.70631'); expect(rows[2].children[2]).toHaveTextContent('70631');
+    // Publication and Advertised in moved to the inspector.
+    expect(screen.queryByText('None at last check')).not.toBeInTheDocument(); expect(screen.queryByText('Not advertised')).not.toBeInTheDocument();
+    fireEvent.click(rows[2]);
+    expect(screen.getByRole('heading', { name: '12.2.0.70631' })).toBeVisible();
+    expect(screen.getByText('World of Warcraft · PTR ·', { exact: false })).toHaveTextContent('World of Warcraft · PTR · wowt');
+    expect(screen.getByText('Product', { selector: 'dt' }).nextElementSibling).toHaveTextContent('wowt · PTR');
+    expect(screen.getByText('Advertised in', { selector: 'dt' }).nextElementSibling).toHaveTextContent('US');
+    expect(screen.getByText('Publication', { selector: 'dt' }).nextElementSibling).toHaveTextContent(/^Current: advertised at the last completed check \(.+\)$/);
+    expect(screen.getByText('CDN routes', { selector: 'dt' })).toBeVisible();
+  });
+  it('marks Current builds with a warm tint and a Current label, so colour is never the only signal', async () => {
+    await ready();
+    const list = screen.getByRole('listbox', { name: 'Builds' });
+    const current = within(list).getAllByRole('option')[0], saved = within(list).getByRole('option', { name: /70011/ });
+    expect(current).toHaveClass('current'); expect(within(current).getByText('Current', { exact: true })).toHaveClass('dv-pill', 'current');
+    expect(current).toHaveAccessibleName(/Current/);
+    expect(saved).not.toHaveClass('current'); expect(within(saved).queryByText('Current')).not.toBeInTheDocument();
+    // Selection keeps its own mint state; the label stays on a selected Current row.
+    fireEvent.click(current);
+    expect(current).toHaveAttribute('aria-selected', 'true'); expect(within(current).getByText('Current', { exact: true })).toBeVisible();
+    fireEvent.click(saved);
+    expect(screen.getByText('Publication', { selector: 'dt' }).nextElementSibling).toHaveTextContent(/^Not advertised at the last completed check$/);
+    expect(screen.getByText('Advertised in', { selector: 'dt' }).nextElementSibling).toHaveTextContent('None at last check');
+  });
+  it('filters by one product through the engine and keeps a selection of another product hidden, not replaced', async () => {
+    const bridge = bridgeMock(page, [ptr]);
     await ready(bridge);
     const product = screen.getByRole('combobox', { name: 'Product' });
+    expect([...product.querySelectorAll('option')].map(option => option.textContent)).toEqual(['All products', 'wow · Retail', 'wowt · PTR']);
+    expect(product).toHaveValue('all');
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'Builds' })).getByRole('option', { name: /70011/ }));
     product.focus();
     fireEvent.change(product, { target: { value: 'wowt' } });
-    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Product' })).toHaveValue('wowt'));
-    expect(screen.getByRole('combobox', { name: 'Product' })).toHaveFocus();
+    await waitFor(() => expect(bridge.readAll).toHaveBeenLastCalledWith({ productId: 'wowt', filter: 'all', limit: 50 }));
+    await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Builds' })).getAllByRole('option')).toHaveLength(1));
+    expect(product).toHaveFocus();
+    expect(screen.getByText('Selected build is hidden by these filters')).toBeVisible();
+    expect(screen.getByText(/wow 12\.1\.0\.70011 is still selected\. Clear filters to see it in the list\./)).toBeVisible();
+    expect(screen.getByRole('heading', { name: '12.1.0.70011' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(screen.getByRole('button', { name: /^All$/ })).toHaveFocus();
+    await waitFor(() => expect(bridge.readAll).toHaveBeenLastCalledWith({ filter: 'all', limit: 50 }));
+    expect(screen.getByRole('combobox', { name: 'Product' })).toHaveValue('all');
+    await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Builds' })).getByRole('option', { name: /70011/ })).toHaveAttribute('aria-selected', 'true'));
+  });
+  it('keeps the toolbar to the brand and puts search, Product, visibility and Refresh builds in one filter row', async () => {
+    await ready();
+    const toolbar = document.querySelector('.dv-toolbar')!;
+    expect(within(toolbar as HTMLElement).queryByRole('combobox')).toBeNull();
+    expect(within(toolbar as HTMLElement).queryByRole('button', { name: /Refresh builds/ })).toBeNull();
+    expect(within(toolbar as HTMLElement).getByRole('img', { name: 'VibeMiner' })).toBeVisible();
+    const head = document.querySelector('.dv-pane-head') as HTMLElement;
+    const order = [screen.getByRole('searchbox', { name: /Filter version or build number/ }), screen.getByRole('combobox', { name: 'Product' }),
+      screen.getByRole('button', { name: /^All$/ }), screen.getByRole('button', { name: /^Prepared$/ }), screen.getByRole('button', { name: /^Current$/ }), screen.getByRole('button', { name: 'Refresh builds' })];
+    for (const control of order) expect(head).toContainElement(control);
+    // DOM order is Tab order: every control is a native tab stop in visual order, Refresh last.
+    for (let i = 1; i < order.length; i++) expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const control of order) expect(control).not.toHaveAttribute('tabindex');
+    expect(order[5]).toHaveClass('dv-refresh'); expect(order[5]).not.toHaveClass('primary'); expect(order[5]).toHaveAttribute('aria-keyshortcuts', 'F5');
+    expect(screen.getByRole('group', { name: 'Build visibility' })).toBeVisible();
+  });
+  it('shows progress across products in the status bar and lists per-product failures in the notice', async () => {
+    const listeners = new Set<(progress: EngineProgress) => void>();
+    const bridge = bridgeMock();
+    vi.mocked(bridge.onProgress).mockImplementation(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; });
+    const held = deferred<BridgeReply<DiscoveryCatalogPage>>();
+    vi.mocked(bridge.refreshAll).mockReturnValueOnce(held.promise);
+    await ready(bridge);
+    expect(document.querySelector('.dv-statusbar')).toHaveTextContent('Checked 1 of 2 products · wowt not checked');
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
+    const id = vi.mocked(bridge.refreshAll).mock.calls[0][0];
+    expect(document.querySelector('.dv-statusbar')).toHaveTextContent('Checking 2 products…');
+    act(() => { for (const listener of listeners) listener({ protocolVersion: 1, type: 'progress', requestId: id, sequence: 3, stage: 'Checking official metadata', region: null, completed: 5, total: 13, unit: 'products' }); });
+    expect(document.querySelector('.dv-statusbar')).toHaveTextContent('Checking 13 products · 5 of 13 done…');
+    expect(document.querySelector('.dv-statusbar')).not.toHaveTextContent('%');
+    // Another request's progress is ignored.
+    act(() => { for (const listener of listeners) listener({ protocolVersion: 1, type: 'progress', requestId: 'other', sequence: 9, stage: 'Checking official metadata', region: null, completed: 12, total: 13, unit: 'products' }); });
+    expect(document.querySelector('.dv-statusbar')).toHaveTextContent('5 of 13 done');
+    const offline = { region: null, code: 'NETWORK_UNAVAILABLE', message: 'Official metadata could not be reached.' };
+    await act(async () => held.resolve(success(catalog(page, { refreshProblems: [{ productId: 'wow', code: 'CATALOG_BUSY', message: 'The discovery catalog is busy.' }] }, [statusOf(page), { ...notChecked('wowt'), connection: 'offline', lastCheckedAt: '2026-10-20T09:00:00Z', errors: [offline] }]))));
+    const notice = screen.getByText('Refresh unavailable').closest('.dv-notice') as HTMLElement;
+    expect(notice).toHaveTextContent('wow: check did not complete. The discovery catalog is busy. (CATALOG_BUSY)');
+    expect(notice).toHaveTextContent('wowt: Official metadata could not be reached. (NETWORK_UNAVAILABLE)');
+    expect(notice).toHaveClass('error'); // a product could not be reached
+    expect(within(notice).getByRole('button', { name: 'Retry discovery' })).toBeEnabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Check completed with problems for 2 of 2 products. Earlier saved observations are kept for wow. wowt: no saved observations.');
+    expect(document.querySelector('.dv-statusbar')).toHaveTextContent('Checked 0 of 2 products · wow, wowt could not be checked'); // a failed or offline check is never counted
+  });
+  it('names the products a canceled refresh did not check', async () => {
+    const bridge = bridgeMock(), held = deferred<BridgeReply<DiscoveryCatalogPage>>();
+    vi.mocked(bridge.refreshAll).mockReturnValueOnce(held.promise);
+    await ready(bridge);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel refresh' }));
+    // wow committed before the stop; wowt did not.
+    vi.mocked(bridge.readAll).mockResolvedValue(success(catalog({ ...page, lastCheckedAt: '2026-10-20T09:00:00Z' })));
+    await act(async () => held.resolve({ ok: false, error: { code: 'CANCELED', message: 'Canceled.', retryable: true } }));
+    await waitFor(() => expect(document.querySelector('.dv-checks')).toHaveTextContent(/^Checked 1 of 2 products · wowt not checked$/));
+    expect(document.querySelector('.dv-checks')).toHaveClass('dv-secondary');
+  });
+  it('counts only the checks a refresh completed: an unchanged or offline product is not counted as checked', async () => {
+    const bridge = bridgeMock(); await ready(bridge);
+    // Before any refresh this session, the saved latest checks are summarized.
+    expect(document.querySelector('.dv-checks')).toHaveTextContent(/^Checked 1 of 2 products · wowt not checked$/);
+    vi.mocked(bridge.refreshAll).mockResolvedValueOnce(success(catalog(page, {}, [statusOf({ ...page, lastCheckedAt: '2026-10-20T09:00:00Z' }), { ...notChecked('wowt'), connection: 'offline', lastCheckedAt: '2026-10-20T09:00:01Z', errors: [{ region: null, code: 'NETWORK_UNAVAILABLE', message: 'Unreachable.' }] }])));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
+    await waitFor(() => expect(document.querySelector('.dv-checks')).toHaveTextContent(/^Checked 1 of 2 products · wowt could not be checked$/));
+    // A refresh that commits nothing new for wow does not count wow's older saved check.
+    vi.mocked(bridge.refreshAll).mockResolvedValueOnce(success(catalog(page, { refreshProblems: [] }, [statusOf({ ...page, lastCheckedAt: '2026-10-20T09:00:00Z' }), { ...notChecked('wowt'), connection: 'online', lastCheckedAt: '2026-10-20T10:00:00Z' }])));
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.dv-refresh')!);
+    await waitFor(() => expect(document.querySelector('.dv-checks')).toHaveTextContent(/^Checked 1 of 2 products · wow not checked$/));
+  });
+  it('labels the newest check as the latest and shows the oldest when products were checked at different times', async () => {
+    const bridge = bridgeMock();
+    vi.mocked(bridge.readAll).mockResolvedValue(success(catalog(page, {}, [statusOf(page), { ...notChecked('wowt'), connection: 'online', lastCheckedAt: '2026-10-20T09:00:00Z' }])));
+    await ready(bridge);
+    const latest = document.querySelector('.dv-latest')!;
+    const when = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    expect(latest).toHaveTextContent(`Latest check ${when('2026-10-20T09:00:00Z')} · oldest ${when(page.lastCheckedAt!)}`);
+    expect(latest.querySelector('.dv-secondary')).toHaveTextContent(`· oldest ${when(page.lastCheckedAt!)}`);
+    expect(document.querySelector('.dv-statusbar')).not.toHaveTextContent('Last check');
+    cleanup();
+    await ready(bridgeMock());
+    expect(document.querySelector('.dv-latest')).toHaveTextContent(`Latest check ${when(page.lastCheckedAt!)}`);
+    expect(document.querySelector('.dv-latest')).not.toHaveTextContent('oldest');
+  });
+  describe('failed checks never read as completed checks that found nothing', () => {
+    const http500 = { region: null, code: 'HTTP_STATUS', message: 'Official metadata returned an unsuccessful HTTP status.' };
+    const offline = { region: null, code: 'NETWORK_UNAVAILABLE', message: 'Official metadata could not be reached.' };
+    // An HTTP 500 on both documents is saved as partial with no checked regions: nothing was received.
+    const failedHttp = (productId: string) => ({ ...notChecked(productId), connection: 'partial' as const, lastCheckedAt: '2026-10-20T09:00:00Z', errors: [http500, http500] });
+    const answering = (statuses: ReturnType<typeof notChecked>[], read: DiscoveryPage = page) => (params: { productId?: string; filter?: 'all' | 'local' | 'advertised' }) =>
+      Promise.resolve(success(catalog(read, { productId: params.productId ?? null, filter: params.filter ?? 'all', builds: read.builds.filter(b => (!params.productId || b.productId === params.productId) && (params.filter !== 'advertised' || b.isAdvertised)) }, statuses)));
+    it('names a filtered product whose latest check failed, with its typed problem, under All and Current', async () => {
+      const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockImplementation(answering([statusOf(page), failedHttp('wowt')]));
+      await ready(bridge);
+      fireEvent.change(screen.getByRole('combobox', { name: 'Product' }), { target: { value: 'wowt' } });
+      await screen.findByRole('heading', { name: 'Could not check wowt' });
+      expect(screen.getByText(/The latest check of wowt failed: Official metadata returned an unsuccessful HTTP status\. \(HTTP_STATUS\)/)).toBeVisible();
+      expect(screen.queryByText(/no advertised builds|was advertised at the last check/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /^Current$/ }));
+      await waitFor(() => expect(bridge.readAll).toHaveBeenLastCalledWith({ productId: 'wowt', filter: 'advertised', limit: 50 }));
+      expect(screen.getByRole('heading', { name: 'Could not check wowt' })).toBeVisible();
+      expect(screen.getByText(/No build of it is known to be current\./)).toBeVisible();
+      expect(screen.queryByText(/No build of wowt was advertised/)).not.toBeInTheDocument();
+    });
+    it('says a product had no current build only when its last check completed', async () => {
+      const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockImplementation(answering([statusOf(page), { ...notChecked('wowt'), connection: 'online', lastCheckedAt: '2026-10-20T09:00:00Z', checkedRegions: ['us'] }]));
+      await ready(bridge);
+      fireEvent.change(screen.getByRole('combobox', { name: 'Product' }), { target: { value: 'wowt' } });
+      fireEvent.click(screen.getByRole('button', { name: /^Current$/ }));
+      await screen.findByRole('heading', { name: 'No current builds' });
+      expect(screen.getByText(/^No build of wowt was advertised at the last check, /)).toBeVisible();
+    });
+    it('reports a fresh catalog where every check failed as unchecked, without retained-evidence claims or a latest check', async () => {
+      const empty: DiscoveryPage = { ...page, builds: [], hasSavedHistory: false, connection: 'notChecked', lastCheckedAt: null, checkedRegions: [] };
+      const bridge = bridgeMock(empty);
+      render(<App bridge={bridge}/>);
+      await screen.findByRole('heading', { name: 'No saved builds yet' });
+      const after = [{ ...notChecked('wow'), connection: 'offline' as const, lastCheckedAt: '2026-10-20T09:00:00Z', errors: [offline] }, failedHttp('wowt')];
+      vi.mocked(bridge.refreshAll).mockResolvedValueOnce(success(catalog(empty, {}, after)));
+      vi.mocked(bridge.readAll).mockImplementation(answering(after, empty));
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
+      await screen.findByRole('heading', { name: 'Could not check any product' });
+      expect(screen.queryByText(/No builds advertised|No builds were advertised/)).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent(/^Could not refresh\. wow, wowt: no saved observations\.$/);
+      expect(document.querySelector('.dv-checks')).toHaveTextContent(/^Checked 0 of 2 products · wow, wowt could not be checked$/);
+      expect(screen.getByText('Refresh unavailable')).toBeVisible();
+      expect(document.querySelector('.dv-statusbar')).not.toHaveTextContent(/Latest check/);
+      expect(screen.queryByText(/Previous successful evidence is retained/)).not.toBeInTheDocument();
+    });
+    it('claims retained evidence only when saved evidence exists', async () => {
+      const empty: DiscoveryPage = { ...page, builds: [], hasSavedHistory: false, connection: 'notChecked', lastCheckedAt: null, checkedRegions: [] };
+      const bridge = bridgeMock(empty);
+      render(<App bridge={bridge}/>);
+      await screen.findByRole('heading', { name: 'No saved builds yet' });
+      // wow answered with no builds; wowt failed with HTTP 500. Nothing is saved.
+      const after = [{ ...notChecked('wow'), connection: 'online' as const, lastCheckedAt: '2026-10-20T09:00:00Z', checkedRegions: ['us'] }, failedHttp('wowt')];
+      vi.mocked(bridge.refreshAll).mockResolvedValueOnce(success(catalog(empty, {}, after)));
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/^Check completed with problems for 1 of 2 products\. wowt: no saved observations\.$/));
+      expect(screen.getByRole('heading', { name: 'No builds advertised' })).toBeVisible();
+      expect(screen.getByText(/No builds were advertised by the checked products at .*\. wowt could not be checked\./)).toBeVisible();
+      expect(document.querySelector('.dv-checks')).toHaveTextContent(/^Checked 1 of 2 products · wowt could not be checked$/);
+      // Another product's saved history says nothing about the failed product: wowt still has none.
+      cleanup();
+      const saved = bridgeMock();
+      vi.mocked(saved.refreshAll).mockResolvedValueOnce(success(catalog(page, {}, [statusOf({ ...page, lastCheckedAt: '2026-10-20T09:00:00Z' }), failedHttp('wowt')])));
+      await ready(saved);
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/^Check completed with problems for 1 of 2 products\. wowt: no saved observations\.$/));
+      const notice = screen.getByText('Refresh incomplete').closest('.dv-notice') as HTMLElement;
+      expect(notice).toHaveTextContent('wowt: no saved observations.');
+      expect(notice).not.toHaveTextContent(/for every product|kept for/);
+    });
+    it('says earlier evidence is kept only for a failed product that has its own saved history', async () => {
+      const bridge = bridgeMock();
+      const after = [{ ...statusOf({ ...page, lastCheckedAt: '2026-10-20T09:00:00Z' }), connection: 'offline' as const, checkedRegions: [], errors: [offline] }, { ...notChecked('wowt'), connection: 'online' as const, lastCheckedAt: '2026-10-20T09:00:00Z', checkedRegions: ['us'] }];
+      vi.mocked(bridge.refreshAll).mockResolvedValueOnce(success(catalog(page, {}, after)));
+      await ready(bridge);
+      vi.mocked(bridge.readAll).mockImplementation(answering(after));
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/^Check completed with problems for 1 of 2 products\. Earlier saved observations are kept for wow\.$/));
+      const notice = screen.getByText('Refresh incomplete').closest('.dv-notice') as HTMLElement;
+      expect(notice).toHaveTextContent('Earlier saved observations are kept for wow. A failed check does not remove earlier advertisements.');
+      expect(notice).not.toHaveTextContent(/for every product|no saved observations/);
+      // The row keeps its Current label from the last completed check; the inspector says which check that was and that the latest failed.
+      const row = within(screen.getByRole('listbox', { name: 'Builds' })).getAllByRole('option')[0];
+      expect(within(row).getByText('Current', { exact: true })).toBeVisible();
+      fireEvent.click(row);
+      const when = new Date(page.builds[0].lastSeenAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      expect(screen.getByText('Publication', { selector: 'dt' }).nextElementSibling).toHaveTextContent(`Current: advertised at the last completed check (${when}) · latest check failed`);
+    });
+    it('describes a product with no saved history by name in the notice and never claims every product', () => {
+      expect(retainedEvidence([{ ...notChecked('wowt'), connection: 'offline', errors: [offline] }])).toBe('wowt: no saved observations.');
+      expect(retainedEvidence([{ ...statusOf(page), connection: 'offline', errors: [offline] }, { ...notChecked('wowt'), connection: 'offline', errors: [offline] }])).toBe('Earlier saved observations are kept for wow. wowt: no saved observations.');
+      expect(retainedEvidence([])).toBe('');
+    });
+    it('shows only completed checks as the latest check, never a newer failed attempt', async () => {
+      const bridge = bridgeMock();
+      vi.mocked(bridge.readAll).mockImplementation(answering([statusOf(page), { ...notChecked('wowt'), connection: 'offline', lastCheckedAt: '2026-10-20T09:00:00Z', errors: [offline] }]));
+      await ready(bridge);
+      const when = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      expect(document.querySelector('.dv-latest')).toHaveTextContent(new RegExp(`^Latest check ${when(page.lastCheckedAt!).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+      expect(document.querySelector('.dv-checks')).toHaveTextContent(/^Checked 1 of 2 products · wowt could not be checked$/);
+    });
+  });
+  it('summarizes checks per product without counting failures', () => {
+    const statuses = [statusOf(page), { ...notChecked('wowt'), connection: 'offline' as const, lastCheckedAt: '2026-10-20T09:00:00Z' }, notChecked('wow_beta'), { ...notChecked('wow_classic'), connection: 'partial' as const, lastCheckedAt: '2026-10-20T09:00:00Z', checkedRegions: ['us'] }, { ...notChecked('wow_classic_ptr'), connection: 'partial' as const, lastCheckedAt: '2026-10-20T09:00:00Z', errors: [{ region: null, code: 'HTTP_STATUS', message: 'Official metadata returned an unsuccessful HTTP status.' }] }];
+    expect(checkSummary(statuses, null, [])).toEqual({ checked: ['wow', 'wow_classic'], failed: ['wowt', 'wow_classic_ptr'], notChecked: ['wow_beta'], total: 5 }); // partial with no checked regions received nothing
+    expect(checkSummary(statuses, new Map([['wow', page.lastCheckedAt], ['wowt', null], ['wow_beta', null], ['wow_classic', null], ['wow_classic_ptr', null]]), [{ productId: 'wow_beta', code: 'CATALOG_BUSY', message: 'Busy.' }]))
+      .toEqual({ checked: ['wow_classic'], failed: ['wowt', 'wow_beta', 'wow_classic_ptr'], notChecked: ['wow'], total: 5 });
+    expect(checkLine({ checked: ['a'], failed: [], notChecked: ['b', 'c', 'd', 'e'], total: 5 }, true)).toBe('Checked 1 of 5 products · 4 products not checked');
+    expect(checkLine({ checked: [], failed: [], notChecked: ['a'], total: 1 }, false)).toBeNull();
+    expect(checkLine({ checked: ['a', 'b'], failed: [], notChecked: [], total: 2 }, true)).toBe('Checked 2 products');
+  });
+  it('groups one problem shared by several products', () => {
+    const offline = { region: null, code: 'NETWORK_UNAVAILABLE', message: 'Official metadata could not be reached.' };
+    const groups = productProblems([{ ...notChecked('wow_beta'), connection: 'offline', errors: [offline] }, { ...notChecked('wow_classic_era'), connection: 'offline', errors: [offline] },
+      { ...notChecked('wowt'), connection: 'partial', errors: [{ region: 'eu', code: 'ROUTE_MISSING', message: 'No route.' }] }], []);
+    expect(groups.map(group => `${group.label}: ${group.text} (${group.code})`)).toEqual(['wow_beta, wow_classic_era: Official metadata could not be reached. (NETWORK_UNAVAILABLE)', 'wowt EU: No route. (ROUTE_MISSING)']);
   });
   it('separates a missing key ring from a present but empty one', async () => {
     await ready();
@@ -159,11 +407,11 @@ describe('desktop discovery layout', () => {
   it('keeps a selection hidden by an engine-side filter selected, with the notice and Clear filters', async () => {
     const prepared = { ...original.builds[0], isLocal: true };
     const bridge = bridgeMock({ ...page, builds: [prepared, second] });
-    vi.mocked(bridge.read).mockImplementation(async params => success({ ...page, productId: params.productId, builds: params.filter === 'local' ? [prepared] : [prepared, second] }));
     await ready(bridge);
     fireEvent.click(within(screen.getByRole('listbox', { name: 'Builds' })).getByRole('option', { name: /70011/ }));
     fireEvent.click(screen.getByRole('button', { name: /^Prepared$/ }));
     await screen.findByText('Selected build is hidden by these filters');
+    expect(bridge.readAll).toHaveBeenLastCalledWith({ filter: 'local', limit: 50 });
     expect(screen.getByRole('heading', { name: '12.1.0.70011' })).toBeVisible();
     const clear = screen.getByRole('button', { name: 'Clear filters' });
     clear.focus();
@@ -173,11 +421,9 @@ describe('desktop discovery layout', () => {
     expect(screen.getByRole('button', { name: /^All$/ })).toHaveFocus();
     expect(screen.queryByText('Selected build is hidden by these filters')).not.toBeInTheDocument();
   });
-  it('drops the pre-refresh copy of a selection hidden by a filter once a refresh completes', async () => {
+  it('drops the pre-refresh copy of a selection hidden by a filter once a refresh completes, with plain wording', async () => {
     const prepared = { ...original.builds[0], isLocal: true };
     const bridge = bridgeMock({ ...page, builds: [prepared, second] });
-    vi.mocked(bridge.read).mockImplementation(async params => success({ ...page, productId: params.productId, builds: params.filter === 'local' ? [prepared] : [prepared, second] }));
-    vi.mocked(bridge.refresh).mockResolvedValue(success({ ...page, builds: [prepared, second] }));
     await ready(bridge);
     fireEvent.click(within(screen.getByRole('listbox', { name: 'Builds' })).getByRole('option', { name: /70011/ }));
     fireEvent.click(screen.getByRole('button', { name: /^Prepared$/ }));
@@ -187,31 +433,44 @@ describe('desktop discovery layout', () => {
     expect(screen.queryByRole('heading', { name: '12.1.0.70011' })).not.toBeInTheDocument();
     expect(screen.getByText('Selected build is hidden')).toBeVisible();
     expect(screen.getByText('Selected build is hidden by these filters')).toBeVisible();
+    expect(screen.getByText('The refresh did not reload its details. Clear filters to see it in the list.')).toBeVisible();
+    expect(screen.queryByText(/still selected\./)).not.toBeInTheDocument();
+    expect(screen.getByText('Clear filters to inspect it again.')).toBeVisible();
+    expect(screen.queryByText(/load more/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear filters' })).toBeVisible();
   });
   it('focuses the filter with Ctrl+F and lets F5 start but never cancel a refresh', async () => {
     const bridge = await ready();
-    const held = deferred<BridgeReply<DiscoveryPage>>();
-    vi.mocked(bridge.refresh).mockReturnValueOnce(held.promise);
+    const held = deferred<BridgeReply<DiscoveryCatalogPage>>();
+    vi.mocked(bridge.refreshAll).mockReturnValueOnce(held.promise);
     fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
     expect(screen.getByRole('searchbox', { name: /Filter version or build number/ })).toHaveFocus();
     fireEvent.keyDown(window, { key: 'F5' });
     await screen.findByRole('button', { name: /Cancel refresh/ });
     fireEvent.keyDown(window, { key: 'F5' });
-    expect(bridge.refresh).toHaveBeenCalledTimes(1);
+    expect(bridge.refreshAll).toHaveBeenCalledTimes(1);
     expect(bridge.cancel).not.toHaveBeenCalled();
-    await act(async () => { held.resolve(success(page)); });
+    await act(async () => { held.resolve(success(catalog(page))); });
     await screen.findByText(/Discovery complete/);
   });
   it('disables filters and hides the inspector when nothing has been saved', async () => {
     const empty: DiscoveryPage = { ...page, builds: [], hasSavedHistory: false, connection: 'notChecked', lastCheckedAt: null, checkedRegions: [] };
     render(<App bridge={bridgeMock(empty)}/>);
-    await screen.findByRole('heading', { name: 'Your research starts with a build' });
+    await screen.findByRole('heading', { name: 'No saved builds yet' });
+    expect(screen.getByText("Refresh builds checks Blizzard's official version service for every World of Warcraft product.")).toBeVisible();
     expect(screen.getByRole('searchbox', { name: /Filter version or build number/ })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'Advertisement region' })).toBeDisabled();
-    for (const name of ['All', 'Prepared', 'Advertised']) expect(screen.getByRole('button', { name: new RegExp(`^${name}$`) })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Product' })).toBeDisabled();
+    for (const name of ['All', 'Prepared', 'Current']) expect(screen.getByRole('button', { name: new RegExp(`^${name}$`) })).toBeDisabled();
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Refresh builds' })).toHaveLength(1);
+    expect(document.querySelector('.dv-statusbar')).toHaveTextContent('Not checked yet');
+  });
+  it('names the product scope when a Product filter has no saved builds', async () => {
+    await ready();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Product' }), { target: { value: 'wowt' } });
+    await screen.findByRole('heading', { name: 'No saved builds for wowt' });
+    expect(screen.getByText('wowt has not been checked yet. Refresh builds checks every product.')).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Product' })).toBeEnabled();
   });
   it('has no activity entry while nothing is running or waiting', async () => {
     await ready();
@@ -279,6 +538,27 @@ describe('status bar activity summary', () => {
     const status = document.querySelector('.dv-statusbar .dv-busy:last-child')!;
     expect(status).toHaveTextContent(/^Build preparation · Building download ledger · 2 of 6 objects · 33% of current stage$/);
     await act(async () => pending.resolve({ ok: false, error: { code: 'CANCELED', message: 'Authored stop.', retryable: true } }));
+  });
+  it('shows refresh progress across products next to the de-duplicated activity summary', async () => {
+    const bridge = bridgeMock(), listeners = new Set<(p: EngineProgress) => void>(), pending = deferred<BridgeReply<WorkspaceSnapshot>>(), refresh = deferred<BridgeReply<DiscoveryCatalogPage>>();
+    vi.mocked(bridge.onProgress).mockImplementation(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; });
+    vi.mocked(bridge.open).mockReturnValue(pending.promise);
+    vi.mocked(bridge.refreshAll).mockReturnValue(refresh.promise);
+    await ready(bridge);
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'Builds' })).getAllByRole('option')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Open build' }));
+    await waitFor(() => expect(bridge.open).toHaveBeenCalledTimes(1));
+    const openId = vi.mocked(bridge.open).mock.calls[0][1];
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
+    const refreshId = vi.mocked(bridge.refreshAll).mock.calls[0][0];
+    act(() => { for (const listener of listeners) {
+      listener({ protocolVersion: 1, type: 'progress', requestId: openId, sequence: 2, stage: 'Building download ledger · 2 of 6 objects', region: 'us', completed: 2, total: 6, unit: 'objects' });
+      listener({ protocolVersion: 1, type: 'progress', requestId: refreshId, sequence: 2, stage: 'Checking official metadata', region: null, completed: 5, total: 13, unit: 'products' });
+    } });
+    const bar = document.querySelector('.dv-statusbar')!;
+    expect(bar.querySelector('.dv-busy:first-child')).toHaveTextContent(/^Checking 13 products · 5 of 13 done…$/);
+    expect(bar.querySelector('.dv-busy:last-child')).toHaveTextContent(/^Build preparation · Building download ledger · 2 of 6 objects · 33% of current stage$/);
+    await act(async () => { refresh.resolve(success(catalog(page))); pending.resolve({ ok: false, error: { code: 'CANCELED', message: 'Authored stop.', retryable: true } }); });
   });
   it('keeps every fact once for real engine stage text, with or without a count', () => {
     expect(summaryLine({ label: 'Build preparation · Reading download sizes · 65,536 of 131,072 entries · 50%', measurement: '65,536 of 131,072 entries · 50% of current stage' }))

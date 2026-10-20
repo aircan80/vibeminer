@@ -249,6 +249,7 @@ public sealed class CreatureGeometryHostTests
         public Task<long> BeginRefreshAsync(string p, CancellationToken t) => throw new NotSupportedException();
         public Task<DiscoveryPage> CommitAsync(string p, long g, DiscoveryAttempt a, string c, CancellationToken t) => throw new NotSupportedException();
         public Task<DiscoveryPage> ReadAsync(string p, string f, int l, string? c, CancellationToken t) => throw new NotSupportedException();
+        public Task<DiscoveryCatalogPage> ReadAllAsync(string? p, string f, int l, string? c, CancellationToken t) => throw new NotSupportedException();
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

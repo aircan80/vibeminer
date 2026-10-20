@@ -15,10 +15,11 @@ const references = {
   preparation: { directory: 'build-preparation', query: 'option=dedicated&state=cached', selector: '.center-stage', prefix: 'preparation' },
   home: { directory: 'build-mining-home', query: 'concept=archive&state=ready', selector: '.shell', prefix: 'home' },
   desktop: { directory: 'desktop-discovery', query: 'state=idle&chrome=0', selector: '.statusbar', prefix: 'desktop-discovery' },
+  'all-products': { directory: 'desktop-discovery', file: 'all-products.html', query: 'state=idle&chrome=0', selector: '.statusbar', prefix: 'all-products' },
 };
 const selected = references[view];
-if (!selected) throw new Error('Choose discovery, desktop, preparation or home.');
-const reference = pathToFileURL(path.join(root, `docs/design/${selected.directory}/index.html`));
+if (!selected) throw new Error('Choose discovery, desktop, all-products, preparation or home.');
+const reference = pathToFileURL(path.join(root, `docs/design/${selected.directory}/${selected.file ?? 'index.html'}`));
 reference.search = selected.query;
 const application = await electron.launch({
   args: [path.join(root, 'apps/desktop'), '--ozone-platform=headless', `--user-data-dir=${path.join(directory, 'profile')}`],

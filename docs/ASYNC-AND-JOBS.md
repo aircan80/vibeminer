@@ -68,6 +68,10 @@ Never hold a CPU permit while acquiring a reader gate, CAS admission, SHA stripe
 
 Journal callbacks and catalog work never recurse into CAS or take CPU while a SQL transaction is open.
 
+### Refresh across products
+
+`DiscoveryService.RefreshAllAsync` ([D062](DECISIONS.md)) runs the per-product refresh for every registered product with `Parallel.ForEachAsync`, at most `MaxProductsInFlight` (3) at once. Each product still fetches its versions/cdns pair through the one `OfficialDiscoverySource` (4 network slots, shared HTTP and CPU permits) and commits in its own transaction. A typed per-product failure is recorded and the loop continues; anything else fails the request. Progress reports are serialized, one per finished product. Cancel stops new products, cancels the running ones and returns only after they retired; committed products stay committed. The desktop allows this request 10 minutes instead of the usual 3, because 13 products with a 20-second document timeout can take longer.
+
 ### Single-owner gates
 
 - **Bulk archive map.** One process-wide builder (`BulkArchiveLocator.Building`). A second build fails with `BULK_LOCATOR_BUSY`. This is intentional: it bounds native index I/O and working memory (4096 archives, 512 MiB aggregate native indexes, 10 million locations, 32 open files, 32 MiB working set).

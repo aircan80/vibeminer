@@ -2,7 +2,7 @@
 
 These JSON documents are synthetic contract fixtures, not acquired Blizzard metadata or application results. The repeated hashes, version labels, timestamps, and `.invalid` URL are authored examples. They exercise the canonical schema, generated TypeScript types, frontend tests, and C# serialization compatibility.
 
-`discovery-page.json` contains one observed build without any locally prepared payload. `empty-page.json` represents a fresh catalog before an explicit remote check.
+`discovery-page.json` contains one observed build without any locally prepared payload. `empty-page.json` represents a fresh catalog before an explicit remote check. `discovery-catalog-page.json` is a cross-product page: builds of two products, every registered product's saved status (checked, partial, offline and never checked) and one product whose refresh did not complete.
 
 `download-workspace.json` is measured DL-scope Home; `download-unavailable-workspace.json` preserves unknown size when no DL is declared. `download-page.json` contains authored exact-EKey object rows, independent of legacy research memberships.
 

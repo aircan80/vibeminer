@@ -314,46 +314,162 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
             after = decoded.After;
         }
         var history = Convert.ToInt64(Scalar("SELECT EXISTS(SELECT 1 FROM builds WHERE product=$p)", null, ("$p", product))) == 1;
-        var records = new List<(string Id, string Canonical, string Fields, string First, string Last, bool New)>();
-        var predicate = filter switch { "local" => " AND (EXISTS(SELECT 1 FROM inventory_generations i WHERE i.build_id=b.id AND i.state='ready') OR EXISTS(SELECT 1 FROM download_admissions d JOIN workspace_admissions a ON a.id=d.admission_id WHERE a.build_id=b.id AND a.profile='home-download-v1' AND d.artifact_sha256 IS NOT NULL))", "advertised" => " AND EXISTS(SELECT 1 FROM advertisements a WHERE a.build_id=b.id)", _ => "" };
-        using (var command = Command($"SELECT id,canonical,identity_fields,first_seen,last_seen,is_new AND NOT EXISTS(SELECT 1 FROM open_acknowledgements o WHERE o.build_id=b.id) FROM builds b WHERE product=$p AND id>$after AND ($exact IS NULL OR id=$exact){predicate} ORDER BY id LIMIT $limit", null,
+        var records = new List<BuildRecord>();
+        using (var command = Command($"SELECT id,canonical,identity_fields,first_seen,last_seen,is_new AND NOT EXISTS(SELECT 1 FROM open_acknowledgements o WHERE o.build_id=b.id) FROM builds b WHERE product=$p AND id>$after AND ($exact IS NULL OR id=$exact){FilterPredicate(filter)} ORDER BY id LIMIT $limit", null,
             ("$p", product), ("$after", after), ("$exact", exactBuild), ("$limit", limit + 1)))
         using (var reader = command.ExecuteReader())
-            while (reader.Read()) records.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetBoolean(5)));
+            while (reader.Read()) records.Add(new(reader.GetString(0), product, reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetBoolean(5)));
+        var builds = ProjectBuilds(records, limit, MaxBuildPageBytes, token);
+        var more = records.Count > builds.Count;
+        var next = more && builds.Count > 0 ? Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new Cursor(product, filter, generation, builds[^1].Id), Json)) : null;
+        return new DiscoveryPage(product, builds, next, checkedAt, checkedRegions, errors, history, state);
+    }
+
+    /// <summary>Serialized build JSON one page may carry. A single larger build is refused rather than truncated.</summary>
+    private const int MaxBuildPageBytes = 750_000;
+    /// <summary>Serialized builds plus product statuses one cross-product page may carry, well inside the 1 MiB frame.</summary>
+    internal const int MaxCatalogPageBytes = 900_000;
+    private sealed record BuildRecord(string Id, string Product, string Canonical, string Fields, string First, string Last, bool New);
+    private static string FilterPredicate(string filter) => filter switch
+    {
+        "local" => " AND (EXISTS(SELECT 1 FROM inventory_generations i WHERE i.build_id=b.id AND i.state='ready') OR EXISTS(SELECT 1 FROM download_admissions d JOIN workspace_admissions a ON a.id=d.admission_id WHERE a.build_id=b.id AND a.profile='home-download-v1' AND d.artifact_sha256 IS NOT NULL))",
+        "advertised" => " AND EXISTS(SELECT 1 FROM advertisements a WHERE a.build_id=b.id)",
+        _ => ""
+    };
+    /// <summary>Project up to limit records, stopping before the page would exceed its byte budget.</summary>
+    private List<Build> ProjectBuilds(IReadOnlyList<BuildRecord> records, int limit, int budget, CancellationToken token)
+    {
         var builds = new List<Build>();
         var verified = new HashSet<string>(StringComparer.Ordinal);
         var size = 0;
         foreach (var row in records.Take(limit))
         {
             token.ThrowIfCancellationRequested();
-            var fields = Deserialize<Dictionary<string, string>>(row.Fields);
-            // Full canonical identity is retained and checked against its digest on every restore.
-            var restored = BuildIdentity.FromFields(product, fields);
-            if (restored.Id != row.Id || restored.Canonical != row.Canonical)
-                throw new DiscoveryException("CATALOG_INTEGRITY", "A saved build identity failed integrity verification.");
-            var regions = new List<string>(); var advertised = new List<string>(); var routes = new List<string>();
-            using (var command = Command("SELECT region FROM build_regions WHERE build_id=$id ORDER BY region", null, ("$id", row.Id)))
-            using (var reader = command.ExecuteReader()) while (reader.Read()) regions.Add(reader.GetString(0));
-            using (var command = Command("SELECT region,MAX(has_route) FROM advertisements WHERE build_id=$id GROUP BY region ORDER BY region", null, ("$id", row.Id)))
-            using (var reader = command.ExecuteReader()) while (reader.Read())
-            { advertised.Add(reader.GetString(0)); if (reader.GetBoolean(1)) routes.Add(reader.GetString(0)); }
-            if (regions.Count == 0) throw new DiscoveryException("CATALOG_INTEGRITY", "Saved build observations are missing.");
-            var receipts = ReadReceipts(row.Id, verified, token);
-            var (cdnHistory, cdnHistoryCount) = ReadCdnConfigHistory(row.Id, verified, token);
-            var build = new Build(row.Id, product, fields["VersionsName"], fields.GetValueOrDefault("BuildId", ""),
-                fields["BuildConfig"], cdnHistory[0].CdnConfig, fields.GetValueOrDefault("ProductConfig") is { Length: > 0 } productConfig ? productConfig : null, fields,
-                regions, advertised, routes, row.First, row.Last, row.New, advertised.Count > 0, Convert.ToInt64(Scalar("SELECT EXISTS(SELECT 1 FROM inventory_generations WHERE build_id=$b AND state='ready') OR EXISTS(SELECT 1 FROM download_admissions d JOIN workspace_admissions a ON a.id=d.admission_id WHERE a.build_id=$b AND a.profile='home-download-v1' AND d.artifact_sha256 IS NOT NULL)", null, ("$b", row.Id))) == 1, "unknown", receipts, cdnHistory, cdnHistoryCount);
+            var build = ProjectBuild(row, verified, token);
             var bytes = JsonSerializer.SerializeToUtf8Bytes(build, Json).Length;
-            if (size + bytes > 750_000)
+            if (size + bytes > budget)
             {
                 if (builds.Count == 0) throw new DiscoveryException("RESULT_LIMIT", "This build's source projection exceeds the protocol limit.");
                 break;
             }
             size += bytes; builds.Add(build);
         }
-        var more = records.Count > builds.Count;
-        var next = more && builds.Count > 0 ? Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new Cursor(product, filter, generation, builds[^1].Id), Json)) : null;
-        return new DiscoveryPage(product, builds, next, checkedAt, checkedRegions, errors, history, state);
+        return builds;
+    }
+    private Build ProjectBuild(BuildRecord row, HashSet<string> verified, CancellationToken token)
+    {
+        var fields = Deserialize<Dictionary<string, string>>(row.Fields);
+        // Full canonical identity is retained and checked against its digest on every restore.
+        var restored = BuildIdentity.FromFields(row.Product, fields);
+        if (restored.Id != row.Id || restored.Canonical != row.Canonical)
+            throw new DiscoveryException("CATALOG_INTEGRITY", "A saved build identity failed integrity verification.");
+        var regions = new List<string>(); var advertised = new List<string>(); var routes = new List<string>();
+        using (var command = Command("SELECT region FROM build_regions WHERE build_id=$id ORDER BY region", null, ("$id", row.Id)))
+        using (var reader = command.ExecuteReader()) while (reader.Read()) regions.Add(reader.GetString(0));
+        using (var command = Command("SELECT region,MAX(has_route) FROM advertisements WHERE build_id=$id GROUP BY region ORDER BY region", null, ("$id", row.Id)))
+        using (var reader = command.ExecuteReader()) while (reader.Read())
+        { advertised.Add(reader.GetString(0)); if (reader.GetBoolean(1)) routes.Add(reader.GetString(0)); }
+        if (regions.Count == 0) throw new DiscoveryException("CATALOG_INTEGRITY", "Saved build observations are missing.");
+        var receipts = ReadReceipts(row.Id, verified, token);
+        var (cdnHistory, cdnHistoryCount) = ReadCdnConfigHistory(row.Id, verified, token);
+        return new Build(row.Id, row.Product, fields["VersionsName"], fields.GetValueOrDefault("BuildId", ""),
+            fields["BuildConfig"], cdnHistory[0].CdnConfig, fields.GetValueOrDefault("ProductConfig") is { Length: > 0 } productConfig ? productConfig : null, fields,
+            regions, advertised, routes, row.First, row.Last, row.New, advertised.Count > 0, Convert.ToInt64(Scalar("SELECT EXISTS(SELECT 1 FROM inventory_generations WHERE build_id=$b AND state='ready') OR EXISTS(SELECT 1 FROM download_admissions d JOIN workspace_admissions a ON a.id=d.admission_id WHERE a.build_id=$b AND a.profile='home-download-v1' AND d.artifact_sha256 IS NOT NULL)", null, ("$b", row.Id))) == 1, "unknown", receipts, cdnHistory, cdnHistoryCount);
+    }
+
+    /// <summary>The saved outcome of a product's latest check. A product that was never checked is notChecked.</summary>
+    private ProductDiscoveryStatus ReadProductStatus(string product)
+    {
+        string? checkedAt = null;
+        string[] checkedRegions = [];
+        DiscoveryProblem[] errors = [];
+        var state = "notChecked";
+        using (var command = Command("SELECT last_checked,checked_regions,errors,connection FROM products WHERE product=$p", null, ("$p", product)))
+        using (var reader = command.ExecuteReader())
+        {
+            if (reader.Read())
+            {
+                checkedAt = reader.IsDBNull(0) ? null : reader.GetString(0);
+                checkedRegions = Deserialize<string[]>(reader.GetString(1));
+                errors = Deserialize<DiscoveryProblem[]>(reader.GetString(2)); state = reader.GetString(3);
+            }
+        }
+        var history = Convert.ToInt64(Scalar("SELECT EXISTS(SELECT 1 FROM builds WHERE product=$p)", null, ("$p", product))) == 1;
+        return new(product, checkedAt, checkedRegions, errors, history, state);
+    }
+
+    /// <summary>
+    /// Cross-product cursor. It binds the product filter, the visibility filter and the number of committed checks, so
+    /// paging never mixes builds from before and after any product's commit. Starting a refresh does not change it.
+    /// </summary>
+    private sealed record CatalogCursor(string Scope, string? Product, string Filter, long Commits, int Ordinal, long Number, string After);
+    private const string CatalogScope = "allProducts";
+    public Task<DiscoveryCatalogPage> ReadAllAsync(string? product, string filter, int limit, string? cursor, CancellationToken token) =>
+        Schedule(() => ReadAllCore(product, filter, limit, cursor, token), token);
+    private DiscoveryCatalogPage ReadAllCore(string? product, string filter, int limit, string? cursor, CancellationToken token)
+    {
+        if (product is not null) ProductRegistry.Validate(product);
+        if (filter is not ("all" or "local" or "advertised") || limit is < 1 or > 100)
+            throw new DiscoveryException("INVALID_REQUEST", "The discovery filter or page size is invalid.");
+        var statuses = ProductRegistry.Products.Select(entry => ReadProductStatus(entry.Id)).ToArray();
+        // Events are only ever inserted, one per committed check of any product.
+        var commits = Convert.ToInt64(Scalar("SELECT count(*) FROM events"));
+        (int Ordinal, long Number, string After)? position = null;
+        if (cursor is not null)
+        {
+            CatalogCursor? decoded;
+            try
+            {
+                if (cursor.Length > 2048) throw new FormatException();
+                decoded = JsonSerializer.Deserialize<CatalogCursor>(Convert.FromBase64String(cursor), Json);
+            }
+            catch (Exception ex) when (ex is FormatException or JsonException)
+            { throw new DiscoveryException("INVALID_CURSOR", "The discovery cursor is invalid."); }
+            if (decoded is null || decoded.Scope != CatalogScope || decoded.Product != product || decoded.Filter != filter || decoded.Commits != commits)
+                throw new DiscoveryException("STALE_CURSOR", "Discovery changed. Read the first page again.", true);
+            if (decoded.After is not { Length: 64 } key || !key.All(Uri.IsHexDigit) || decoded.Ordinal < 0 ||
+                decoded.Ordinal >= ProductRegistry.Products.Count || decoded.Number < -1)
+                throw new DiscoveryException("INVALID_CURSOR", "The discovery cursor is invalid.");
+            position = (decoded.Ordinal, decoded.Number, decoded.After);
+        }
+        // Registry product order, then the raw BuildId read as a number (newest first; missing or non-decimal last), then identity.
+        var parameters = new List<(string, object?)> { ("$product", product), ("$start", position is null ? 1 : 0),
+            ("$o", position?.Ordinal ?? 0), ("$n", position?.Number ?? 0), ("$after", position?.After ?? ""), ("$limit", limit + 1) };
+        var ordinal = new StringBuilder("CASE b.product");
+        for (var i = 0; i < ProductRegistry.Products.Count; i++)
+        { ordinal.Append(" WHEN $p").Append(i).Append(" THEN ").Append(i); parameters.Add(($"$p{i}", ProductRegistry.Products[i].Id)); }
+        ordinal.Append(" END");
+        const string buildId = "json_extract(b.identity_fields,'$.BuildId')";
+        const string number = $"CASE WHEN json_valid(b.identity_fields) AND typeof({buildId})='text' AND length({buildId}) BETWEEN 1 AND 18 " +
+            $"AND {buildId} NOT GLOB '*[^0-9]*' THEN CAST({buildId} AS INTEGER) ELSE -1 END";
+        var records = new List<(BuildRecord Record, int Ordinal, long Number)>();
+        using (var command = Command($"""
+            SELECT id,product,canonical,identity_fields,first_seen,last_seen,fresh,ord,number FROM (
+                SELECT b.id,b.product,b.canonical,b.identity_fields,b.first_seen,b.last_seen,
+                    b.is_new AND NOT EXISTS(SELECT 1 FROM open_acknowledgements o WHERE o.build_id=b.id) AS fresh,
+                    {ordinal} AS ord,{number} AS number FROM builds b) b
+            WHERE ord IS NOT NULL AND ($product IS NULL OR product=$product){FilterPredicate(filter)}
+                AND ($start=1 OR ord>$o OR (ord=$o AND (number<$n OR (number=$n AND id>$after))))
+            ORDER BY ord,number DESC,id LIMIT $limit
+            """, null, parameters.ToArray()))
+        using (var reader = command.ExecuteReader())
+            while (reader.Read())
+            {
+                token.ThrowIfCancellationRequested();
+                records.Add((new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                    reader.GetString(5), reader.GetBoolean(6)), reader.GetInt32(7), reader.GetInt64(8)));
+            }
+        var budget = Math.Min(MaxBuildPageBytes, MaxCatalogPageBytes - JsonSerializer.SerializeToUtf8Bytes(statuses, Json).Length);
+        if (budget <= 0) throw new DiscoveryException("RESULT_LIMIT", "Saved product statuses exceed the protocol limit.");
+        var builds = ProjectBuilds(records.Select(record => record.Record).ToArray(), limit, budget, token);
+        string? next = null;
+        if (records.Count > builds.Count && builds.Count > 0)
+        {
+            var last = records[builds.Count - 1];
+            next = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(
+                new CatalogCursor(CatalogScope, product, filter, commits, last.Ordinal, last.Number, last.Record.Id), Json));
+        }
+        return new DiscoveryCatalogPage(product, filter, builds, next, statuses, []);
     }
 
     private List<SourceReceipt> ReadReceipts(string buildId, HashSet<string> verified, CancellationToken token)

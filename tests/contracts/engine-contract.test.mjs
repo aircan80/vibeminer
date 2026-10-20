@@ -29,6 +29,32 @@ test('authored discovery fixtures conform to the canonical wire schema', async (
   assert.equal(validator('DiscoveryPage')(page), false, 'exact build IDs cannot silently become JavaScript numbers');
 });
 
+test('a cross-product page keeps exact builds, every product status and per-product refresh problems', async () => {
+  const page = JSON.parse(await readFile(path.join(root, 'contracts/examples/discovery-catalog-page.json'), 'utf8'));
+  validate('DiscoveryCatalogPage', page);
+  assert.deepEqual([...new Set(page.builds.map(build => build.productId))], ['wow', 'wowt'], 'one page mixes products');
+  validate('DiscoveryCatalogPage', { ...page, productId: 'wowt', builds: page.builds.filter(build => build.productId === 'wowt'), refreshProblems: [] });
+  const invalid = change => { const value = structuredClone(page); change(value); assert.equal(validator('DiscoveryCatalogPage')(value), false); };
+  invalid(value => { value.builds[0].buildId = 70448; });
+  invalid(value => { value.filter = 'current'; });
+  invalid(value => { value.productId = '../wow'; });
+  invalid(value => { delete value.refreshProblems; });
+  invalid(value => { delete value.products; });
+  invalid(value => { value.products[0].connection = 'checked'; });
+  invalid(value => { value.products[0].extra = true; });
+  invalid(value => { value.refreshProblems[0].region = 'us'; });
+  invalid(value => { value.builds = Array(101).fill(value.builds[0]); });
+  const request = (method, params) => ({ protocolVersion: 1, id: 'all', method, params });
+  validate('EngineRequest', request('discovery.readAll', {}));
+  validate('EngineRequest', request('discovery.readAll', { productId: 'wow_classic', filter: 'advertised', limit: 100, cursor: 'opaque' }));
+  validate('EngineRequest', request('discovery.refreshAll', {}));
+  for (const [method, params] of [['discovery.readAll', { limit: 101 }], ['discovery.readAll', { limit: '50' }], ['discovery.readAll', { region: 'us' }],
+    ['discovery.readAll', { filter: 'current' }], ['discovery.refreshAll', { productId: 'wow' }]])
+    assert.equal(validator('EngineRequest')(request(method, params)), false, `${method} ${JSON.stringify(params)}`);
+  const progress = { protocolVersion: 1, type: 'progress', requestId: 'all', sequence: 2, stage: 'Checking official metadata', region: null, completed: 1, total: 13, unit: 'products' };
+  validate('EngineProgress', progress);
+});
+
 test('a build carries its CDN configuration history outside its identity fields', async () => {
   const page = JSON.parse(await readFile(path.join(root, 'contracts/examples/discovery-page.json'), 'utf8'));
   const build = page.builds[0], [current] = build.cdnConfigHistory;
@@ -471,6 +497,18 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.deepEqual(empty.result.builds, []);
   assert.equal(empty.result.hasSavedHistory, false);
   assert.equal(empty.result.connection, 'notChecked');
+  const allProducts = await request('discovery.readAll', {});
+  assert.ok(!allProducts.error, JSON.stringify(allProducts.error));
+  validate('DiscoveryCatalogPage', allProducts.result);
+  assert.deepEqual(allProducts.result.builds, []);
+  assert.equal(allProducts.result.productId, null);
+  assert.deepEqual(allProducts.result.products.map(status => status.productId), products.result.products.map(product => product.id), 'every registered product reports a status in registry order');
+  assert.ok(allProducts.result.products.every(status => status.connection === 'notChecked' && status.lastCheckedAt === null && !status.hasSavedHistory));
+  const oneProduct = await request('discovery.readAll', { productId: 'wowt', filter: 'advertised', limit: 10 });
+  validate('DiscoveryCatalogPage', oneProduct.result);
+  assert.equal(oneProduct.result.productId, 'wowt'); assert.equal(oneProduct.result.filter, 'advertised');
+  assert.equal((await request('discovery.readAll', { productId: '../not-a-product' })).error?.code, 'INVALID_PRODUCT');
+  assert.equal((await request('discovery.refreshAll', { productId: 'wow' })).error?.code, 'INVALID_REQUEST', 'refreshAll checks every product and takes no product');
   const invalid = await request('discovery.read', { productId: '../not-a-product' });
   assert.ok(invalid.error, 'Invalid product must fail before any HTTP request.');
   const mismatched = await request('hello', {}, 99);

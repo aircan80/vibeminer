@@ -369,6 +369,7 @@ public sealed class CreaturesHostTests
         public Task<long> BeginRefreshAsync(string product, CancellationToken token) => throw new InvalidOperationException();
         public Task<DiscoveryPage> CommitAsync(string product, long generation, DiscoveryAttempt attempt, string completedAt, CancellationToken token) => throw new InvalidOperationException();
         public Task<DiscoveryPage> ReadAsync(string product, string filter, int limit, string? cursor, CancellationToken token) => throw new InvalidOperationException();
+        public Task<DiscoveryCatalogPage> ReadAllAsync(string? product, string filter, int limit, string? cursor, CancellationToken token) => throw new InvalidOperationException();
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

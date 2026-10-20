@@ -15,7 +15,7 @@ The owner accepted [size-first opening and demand-driven storage](SIZE-AND-DEMAN
 
 ## Discovery and opening
 
-Product is the first task control immediately beneath the discovery question. Product choice triggers metadata refresh; selecting a build row does not download payloads. One build list offers All, Local, and Currently advertised. Local presence, latest successful advertisement, and checked remote availability are separate facts.
+Discovery lists the builds of every registered product in one grid, with a Product filter that narrows it locally ([D062](DECISIONS.md)). Refresh builds is the explicit metadata check for every product; selecting a build row does not download payloads. One build list offers All, Prepared, and Current (advertised at the last check). Local presence, latest successful advertisement, and checked remote availability are separate facts.
 
 Group regional observations only when all identity-bearing references agree. Version text alone is insufficient. Preserve original regional receipts and show the separately selected acquisition route. Unknown friendly names remain exact product IDs with honest labels.
 

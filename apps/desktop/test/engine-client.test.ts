@@ -12,6 +12,8 @@ import { EngineClient, type EngineProcess } from '../src/main/engine-client';
 import {itemsSnapshot as classificationItems} from '../../../tests/desktop/fixtures/items.mjs';
 import {classificationBatch} from '../../../tests/desktop/fixtures/classifications.mjs';
 import fixture from '../../../contracts/examples/discovery-page.json';
+import catalogFixture from '../../../contracts/examples/discovery-catalog-page.json';
+import type { DiscoveryCatalogPage } from '../../../contracts/generated/discovery';
 import workspace from '../../../contracts/examples/workspace-snapshot.json';
 import inventoryWorkspace from '../../../contracts/examples/inventory-workspace.json';
 import tableCatalogue from '../../../contracts/examples/table-catalog-page.json';
@@ -36,6 +38,46 @@ it('reserves four lease closes plus cancellation and shutdown at ordinary satura
 it('gates Creature-only authority and rejects changed source mappings before exposing a ready core',async()=>{const{child,client}=setup(),s=creaturesSnapshot();await expect(client.request('creatures.prepare',s.context,'no-cap')).rejects.toMatchObject({code:'UNSUPPORTED'});expect(child.requests).toHaveLength(0);const hello=client.hello();child.reply(child.requests[0].id,{protocolVersion:1,engineVersion:'authored',capabilities:['creatures-v1']});await hello;const work=client.request('creatures.prepare',s.context,'creature-core');child.reply('creature-core',s);await expect(work).resolves.toMatchObject({featureRevision:'creatures-core-v1'});const bad=client.request('creatures.prepare',s.context,'wrong-core').catch(e=>e.code),wrong=structuredClone(s);wrong.fields.name.columnIndex=1;child.reply('wrong-core',wrong);expect(await bad).toBe('PROTOCOL_ERROR');});
 it('pins Creature pages and inspect replies to the exact ordered query and original raw ID',async()=>{const{child,client}=setup(),s=creaturesSnapshot(),hello=client.hello();child.reply(child.requests[0].id,{protocolVersion:1,engineVersion:'authored',capabilities:['creatures-v1']});await hello;const p={...s.context,artifactId:s.artifactId,exactCreatureId:'3',limit:50},page=client.request('creatures.page',p,'creature-page');child.reply('creature-page',creaturesPage(s,p));await expect(page).resolves.toMatchObject({exactCreatureId:'3'});const q={...s.context,artifactId:s.artifactId,creatureId:'3'},work=client.request('creatures.inspect',q,'creature-inspect').catch(e=>e.code),value=creatureInspect(s,q);value.creatureId='4';child.reply('creature-inspect',value);expect(await work).toBe('PROTOCOL_ERROR');});
 it('bounds whole Creature failure frames including escaped request ID at512KiB',async()=>{const{child,client}=setup(),hello=client.hello(),s=creaturesSnapshot();child.reply(child.requests[0].id,{protocolVersion:1,engineVersion:'authored',capabilities:['creatures-v1']});await hello;const id='\\'.repeat(262000),work=client.request('creatures.data',s.context,id).catch(e=>e.code);const frame=JSON.stringify({protocolVersion:1,id,error:{code:'CREATURES_RESULT_LIMIT',message:'x'.repeat(1024),retryable:true}})+'\n';expect(Buffer.byteLength(frame)).toBeGreaterThan(512*1024);child.stdout.write(frame);expect(await work).toBe('PROTOCOL_ERROR');});
+describe('cross-product discovery replies', () => {
+  const page = () => structuredClone(catalogFixture) as DiscoveryCatalogPage;
+  it('accepts the page that answers the exact read and refuses a page for another scope', async () => {
+    const { child, client } = setup();
+    const all = client.request('discovery.readAll', { filter: 'all', limit: 50 }, 'all');
+    child.reply('all', page());
+    await expect(all).resolves.toMatchObject({ productId: null, products: expect.any(Array) });
+    const value = page(); value.productId = 'wowt'; value.builds = value.builds.filter(build => build.productId === 'wowt');
+    const one = client.request('discovery.readAll', { productId: 'wowt', limit: 50 }, 'one');
+    child.reply('one', value);
+    await expect(one).resolves.toMatchObject({ productId: 'wowt' });
+    for (const [params, change] of [
+      [{ productId: 'wowt' }, (v: DiscoveryCatalogPage) => { v.productId = 'wowt'; }], // a wow build in a wowt page
+      [{}, (v: DiscoveryCatalogPage) => { v.productId = 'wow'; }],
+      [{ filter: 'advertised' }, (v: DiscoveryCatalogPage) => { v.filter = 'advertised'; v.builds[0].isAdvertised = false; }],
+      [{ limit: 1 }, () => {}],
+      [{}, (v: DiscoveryCatalogPage) => { v.builds[1] = v.builds[0]; }],
+      [{}, (v: DiscoveryCatalogPage) => { v.refreshProblems = [{ productId: 'not_registered', code: 'X', message: 'x' }]; }],
+    ] as const) {
+      const { child: other, client: second } = setup(), reply = page(); change(reply);
+      const work = second.request('discovery.readAll', params, 'bad').catch(e => e.code);
+      other.reply('bad', reply);
+      expect(await work).toBe('PROTOCOL_ERROR');
+    }
+  });
+  it('refuses invalid cross-product requests before writing and allows a long refresh', async () => {
+    vi.useFakeTimers();
+    const { child, client } = setup();
+    await expect(client.request('discovery.readAll', { productId: '../wow' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    await expect(client.request('discovery.readAll', { limit: 101 })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    await expect(client.request('discovery.refreshAll', { productId: 'wow' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(child.requests).toHaveLength(0);
+    const refresh = client.request('discovery.refreshAll', {}, 'refresh');
+    // Thirteen products at three at a time can outlast the ordinary three-minute reply limit.
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    expect(client.hasFailed).toBe(false);
+    child.reply('refresh', page());
+    await expect(refresh).resolves.toMatchObject({ refreshProblems: [{ productId: 'wow_classic' }] });
+  });
+});
 describe('bounded local engine transport', () => {
   it('reassembles split UTF-8 frames and correlates concurrent responses', async () => {
     const { child, client } = setup();

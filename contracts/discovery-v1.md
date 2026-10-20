@@ -24,6 +24,8 @@ Exactly one success/error reply completes a request. Progress includes a positiv
 | `products.list` | `{}` | `{ products: Product[] }`; local reviewed registry, no HTTP |
 | `discovery.read` | `{ productId, filter?: "all" \| "local" \| "advertised", limit?: number, cursor?: string }` | `DiscoveryPage`; local only |
 | `discovery.refresh` | `{ productId }` | `DiscoveryPage` with default first All page after current attempt |
+| `discovery.readAll` | `{ productId?, filter?: "all" \| "local" \| "advertised", limit?: number, cursor?: string }` | `DiscoveryCatalogPage` across every registered product; `productId` narrows it to one; local only |
+| `discovery.refreshAll` | `{}` | `DiscoveryCatalogPage`: first All page across every product after checking every product ([D062](../docs/DECISIONS.md)) |
 | `request.cancel` | `{ requestId }` | `{ requested: boolean }` |
 | `shutdown` | `{}` | `{ stopping: true }`; retire work and exit |
 
@@ -66,6 +68,34 @@ type DiscoveryPage = {
 
 In a discovery page `cdnConfig` is the newest entry of `cdnConfigHistory`. In a workspace snapshot it is the CDN config that open or admission was made with. Whether switching would change anything is decided per source region: only when the open's own region now advertises a different CDN config (its `advertisedRegions`, else its newest `sourceReceipts` for that region) is a new Open worth it. Entries with the same first and last check are a same-check tie ordered only by key; that order means nothing. The projection holds at most the newest 16 entries; `cdnConfigHistoryCount` is the total.
 
+### Across products
+
+The desktop lists every product's builds in one grid ([D062](../docs/DECISIONS.md)). It uses only `discovery.readAll` and `discovery.refreshAll`; the single-product methods keep their behaviour.
+
+```ts
+type ProductDiscoveryStatus = {
+  productId: string; lastCheckedAt: string | null; checkedRegions: string[];
+  errors: DiscoveryProblem[]; hasSavedHistory: boolean;
+  connection: "notChecked" | "online" | "offline" | "partial";
+};
+type ProductRefreshProblem = { productId: string; code: string; message: string };
+type DiscoveryCatalogPage = {
+  productId: string | null; // the Product filter; null = every product
+  filter: "all" | "local" | "advertised";
+  builds: Build[]; nextCursor: string | null; // at most 100 builds
+  products: ProductDiscoveryStatus[]; // every registered product in registry order, whatever the filter
+  refreshProblems: ProductRefreshProblem[]; // always [] from discovery.readAll
+};
+```
+
+- **Order.** Registry product order, then the raw `BuildId` read as a decimal number, newest first (missing, non-decimal or longer than 18 digits sort last), then build identity. The order is only for display; identity is unchanged. Each `Build` is the same exact projection `discovery.read` returns, with the same integrity checks.
+- **Paging.** The cursor binds scope, product filter, visibility filter and the number of committed checks. A commit of any product refuses an older cursor with `STALE_CURSOR`; starting a refresh does not. A page carries at most 750,000 bytes of builds and at most 900,000 bytes of builds plus statuses, inside the 1 MiB frame.
+- **Per-product status.** `products[i]` is that product's saved latest check: the same `lastCheckedAt`, `checkedRegions`, `errors`, `hasSavedHistory` and `connection` a single-product page carries. A product never checked is `notChecked`.
+- **Completed or failed.** A latest check received evidence when `connection` is `online`, or `partial` with at least one `checkedRegions` entry (the versions document was read). `offline`, and `partial` with no checked regions (for example HTTP 500 on both documents), are failed attempts: the desktop names them as "could not be checked", never as a check that found nothing, and never counts them or shows them as the latest check.
+- **Refresh.** `discovery.refreshAll` runs the existing per-product refresh for every registered product, at most three products at once, through the same official-source transport and its network and HTTP permits. Each product commits on its own. A product whose attempt fails with a typed error keeps its earlier evidence and appears in `refreshProblems`; the others continue. Network failures are ordinary committed checks with `offline` or `partial` status, as before.
+- **Progress.** One frame before any product starts, then one per finished product, in order: `{ stage: "Checking official metadata", completed, total, unit: "products", region: null }`. `total` is the registry size. There is no percentage, byte count or ETA.
+- **Cancel.** `request.cancel` stops starting products and cancels the running ones. The terminal `CANCELED` reply follows only after the running checks retired. Products that committed before the stop keep their new results, so the desktop reads the saved view again. If every product had already finished, the durable result wins and the reply is a success.
+
 `connection` describes the latest explicit attempt, not a general connectivity probe. Local reads make no HTTP calls. An engine/network failure cannot masquerade as successful empty results. `isLocal` is false for discovery-only observations; Local can be empty until actual preparation exists. Render availability as Not checked, never infer payload readiness or locale.
 
 ## Discovery source and identity policy
@@ -82,4 +112,4 @@ Input limits: 1 MiB/document, 64 columns, 10,000 data rows, 16,384 characters/li
 
 Host accepts optional `--data-dir <absolute-path>` for isolated tests/development. Electron supplies its app-owned `userData/engine-v1` location; never open the Java archive by default. Tests use temporary directories. Normal shutdown cancels and awaits active request work before closing the catalog. Unexpected exit rejects all pending frontend consumers. Transport/recovery errors are safe stable codes rather than exception-string parsing.
 
-The UI preserves current product/selection and saved rows during refresh, supports explicit stopping/cancellation, and fences late results by request generation. Same-product refresh preserves valid selection. Discovery queries do not initialize payload acquisition or mark metadata ready. Open Build stays disabled with a visible reason until real opening is implemented.
+The UI preserves the current filters, selection and saved rows during refresh, supports explicit stopping/cancellation, and fences late results by request generation. Refresh preserves a valid selection. Discovery queries do not initialize payload acquisition or mark metadata ready. Open Build stays disabled with a visible reason until real opening is implemented.

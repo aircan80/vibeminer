@@ -162,7 +162,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
             {
                 case "hello":
                     RequireOnly(parameters);
-                    var capabilities = new List<string> { "discovery-v1", "local-history", "cancellation", "home-download-v1", "download-v1", "inventory-v1", "tables-definitions-v1", "tables-data-v1" };
+                    var capabilities = new List<string> { "discovery-v1", "discovery-all-products-v1", "local-history", "cancellation", "home-download-v1", "download-v1", "inventory-v1", "tables-definitions-v1", "tables-data-v1" };
                     if (retention is not null) capabilities.Add("retention-v1");
                     if (items is not null) capabilities.Add("items-v1");
                     if (itemIcons is not null && iconLeases is not null) capabilities.Add("item-icons-v1");
@@ -195,6 +195,22 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     await WriteAsync(output, new { protocolVersion = 1, type = "progress", requestId = id,
                         sequence = 1, stage = "Downloading metadata", region = (string?)null, completed = (int?)null, total = (int?)null, unit = (string?)null });
                     result = await service.RefreshAsync(product, request.Cancellation.Token);
+                    break;
+                case "discovery.readAll":
+                    RequireOnly(parameters, "productId", "filter", "limit", "cursor");
+                    var allLimit = 50;
+                    if (parameters.TryGetProperty("limit", out var allCount) && (allCount.ValueKind != JsonValueKind.Number || !allCount.TryGetInt32(out allLimit)))
+                        throw new DiscoveryException("INVALID_REQUEST", "The page size must be an integer.");
+                    result = await service.ReadAllAsync(OptionalString(parameters, "productId"), OptionalString(parameters, "filter") ?? "all",
+                        allLimit, OptionalString(parameters, "cursor"), request.Cancellation.Token);
+                    break;
+                case "discovery.refreshAll":
+                    RequireOnly(parameters);
+                    long refreshSequence = 0;
+                    // The service reports one product at a time, so sequence order matches the completed count.
+                    result = await service.RefreshAllAsync(progress => WriteAsync(output, new { protocolVersion = 1, type = "progress", requestId = id,
+                        sequence = Interlocked.Increment(ref refreshSequence), stage = "Checking official metadata", region = (string?)null,
+                        completed = progress.Completed, total = progress.Total, unit = "products" }), request.Cancellation.Token);
                     break;
                 case "tables.catalog":
                     RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "query", "limit", "after");
@@ -539,7 +555,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
             await ReplyAsync(output, id, result, maximumBytes, frameKind);
             pendingGeometryLease = null; // Opaque ownership transfers only after actual terminal Flush.
         }
-        catch (OperationCanceledException) { await TryErrorAsync(output, id, "CANCELED", method == "workspace.open" ? "Opening canceled." : method == "tables.prepare" ? "Table loading canceled." : "Operation canceled.", true, maximumBytes, frameKind); }
+        catch (OperationCanceledException) { await TryErrorAsync(output, id, "CANCELED", method == "workspace.open" ? "Opening canceled." : method == "discovery.refreshAll" ? "Discovery canceled. Products checked before stopping keep their new results." : method == "tables.prepare" ? "Table loading canceled." : "Operation canceled.", true, maximumBytes, frameKind); }
         catch (DiscoveryException ex) { await TryErrorAsync(output, id, ex.Code, ex.Message, ex.Retryable, maximumBytes, frameKind); }
         catch (Exception ex)
         {

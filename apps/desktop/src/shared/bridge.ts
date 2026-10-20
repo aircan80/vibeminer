@@ -14,14 +14,16 @@ import type { ItemsPageParams, ItemInspectParams } from './items';
 import type { RetentionSet } from './retention';
 import type { RetentionTarget, RetentionSnapshot, RetentionList } from '../../../../contracts/generated/discovery';
 import type { TableDataParams, TableRowsParams } from './table-data';
-import type { Product, DiscoveryPage, EngineProgress, WorkspaceSnapshot, InventoryPage, DownloadPage, TableCatalogPage, TableDefinitionSnapshot, TableDataSnapshot, TableDataReadiness, TableDataPage } from '../../../../contracts/generated/discovery';
+import type { Product, DiscoveryPage, DiscoveryCatalogPage, EngineProgress, WorkspaceSnapshot, InventoryPage, DownloadPage, TableCatalogPage, TableDefinitionSnapshot, TableDataSnapshot, TableDataReadiness, TableDataPage } from '../../../../contracts/generated/discovery';
 import type { TablesCatalogParams, TableDefinitionParams } from './tables';
 import { isDownloadWorkspace, type DownloadReadParams } from './download';
 import { isInventoryWorkspace, type InventoryReadParams } from './inventory';
 export type DiscoveryFilter = 'all' | 'local' | 'advertised';
 export type ReadParams = { productId: string; filter?: DiscoveryFilter; limit?: number; cursor?: string };
+/** Cross-product read. Without productId it reads every registered product. */
+export type ReadAllParams = { productId?: string; filter?: DiscoveryFilter; limit?: number; cursor?: string };
 export type OpenParams = { productId: string; buildIdentity: string; sourceRegion: string };
-export type RequestMethod = 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'workspace.open' | 'inventory.read' | 'download.read' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
+export type RequestMethod = 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'workspace.open' | 'inventory.read' | 'download.read' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
 export type BridgeReply<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; retryable: boolean } };
 export interface DiscoveryBridge {
   onGeometryRetirement?(listener:(notice:GeometryViewRetirement)=>void):()=>void;
@@ -60,6 +62,9 @@ export interface DiscoveryBridge {
   products(): Promise<BridgeReply<{ products: Product[] }>>;
   read(params: ReadParams): Promise<BridgeReply<DiscoveryPage>>;
   refresh(productId: string, requestId: string): Promise<BridgeReply<DiscoveryPage>>;
+  readAll(params: ReadAllParams): Promise<BridgeReply<DiscoveryCatalogPage>>;
+  /** Checks every registered product in one cancellable request. */
+  refreshAll(requestId: string): Promise<BridgeReply<DiscoveryCatalogPage>>;
   open(params: OpenParams, requestId: string): Promise<BridgeReply<WorkspaceSnapshot>>;
   tablePrepare(params: TableDataParams, requestId: string): Promise<BridgeReply<TableDataSnapshot>>;
   tableData(params: TableDataParams): Promise<BridgeReply<TableDataReadiness>>;
@@ -78,6 +83,19 @@ export function validRead(value: unknown): value is ReadParams {
   if (!value || typeof value !== 'object') return false;
   const p = value as ReadParams;
   return validProduct(p.productId) && (p.filter === undefined || ['all', 'local', 'advertised'].includes(p.filter)) && (p.limit === undefined || Number.isInteger(p.limit) && p.limit >= 1 && p.limit <= 100) && (p.cursor === undefined || typeof p.cursor === 'string' && p.cursor.length <= 4096) && Object.keys(p).every(key => ['productId', 'filter', 'limit', 'cursor'].includes(key));
+}
+export function validReadAll(value: unknown): value is ReadAllParams {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const p = value as ReadAllParams;
+  return (p.productId === undefined || validProduct(p.productId)) && (p.filter === undefined || ['all', 'local', 'advertised'].includes(p.filter)) && (p.limit === undefined || Number.isInteger(p.limit) && p.limit >= 1 && p.limit <= 100) && (p.cursor === undefined || typeof p.cursor === 'string' && p.cursor.length <= 4096) && Object.keys(p).every(key => ['productId', 'filter', 'limit', 'cursor'].includes(key));
+}
+/** A cross-product page answers exactly the read that was asked: same product filter and visibility, builds only from that product. */
+export function catalogPageMatches(value: DiscoveryCatalogPage, params: ReadAllParams): boolean {
+  const product = params.productId ?? null, filter = params.filter ?? 'all';
+  const ids = new Set(value.builds.map(build => build.id)), statuses = new Set(value.products.map(status => status.productId));
+  return value.productId === product && value.filter === filter && value.builds.length <= (params.limit ?? 50) && ids.size === value.builds.length && statuses.size === value.products.length
+    && value.builds.every(build => (product === null || build.productId === product) && statuses.has(build.productId) && (filter !== 'local' || build.isLocal) && (filter !== 'advertised' || build.isAdvertised))
+    && value.refreshProblems.every(problem => statuses.has(problem.productId)) && (value.nextCursor === null || value.builds.length > 0);
 }
 
 export function validOpen(value: unknown): value is OpenParams {

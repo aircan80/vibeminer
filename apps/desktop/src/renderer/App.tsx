@@ -14,10 +14,10 @@ import {useItemsLoading,ItemsLoadBanner} from './useItemsLoading';
 import { useRetention } from './useRetention';
 import { exactBytes, exactCount } from '../shared/inventory';
 import { RetentionActivity } from './Retention';
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import './discovery.css';
-import type { Build, DiscoveryPage, Product, EngineProgress, RetentionSnapshot } from '../../../../contracts/generated/discovery';
-import type { DiscoveryBridge, DiscoveryFilter } from '../shared/bridge';
+import type { Build, DiscoveryCatalogPage, Product, ProductDiscoveryStatus, ProductRefreshProblem, EngineProgress, RetentionSnapshot } from '../../../../contracts/generated/discovery';
+import type { BridgeReply, DiscoveryBridge, DiscoveryFilter, ReadAllParams } from '../shared/bridge';
 import { historyLabels, newerRegionCdnConfigs, newestGroupSize } from '../shared/cdn-config';
 import { TableLoadBanner, useTableLoading } from './useTableLoading';
 import { useWorkspaceFlow, type Opening } from './useWorkspaceFlow';
@@ -65,12 +65,18 @@ export function buildDownloads(jobs: readonly RetentionSnapshot[]): Map<string, 
   return downloads;
 }
 const routeRegions = (build: Build) => Array.from(new Set(build.sourceReceipts.filter(receipt => receipt.role === 'cdns' && receipt.rowOrdinal !== null && build.sourceReceipts.some(version => version.role === 'versions' && version.region === receipt.region && version.rowOrdinal !== null)).map(receipt => receipt.region))).sort();
-const savedProduct = () => { try { return localStorage.getItem('vibeminer.product') || 'wow'; } catch { return 'wow'; } };
+/** The persisted exact selection. Older versions kept one per product under the last chosen product. */
+const selectionKey = 'vibeminer.discovery.selection';
+function savedSelection(): string | null {
+  try {
+    const saved = localStorage.getItem(selectionKey);
+    if (saved) return saved;
+    return localStorage.getItem(`vibeminer.selection.${localStorage.getItem('vibeminer.product') || 'wow'}`);
+  } catch { return null; }
+}
 export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge }) {
   const [products, setProducts] = useState<Product[]>([]);
-  const [productId, setProductId] = useState(savedProduct);
-  const [chosen, setChosen] = useState(false);
-  const flow = useWorkspaceFlow(bridge, productId);
+  const flow = useWorkspaceFlow(bridge);
   const tableLoading = useTableLoading(bridge);
   const itemsLoading = useItemsLoading(bridge);
   const effectsLoading=useItemEffects(bridge);
@@ -106,17 +112,12 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
   const [problem, setProblem] = useState('');
   useEffect(() => { let disposed = false; void bridge.products().then(reply => {
     if (disposed) return;
-    if (reply.ok) { setProducts(reply.value.products); if (!reply.value.products.some(p => p.id === productId)) setProductId('wow'); }
+    if (reply.ok) setProducts(reply.value.products);
     else setProblem(`${reply.error.message} (${reply.error.code})`);
   }).catch(() => { if (!disposed) setProblem('The local engine is unavailable. Restart VibeMiner to reconnect.'); }); return () => { disposed = true; }; }, [bridge]);
-  const product = products.find(p => p.id === productId);
-  const productFocus = useRef(false);
-  useEffect(() => { if (productFocus.current) { productFocus.current = false; document.getElementById('product')?.focus(); } }, [productId]);
-  function choose(id: string) { productFocus.current = document.activeElement?.id === 'product'; setChosen(true); setProductId(id); try { localStorage.setItem('vibeminer.product', id); } catch { /* Session selection still works. */ } }
   return <DownloadActivity tasks={tasks} contextKey={activityContext} onInfoAction={(info,action)=>{if(action==='refreshStatus'&&info.key===activityContext&&info.target&&workspace?.download&&info.target.ledgerId===workspace.download.ledgerId&&matches(info.target))retention.refresh(info.target);}} onAction={(key,action)=>taskActions.get(key)?.get(action)?.()}>
     <div className="discovery-screen" hidden={flow.view !== 'discovery'} inert={flow.view !== 'discovery'}><a className="skip" href="#builds">Skip to builds</a>
-      <DiscoveryWorkspace key={productId} active={flow.view === 'discovery'} productId={productId} product={product} autoRefresh={chosen} bridge={bridge} acknowledgedBuild={flow.operation?.result?.build} acknowledgedRegion={flow.operation?.result?.sourceReference.region} downloads={downloads} opening={flow.operation} onShowOpening={() => flow.showActive()} onCancelOpening={() => { void flow.cancel(); }} onOpen={(build, region) => { void flow.open(build, region, product?.label || productId); }}
-        productControl={<div className="dv-field"><label htmlFor="product">Product</label><select id="product" className="dv-control dv-product" value={productId} onChange={e => choose(e.target.value)}>{products.length ? products.map(p => <option value={p.id} key={p.id}>{p.id} · World of Warcraft · {p.label}</option>) : <option value={productId}>{productId}</option>}</select></div>}
+      <DiscoveryWorkspace active={flow.view === 'discovery'} products={products} bridge={bridge} acknowledgedBuild={flow.operation?.result?.build} acknowledgedRegion={flow.operation?.result?.sourceReference.region} downloads={downloads} opening={flow.operation} onShowOpening={() => flow.showActive()} onCancelOpening={() => { void flow.cancel(); }} onOpen={(build, region) => { void flow.open(build, region, products.find(p => p.id === build.productId)?.label || build.productId); }}
         fixtureLabel={bridge.fixtureLabel ?? undefined} problem={problem}/>
     </div>
     {flow.view === 'preparation' && flow.operation && <PreparationView tableActivity={null} operation={flow.operation} notice={flow.notice} fixtureLabel={bridge.fixtureLabel} onBack={flow.detach} onCancel={() => { void flow.cancel(); }} onRetry={() => { const op = flow.operation!; void flow.open(op.build, op.sourceRegion, op.label); }} onEnter={flow.enterVerified}/>}
@@ -124,23 +125,79 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
   </DownloadActivity>;
 }
 
-function DiscoveryWorkspace({ active: visibleView, productId, product, autoRefresh, bridge, productControl, fixtureLabel, problem, downloads, opening, onShowOpening, onCancelOpening, onOpen, acknowledgedBuild, acknowledgedRegion }: { active: boolean; productId: string; product?: Product; autoRefresh: boolean; bridge: DiscoveryBridge; productControl: ReactNode; fixtureLabel?: string; problem: string; downloads: Map<string, BuildDownload>; opening: Opening | null; onShowOpening: () => void; onCancelOpening: () => void; acknowledgedBuild?: Build; acknowledgedRegion?: string; onOpen: (build: Build, sourceRegion: string) => void }) {
-  const [page, setPage] = useState<DiscoveryPage | null>(null);
+type ProductFilter = 'all' | string;
+type ProblemGroup = { key: string; label: string; text: string; code: string };
+/** Per-product problems from the latest saved checks and from this session's refresh, grouped when products share one. */
+export function productProblems(statuses: readonly ProductDiscoveryStatus[], refreshProblems: readonly ProductRefreshProblem[]): ProblemGroup[] {
+  const groups = new Map<string, { labels: string[]; text: string; code: string }>();
+  const add = (key: string, label: string, text: string, code: string) => { const group = groups.get(key); if (group) { if (!group.labels.includes(label)) group.labels.push(label); } else groups.set(key, { labels: [label], text, code }); };
+  for (const problem of refreshProblems) add(`refresh|${problem.code}|${problem.message}`, problem.productId, `check did not complete. ${problem.message}`, problem.code);
+  for (const status of statuses) for (const error of status.errors) add(`${error.region ?? ''}|${error.code}|${error.message}`, `${status.productId}${error.region ? ` ${error.region.toUpperCase()}` : ''}`, error.message, error.code);
+  return [...groups].map(([key, group]) => ({ key, label: group.labels.join(', '), text: group.text, code: group.code }));
+}
+/**
+ * A latest check that received the versions document. `checkedRegions` lists that document's regions, so `partial`
+ * with no checked regions means neither document was usable (offline-like failures, HTTP errors, invalid metadata).
+ */
+export const checkCompleted = (status: ProductDiscoveryStatus) => status.connection === 'online' || status.connection === 'partial' && status.checkedRegions.length > 0;
+/** A latest check that was attempted but received no usable evidence. It never reads as a check that found nothing. */
+export const checkFailed = (status: ProductDiscoveryStatus) => status.connection === 'offline' || status.connection === 'partial' && status.checkedRegions.length === 0;
+/** The typed problem a failed check reports, for naming it in place. */
+const failureText = (status: ProductDiscoveryStatus | undefined, refresh?: ProductRefreshProblem) => refresh ? `${refresh.message} (${refresh.code})` : status?.errors[0] ? `${status.errors[0].message} (${status.errors[0].code})` : 'Official metadata could not be read.';
+export type CheckSummary = { checked: string[]; failed: string[]; notChecked: string[]; total: number };
+/**
+ * Which products have a completed check. With a baseline (each product's lastCheckedAt when this session's latest
+ * refresh started), only checks that refresh committed count; without one, the saved latest checks do. An offline
+ * check or a check that did not complete is never counted as checked.
+ */
+export function checkSummary(statuses: readonly ProductDiscoveryStatus[], baseline: ReadonlyMap<string, string | null> | null, refreshProblems: readonly ProductRefreshProblem[]): CheckSummary {
+  const summary: CheckSummary = { checked: [], failed: [], notChecked: [], total: statuses.length };
+  const problems = new Set(refreshProblems.map(problem => problem.productId));
+  for (const status of statuses) {
+    const ran = baseline ? status.lastCheckedAt !== null && status.lastCheckedAt !== (baseline.get(status.productId) ?? null) : status.connection !== 'notChecked';
+    if (problems.has(status.productId) || ran && checkFailed(status)) summary.failed.push(status.productId);
+    else if (ran && checkCompleted(status)) summary.checked.push(status.productId);
+    else summary.notChecked.push(status.productId);
+  }
+  return summary;
+}
+const productNames = (ids: readonly string[]) => ids.length <= 3 ? ids.join(', ') : `${ids.length} products`;
+/**
+ * What a problem leaves behind, per product with the problem: its own saved observations are kept, or it has none.
+ * Never decided from other products' history, and never "every product".
+ */
+export function retainedEvidence(problemStatuses: readonly ProductDiscoveryStatus[]): string {
+  const kept = problemStatuses.filter(s => s.hasSavedHistory).map(s => s.productId), none = problemStatuses.filter(s => !s.hasSavedHistory).map(s => s.productId);
+  return [...(kept.length ? [`Earlier saved observations are kept for ${productNames(kept)}.`] : []), ...(none.length ? [`${productNames(none)}: no saved observations.`] : [])].join(' ');
+}
+/** "Checked 1 of 2 products · wowt not checked"; null when nothing was ever checked and no refresh ran this session. */
+export function checkLine(summary: CheckSummary, refreshed: boolean): string | null {
+  if (!refreshed && !summary.checked.length && !summary.failed.length) return null;
+  const count = summary.checked.length === summary.total ? `${summary.total}` : `${summary.checked.length} of ${summary.total}`;
+  return [`Checked ${count} products`, ...(summary.failed.length ? [`${productNames(summary.failed)} could not be checked`] : []), ...(summary.notChecked.length ? [`${productNames(summary.notChecked)} not checked`] : [])].join(' · ');
+}
+function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabel, problem, downloads, opening, onShowOpening, onCancelOpening, onOpen, acknowledgedBuild, acknowledgedRegion }: { active: boolean; products: Product[]; bridge: DiscoveryBridge; fixtureLabel?: string; problem: string; downloads: Map<string, BuildDownload>; opening: Opening | null; onShowOpening: () => void; onCancelOpening: () => void; acknowledgedBuild?: Build; acknowledgedRegion?: string; onOpen: (build: Build, sourceRegion: string) => void }) {
+  const [page, setPage] = useState<DiscoveryCatalogPage | null>(null);
   useEffect(() => {
-    if (!acknowledgedBuild || acknowledgedBuild.productId !== productId) return;
+    if (!acknowledgedBuild) return;
     setPage(previous => {
-      if (!previous?.builds.some(build => build.id === acknowledgedBuild.id && (build.isNew !== acknowledgedBuild.isNew || build.isLocal !== acknowledgedBuild.isLocal))) return previous;
-      return { ...previous, builds: previous.builds.map(build => build.id === acknowledgedBuild.id ? { ...build, isNew: acknowledgedBuild.isNew, isLocal: acknowledgedBuild.isLocal } : build) };
+      const same = (build: Build) => build.id === acknowledgedBuild.id && build.productId === acknowledgedBuild.productId;
+      if (!previous?.builds.some(build => same(build) && (build.isNew !== acknowledgedBuild.isNew || build.isLocal !== acknowledgedBuild.isLocal))) return previous;
+      return { ...previous, builds: previous.builds.map(build => same(build) ? { ...build, isNew: acknowledgedBuild.isNew, isLocal: acknowledgedBuild.isLocal } : build) };
     });
-  }, [acknowledgedBuild, productId]);
+  }, [acknowledgedBuild]);
   const [filter, setFilter] = useState<DiscoveryFilter>('all');
+  const [productFilter, setProductFilter] = useState<ProductFilter>('all');
   const [query, setQuery] = useState('');
-  const [region, setRegion] = useState('all');
-  const [selectedId, setSelectedId] = useState<string | null>(() => { try { return localStorage.getItem(`vibeminer.selection.${productId}`); } catch { return null; } });
+  const [selectedId, setSelectedId] = useState<string | null>(savedSelection);
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(true);
   const [stopping, setStopping] = useState(false);
-  const [activity, setActivity] = useState('');
+  const [progress, setProgress] = useState<{ completed: number; total: number } | null>(null);
+  const [refreshProblems, setRefreshProblems] = useState<ProductRefreshProblem[]>([]);
+  // Each product's lastCheckedAt when the latest refresh this session started; set once that refresh ends.
+  const startBaseline = useRef<Map<string, string | null> | null>(null);
+  const [sessionBaseline, setSessionBaseline] = useState<Map<string, string | null> | null>(null);
   const [message, setMessage] = useState('Not refreshed this session.');
   const [error, setError] = useState('');
   // A refused catalog (older or newer VibeMiner) cannot be read or refreshed; nothing on screen may suggest otherwise.
@@ -158,81 +215,97 @@ function DiscoveryWorkspace({ active: visibleView, productId, product, autoRefre
   const refreshButton = useRef<HTMLButtonElement>(null);
   const activity_ = useDownloadActivity();
   const latestFilter = useRef(filter); latestFilter.current = filter;
-  function accept(value: DiscoveryPage, append = false) {
-    if (value.productId !== productId) throw new Error('Product mismatch');
+  const latestProduct = useRef(productFilter); latestProduct.current = productFilter;
+  const label = (id: string) => products.find(p => p.id === id)?.label;
+  const params = (nextFilter: DiscoveryFilter, product: ProductFilter, limit = 50, cursor?: string | null): ReadAllParams => ({ ...(product !== 'all' ? { productId: product } : {}), filter: nextFilter, limit, ...(cursor ? { cursor } : {}) });
+  const expected = (value: DiscoveryCatalogPage, product: ProductFilter) => { if (value.productId !== (product === 'all' ? null : product)) throw new Error('Product mismatch'); };
+  function accept(value: DiscoveryCatalogPage, product: ProductFilter, append = false) {
+    expected(value, product);
     setPage(previous => append && previous ? { ...value, builds: [...previous.builds, ...value.builds.filter(b => !previous.builds.some(old => old.id === b.id))] } : value);
   }
-  async function read(nextFilter: DiscoveryFilter, cursor?: string, restoreSelection = false) {
+  /** Read pages until the wanted build is loaded, the window holds 500 builds or the engine has no more. */
+  async function fill(first: DiscoveryCatalogPage, nextFilter: DiscoveryFilter, product: ProductFilter, done: (value: DiscoveryCatalogPage) => boolean, live: () => boolean): Promise<DiscoveryCatalogPage | null> {
+    let windowPage = first;
+    while (windowPage.nextCursor && windowPage.builds.length < 500 && !done(windowPage)) {
+      const next = await bridge.readAll(params(nextFilter, product, Math.min(50, 500 - windowPage.builds.length), windowPage.nextCursor));
+      if (!live()) return null;
+      if (!next.ok) throw Object.assign(new Error('read'), { reply: next });
+      expected(next.value, product);
+      const additions = next.value.builds.filter(build => !windowPage.builds.some(old => old.id === build.id));
+      if (!additions.length && next.value.nextCursor) throw new Error('Paging did not advance.');
+      windowPage = { ...next.value, builds: [...windowPage.builds, ...additions] };
+    }
+    return windowPage;
+  }
+  async function read(nextFilter: DiscoveryFilter, product: ProductFilter, cursor?: string, restoreSelection = false) {
     const version = ++generation.current;
+    const live = () => !disposed.current && version === generation.current;
     setReading(true);
     try {
-      const reply = await bridge.read({ productId, filter: nextFilter, limit: 50, ...(cursor ? { cursor } : {}) });
-      if (disposed.current || version !== generation.current) return;
+      const reply = await bridge.readAll(params(nextFilter, product, 50, cursor));
+      if (!live()) return;
       if (reply.ok) {
-        let windowPage = reply.value;
         const wanted = restoreSelection ? currentSelection.current : null;
-        while (wanted && windowPage.nextCursor && windowPage.builds.length < 500 && !windowPage.builds.some(build => build.id === wanted)) {
-          const next = await bridge.read({ productId, filter: nextFilter, limit: Math.min(50, 500 - windowPage.builds.length), cursor: windowPage.nextCursor });
-          if (disposed.current || version !== generation.current) return;
-          if (!next.ok) { setError(`${next.error.message} (${next.error.code})`); return; }
-          if (next.value.productId !== productId) throw new Error('Product mismatch');
-          const additions = next.value.builds.filter(build => !windowPage.builds.some(old => old.id === build.id));
-          if (!additions.length && next.value.nextCursor) throw new Error('Paging did not advance.');
-          windowPage = { ...next.value, builds: [...windowPage.builds, ...additions] };
-        }
-        accept(windowPage, !!cursor); setError('');
+        const windowPage = await fill(reply.value, nextFilter, product, value => !wanted || value.builds.some(build => build.id === wanted), live);
+        if (!windowPage) return;
+        accept(windowPage, product, !!cursor); setError('');
         if (wanted && !windowPage.builds.some(build => build.id === wanted)) setSelectionNotice(windowPage.nextCursor ? 'The saved exact selection is outside the 500-build display window. No different build has been selected.' : 'The saved exact selection is not returned by this view. No different build has been selected.');
       } else { if (refusedCodes.includes(reply.error.code)) refusedRead.current = true; setError(`${reply.error.message} (${reply.error.code})`); }
-    } catch { if (!disposed.current && version === generation.current) setError('The local engine connection failed. Restart VibeMiner to reconnect.'); }
-    finally { if (!disposed.current && version === generation.current) setReading(false); }
+    } catch (failure) {
+      const reply = (failure as { reply?: BridgeReply<unknown> }).reply;
+      if (live()) setError(reply && !reply.ok ? `${reply.error.message} (${reply.error.code})` : 'The local engine connection failed. Restart VibeMiner to reconnect.');
+    }
+    finally { if (live()) setReading(false); }
   }
   async function refresh() {
     if (active.current || refusedRead.current || refused) return;
     const id = crypto.randomUUID(); active.current = id;
-    ++generation.current; setReading(false); setBusy(true); setStopping(false); setError(''); setActivity('Checking official metadata'); setMessage(`Checking official metadata for ${productId}…`);
+    startBaseline.current = new Map((currentPage.current?.products ?? []).map(status => [status.productId, status.lastCheckedAt]));
+    ++generation.current; setReading(false); setBusy(true); setStopping(false); setError(''); setProgress(null); setRefreshProblems([]); setMessage('Checking official metadata for every product…');
+    let reread = false;
     try {
-      const reply = await bridge.refresh(productId, id);
+      const reply = await bridge.refreshAll(id);
       if (disposed.current || active.current !== id) return;
       ++generation.current;
       if (reply.ok) {
         // A refreshed view must not keep showing a pre-refresh copy of a selection it no longer returns, even if it exits early.
         lastSelection.current = null;
+        setRefreshProblems(reply.value.refreshProblems);
         const originalWindow = currentPage.current;
         const wantedCount = Math.min(500, originalWindow?.builds.length || 0);
         const wantedSelection = originalWindow?.builds.some(build => build.id === currentSelection.current) ? currentSelection.current : null;
-        const contextFilter = latestFilter.current;
+        const contextFilter = latestFilter.current, contextProduct = latestProduct.current;
         const refreshGeneration = generation.current;
-        let windowPage = reply.value;
-        if (contextFilter !== 'all') {
-          const first = await bridge.read({ productId, filter: contextFilter, limit: 50 });
-          if (!first.ok) throw new Error('Refreshed view could not be read.');
-          windowPage = first.value;
-        }
-        while (windowPage.nextCursor && windowPage.builds.length < 500 && (windowPage.builds.length < wantedCount || wantedSelection && !windowPage.builds.some(build => build.id === wantedSelection))) {
-          const next = await bridge.read({ productId, filter: contextFilter, limit: Math.min(50, 500 - windowPage.builds.length), cursor: windowPage.nextCursor });
+        const live = () => !disposed.current && refreshGeneration === generation.current && contextFilter === latestFilter.current && contextProduct === latestProduct.current;
+        let first = reply.value;
+        if (contextFilter !== 'all' || contextProduct !== 'all') {
+          const filtered = await bridge.readAll(params(contextFilter, contextProduct));
           if (disposed.current) return;
-          if (refreshGeneration !== generation.current) { setMessage('Discovery completed. Showing the current filtered view.'); return; }
-          if (!next.ok) throw new Error('Refreshed view could not be read.');
-          if (next.value.productId !== productId) throw new Error('Product mismatch');
-          const additions = next.value.builds.filter(build => !windowPage.builds.some(old => old.id === build.id));
-          if (!additions.length && next.value.nextCursor) throw new Error('Paging did not advance.');
-          windowPage = { ...next.value, builds: [...windowPage.builds, ...additions] };
+          if (!live()) { setMessage('Discovery completed. Showing the current filtered view.'); return; }
+          if (!filtered.ok) throw new Error('Refreshed view could not be read.');
+          first = filtered.value;
         }
+        const windowPage = await fill(first, contextFilter, contextProduct, value => value.builds.length >= wantedCount && (!wantedSelection || value.builds.some(build => build.id === wantedSelection)), live);
         if (disposed.current) return;
-        if (refreshGeneration !== generation.current || contextFilter !== latestFilter.current) { setMessage('Discovery completed. Showing the current filtered view.'); return; }
-        accept(windowPage);
+        if (!windowPage || !live()) { setMessage('Discovery completed. Showing the current filtered view.'); return; }
+        accept(windowPage, contextProduct);
         setSelectionNotice(wantedSelection && !windowPage.builds.some(build => build.id === wantedSelection) ? windowPage.nextCursor ? 'The selected exact build is outside the refreshed 500-build display window. No different build has been selected.' : 'The selected exact build is no longer returned by this view after refresh. No different build has been selected.' : '');
-        const value = reply.value;
-        setMessage(value.connection === 'offline' ? 'Could not refresh. Showing saved observations where available.' : value.connection === 'partial' ? 'Check completed with regional problems. Previous successful evidence is retained.' : `Discovery complete. Checked ${regions(value.checkedRegions)}.`);
-      } else if (reply.error.code === 'CANCELED') setMessage('Discovery canceled. Previous observations are still available.');
-      else { setError(`${reply.error.message} (${reply.error.code})`); setMessage('Discovery could not complete. Previous observations are still available.'); }
+        const statuses = reply.value.products, total = statuses.length, checkedNow = statuses.filter(s => s.connection !== 'notChecked');
+        const failed = new Set([...statuses.filter(s => s.connection === 'offline' || s.errors.length > 0).map(s => s.productId), ...reply.value.refreshProblems.map(p => p.productId)]);
+        // What is kept is stated per product with a problem, from that product's own saved history.
+        const kept = retainedEvidence(statuses.filter(s => failed.has(s.productId)));
+        setMessage(checkedNow.length > 0 && checkedNow.every(checkFailed) ? `Could not refresh. ${kept}` : failed.size ? `Check completed with problems for ${failed.size} of ${total} products. ${kept}` : `Discovery complete. Checked ${total} products.`);
+      } else if (reply.error.code === 'CANCELED') { setMessage('Discovery canceled. Products checked before stopping keep their new results.'); reread = true; }
+      else { setError(`${reply.error.message} (${reply.error.code})`); setMessage('Discovery could not complete. Previous observations are still available.'); reread = true; }
     } catch { if (!disposed.current) { setError('The refreshed view could not be completed. Previous observations remain displayed; retry discovery to read a coherent window.'); setMessage('Discovery could not complete the refreshed view. Previous observations are still displayed.'); } }
-    finally { if (!disposed.current && active.current === id) { active.current = null; setBusy(false); setStopping(false); setActivity(''); } }
+    finally { if (!disposed.current && active.current === id) { active.current = null; setBusy(false); setStopping(false); setProgress(null); setSessionBaseline(startBaseline.current); } }
+    // Products that finished before a stop or failure committed their results; show what is saved now.
+    if (reread && !disposed.current) void read(latestFilter.current, latestProduct.current, undefined, true);
   }
   useEffect(() => {
     disposed.current = false;
-    const off = bridge.onProgress(progress => { if (progress.requestId === active.current && !disposed.current) setActivity(progress.stage); });
-    void read('all', undefined, true).then(() => { if (autoRefresh && !disposed.current) void refresh(); });
+    const off = bridge.onProgress(update => { if (update.requestId === active.current && !disposed.current && update.unit === 'products' && update.completed !== null && update.total !== null) setProgress({ completed: update.completed, total: update.total }); });
+    void read('all', 'all', undefined, true);
     return () => { disposed.current = true; ++generation.current; off(); if (active.current) void bridge.cancel(active.current).catch(() => {}); };
   }, []);
   async function cancel() {
@@ -241,21 +314,34 @@ function DiscoveryWorkspace({ active: visibleView, productId, product, autoRefre
     try { const reply = await bridge.cancel(active.current); if (!disposed.current && !reply.ok) setError(`${reply.error.message} (${reply.error.code}). Waiting for discovery to stop safely.`); }
     catch { if (!disposed.current) setError('Cancellation could not be delivered. Waiting for the local engine.'); }
   }
-  function changeFilter(value: DiscoveryFilter) { setFilter(value); setError(''); void read(value); }
-  const filtered = useMemo(() => (page?.builds || []).filter(b => (filter === 'all' || filter === 'local' && b.isLocal || filter === 'advertised' && b.isAdvertised) && (region === 'all' || b.advertisedRegions.includes(region)) && `${b.version} ${b.buildId}`.toLowerCase().includes(query.toLowerCase())), [page, query, region, filter]);
+  function changeFilter(value: DiscoveryFilter) { setFilter(value); setError(''); void read(value, productFilter); }
+  function changeProduct(value: ProductFilter) { setProductFilter(value); setError(''); void read(filter, value); }
+  const filtered = useMemo(() => (page?.builds || []).filter(b => (filter === 'all' || filter === 'local' && b.isLocal || filter === 'advertised' && b.isAdvertised) && (productFilter === 'all' || b.productId === productFilter) && `${b.version} ${b.buildId}`.toLowerCase().includes(query.toLowerCase())), [page, query, productFilter, filter]);
   // A selection hidden by filters stays selected and inspectable while its row is still loaded.
   const loadedSelection = (page?.builds || []).find(b => b.id === selectedId);
   if (loadedSelection) lastSelection.current = loadedSelection;
-  // Only an engine-side visibility filter (Prepared, Advertised) can hide a loaded selection; a refresh that drops it still reports it as gone.
-  const selected = loadedSelection ?? (filter !== 'all' && lastSelection.current?.id === selectedId ? lastSelection.current : undefined);
+  // Only an engine-side filter (Product, Prepared, Current) can hide a loaded selection; a refresh that drops it still reports it as gone.
+  const selected = loadedSelection ?? ((filter !== 'all' || productFilter !== 'all') && lastSelection.current?.id === selectedId ? lastSelection.current : undefined);
   const hidden = !!selectedId && !filtered.some(b => b.id === selectedId);
+  const filtersActive = filter !== 'all' || productFilter !== 'all' || !!query;
   const activeIndex = Math.max(0, filtered.findIndex(b => b.id === selectedId));
-  const availableRegions = Array.from(new Set([...(page?.checkedRegions || []), ...(page?.builds.flatMap(b => b.advertisedRegions) || [])])).sort();
-  function select(build: Build) { setSelectionNotice(''); setSelectedId(build.id); try { localStorage.setItem(`vibeminer.selection.${productId}`, build.id); } catch { /* Selection stays in this session. */ } }
+  const statuses = page?.products || [];
+  const status = (productId: string) => statuses.find(s => s.productId === productId);
+  function select(build: Build) { setSelectionNotice(''); setSelectedId(build.id); try { localStorage.setItem(selectionKey, build.id); } catch { /* Selection stays in this session. */ } }
   // Clear filters removes its own button, so focus moves to All, the control it just set.
-  function clearFilters() { setQuery(''); setRegion('all'); if (filter !== 'all') changeFilter('all'); document.getElementById('visibility-all')?.focus(); }
-  const failed = page?.connection === 'offline' || (page?.errors.length || 0) > 0;
-  const nothingSaved = !!page && !reading && !page.builds.length && filter === 'all';
+  function clearFilters() { setQuery(''); if (filter !== 'all' || productFilter !== 'all') { setFilter('all'); setProductFilter('all'); setError(''); void read('all', 'all'); } document.getElementById('visibility-all')?.focus(); }
+  const problems = productProblems(statuses, refreshProblems);
+  // A product whose latest attempt failed (saved as failed, or not committed this session) has no completed check to report.
+  const refreshFailed = new Set(refreshProblems.map(p => p.productId));
+  const failedNow = (s: ProductDiscoveryStatus) => checkFailed(s) || refreshFailed.has(s.productId);
+  const attempted = statuses.filter(s => s.connection !== 'notChecked' || refreshFailed.has(s.productId));
+  const completed = attempted.filter(s => !failedNow(s) && checkCompleted(s));
+  const failedChecks = attempted.filter(failedNow);
+  // Products the notice reports a problem for: failed attempts and checks with regional problems.
+  const problemStatuses = statuses.filter(s => failedNow(s) || s.errors.length > 0);
+  const allFailed = attempted.length > 0 && completed.length === 0;
+  const anySaved = statuses.some(s => s.hasSavedHistory);
+  const nothingSaved = !!page && !reading && !page.builds.length && filter === 'all' && productFilter === 'all' && !anySaved;
   function listKey(event: KeyboardEvent<HTMLDivElement>) {
     if ((event.key === 'Enter' || event.key === ' ') && filtered.length) { event.preventDefault(); select(filtered[activeIndex]); return; }
     const from = filtered.some(b => b.id === selectedId) ? activeIndex : -1;
@@ -276,15 +362,16 @@ function DiscoveryWorkspace({ active: visibleView, productId, product, autoRefre
     window.addEventListener('keydown', keys);
     return () => window.removeEventListener('keydown', keys);
   }, [visibleView]);
-  const refreshLabel = busy ? stopping ? 'Stopping discovery…' : 'Cancel refresh' : error || failed ? 'Retry discovery' : 'Refresh builds';
-  const openingHere = opening && selected && opening.build.id === selected.id && opening.build.productId === productId ? opening : null;
+  const refreshLabel = busy ? stopping ? 'Stopping discovery…' : 'Cancel refresh' : error || problems.length ? 'Retry discovery' : 'Refresh builds';
+  const openingHere = opening && selected && opening.build.id === selected.id && opening.build.productId === selected.productId ? opening : null;
   const openingElsewhere = opening && !openingHere ? opening : null;
-  const openingBox = (op: Opening) => <div className="dv-state"><strong>{op.status === 'pending' || op.status === 'stopping' ? 'Opening build' : op.status === 'succeeded' ? 'Verified overview available' : op.status === 'canceled' ? 'Opening canceled' : 'Opening needs attention'}</strong>{op.build.version} · source {op.sourceRegion.toUpperCase()}<br/>{op.progress?.stage || (op.status === 'stopping' ? 'Stopping preparation…' : 'Exact configuration context is preserved.')}<div className="dv-row"><button className="dv-btn" onClick={onShowOpening}>{op.status === 'succeeded' ? 'View verified overview' : 'View preparation'}</button>{(op.status === 'pending' || op.status === 'stopping') && <button className="dv-btn" aria-disabled={op.status === 'stopping'} onClick={() => { if (op.status === 'pending') onCancelOpening(); }}>{op.status === 'stopping' ? 'Stopping opening…' : 'Cancel opening'}</button>}</div></div>;
+  const openingBox = (op: Opening) => <div className="dv-state"><strong>{op.status === 'pending' || op.status === 'stopping' ? 'Opening build' : op.status === 'succeeded' ? 'Verified overview available' : op.status === 'canceled' ? 'Opening canceled' : 'Opening needs attention'}</strong>{op.build.productId} {op.build.version} · source {op.sourceRegion.toUpperCase()}<br/>{op.progress?.stage || (op.status === 'stopping' ? 'Stopping preparation…' : 'Exact configuration context is preserved.')}<div className="dv-row"><button className="dv-btn" onClick={onShowOpening}>{op.status === 'succeeded' ? 'View verified overview' : 'View preparation'}</button>{(op.status === 'pending' || op.status === 'stopping') && <button className="dv-btn" aria-disabled={op.status === 'stopping'} onClick={() => { if (op.status === 'pending') onCancelOpening(); }}>{op.status === 'stopping' ? 'Stopping opening…' : 'Cancel opening'}</button>}</div></div>;
+  const shownProblems = problems.slice(0, 6);
   const notices = <>
     {problem && (refusedCatalog(problem) ? <RefusedNotice text={problem}/> : <div role="alert" className="dv-notice error"><div><strong>Products unavailable</strong>{problem}</div></div>)}
-    {error && !(refusedCatalog(error) && refusedCatalog(problem)) && (refusedCatalog(error) ? <RefusedNotice text={error}/> : <div role="alert" className="dv-notice error"><div><><strong>Discovery problem</strong>{error} Saved observations remain available. Retry checks the complete product scope; engine failures require restarting VibeMiner.</></div></div>)}
-    {failed && !refused && <div className={`dv-notice${page?.connection === 'offline' ? ' error' : ''}`}><div><strong>{page?.connection === 'offline' ? 'Refresh unavailable' : 'Some discovery evidence is incomplete'}</strong>{page?.hasSavedHistory ? 'Showing saved evidence. A failed check does not remove earlier advertisements.' : 'No saved observations are available for this product.'} Retry discovery checks the complete product scope again.<ul>{page?.errors.map((p, i) => <li key={i}>{p.region?.toUpperCase() || 'Source'}: {p.message} <code>({p.code})</code></li>)}</ul></div>{!busy && <button className="dv-btn" onClick={() => { refreshButton.current?.focus(); void refresh(); }}>Retry discovery</button>}</div>}
-    {!refused && hidden && filtered.length > 0 && (selected || filter !== 'all' || query || region !== 'all') && <div className="dv-notice"><div><strong>Selected build is hidden by these filters</strong>{selected ? `${selected.version} is still selected.` : 'The selected build is still selected.'} Clear filters to see it in the list.</div><button className="dv-btn" onClick={clearFilters}>Clear filters</button></div>}
+    {error && !(refusedCatalog(error) && refusedCatalog(problem)) && (refusedCatalog(error) ? <RefusedNotice text={error}/> : <div role="alert" className="dv-notice error"><div><><strong>Discovery problem</strong>{error} Saved observations remain available. Retry discovery checks every product again; engine failures require restarting VibeMiner.</></div></div>)}
+    {problems.length > 0 && !refused && <div className={`dv-notice${failedChecks.length ? ' error' : ''}`}><div><strong>{allFailed ? 'Refresh unavailable' : 'Refresh incomplete'}</strong>{anySaved ? `${retainedEvidence(problemStatuses)}${problemStatuses.some(s => s.hasSavedHistory) ? ' A failed check does not remove earlier advertisements.' : ''}` : 'No saved observations are available yet.'} Retry discovery checks every product again.<ul>{shownProblems.map(p => <li key={p.key}>{p.label}: {p.text} <code>({p.code})</code></li>)}</ul>{problems.length > shownProblems.length && <span>{problems.length - shownProblems.length} more problems. Source details lists the problems of the selected build's product.</span>}</div>{!busy && <button className="dv-btn" onClick={() => { refreshButton.current?.focus(); void refresh(); }}>Retry discovery</button>}</div>}
+    {!refused && hidden && filtered.length > 0 && (selected || filtersActive) && <div className="dv-notice"><div><strong>Selected build is hidden by these filters</strong>{selected ? `${selected.productId} ${selected.version} is still selected.` : 'The refresh did not reload its details.'} Clear filters to see it in the list.</div><button className="dv-btn" onClick={clearFilters}>Clear filters</button></div>}
     {openingElsewhere && <div className="dv-notice info">{openingBox(openingElsewhere)}</div>}
   </>;
   const summary = activity_ && activity_.entry && !activity_.expanded ? activity_.summary : null;
@@ -316,12 +403,37 @@ function DiscoveryWorkspace({ active: visibleView, productId, product, autoRefre
     if (statusRef.current) observer?.observe(statusRef.current);
     return () => observer?.disconnect();
   }, []);
+  const productCount = statuses.length || products.length;
+  const checksLine = statuses.length ? checkLine(checkSummary(statuses, sessionBaseline, refreshProblems), sessionBaseline !== null) : null;
+  // Products are checked at different times: show the newest check and, when they differ, the oldest one too.
+  // Only checks that received evidence count; a failed attempt is never shown as the latest check.
+  const checkTimes = completed.map(s => s.lastCheckedAt).filter((time): time is string => !!time).sort();
+  const latestCheck = checkTimes.at(-1) ?? null, oldestCheck = checkTimes.length > 1 && stamp(checkTimes[0]) !== stamp(latestCheck) ? checkTimes[0] : null;
+  const checking = progress ? `Checking ${progress.total} products · ${progress.completed} of ${progress.total} done…` : `Checking ${productCount || 'every'} products…`;
+  const filteredStatus = productFilter === 'all' ? undefined : status(productFilter);
+  const selectedStatus = selected ? status(selected.productId) : undefined;
+  // Empty states never present a failed check as a completed one that found nothing.
+  const [emptyTitle, emptyText] = ((): [string, string] => {
+    if (reading) return ['Reading saved observations…', ''];
+    if (busy) return ['Checking official metadata…', ''];
+    if (filter === 'local') return ['No prepared builds', 'Saved discovery observations are available in All. A saved observation is separate from a prepared build.'];
+    if (query) return ['No matching loaded builds', 'Try another version or build number. Filters cover loaded builds only.'];
+    const failedNames = failedChecks.length ? ` ${productNames(failedChecks.map(s => s.productId))} could not be checked.` : '';
+    if (productFilter !== 'all') {
+      if (!filteredStatus || filteredStatus.connection === 'notChecked' && !refreshFailed.has(productFilter)) return [`No saved builds for ${productFilter}`, `${productFilter} has not been checked yet. Refresh builds checks every product.`];
+      if (failedNow(filteredStatus)) return [`Could not check ${productFilter}`, `The latest check of ${productFilter} failed: ${failureText(filteredStatus, refreshProblems.find(p => p.productId === productFilter))} ${filter === 'advertised' ? 'No build of it is known to be current.' : `No saved builds for ${productFilter}.`} Retry discovery checks every product again.`];
+      if (filter === 'advertised') return ['No current builds', `No build of ${productFilter} was advertised at the last check, ${stamp(filteredStatus.lastCheckedAt)}. Saved builds are in All.`];
+      return [`No saved builds for ${productFilter}`, `${productFilter} had no advertised builds at ${stamp(filteredStatus.lastCheckedAt)}. Refresh builds checks every product.`];
+    }
+    if (allFailed && (filter === 'advertised' || !anySaved)) return ['Could not check any product', anySaved ? 'No product could be checked at its latest attempt, so no build is known to be current. Saved builds are in All.' : 'Official metadata could not be read for any product, and no saved observations are available. Select Retry discovery to check every product again.'];
+    if (filter === 'advertised') return ['No current builds', `No build was advertised at the last completed checks.${failedNames} Saved builds are in All.`];
+    if (anySaved) return ['No builds match this view', 'Saved builds are not returned by this view.'];
+    if (completed.length) return ['No builds advertised', `No builds were advertised by the checked products at ${stamp(latestCheck)}.${failedNames}`];
+    return ['No saved builds yet', "Refresh builds checks Blizzard's official version service for every World of Warcraft product."];
+  })();
   return <div className={`dv-window${compact ? ' dv-compact' : ''}`} ref={windowRef}>
     <header className="dv-toolbar" ref={toolbarRef}>
       <div className="dv-brand"><img src={brand} alt="VibeMiner"/><span className="dv-word" aria-hidden="true">Vibe<span>Miner</span></span></div>
-      <div className="dv-divider" aria-hidden="true"/>
-      {productControl}
-      {!refused && <button ref={refreshButton} className="dv-btn" aria-keyshortcuts="F5" onClick={() => { if (busy) void cancel(); else void refresh(); }} aria-disabled={stopping}>{!stopping && <span aria-hidden="true">{busy ? '✕' : '↻'}</span>}{refreshLabel}</button>}
       {fixtureLabel && <span className="dv-fixture"><strong>{fixtureLabel}</strong><span> · Synthetic identities and receipts.</span></span>}
       <div className="dv-spacer"/>
       <ActivityTrigger compact/>
@@ -331,42 +443,43 @@ function DiscoveryWorkspace({ active: visibleView, productId, product, autoRefre
         <div className="dv-pane-head">
           <h1 id="builds-heading" tabIndex={-1}>Builds</h1>{filtered.length > 0 && <span className="dv-n" aria-label={`${filtered.length}${page?.nextCursor ? ' or more' : ''} builds shown`}>{filtered.length}{page?.nextCursor ? '+' : ''}</span>}
           <input ref={searchInput} id="search" className="dv-control dv-search" type="search" placeholder="Filter version or build" aria-label="Filter version or build number" aria-keyshortcuts="Control+F" value={query} disabled={nothingSaved || refused} onChange={e => { setQuery(e.target.value); }}/>
-          <select id="region" className="dv-control" aria-label="Advertisement region" value={region} disabled={nothingSaved || refused} onChange={e => { setRegion(e.target.value); }}><option value="all">All regions</option>{availableRegions.map(r => <option value={r} key={r}>{r.toUpperCase()}</option>)}</select>
-          <div className="dv-segmented" role="group" aria-label="Build visibility">{(['all', 'local', 'advertised'] as const).map(f => <button key={f} id={`visibility-${f}`} aria-pressed={filter === f} disabled={nothingSaved || refused} onClick={() => changeFilter(f)}>{f === 'all' ? 'All' : f === 'local' ? 'Prepared' : 'Advertised'}</button>)}</div>
+          <select id="product-filter" className="dv-control dv-product-filter" aria-label="Product" value={productFilter} disabled={nothingSaved || refused} onChange={e => changeProduct(e.target.value)}><option value="all">All products</option>{products.map(p => <option value={p.id} key={p.id}>{p.id} · {p.label}</option>)}</select>
+          <div className="dv-segmented" role="group" aria-label="Build visibility">{(['all', 'local', 'advertised'] as const).map(f => <button key={f} id={`visibility-${f}`} aria-pressed={filter === f} disabled={nothingSaved || refused} onClick={() => changeFilter(f)}>{f === 'all' ? 'All' : f === 'local' ? 'Prepared' : 'Current'}</button>)}</div>
+          {!refused && <button ref={refreshButton} className="dv-btn dv-refresh" aria-keyshortcuts="F5" onClick={() => { if (busy) void cancel(); else void refresh(); }} aria-disabled={stopping}>{!stopping && <span aria-hidden="true">{busy ? '✕' : '↻'}</span>}{refreshLabel}</button>}
         </div>
         {notices}
         <div className={`dv-list${notices.props.children.some(Boolean) ? '' : ' flush'}`} aria-busy={reading}>
           {filtered.length > 0 && <>
-            <div className="dv-cols dv-thead" aria-hidden="true"><span>Version</span><span>Build</span><span>Advertised in</span><span>Publication</span><span>Downloaded</span><span>In VibeMiner</span></div>
-            <div role="listbox" id="builds" aria-label="Builds" tabIndex={0} aria-activedescendant={`build-option-${filtered[activeIndex].id}`} onKeyDown={listKey}>{filtered.map(build => { const download = downloads.get(`${build.productId}:${build.id}`), job = download?.job, percent = downloadedPercent(job), running = !!download?.running; return <div role="option" key={build.id} id={`build-option-${build.id}`} data-build-id={build.id} className={`dv-cols build-row${filtered[activeIndex].id === build.id ? ' active' : ''}`} aria-selected={selectedId === build.id} onClick={() => select(build)}>
-              <span className="dv-version">{build.version || 'Version not supplied'}<span className="visually-hidden">, Config {short(build.buildConfig)}, Identity {short(build.id)}</span></span>
+            <div className="dv-cols dv-thead" aria-hidden="true"><span>Product</span><span>Version</span><span>Build</span><span>Downloaded</span><span>In VibeMiner</span></div>
+            <div role="listbox" id="builds" aria-label="Builds" tabIndex={0} aria-activedescendant={`build-option-${filtered[activeIndex].id}`} onKeyDown={listKey}>{filtered.map(build => { const download = downloads.get(`${build.productId}:${build.id}`), job = download?.job, percent = downloadedPercent(job), running = !!download?.running; return <div role="option" key={build.id} id={`build-option-${build.id}`} data-build-id={build.id} data-product-id={build.productId} className={`dv-cols build-row${filtered[activeIndex].id === build.id ? ' active' : ''}${build.isAdvertised ? ' current' : ''}`} aria-selected={selectedId === build.id} onClick={() => select(build)}>
+              <span className="dv-product">{build.productId}</span>
+              <span className="dv-version">{build.version || 'Version not supplied'}{build.isAdvertised && <span className="dv-pill current">Current</span>}<span className="visually-hidden">, Config {short(build.buildConfig)}, Identity {short(build.id)}</span></span>
               <span className="dv-dim"><span className="visually-hidden">Build </span>{build.buildId || 'not supplied'}</span>
-              <span><span className="visually-hidden">Advertised in </span>{build.advertisedRegions.length ? build.advertisedRegions.map(r => <span className="dv-pill" key={r}>{r.toUpperCase()}</span>) : <span className="dv-dim">None at last check</span>}</span>
-              <span>{build.isAdvertised ? <span className="dv-pill">Advertised</span> : <span className="dv-dim">Not advertised</span>}</span>
               <span><span className="visually-hidden">Downloaded </span>{!job && !build.isLocal ? <span className="dv-dim">Not opened</span> : percent === null ? <span className="dv-dim">{job?.coverage.presenceState === 'assessing' ? 'Checking…' : 'Not checked'}</span> : <span className={`dv-meter${percent === '100%' ? ' done' : ''}`}><span className="dv-track" aria-hidden="true"><i style={{ width: percent === '<0.1%' ? '0%' : percent }}/></span>{percent}</span>}{running && <><span className="dv-pulse" aria-hidden="true"/><span className="visually-hidden">, downloading</span></>}</span>
               <span>{build.isLocal && <span className="dv-pill">Prepared</span>}{build.isNew && <span className="dv-pill gold">New to VibeMiner</span>}{!build.isLocal && !build.isNew && <span className="dv-dim">—</span>}</span>
             </div>; })}</div>
-            {page?.nextCursor && <div className="dv-load-more"><button className="dv-btn" disabled={reading || busy || page.builds.length >= 500} onClick={() => void read(filter, page.nextCursor!)}>{reading ? 'Loading…' : page.builds.length >= 500 ? '500-build display limit reached' : 'Load more builds'}</button><span>{page.builds.length >= 500 ? 'This view displays the first 500 builds. Search and region controls only refine loaded builds; searching beyond this display window is not available.' : 'Filters apply to loaded builds only.'}</span></div>}
+            {page?.nextCursor && <div className="dv-load-more"><button className="dv-btn" disabled={reading || busy || page.builds.length >= 500} onClick={() => void read(filter, productFilter, page.nextCursor!)}>{reading ? 'Loading…' : page.builds.length >= 500 ? '500-build display limit reached' : 'Load more builds'}</button><span>{page.builds.length >= 500 ? 'This view displays the first 500 builds. Search only refines loaded builds; searching beyond this display window is not available.' : 'Filters apply to loaded builds only.'}</span></div>}
           </>}
           {refused && <div className="dv-empty"><div><h2>Saved catalog not opened</h2><p>No builds are shown because the saved catalog was not opened. Follow the steps in the notice above.</p></div></div>}
-          {!refused && !filtered.length && <div className="dv-empty"><div><h2>{reading ? 'Reading saved observations…' : busy ? 'Checking official metadata…' : filter === 'local' ? 'No prepared builds' : page?.connection === 'offline' && !page.hasSavedHistory ? `Could not check ${productId}` : query || region !== 'all' ? 'No matching loaded builds' : page?.hasSavedHistory ? 'No builds match this view' : 'Your research starts with a build'}</h2><p>{filter === 'local' ? 'Saved discovery observations are available in All. A saved observation is separate from a prepared build.' : page?.connection === 'offline' && !page.hasSavedHistory ? 'Official metadata could not be reached, and no saved observations are available. Select Retry discovery to check this product again.' : query || region !== 'all' ? 'Try another version, build number, or advertisement region. Filters cover loaded builds only.' : page?.connection === 'online' ? `No builds advertised in the checked scope at ${stamp(page.lastCheckedAt)}.` : `No saved observations for ${productId}. Refresh builds checks Blizzard's official version service.`}</p>{(query || region !== 'all' || filter !== 'all') && <button className="dv-btn" onClick={clearFilters}>Clear filters</button>}</div></div>}
+          {!refused && !filtered.length && <div className="dv-empty"><div><h2>{emptyTitle}</h2>{!reading && !busy && <p>{emptyText}</p>}{filtersActive && !reading && <button className="dv-btn" onClick={clearFilters}>Clear filters</button>}</div></div>}
         </div>
       </section>
       {!refused && !(nothingSaved && !selected) && <aside className="dv-inspector" id="inspector" aria-labelledby="inspector-heading" inert={!!activity_?.expanded}>{selected ? <>
-        <div className="dv-insp-head"><div className="dv-label">Selected build</div><h2 id="inspector-heading" className="dv-selectable">{selected.version}</h2><p className="inspector-product">World of Warcraft · {product?.label || productId} · <code>{productId}</code></p></div>
+        <div className="dv-insp-head"><div className="dv-label">Selected build</div><h2 id="inspector-heading" className="dv-selectable">{selected.version}</h2><p className="inspector-product">World of Warcraft · {label(selected.productId) || selected.productId} · <code>{selected.productId}</code></p></div>
         <div className="dv-insp-body">
           {openingHere ? openingBox(openingHere) : <div className="dv-state"><strong>{selected.isLocal ? 'Prepared locally' : 'Not prepared'}</strong>{selected.isLocal ? downloads.get(`${selected.productId}:${selected.id}`)?.job.mode === 'downloadAll' ? 'Local evidence recorded. Download all is on for this build.' : 'Local evidence recorded. Game content downloads on demand.' : 'Opening verifies configs and measures download size.'}</div>}
           <div className="dv-label">Identity</div>
-          <dl><dt>Build</dt><dd className="dv-selectable">{selected.buildId || 'Not supplied'}</dd>
+          <dl><dt>Product</dt><dd><code>{selected.productId}</code>{label(selected.productId) ? ` · ${label(selected.productId)}` : ''}</dd>
+            <dt>Build</dt><dd className="dv-selectable">{selected.buildId || 'Not supplied'}</dd>
             <dt>Build config</dt><dd className="mono dv-selectable">{selected.buildConfig}</dd>
             <dt>CDN config</dt><dd className="mono dv-selectable">{selected.cdnConfig}</dd>
             <dt>Product config</dt><dd className="mono dv-selectable">{missing(selected.identityFields.ProductConfig)}</dd>
             <dt>Key ring</dt><dd className="mono dv-selectable">{missing(selected.identityFields.KeyRing)}</dd>
             <dt>Identity</dt><dd className="mono dv-selectable">{selected.id}</dd></dl>
-          <CdnConfigHint build={selected} open={acknowledgedBuild?.productId === productId && acknowledgedBuild.id === selected.id && acknowledgedRegion ? { cdnConfig: acknowledgedBuild.cdnConfig, region: acknowledgedRegion } : undefined}/>
+          <CdnConfigHint build={selected} open={acknowledgedBuild?.productId === selected.productId && acknowledgedBuild.id === selected.id && acknowledgedRegion ? { cdnConfig: acknowledgedBuild.cdnConfig, region: acknowledgedRegion } : undefined}/>
           {(() => { const download = downloads.get(`${selected.productId}:${selected.id}`), job = download?.job, percent = downloadedPercent(job); return job ? <><div className="dv-label">Download</div><dl><dt>Downloaded</dt><dd>{percent === null ? 'Not checked' : `${exactBytes(job.coverage.presentBytes)} of ${exactBytes(job.totalEncodedBytes)} · ${percent}`}</dd><dt>Scope</dt><dd>Download manifest, all variants (encoded)</dd><dt>Checked</dt><dd>{job.coverage.presenceState === 'assessing' ? 'Checking now' : job.coverage.presenceAssessedAt ? stamp(job.coverage.presenceAssessedAt) : 'Never'}</dd><dt>Source</dt><dd>{job.target.sourceRegion.toUpperCase()}</dd>{job.coverage.corruptObjects !== '0' && <><dt>Corrupt</dt><dd>{exactCount(job.coverage.corruptObjects)} objects found corrupt at the check; not counted as downloaded</dd></>}{download!.running && <><dt>Activity</dt><dd>Download all running</dd></>}</dl></> : null; })()}
           <div className="dv-label">Observation</div>
-          <dl><dt>Publication</dt><dd>{selected.isAdvertised ? 'Advertised at last check' : 'Not advertised at last check'}</dd>
+          <dl><dt>Publication</dt><dd>{selected.isAdvertised ? `Current: advertised at the last completed check (${stamp(selected.lastSeenAt)})` : 'Not advertised at the last completed check'}{selectedStatus && failedNow(selectedStatus) && ' · latest check failed'}</dd>
             <dt>Advertised in</dt><dd>{selected.advertisedRegions.length ? regions(selected.advertisedRegions) : 'None at last check'}</dd>
             <dt>CDN routes</dt><dd>{regions(routeRegions(selected))}{selected.advertisedRegions.filter(r => !routeRegions(selected).includes(r)).map(r => ` · ${r.toUpperCase()} has no CDN route`).join('')}</dd>
             <dt>Last seen</dt><dd>{stamp(selected.lastSeenAt)}</dd>
@@ -374,13 +487,13 @@ function DiscoveryWorkspace({ active: visibleView, productId, product, autoRefre
           {selected.identityFields.KeyRing && <p className="dv-note">A key ring reference does not mean its keys are available.</p>}
         </div>
         <BuildOpenAction key={selected.id} build={selected} onOpen={onOpen} onSource={() => setSourceOpen(true)}/>
-        {sourceOpen && <SourceDialog build={selected} page={page!} openCdnConfig={acknowledgedBuild?.productId === productId && acknowledgedBuild.id === selected.id ? acknowledgedBuild.cdnConfig : undefined} onClose={() => setSourceOpen(false)}/>}
-      </> : <><h2 id="inspector-heading" className="visually-hidden">Build inspector</h2><div className="dv-insp-empty"><div><strong>{hidden ? 'Selected build is hidden' : 'No build selected'}</strong><p>{hidden ? selectionNotice || 'Selected build is hidden by these filters or no longer appears in this page. Clear filters or load more to inspect it again.' : 'Select a build to see its exact identity.'}</p></div></div><div className="dv-insp-foot blocked"><button className="dv-btn primary" disabled>Open build</button><p className="dv-reason">Select a build with a recorded download source to open it.</p></div></>}</aside>}
+        {sourceOpen && <SourceDialog build={selected} status={selectedStatus} openCdnConfig={acknowledgedBuild?.productId === selected.productId && acknowledgedBuild.id === selected.id ? acknowledgedBuild.cdnConfig : undefined} onClose={() => setSourceOpen(false)}/>}
+      </> : <><h2 id="inspector-heading" className="visually-hidden">Build inspector</h2><div className="dv-insp-empty"><div><strong>{hidden ? 'Selected build is hidden' : 'No build selected'}</strong><p>{hidden ? selectionNotice || (filtersActive ? 'Clear filters to inspect it again.' : 'It is not among the loaded builds.') : 'Select a build to see its exact identity.'}</p></div></div><div className="dv-insp-foot blocked"><button className="dv-btn primary" disabled>Open build</button><p className="dv-reason">Select a build with a recorded download source to open it.</p></div></>}</aside>}
     </main>
     <footer className="dv-statusbar" ref={statusRef}>
-      {busy && <span className="dv-busy"><span className="dv-pulse" aria-hidden="true"/>{!stopping && <span aria-live="off">{activity}</span>}</span>}
-      <span className="dv-secondary">Checked regions <strong>{regions(page?.checkedRegions || [])}</strong></span>
-      <span>Last check <strong>{stamp(page?.lastCheckedAt || null)}</strong></span>
+      {busy && <span className="dv-busy"><span className="dv-pulse" aria-hidden="true"/>{!stopping && <span aria-live="off">{checking}</span>}</span>}
+      {checksLine && <span className="dv-secondary dv-checks">{checksLine}</span>}
+      {latestCheck ? <span className="dv-latest">Latest check <strong>{stamp(latestCheck)}</strong>{oldestCheck && <span className="dv-secondary"> · oldest <strong>{stamp(oldestCheck)}</strong></span>}</span> : !checksLine && <span>Not checked yet</span>}
       <span role="status" aria-live="polite" className="dv-message">{stopping ? 'Stopping discovery…' : refused ? 'The saved catalog was not opened.' : message}</span>
       <span className="dv-spacer"/>
       {summary && <span className={activity_!.attention ? 'dv-warn' : 'dv-busy'} aria-live="off">{!activity_!.attention && activity_!.active && <span className="dv-pulse" aria-hidden="true"/>}{summaryLine(summary)}</span>}
@@ -406,9 +519,9 @@ function CdnConfigHistory({ build, openCdnConfig }: { build: Build; openCdnConfi
   const labels = historyLabels(build), tied = newestGroupSize(build) > 1, omitted = build.cdnConfigHistoryCount - build.cdnConfigHistory.length;
   return <><h3>CDN configuration history</h3><p>{tied ? 'Several CDN configurations were advertised in the same check; their order is not significant. Earlier ones follow.' : 'Newest first.'} A republished CDN configuration only changes the archive list; it is the same build. Earlier ones keep their original receipts.</p>{build.cdnConfigHistory.map((entry, i) => <section key={entry.cdnConfig}><h4>{labels[i]} · <span className="mono">{short(entry.cdnConfig)}</span>{entry.cdnConfig === openCdnConfig && ' · Used by the open build'}</h4><dl className="identity"><Field label="CDN configuration" value={entry.cdnConfig}/><dt>First observed</dt><dd>{stamp(entry.firstSeenAt)}</dd><dt>Last observed</dt><dd>{stamp(entry.lastSeenAt)}</dd><dt>Advertised at last check</dt><dd>{regions(entry.advertisedRegions)}</dd></dl>{entry.sourceReceipts.map(receipt => <section className="receipt" key={receipt.region}><h4>{receipt.region.toUpperCase()} · {receipt.role}</h4><dl className="identity"><Field label="Requested URL" value={receipt.url}/><dt>Retrieved</dt><dd>{stamp(receipt.retrievedAt)}</dd><Field label="SHA-256" value={receipt.sha256}/><dt>Document length / row</dt><dd>{receipt.byteLength} bytes · {receipt.rowOrdinal === null ? 'No row ordinal' : `Row ${receipt.rowOrdinal}`}</dd></dl></section>)}</section>)}{omitted > 0 && <p>{omitted === 1 ? '1 older CDN configuration is' : `${omitted} older CDN configurations are`} not shown here. {build.cdnConfigHistoryCount} in total; the catalog keeps all of them with their receipts.</p>}</>;
 }
-function SourceDialog({ build, page, openCdnConfig, onClose }: { build: Build; page: DiscoveryPage; openCdnConfig?: string; onClose: () => void }) {
+function SourceDialog({ build, status, openCdnConfig, onClose }: { build: Build; status?: ProductDiscoveryStatus; openCdnConfig?: string; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const previous = useRef<HTMLElement | null>(null);
   useEffect(() => { previous.current = document.activeElement as HTMLElement; dialog.current?.showModal(); return () => { dialog.current?.close(); previous.current?.focus(); }; }, []);
-  return <dialog ref={dialog} aria-labelledby="source-title" onCancel={e => { e.preventDefault(); onClose(); }}><div className="dialog-heading"><div><div className="eyebrow">Discovery evidence</div><h2 id="source-title">Source details</h2></div><button autoFocus onClick={onClose}>Close</button></div><div className="dialog-body"><p><code>{build.productId}</code> · {build.version} · Build {build.buildId}</p><p>Checked regions: {regions(page.checkedRegions)} · Last attempt: {stamp(page.lastCheckedAt)}</p><h3>Exact build references</h3><dl className="identity"><Field label="Build number" value={build.buildId}/><Field label="Build configuration" value={build.buildConfig}/><Field label="CDN configuration" value={build.cdnConfig}/><Field label="Product configuration" value={build.productConfig === null ? 'Not supplied' : build.productConfig}/><Field label="Exact identity" value={build.id}/><dt>First observed here</dt><dd>{stamp(build.firstSeenAt)}</dd><dt>Last observed</dt><dd>{stamp(build.lastSeenAt)}</dd></dl><CdnConfigHistory build={build} openCdnConfig={openCdnConfig}/><details><summary>Original identity fields</summary><dl className="identity">{Object.entries(build.identityFields).map(([name, value]) => <Field key={name} label={name} value={value === '' ? '(empty value)' : value}/>)}</dl></details><h3>Regional route evidence</h3><p>{regions(build.routeRegions)}. Route evidence is separate from advertisement-region grouping. The Download source control selects one eligible saved regional source for Open; that choice does not change the exact build identity or its grouped advertisements.</p><h3>Original receipts</h3>{build.sourceReceipts.length ? build.sourceReceipts.map((receipt, i) => <section className="receipt" key={i}><h4>{receipt.region.toUpperCase()} · {receipt.role}</h4><dl className="identity"><Field label="Requested URL" value={receipt.url}/><dt>Retrieved</dt><dd>{stamp(receipt.retrievedAt)}</dd><Field label="SHA-256" value={receipt.sha256}/><dt>Document length / row</dt><dd>{receipt.byteLength} bytes · {receipt.rowOrdinal === null ? 'No row ordinal' : `Row ${receipt.rowOrdinal}`}</dd></dl></section>) : <p>No receipts recorded.</p>}{page.errors.length > 0 && <><h3>Current attempt problems</h3><ul>{page.errors.map((p, i) => <li key={i}>{p.region || 'Source'}: {p.message} ({p.code})</li>)}</ul></>}</div></dialog>;
+  return <dialog ref={dialog} aria-labelledby="source-title" onCancel={e => { e.preventDefault(); onClose(); }}><div className="dialog-heading"><div><div className="eyebrow">Discovery evidence</div><h2 id="source-title">Source details</h2></div><button autoFocus onClick={onClose}>Close</button></div><div className="dialog-body"><p><code>{build.productId}</code> · {build.version} · Build {build.buildId}</p><p>Checked regions for <code>{build.productId}</code>: {regions(status?.checkedRegions ?? [])} · Last attempt: {stamp(status?.lastCheckedAt ?? null)}</p><h3>Exact build references</h3><dl className="identity"><Field label="Build number" value={build.buildId}/><Field label="Build configuration" value={build.buildConfig}/><Field label="CDN configuration" value={build.cdnConfig}/><Field label="Product configuration" value={build.productConfig === null ? 'Not supplied' : build.productConfig}/><Field label="Exact identity" value={build.id}/><dt>First observed here</dt><dd>{stamp(build.firstSeenAt)}</dd><dt>Last observed</dt><dd>{stamp(build.lastSeenAt)}</dd></dl><CdnConfigHistory build={build} openCdnConfig={openCdnConfig}/><details><summary>Original identity fields</summary><dl className="identity">{Object.entries(build.identityFields).map(([name, value]) => <Field key={name} label={name} value={value === '' ? '(empty value)' : value}/>)}</dl></details><h3>Regional route evidence</h3><p>{regions(build.routeRegions)}. Route evidence is separate from advertisement-region grouping. The Download source control selects one eligible saved regional source for Open; that choice does not change the exact build identity or its grouped advertisements.</p><h3>Original receipts</h3>{build.sourceReceipts.length ? build.sourceReceipts.map((receipt, i) => <section className="receipt" key={i}><h4>{receipt.region.toUpperCase()} · {receipt.role}</h4><dl className="identity"><Field label="Requested URL" value={receipt.url}/><dt>Retrieved</dt><dd>{stamp(receipt.retrievedAt)}</dd><Field label="SHA-256" value={receipt.sha256}/><dt>Document length / row</dt><dd>{receipt.byteLength} bytes · {receipt.rowOrdinal === null ? 'No row ordinal' : `Row ${receipt.rowOrdinal}`}</dd></dl></section>) : <p>No receipts recorded.</p>}{!!status?.errors.length && <><h3>Current attempt problems</h3><ul>{status.errors.map((p, i) => <li key={i}>{p.region || 'Source'}: {p.message} ({p.code})</li>)}</ul></>}</div></dialog>;
 }

@@ -55,6 +55,62 @@ public sealed class HostTests
         Assert.False((await session.Receive()).GetProperty("result").GetProperty("requested").GetBoolean());
     }
     [Fact]
+    public async Task CrossProductRefreshReportsOrderedProductProgressAndOneTerminalPage()
+    {
+        using var directory = new TempDirectory(); await using var catalog = await DiscoveryCatalog.OpenAsync(directory.Path);
+        using var source = Fixtures.Source(Fixtures.Versions(Fixtures.Row()));
+        await using var session = await Session.Start(new DiscoveryService(source, catalog));
+        await session.Send("bad-param", "discovery.refreshAll", new { productId = "wow" });
+        Assert.Equal("INVALID_REQUEST", (await session.Receive()).GetProperty("error").GetProperty("code").GetString());
+        await session.Send("bad-product", "discovery.readAll", new { productId = "../wow" });
+        Assert.Equal("INVALID_PRODUCT", (await session.Receive()).GetProperty("error").GetProperty("code").GetString());
+        await session.Send("bad-limit", "discovery.readAll", new { limit = "50" });
+        Assert.Equal("INVALID_REQUEST", (await session.Receive()).GetProperty("error").GetProperty("code").GetString());
+        await session.Send("all", "discovery.refreshAll");
+        var completed = new List<int>(); var sequences = new List<int>();
+        JsonElement terminal;
+        while (true)
+        {
+            var frame = await session.Receive();
+            if (!frame.TryGetProperty("type", out _)) { terminal = frame; break; }
+            Assert.Equal("all", frame.GetProperty("requestId").GetString());
+            Assert.Equal("products", frame.GetProperty("unit").GetString());
+            Assert.Equal(ProductRegistry.Products.Count, frame.GetProperty("total").GetInt32());
+            completed.Add(frame.GetProperty("completed").GetInt32()); sequences.Add(frame.GetProperty("sequence").GetInt32());
+        }
+        Assert.Equal(Enumerable.Range(0, ProductRegistry.Products.Count + 1), completed);
+        Assert.Equal(Enumerable.Range(1, ProductRegistry.Products.Count + 1), sequences);
+        var result = terminal.GetProperty("result");
+        Assert.Equal(JsonValueKind.Null, result.GetProperty("productId").ValueKind);
+        Assert.Equal(ProductRegistry.Products.Count, result.GetProperty("products").GetArrayLength());
+        Assert.Equal(ProductRegistry.Products.Count, result.GetProperty("builds").GetArrayLength());
+        Assert.Equal(0, result.GetProperty("refreshProblems").GetArrayLength());
+        await session.Send("wowt", "discovery.readAll", new { productId = "wowt", filter = "advertised", limit = 5 });
+        var read = (await session.Receive()).GetProperty("result");
+        Assert.Equal("wowt", read.GetProperty("productId").GetString());
+        Assert.Equal("wowt", read.GetProperty("builds")[0].GetProperty("productId").GetString());
+        Assert.Equal(1, read.GetProperty("builds").GetArrayLength());
+    }
+    [Fact]
+    public async Task CanceledCrossProductRefreshRepliesOnlyAfterTheRunningChecksRetired()
+    {
+        using var directory = new TempDirectory(); await using var catalog = await DiscoveryCatalog.OpenAsync(directory.Path);
+        var source = new GatedSource();
+        await using var session = await Session.Start(new DiscoveryService(source, catalog));
+        await session.Send("all", "discovery.refreshAll");
+        Assert.Equal(0, (await session.Receive()).GetProperty("completed").GetInt32());
+        await source.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await session.Send("cancel", "request.cancel", new { requestId = "all" });
+        Assert.True((await session.Receive()).GetProperty("result").GetProperty("requested").GetBoolean());
+        await source.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await session.Send("read", "discovery.readAll");
+        Assert.Equal("read", (await session.Receive()).GetProperty("id").GetString());
+        source.Cleanup.SetResult();
+        var terminal = await session.Receive();
+        Assert.Equal("all", terminal.GetProperty("id").GetString());
+        Assert.Equal("CANCELED", terminal.GetProperty("error").GetProperty("code").GetString());
+    }
+    [Fact]
     public async Task AdmissionIsBoundedAndControlRequestsRemainAvailable()
     {
         using var directory = new TempDirectory(); await using var catalog = await DiscoveryCatalog.OpenAsync(directory.Path);

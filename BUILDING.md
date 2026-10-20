@@ -28,7 +28,7 @@ npm run build
 npm start
 ```
 
-Select a product or click **Refresh builds** to explicitly check official sources. Startup restores the chosen product and reads saved local observations without an automatic remote scan. Discovery observations do not mean game content is downloaded or prepared. Select a build and its saved **Download source**, then choose **Open Build**. This downloads only the two small configuration files when needed and verifies them before Home entry. Previously admitted configurations are revalidated locally; missing/corrupt retained bytes fail explicitly.
+Click **Refresh builds** to explicitly check official sources for every product. Startup reads saved local observations for every product without an automatic remote scan; the **Product** filter narrows the list. Discovery observations do not mean game content is downloaded or prepared. Select a build and its saved **Download source**, then choose **Open Build**. This downloads only the two small configuration files when needed and verifies them before Home entry. Previously admitted configurations are revalidated locally; missing/corrupt retained bytes fail explicitly.
 
 Electron normally stores its catalog beneath its platform user-data directory in `engine-v1/`. To isolate a development catalog, set `VIBEMINER_DATA_DIR` to an absolute app-owned directory. `VIBEMINER_DOTNET` can override the SDK executable; `VIBEMINER_ENGINE_PATH` can override the development host. Never point this port at Java application storage or a game installation.
 

@@ -152,6 +152,8 @@ The engine fetches two documents per product from a fixed origin:
 - `https://us.version.battle.net/v2/products/{product}/versions`
 - `https://us.version.battle.net/v2/products/{product}/cdns`
 
+Refresh builds fetches that pair for every registered product, at most three products at once ([D062](DECISIONS.md)). The cross-product list sorts by registry product, then by the raw `BuildId` as a number, newest first. That is display order only: BuildId is the build number upstream reports, not a release date, and `## seqn` is never used for ordering.
+
 `https://us.version.battle.net/v2/summary` is the upstream product catalogue. The engine does not fetch it; it uses a fixed registry instead. The `us` in the host does not select the US region; each document contains rows for every region.
 
 Product registry ([Discovery.cs](../src/backend/VibeMiner.Domain/Discovery.cs)):

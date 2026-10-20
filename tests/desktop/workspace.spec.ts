@@ -50,7 +50,7 @@ test('Open verifies an exact context, preserves discovery on Back, and exposes h
   } finally { await session.close(); }
 });
 
-test('detached preparation cannot navigate after a product change', async () => {
+test('detached preparation cannot navigate while the Product filter and a refresh change the list', async () => {
   const session = await launch(true);
   try {
     const { page } = session;
@@ -59,16 +59,18 @@ test('detached preparation cannot navigate after a product change', async () => 
     await expect(page.locator('.preparation-view')).toBeVisible();
     await page.getByRole('button', { name: /Back to build list/ }).click();
     await page.getByLabel('Product', { exact: true }).selectOption('wowt');
+    await expect(page.getByRole('heading', { name: 'No saved builds for wowt' })).toBeVisible();
+    await page.getByRole('button', { name: 'Refresh builds', exact: true }).click();
     await expect.poll(() => existsSync(path.join(session.data, 'waiting-wowt'))).toBe(true);
     await writeFile(path.join(session.data, 'release-wowt'), 'release');
-    await expect(page.getByRole('status')).toContainText('regional problems');
+    await writeFile(path.join(session.data, 'release-wow'), 'release');
+    await expect(page.getByRole('status')).toContainText('problems for 1 of 2 products');
     await writeFile(path.join(session.data, 'release-open'), 'release');
     await expect(page.getByRole('button', { name: 'View verified overview' })).toBeVisible();
     await expect(page.getByLabel('Product', { exact: true })).toHaveValue('wowt');
     await expect(page.locator('.home-view')).toHaveCount(0);
+    // The Product filter only narrows the list, so the verified result opens when asked for.
     await page.getByRole('button', { name: 'View verified overview' }).click();
-    await expect(page.getByRole('button', { name: 'Enter verified overview' })).toBeVisible();
-    await page.getByRole('button', { name: 'Enter verified overview' }).click();
     await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
     await page.getByRole('button',{name:'PRODUCT Retail',exact:true}).click();await expect(page.locator('.download-info-body dl>div').filter({has:page.getByText('Exact product ID',{exact:true})}).locator('dd')).toHaveText('wow');
     expect((await requests(session.data)).filter(request => request.method === 'workspace.open')).toHaveLength(1);

@@ -175,6 +175,11 @@ export interface DiscoveryContract {
   build: Build;
   discoveryProblem: DiscoveryProblem;
   discoveryPage: DiscoveryPage;
+  productDiscoveryStatus: ProductDiscoveryStatus;
+  productRefreshProblem: ProductRefreshProblem;
+  discoveryCatalogPage: DiscoveryCatalogPage;
+  discoveryReadAllParams: DiscoveryReadAllParams;
+  discoveryRefreshAllParams: DiscoveryRefreshAllParams;
   engineProgress: EngineProgress;
   engineError: EngineError;
   engineRequest: EngineRequest;
@@ -335,6 +340,59 @@ export interface DiscoveryPage {
   hasSavedHistory: boolean;
   connection: 'notChecked' | 'online' | 'offline' | 'partial';
 }
+/**
+ * The saved outcome of one product's latest check, the same facts a single-product DiscoveryPage carries without its builds.
+ */
+export interface ProductDiscoveryStatus {
+  productId: string;
+  lastCheckedAt: string | null;
+  checkedRegions: string[];
+  errors: DiscoveryProblem[];
+  hasSavedHistory: boolean;
+  connection: 'notChecked' | 'online' | 'offline' | 'partial';
+}
+/**
+ * A product whose part of a cross-product refresh did not complete. Its saved evidence is unchanged.
+ */
+export interface ProductRefreshProblem {
+  productId: string;
+  code: string;
+  message: string;
+}
+/**
+ * One bounded page of builds across every registered product, ordered by registry product order, then numeric BuildId descending (missing or non-decimal last), then build identity.
+ */
+export interface DiscoveryCatalogPage {
+  /**
+   * The Product filter this page was read with; null reads every product.
+   */
+  productId: string | null;
+  filter: 'all' | 'local' | 'advertised';
+  /**
+   * @maxItems 100
+   */
+  builds: Build[];
+  nextCursor: string | null;
+  /**
+   * Every registered product's saved status in registry order, whatever the Product filter.
+   *
+   * @maxItems 100
+   */
+  products: ProductDiscoveryStatus[];
+  /**
+   * Products whose refresh attempt did not complete. Always empty for discovery.readAll.
+   *
+   * @maxItems 100
+   */
+  refreshProblems: ProductRefreshProblem[];
+}
+export interface DiscoveryReadAllParams {
+  productId?: string;
+  filter?: 'all' | 'local' | 'advertised';
+  limit?: number;
+  cursor?: string;
+}
+export interface DiscoveryRefreshAllParams {}
 export interface EngineProgress {
   protocolVersion: 1;
   type: 'progress';
@@ -367,6 +425,8 @@ export interface EngineRequest1 {
     | 'products.list'
     | 'discovery.read'
     | 'discovery.refresh'
+    | 'discovery.readAll'
+    | 'discovery.refreshAll'
     | 'workspace.open'
     | 'request.cancel'
     | 'shutdown'

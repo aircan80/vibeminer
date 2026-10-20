@@ -1,6 +1,6 @@
 # VibeMiner UI design references
 
-The first screen follows **[desktop discovery](desktop-discovery/index.html)** ([D059](../DECISIONS.md)). It replaced the layout of **guided build discovery** ([`build-discovery/index.html?concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow)), whose meaning it keeps. The repository keeps that exact HTML and its local navigation dependencies. The other concepts in its selector are historical alternatives. The older standalone `mockups/atlas` prototype is superseded and is not a reference.
+The first screen follows **[desktop discovery](desktop-discovery/index.html)** ([D059](../DECISIONS.md)), with every product in one grid as in [all-products.html](desktop-discovery/all-products.html) ([D062](../DECISIONS.md)). It replaced the layout of **guided build discovery** ([`build-discovery/index.html?concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow)), whose meaning it keeps. The repository keeps that exact HTML and its local navigation dependencies. The other concepts in its selector are historical alternatives. The older standalone `mockups/atlas` prototype is superseded and is not a reference.
 
 Cross-screen rules (tokens, states, progress, focus, verification) are in [UI guidelines](../UI-GUIDELINES.md).
 
@@ -8,7 +8,7 @@ Cross-screen rules (tokens, states, progress, focus, verification) are in [UI gu
 
 | View | Reference | Role |
 | --- | --- | --- |
-| Desktop discovery | [`desktop-discovery/index.html`](desktop-discovery/index.html) (states via `?state=`; see its [README](desktop-discovery/README.md)) | Selected first screen |
+| Desktop discovery | [`desktop-discovery/all-products.html`](desktop-discovery/all-products.html) on top of [`desktop-discovery/index.html`](desktop-discovery/index.html) (states via `?state=`; see its [README](desktop-discovery/README.md)) | Selected first screen |
 | Guided discovery | [`concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow) | Superseded layout; its discovery contract still applies |
 | Preparation | [`option=dedicated&state=indexUnknown`](build-preparation/index.html?option=dedicated&state=indexUnknown) | Selected in Java; carried forward |
 | C build overview (Home) | [`concept=archive&state=ready`](build-mining-home/index.html?concept=archive&state=ready) | Selected in Java; discovery's destination |
@@ -26,9 +26,9 @@ The HTML files can contain older alternatives. Only the views above guide the ap
 
 ## Discovery contract
 
-- Product goes immediately under the discovery question, before results. Show the exact product ID and a reviewed description.
-- Choosing a product refreshes metadata. Selecting a row doesn't download payloads or open the build.
-- All / Local / Currently advertised share one list. Publication, local evidence and remote availability stay separate facts.
+- One grid lists every registered product ([D062](../DECISIONS.md)); a Product filter narrows it. Show the exact product ID and a reviewed label.
+- Refresh builds is the explicit metadata check, for every product at once. Selecting a row doesn't download payloads or open the build.
+- All / Prepared / Current share one list. Publication, local evidence and remote availability stay separate facts.
 - Group regions only when every identity-bearing reference agrees. Keep the original receipts, and show the chosen acquisition route separately.
 - There's one primary Open Build action, with bounded automatic preparation and explicit failure/retry.
 - Keep the exact selection through async work. Stale results can't navigate to another context.

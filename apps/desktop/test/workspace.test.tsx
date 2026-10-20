@@ -10,6 +10,7 @@ import definitionsFixture from '../../../tests/desktop/fixtures/table-definition
 import downloadFixture from '../../../tests/desktop/fixtures/download-workspace.json';
 import configurationFixture from '../../../contracts/examples/workspace-snapshot.json';
 import inventoryPageFixture from '../../../contracts/examples/inventory-page.json';
+import { catalog } from './catalog-page';
 const success = <T,>(value: T): BridgeReply<T> => ({ ok: true, value });
 const failure = (code = 'CANCELED', retryable = true): BridgeReply<WorkspaceSnapshot> => ({ ok: false, error: { code, message: `Authored ${code} outcome.`, retryable } });
 const base = pageFixture.builds[0] as Build;
@@ -34,8 +35,10 @@ function setup(builds: Build[] = [routed()]) {
     itemsPage: vi.fn(async()=>({ok:false as const,error:{code:'NOT_TESTED',message:'Items outside this test.',retryable:false}})),
     itemInspect: vi.fn(async()=>({ok:false as const,error:{code:'NOT_TESTED',message:'Items outside this test.',retryable:false}})),
     products: vi.fn(async () => success({ products: [{ id: 'wow', label: 'Retail', description: 'World of Warcraft' }, { id: 'wowt', label: 'PTR', description: 'Public test' }] })),
-    read: vi.fn(async params => success({ ...pageFixture, productId: params.productId, builds: params.productId === 'wow' ? builds : [] } as DiscoveryPage)),
-    refresh: vi.fn(async productId => success({ ...pageFixture, productId, builds: [] } as DiscoveryPage)),
+    read: vi.fn(async () => ({ ok: false as const, error: { code: 'NOT_TESTED', message: 'Discovery reads every product.', retryable: false } })),
+    refresh: vi.fn(async () => ({ ok: false as const, error: { code: 'NOT_TESTED', message: 'Discovery refreshes every product.', retryable: false } })),
+    readAll: vi.fn(async params => success(catalog({ ...pageFixture, builds: !params.productId || params.productId === 'wow' ? builds : [] } as DiscoveryPage, { productId: params.productId ?? null }))),
+    refreshAll: vi.fn(async () => success(catalog({ ...pageFixture, builds: [] } as DiscoveryPage))),
     open: vi.fn(async params => success(snapshot(builds.find(build => build.id === params.buildIdentity)!, params.sourceRegion))),
     tableData: vi.fn(async () => success({snapshot:null})),
     tablePrepare: vi.fn(async () => ({ok:false as const,error:{code:'NOT_TESTED',message:'Table load outside this test.',retryable:false}})),
@@ -65,7 +68,7 @@ describe('verified inventory opening and preserved discovery', () => {
   it('keeps the open build on its CDN configuration and shows a newer advertised one after refresh', async () => {
     const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' });
     const opened = routed(), newer = 'e'.repeat(32);
-    vi.mocked(bridge.refresh).mockResolvedValue(success({ ...pageFixture, builds: [{ ...opened, cdnConfig: newer, cdnConfigHistory: [{ ...opened.cdnConfigHistory[0], cdnConfig: newer, firstSeenAt: '2026-10-18T13:00:00Z', lastSeenAt: '2026-10-18T13:00:00Z' }, { ...opened.cdnConfigHistory[0], advertisedRegions: [] }] }] } as DiscoveryPage));
+    vi.mocked(bridge.refreshAll).mockResolvedValue(success(catalog({ ...pageFixture, builds: [{ ...opened, cdnConfig: newer, cdnConfigHistory: [{ ...opened.cdnConfigHistory[0], cdnConfig: newer, firstSeenAt: '2026-10-18T13:00:00Z', lastSeenAt: '2026-10-18T13:00:00Z' }, { ...opened.cdnConfigHistory[0], advertisedRegions: [] }] }] } as DiscoveryPage)));
     fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); fireEvent.click(await screen.findByRole('button', { name: 'Refresh builds' }));
     await screen.findByText(/Discovery complete/); await select();
     const note = screen.getByText('US now advertises a different CDN configuration.').closest('[role="note"]')!;
@@ -80,7 +83,7 @@ describe('verified inventory opening and preserved discovery', () => {
     const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' });
     const opened = routed(), entry = opened.cdnConfigHistory[0], other = '0'.repeat(32);
     // us keeps the open configuration; eu advertises another in the same check, which wins only by key order.
-    vi.mocked(bridge.refresh).mockResolvedValue(success({ ...pageFixture, builds: [{ ...opened, cdnConfig: other, cdnConfigHistory: [{ ...entry, cdnConfig: other, advertisedRegions: ['eu'], regions: ['eu'], sourceReceipts: entry.sourceReceipts.map(r => ({ ...r, region: 'eu' })) }, entry] }] } as DiscoveryPage));
+    vi.mocked(bridge.refreshAll).mockResolvedValue(success(catalog({ ...pageFixture, builds: [{ ...opened, cdnConfig: other, cdnConfigHistory: [{ ...entry, cdnConfig: other, advertisedRegions: ['eu'], regions: ['eu'], sourceReceipts: entry.sourceReceipts.map(r => ({ ...r, region: 'eu' })) }, entry] }] } as DiscoveryPage)));
     fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); fireEvent.click(await screen.findByRole('button', { name: 'Refresh builds' }));
     await screen.findByText(/Discovery complete/); await select();
     expect(screen.queryByText(/now advertises a different CDN configuration/)).not.toBeInTheDocument();
@@ -110,7 +113,7 @@ describe('verified inventory opening and preserved discovery', () => {
     const { bridge } = setup(); await select();
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '70448' } }); const open = screen.getByRole('button', { name: 'Open build' }); open.focus(); fireEvent.click(open);
     await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: /Choose build/ }));
-    await waitFor(() => expect(open).toHaveFocus()); expect(screen.getByRole('searchbox')).toHaveValue('70448'); expect(screen.getByRole('option', { name: /Identity dddddddddd/ })).toHaveAttribute('aria-selected', 'true'); expect(bridge.read).toHaveBeenCalledTimes(1); expect(bridge.refresh).not.toHaveBeenCalled();
+    await waitFor(() => expect(open).toHaveFocus()); expect(screen.getByRole('searchbox')).toHaveValue('70448'); expect(screen.getByRole('option', { name: /Identity dddddddddd/ })).toHaveAttribute('aria-selected', 'true'); expect(bridge.readAll).toHaveBeenCalledTimes(1); expect(bridge.refreshAll).not.toHaveBeenCalled();
   });
   it('presents actual preparation stages and Back detaches without canceling or late navigation', async () => {
     const { bridge, emit } = setup(); const pending = deferred<BridgeReply<WorkspaceSnapshot>>(); vi.mocked(bridge.open).mockReturnValue(pending.promise); await begin();
@@ -141,16 +144,17 @@ describe('verified inventory opening and preserved discovery', () => {
     expect(screen.queryByRole('button', { name: 'Retry this build' })).not.toBeInTheDocument();
     await act(async () => pending.resolve(failure())); expect(screen.getByText('Preparation canceled')).toBeVisible(); expect(screen.getByText('Metadata preparation canceled')).toBeVisible(); expect(screen.queryByText('Metadata verification pending')).not.toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Retry this build' })).toBeEnabled();
   });
-  it('fences detached completion after a product change and requires explicit entry when viewing its saved result', async () => {
+  it('fences detached completion while the Product filter changes and opens its saved result only on View verified overview', async () => {
     const { bridge } = setup(); const pending = deferred<BridgeReply<WorkspaceSnapshot>>(); vi.mocked(bridge.open).mockReturnValue(pending.promise); await begin(); await screen.findByRole('heading', { name: 'Open this build overview' });
     fireEvent.click(screen.getByRole('button', { name: /Back to build list/ })); fireEvent.change(screen.getByRole('combobox', { name: 'Product' }), { target: { value: 'wowt' } });
     await act(async () => pending.resolve(success(snapshot()))); expect(screen.queryByRole('heading', { name: 'Build overview' })).not.toBeInTheDocument(); expect(screen.getByRole('combobox', { name: 'Product' })).toHaveValue('wowt');
-    fireEvent.click(screen.getByRole('button', { name: 'View verified overview' })); expect(screen.getByRole('button', { name: 'Enter verified overview' })).toBeEnabled(); fireEvent.click(screen.getByRole('button', { name: 'Enter verified overview' })); await screen.findByRole('heading', { name: 'Build overview' });
+    // The Product filter only narrows the list, so the verified result belongs to the current context and opens directly.
+    fireEvent.click(screen.getByRole('button', { name: 'View verified overview' })); await screen.findByRole('heading', { name: 'Build overview' });
   });
   it('shows typed preparation failure and retries only the same product, identity and source', async () => {
     const { bridge } = setup(); vi.mocked(bridge.open).mockResolvedValueOnce(failure('CONFIGURATION_CORRUPT')).mockResolvedValueOnce(success(snapshot())); await begin();
     await screen.findByText('CONFIGURATION_CORRUPT'); expect(screen.getByText('Metadata preparation not completed')).toBeVisible(); expect(screen.queryByText('Metadata verification pending')).not.toBeInTheDocument(); expect(screen.queryByRole('heading', { name: 'Build overview' })).not.toBeInTheDocument(); fireEvent.click(screen.getByRole('button', { name: 'Retry this build' })); await screen.findByRole('heading', { name: 'Build overview' });
-    expect(vi.mocked(bridge.open).mock.calls[0][0]).toEqual(vi.mocked(bridge.open).mock.calls[1][0]); expect(bridge.refresh).not.toHaveBeenCalled();
+    expect(vi.mocked(bridge.open).mock.calls[0][0]).toEqual(vi.mocked(bridge.open).mock.calls[1][0]); expect(bridge.refreshAll).not.toHaveBeenCalled();
   });
   it('exposes actual verified receipts and source metadata with modal focus return', async () => {
     setup(); await begin(); const heading = await screen.findByRole('heading', { name: 'Build overview' }); await waitFor(() => expect(heading).toHaveFocus()); const metadata = screen.getByRole('button', { name: 'View metadata details' }); metadata.focus(); fireEvent.click(metadata);
@@ -174,7 +178,7 @@ describe('verified inventory opening and preserved discovery', () => {
     expect(within(acknowledged).queryByText('New to VibeMiner')).not.toBeInTheDocument(); expect(within(acknowledged).getByText('Prepared', { exact: true })).toBeVisible();
     expect(within(screen.getByRole('option', { name: /Identity ffffffffff/ })).getByText('New to VibeMiner')).toBeVisible();
     expect(acknowledged).toHaveAttribute('aria-selected', 'true'); expect(screen.getByRole('searchbox')).toHaveValue('70448');
-    expect(bridge.read).toHaveBeenCalledTimes(1); expect(bridge.refresh).not.toHaveBeenCalled();
+    expect(bridge.readAll).toHaveBeenCalledTimes(1); expect(bridge.refreshAll).not.toHaveBeenCalled();
   });
 
   it('rejects a historical configuration-only admission until the real inventory profile is prepared', async () => {
@@ -200,7 +204,7 @@ describe('verified inventory opening and preserved discovery', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Browse catalog memberships' })); await screen.findByText('FileDataID 12345');
     expect(bridge.inventory).toHaveBeenCalledWith({ productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', generation: '1', limit: 50 });
     expect(screen.getByText('Name not supplied')).toBeVisible(); expect(screen.getByText(`EKey ${inventoryPageFixture.entries[0].encodingKey}`)).toBeVisible(); expect(screen.getByRole('status')).toHaveTextContent('1 memberships on this page · 6 total');
-    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Download all', hidden: true })).not.toBeInTheDocument(); expect(bridge.refresh).not.toHaveBeenCalled();
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Download all', hidden: true })).not.toBeInTheDocument(); expect(bridge.refreshAll).not.toHaveBeenCalled();
   });
   it('keeps page controls focused and current rows readable during paged local reads', async () => {
     const { bridge } = setup(); const later = deferred<BridgeReply<InventoryPage>>();
@@ -233,13 +237,13 @@ describe('verified inventory opening and preserved discovery', () => {
   it('returns Files to the Home origin and retains its local page without another read', async () => {
     const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' }); const browse = screen.getByRole('button', { name: 'Browse catalog memberships' }); browse.focus(); fireEvent.click(browse); await screen.findByText('FileDataID 12345');
     fireEvent.click(screen.getByRole('button', { name: /Return to build overview/ })); await waitFor(() => expect(browse).toHaveFocus()); fireEvent.click(screen.getByRole('button', { name: 'Files' })); expect(screen.getByText('FileDataID 12345')).toBeVisible(); expect(bridge.inventory).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); await screen.findByRole('button', { name: 'Open build' }); expect(bridge.read).toHaveBeenCalledTimes(1); expect(bridge.refresh).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); await screen.findByRole('button', { name: 'Open build' }); expect(bridge.readAll).toHaveBeenCalledTimes(1); expect(bridge.refreshAll).not.toHaveBeenCalled();
   });
   it('discards a late catalog result after leaving the exact Home context', async () => {
     const { bridge } = setup(); const pending = deferred<BridgeReply<InventoryPage>>(); vi.mocked(bridge.inventory).mockReturnValue(pending.promise);
     await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse catalog memberships' })); await waitFor(() => expect(bridge.inventory).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); await act(async () => pending.resolve(success(inventoryPageFixture as InventoryPage)));
-    expect(screen.queryByRole('heading', { name: 'Files' })).not.toBeInTheDocument(); expect(screen.queryByText('FileDataID 12345')).not.toBeInTheDocument(); expect(screen.getByRole('combobox', { name: 'Product' })).toHaveValue('wow');
+    expect(screen.queryByRole('heading', { name: 'Files' })).not.toBeInTheDocument(); expect(screen.queryByText('FileDataID 12345')).not.toBeInTheDocument(); expect(screen.getByRole('combobox', { name: 'Product' })).toHaveValue('all');
   });
 
   it('returns membership dialog focus to Files when a pending page replaces its original row', async () => {
@@ -315,7 +319,7 @@ describe('verified inventory opening and preserved discovery', () => {
     fireEvent.click(screen.getByRole('button', { name: /Return to build overview/ })); await waitFor(() => expect(browse).toHaveFocus()); fireEvent.click(screen.getByRole('button', { name: /^Download objects$/ })); expect(bridge.download).toHaveBeenCalledTimes(3); expect(screen.getByText('Object 1')).toBeVisible();
   });
   it('discards a late download-object page after Choose build and preserves Discovery without refresh', async () => {
-    const { bridge } = setup(); vi.mocked(bridge.open).mockResolvedValue(success(downloadSnapshot())); const pending = deferred<BridgeReply<DownloadPage>>(); vi.mocked(bridge.download).mockReturnValue(pending.promise); const open = await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse download objects' })); await waitFor(() => expect(bridge.download).toHaveBeenCalledTimes(1)); fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); await act(async () => pending.resolve(success(downloadPage()))); await waitFor(() => expect(open).toHaveFocus()); expect(screen.queryByText('Object 1')).not.toBeInTheDocument(); expect(bridge.read).toHaveBeenCalledTimes(1); expect(bridge.refresh).not.toHaveBeenCalled();
+    const { bridge } = setup(); vi.mocked(bridge.open).mockResolvedValue(success(downloadSnapshot())); const pending = deferred<BridgeReply<DownloadPage>>(); vi.mocked(bridge.download).mockReturnValue(pending.promise); const open = await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse download objects' })); await waitFor(() => expect(bridge.download).toHaveBeenCalledTimes(1)); fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); await act(async () => pending.resolve(success(downloadPage()))); await waitFor(() => expect(open).toHaveFocus()); expect(screen.queryByText('Object 1')).not.toBeInTheDocument(); expect(bridge.readAll).toHaveBeenCalledTimes(1); expect(bridge.refreshAll).not.toHaveBeenCalled();
   });
 
   it('returns focus after a successful download-page retry removes its retry button', async () => {
@@ -331,7 +335,7 @@ describe('verified inventory opening and preserved discovery', () => {
     await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse download objects' })); await screen.findByText('Object 1'); fireEvent.click(screen.getByRole('button', { name: 'Next page' })); await screen.findByText('Object 2');
     const areas = screen.getByRole('navigation', { name: 'Build areas' }); fireEvent.click(within(areas).getByRole('button', { name: 'Tables' })); const catalogue = await screen.findByRole('region', { name: 'Provider definitions on this page' }); fireEvent.click(await within(catalogue).findByRole('button', { name: /^ItemDefinition bundled/ })); await screen.findByRole('button',{name:'Structure'}); fireEvent.click(screen.getByRole('button',{name:'Structure'})); const field = await screen.findByRole('button', { name: 'Inspect field ClassID' }); field.focus(); fireEvent.click(field); const search = screen.getByRole('searchbox', { name: 'Search definitions' }); fireEvent.change(search, { target: { value: 'ClassName' } }); await screen.findByText('1 provider entries on this page · 1 matching');
     fireEvent.click(within(areas).getByRole('button', { name: 'Home' })); expect(screen.getByRole('heading', { name: 'Build overview' })).toHaveFocus(); expect(screen.getByRole('group', { name: 'Home utilities' })).toBeVisible();
-    fireEvent.click(within(areas).getByRole('button', { name: /^Download objects$/ })); expect(screen.getByText('Object 2')).toBeVisible(); expect(bridge.download).toHaveBeenCalledTimes(2); fireEvent.click(within(areas).getByRole('button', { name: 'Tables' })); expect(search).toHaveValue('ClassName'); expect(field).toHaveAttribute('aria-pressed', 'true'); expect(screen.getByRole('heading', { name: 'Tables' })).toHaveFocus(); expect(screen.queryByRole('group', { name: 'Home utilities' })).not.toBeInTheDocument(); expect(document.querySelector('.sidebar')).not.toBeInTheDocument(); expect(bridge.open).toHaveBeenCalledTimes(1); expect(bridge.read).toHaveBeenCalledTimes(1); expect(bridge.refresh).not.toHaveBeenCalled();
+    fireEvent.click(within(areas).getByRole('button', { name: /^Download objects$/ })); expect(screen.getByText('Object 2')).toBeVisible(); expect(bridge.download).toHaveBeenCalledTimes(2); fireEvent.click(within(areas).getByRole('button', { name: 'Tables' })); expect(search).toHaveValue('ClassName'); expect(field).toHaveAttribute('aria-pressed', 'true'); expect(screen.getByRole('heading', { name: 'Tables' })).toHaveFocus(); expect(screen.queryByRole('group', { name: 'Home utilities' })).not.toBeInTheDocument(); expect(document.querySelector('.sidebar')).not.toBeInTheDocument(); expect(bridge.open).toHaveBeenCalledTimes(1); expect(bridge.readAll).toHaveBeenCalledTimes(1); expect(bridge.refreshAll).not.toHaveBeenCalled();
   });
 
 });

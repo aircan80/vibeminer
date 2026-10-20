@@ -1,0 +1,287 @@
+{
+  "productId": null,
+  "filter": "all",
+  "builds": [
+    {
+      "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "productId": "wow",
+      "version": "12.1.5.70448",
+      "buildId": "70448",
+      "buildConfig": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "cdnConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "productConfig": null,
+      "identityFields": {
+        "BuildConfig": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "BuildId": "70448",
+        "VersionsName": "12.1.5.70448",
+        "KeyRing": ""
+      },
+      "regions": [
+        "us"
+      ],
+      "advertisedRegions": [
+        "us"
+      ],
+      "routeRegions": [
+        "us"
+      ],
+      "firstSeenAt": "2026-10-18T12:00:00Z",
+      "lastSeenAt": "2026-10-18T12:00:00Z",
+      "isNew": false,
+      "isAdvertised": true,
+      "isLocal": false,
+      "availability": "unknown",
+      "sourceReceipts": [
+        {
+          "region": "us",
+          "role": "versions",
+          "url": "https://metadata.invalid/v2/products/wow/versions",
+          "retrievedAt": "2026-10-18T12:00:00Z",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "byteLength": 200,
+          "rowOrdinal": 0
+        },
+        {
+          "region": "us",
+          "role": "cdns",
+          "url": "https://fixture.invalid/cdns",
+          "retrievedAt": "2026-10-18T12:00:00Z",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "byteLength": 128,
+          "rowOrdinal": 0
+        }
+      ],
+      "cdnConfigHistory": [
+        {
+          "cdnConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "firstSeenAt": "2026-10-18T12:00:00Z",
+          "lastSeenAt": "2026-10-18T12:00:00Z",
+          "regions": [
+            "us"
+          ],
+          "advertisedRegions": [
+            "us"
+          ],
+          "sourceReceipts": [
+            {
+              "region": "us",
+              "role": "versions",
+              "url": "https://metadata.invalid/v2/products/wow/versions",
+              "retrievedAt": "2026-10-18T12:00:00Z",
+              "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "byteLength": 200,
+              "rowOrdinal": 0
+            }
+          ]
+        }
+      ],
+      "cdnConfigHistoryCount": 1
+    },
+    {
+      "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "productId": "wowt",
+      "version": "12.2.0.70631",
+      "buildId": "70631",
+      "buildConfig": "ffffffffffffffffffffffffffffffff",
+      "cdnConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "productConfig": null,
+      "identityFields": {
+        "BuildConfig": "ffffffffffffffffffffffffffffffff",
+        "BuildId": "70631",
+        "VersionsName": "12.2.0.70631",
+        "KeyRing": ""
+      },
+      "regions": [
+        "us"
+      ],
+      "advertisedRegions": [
+        "us"
+      ],
+      "routeRegions": [
+        "us"
+      ],
+      "firstSeenAt": "2026-10-18T12:00:00Z",
+      "lastSeenAt": "2026-10-18T12:00:00Z",
+      "isNew": false,
+      "isAdvertised": true,
+      "isLocal": false,
+      "availability": "unknown",
+      "sourceReceipts": [
+        {
+          "region": "us",
+          "role": "versions",
+          "url": "https://metadata.invalid/v2/products/wowt/versions",
+          "retrievedAt": "2026-10-18T12:00:00Z",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "byteLength": 200,
+          "rowOrdinal": 0
+        },
+        {
+          "region": "us",
+          "role": "cdns",
+          "url": "https://fixture.invalid/cdns",
+          "retrievedAt": "2026-10-18T12:00:00Z",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "byteLength": 128,
+          "rowOrdinal": 0
+        }
+      ],
+      "cdnConfigHistory": [
+        {
+          "cdnConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "firstSeenAt": "2026-10-18T12:00:00Z",
+          "lastSeenAt": "2026-10-18T12:00:00Z",
+          "regions": [
+            "us"
+          ],
+          "advertisedRegions": [
+            "us"
+          ],
+          "sourceReceipts": [
+            {
+              "region": "us",
+              "role": "versions",
+              "url": "https://metadata.invalid/v2/products/wowt/versions",
+              "retrievedAt": "2026-10-18T12:00:00Z",
+              "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "byteLength": 200,
+              "rowOrdinal": 0
+            }
+          ]
+        }
+      ],
+      "cdnConfigHistoryCount": 1
+    }
+  ],
+  "nextCursor": null,
+  "products": [
+    {
+      "productId": "wow",
+      "lastCheckedAt": "2026-10-18T12:00:00Z",
+      "checkedRegions": [
+        "us"
+      ],
+      "errors": [],
+      "hasSavedHistory": true,
+      "connection": "online"
+    },
+    {
+      "productId": "wowt",
+      "lastCheckedAt": "2026-10-18T12:00:00Z",
+      "checkedRegions": [
+        "eu",
+        "us"
+      ],
+      "errors": [
+        {
+          "region": "eu",
+          "code": "ROUTE_MISSING",
+          "message": "This advertised region has no matching CDN route."
+        }
+      ],
+      "hasSavedHistory": true,
+      "connection": "partial"
+    },
+    {
+      "productId": "wowxptr",
+      "lastCheckedAt": null,
+      "checkedRegions": [],
+      "errors": [],
+      "hasSavedHistory": false,
+      "connection": "notChecked"
+    },
+    {
+      "productId": "wow_beta",
+      "lastCheckedAt": "2026-10-18T12:00:00Z",
+      "checkedRegions": [],
+      "errors": [
+        {
+          "region": null,
+          "code": "NETWORK_UNAVAILABLE",
+          "message": "Official metadata could not be reached."
+        }
+      ],
+      "hasSavedHistory": false,
+      "connection": "offline"
+    },
+    {
+      "productId": "wow_classic",
+      "lastCheckedAt": null,
+      "checkedRegions": [],
+      "errors": [],
+      "hasSavedHistory": false,
+      "connection": "notChecked"
+    },
+    {
+      "productId": "wow_classic_ptr",
+      "lastCheckedAt": null,
+      "checkedRegions": [],
+      "errors": [],
+      "hasSavedHistory": false,
+      "connection": "notChecked"
+    },
+    {
+      "productId": "wow_classic_era",
+      "lastCheckedAt": null,
+      "checkedRegions": [],
+      "errors": [],
+      "hasSavedHistory": false,
+      "connection": "notChecked"
+    },
+    {
+      "productId": "wow_classic_era_ptr",
+      "lastCheckedAt": null,
+      "checkedRegions": [],
+      "errors": [],
+      "hasSavedHistory": false,
+      "connection": "notChecked"
+    },
+    {
+      "productId": "wow_anniversary",
+      "lastCheckedAt": null,
+      "checkedRegions": [],
+      "errors": [],
+      "hasSavedHistory": false,
+      "connection": "notChecked"
+    },
+    {
+      "productId": "wow_classic_beta",
+      "lastCheckedAt": null,
+      "checkedRegions": [],
+      "errors": [],
+      "hasSavedHistory": false,
+      "connection": "notChecked"
+    },
+    {
+      "productId": "wow_cn_beta",
+      "lastCheckedAt": null,
+      "checkedRegions": [],
+      "errors": [],
+      "hasSavedHistory": false,
+      "connection": "notChecked"
+    },
+    {
+      "productId": "wowf",
+      "lastCheckedAt": null,
+      "checkedRegions": [],
+      "errors": [],
+      "hasSavedHistory": false,
+      "connection": "notChecked"
+    },
+    {
+      "productId": "wow_classic_titan",
+      "lastCheckedAt": null,
+      "checkedRegions": [],
+      "errors": [],
+      "hasSavedHistory": false,
+      "connection": "notChecked"
+    }
+  ],
+  "refreshProblems": [
+    {
+      "productId": "wow_classic",
+      "code": "CATALOG_BUSY",
+      "message": "The discovery catalog is busy. Retry this operation."
+    }
+  ]
+}

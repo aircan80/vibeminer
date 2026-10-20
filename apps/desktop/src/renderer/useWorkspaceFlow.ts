@@ -10,13 +10,15 @@ export type Opening = {
   progress: EngineProgress | null; result: WorkspaceSnapshot | null;
   error: { code: string; message: string; retryable: boolean } | null;
 };
-export function useWorkspaceFlow(bridge: DiscoveryBridge, productId: string) {
+/** productId, when given, is the product a finished opening may still navigate for; without it any product may. */
+export function useWorkspaceFlow(bridge: DiscoveryBridge, productId?: string) {
   const [operation, setOperation] = useState<Opening | null>(null);
   const [view, setView] = useState<'discovery' | 'preparation' | 'home'>('discovery');
   const [notice, setNotice] = useState('');
   const active = useRef<Opening | null>(null);
   const attached = useRef<string | null>(null);
   const currentProduct = useRef(productId); currentProduct.current = productId;
+  const productMatches = (id: string) => currentProduct.current === undefined || currentProduct.current === id;
   const alive = useRef(true);
   const origin = useRef<{ element: HTMLElement | null; scroll: number }>({ element: null, scroll: 0 });
   const frame = useRef<number | null>(null);
@@ -47,7 +49,7 @@ export function useWorkspaceFlow(bridge: DiscoveryBridge, productId: string) {
   function showActive(expectedId?:string) {
     const op = active.current; if (!op||expectedId!==undefined&&op.id!==expectedId) return false;
     rememberOrigin(); attached.current = op.id;
-    if (op.status === 'succeeded' && op.result && currentProduct.current === op.build.productId) setView('home');
+    if (op.status === 'succeeded' && op.result && productMatches(op.build.productId)) setView('home');
     else setView('preparation');
     return true;
   }
@@ -76,11 +78,11 @@ export function useWorkspaceFlow(bridge: DiscoveryBridge, productId: string) {
         update({ ...active.current, status: 'failed', progress: null, error: { code: 'INVENTORY_REQUIRED', message: 'A supported preparation result is required before Home. Configuration-only preparation is no longer sufficient.', retryable: true } });
       } else if (reply.ok) update({ ...active.current, status: 'succeeded', result: reply.value, progress: null });
       else update({ ...active.current, status: reply.error.code === 'CANCELED' ? 'canceled' : 'failed', error: reply.error, progress: null });
-      if (attached.current === id && currentProduct.current === build.productId) setView(active.current?.status === 'succeeded' ? 'home' : 'preparation');
+      if (attached.current === id && productMatches(build.productId)) setView(active.current?.status === 'succeeded' ? 'home' : 'preparation');
     } catch {
       if (!alive.current || active.current?.id !== id) return;
       update({ ...active.current, status: 'failed', progress: null, error: { code: 'ENGINE_UNAVAILABLE', message: 'The local engine connection failed. Restart VibeMiner to reconnect.', retryable: true } });
-      if (attached.current === id && currentProduct.current === build.productId) setView('preparation');
+      if (attached.current === id && productMatches(build.productId)) setView('preparation');
     }
   }
   async function cancel(expectedId?:string) {

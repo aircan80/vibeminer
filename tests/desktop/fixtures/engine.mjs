@@ -58,6 +58,41 @@ function pageFor(productId, filter = 'all', limit = 50) {
   page.builds = page.builds.filter(b => filter === 'all' || filter === 'local' && b.isLocal || filter === 'advertised' && b.isAdvertised).slice(0, limit);
   return page;
 }
+const fixtureProducts = [{ id: 'wow', label: 'Retail', description: 'Authored discovery fixture' }, { id: 'wowt', label: 'Public Test Realm', description: 'Authored second product' }];
+/** The authored outcome of checking one product: offline without history, wowt with a regional problem. */
+function checkedPage(productId) {
+  // Per-product failure controls, shaped like the real engine: HTTP 500 on both documents saves partial with no
+  // checked regions; unreachable saves offline. Both keep earlier builds.
+  if (existsSync(path.join(directory, `http500-${productId}`))) {
+    const page = pageFor(productId, 'all', 100);
+    const problem = { region: null, code: 'HTTP_STATUS', message: 'Official metadata returned an unsuccessful HTTP status.' };
+    return { ...page, connection: 'partial', lastCheckedAt: new Date().toISOString(), checkedRegions: [], errors: [problem, problem] };
+  }
+  if (existsSync(path.join(directory, `offline-${productId}`))) {
+    const page = pageFor(productId, 'all', 100);
+    return { ...page, connection: 'offline', lastCheckedAt: new Date().toISOString(), checkedRegions: [], errors: [{ region: null, code: 'NETWORK_UNAVAILABLE', message: 'Authored unavailable metadata source' }] };
+  }
+  if (offlineEmpty) {
+    const page = pageFor(productId);
+    page.connection = 'offline'; page.lastCheckedAt = new Date().toISOString();
+    page.errors = [{ region: null, code: 'NETWORK_UNAVAILABLE', message: 'Authored unavailable metadata source' }];
+    return page;
+  }
+  const page = structuredClone(seed);
+  page.productId = productId; page.connection = 'online'; page.lastCheckedAt = new Date().toISOString();
+  for (const build of page.builds) { build.productId = productId; if (productId !== 'wow') build.id = (productId === 'wowt' ? 'e' : '0').repeat(64); }
+  if (productId === 'wowt') {
+    page.builds = page.builds.slice(0, 1);
+    page.connection = 'partial'; page.errors = [{ region: 'xx', code: 'ROUTE_UNAVAILABLE', message: 'Authored missing regional route' }];
+  }
+  return page;
+}
+/** Cross-product page over the authored products in registry order; the authored pages fit one page. */
+function catalogFor(productId = null, filter = 'all', limit = 50) {
+  const products = fixtureProducts.map(product => { const page = pageFor(product.id); return { productId: product.id, lastCheckedAt: page.lastCheckedAt, checkedRegions: page.checkedRegions, errors: page.errors, hasSavedHistory: page.hasSavedHistory, connection: page.connection }; });
+  const builds = fixtureProducts.filter(product => !productId || product.id === productId).flatMap(product => pageFor(product.id, filter, 100).builds).slice(0, limit);
+  return { productId, filter, builds, nextCursor: null, products, refreshProblems: [] };
+}
 function waitForRelease(name, signal) {
   return new Promise((resolve, reject) => {
     const target = path.join(directory, name);
@@ -75,7 +110,7 @@ function waitForRelease(name, signal) {
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[])] });
   if(creaturesEnabled&&method.startsWith('creatures.')){
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
     if(!opened.has(key))return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
@@ -130,7 +165,8 @@ async function dispatch(request) {
       Object.assign(s,{revision:String(BigInt(s.revision)+1n),jobId:s.jobId??'authored-retention-job',mode:action==='onDemand'?'onDemand':'downloadAll',paused:action==='pause',state:action==='pause'||action==='onDemand'?'stopping':'queued',pendingObjects:0});retentionJobs.set(key,s);return reply(id,s);
     }
   }
-  if (method === 'products.list') return reply(id, { products: [{ id: 'wow', label: 'Retail', description: 'Authored discovery fixture' }, { id: 'wowt', label: 'Public Test Realm', description: 'Authored second product' }] });
+  if (method === 'products.list') return reply(id, { products: fixtureProducts });
+  if (method === 'discovery.readAll') return reply(id, catalogFor(params.productId ?? null, params.filter ?? 'all', params.limit ?? 50));
   if (method === 'discovery.read') return reply(id, pageFor(params.productId, params.filter, params.limit));
   if (method === 'request.cancel') {
     const controller = active.get(params.requestId); controller?.abort();
@@ -283,25 +319,31 @@ async function dispatch(request) {
     } finally { stepWatcher.close(); active.delete(id); }
     return;
   }
+  if (method === 'discovery.refreshAll') {
+    // Both authored products are checked at once, like the bounded engine; each waits for its own release file.
+    const controller = new AbortController(); active.set(id, controller);
+    let sequence = 1, completed = 0;
+    const progress = () => send({ type: 'progress', requestId: id, stage: 'Checking official metadata', sequence: sequence++, region: null, completed, total: fixtureProducts.length, unit: 'products' });
+    progress();
+    try {
+      await Promise.all(fixtureProducts.map(async product => {
+        writeFileSync(path.join(directory, `waiting-${product.id}`), id);
+        await waitForRelease(`release-${product.id}`, controller.signal);
+        saved.set(product.id, checkedPage(product.id));
+        completed++; progress();
+      }));
+      reply(id, catalogFor());
+    } catch { fail(id, 'CANCELED', 'Discovery canceled. Products checked before stopping keep their new results.'); }
+    finally { active.delete(id); }
+    return;
+  }
   if (method !== 'discovery.refresh') return fail(id, 'INVALID_REQUEST', 'Unsupported authored fixture operation.');
   const controller = new AbortController(); active.set(id, controller);
   send({ type: 'progress', requestId: id, stage: 'Reading authored metadata', sequence: 1, region: null, completed: null, total: null, unit: null });
   writeFileSync(path.join(directory, `waiting-${params.productId}`), id);
   try {
     await waitForRelease(`release-${params.productId}`, controller.signal);
-    if (offlineEmpty) {
-      const page = pageFor(params.productId);
-      page.connection = 'offline'; page.lastCheckedAt = new Date().toISOString();
-      page.errors = [{ region: null, code: 'NETWORK_UNAVAILABLE', message: 'Authored unavailable metadata source' }];
-      saved.set(params.productId, page); reply(id, page); return;
-    }
-    const page = structuredClone(seed);
-    page.productId = params.productId; page.connection = 'online';
-    for (const build of page.builds) build.productId = params.productId;
-    if (params.productId === 'wowt') {
-      page.connection = 'partial'; page.errors = [{ region: 'xx', code: 'ROUTE_UNAVAILABLE', message: 'Authored missing regional route' }];
-    }
-    saved.set(params.productId, page); reply(id, pageFor(params.productId));
+    saved.set(params.productId, checkedPage(params.productId)); reply(id, pageFor(params.productId));
   } catch { fail(id, 'CANCELED', 'Discovery canceled.'); }
   finally { active.delete(id); }
 }
