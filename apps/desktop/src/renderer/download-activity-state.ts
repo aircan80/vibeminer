@@ -20,6 +20,15 @@ export function activitySummary(tasks:readonly ActivityTask[]){
  const counted=tasks.filter(t=>t.counted??(t.kind==='buildRetention'||!taskRecent(t))),attention=tasks.find(taskAttention),active=tasks.find(t=>['pending','running','preparing','stopping','releasing'].includes(t.status)),other=counted[0],chosen=attention??active??other;
  return {count:counted.length,measurement:chosen?.measurement?.label??null,label:attention?`${attention.title} · needs attention`:active?`${active.title} · ${active.stage}`:other?`${other.title} · ${other.stage}`:'No active tasks'};
 }
+// Joins a summary label and its measurement for one line. Engine stage text may already end with the same count, or the
+// same count and percent; that tail is dropped so each fact appears once. A differing count is kept.
+export function summaryLine(s:Readonly<{label:string;measurement:string|null}>){
+ if(!s.measurement)return s.label;
+ const plain=(t:string)=>t.trim().replace(/(\d)[,.\u00a0\u202f' ](?=\d{3}(?!\d))/g,'$1').replace(/^0 of 0 /,'0 '),count=plain(s.measurement.split(' · ')[0]),percent=/ · (\d+)% of current stage$/.exec(s.measurement)?.[1];
+ const parts=s.label.split(' · '),n=parts.length,tail=(i:number)=>plain(parts[n-i]);
+ const drop=percent!==undefined&&n>2&&tail(1)===`${percent}%`&&tail(2)===count?2:n>1&&tail(1)===count?1:0;
+ return `${parts.slice(0,n-drop).join(' · ')} · ${s.measurement}`;
+}
 export const retentionStateLabel=(s:RetentionSnapshot)=>s.state==='stopping'?(s.mode==='onDemand'?'Switching to On demand':s.paused?'Pausing build download':'Updating build download'):({onDemand:'On demand',queued:'Build download queued',preparing:'Preparing encoded retention',running:'Encoded retention pass underway',waiting:'Build download waiting',paused:'Build download paused',completed:'Encoded retention pass complete',failed:'Build download needs attention'}[s.state]);
 export function retentionActivity(s:RetentionSnapshot,locked=false):ActivityTask{
  const actions:ActivityAction[]=[];

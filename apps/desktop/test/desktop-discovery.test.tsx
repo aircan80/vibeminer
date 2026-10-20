@@ -3,9 +3,9 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App, buildDownloads, downloadedPercent } from '../src/renderer/App';
 import { ActivityTrigger, DownloadActivity } from '../src/renderer/DownloadActivity';
-import type { ActivityTask } from '../src/renderer/download-activity-state';
+import { summaryLine, type ActivityTask } from '../src/renderer/download-activity-state';
 import type { BridgeReply, DiscoveryBridge } from '../src/shared/bridge';
-import type { DiscoveryPage, RetentionSnapshot } from '../../../contracts/generated/discovery';
+import type { DiscoveryPage, EngineProgress, RetentionSnapshot, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
 import fixture from '../../../contracts/examples/discovery-page.json';
 import retained from '../../../contracts/examples/retention-snapshot.json';
 const original = fixture as DiscoveryPage;
@@ -262,5 +262,37 @@ describe('compact activity entry', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close downloads and activity' }));
     await waitFor(() => expect(document.querySelector('.dv-chip')).toBeNull());
     expect(screen.getByRole('heading', { name: 'Builds' })).toHaveFocus();
+  });
+});
+
+describe('status bar activity summary', () => {
+  it('shows a count once when the engine stage already carries it', async () => {
+    const bridge = bridgeMock(), listeners = new Set<(p: EngineProgress) => void>(), pending = deferred<BridgeReply<WorkspaceSnapshot>>();
+    vi.mocked(bridge.onProgress).mockImplementation(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; });
+    vi.mocked(bridge.open).mockReturnValue(pending.promise);
+    await ready(bridge);
+    fireEvent.click(within(screen.getByRole('listbox', { name: 'Builds' })).getAllByRole('option')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Open build' }));
+    await waitFor(() => expect(bridge.open).toHaveBeenCalledTimes(1));
+    const requestId = vi.mocked(bridge.open).mock.calls[0][1];
+    act(() => { for (const listener of listeners) listener({ protocolVersion: 1, type: 'progress', requestId, sequence: 2, stage: 'Building download ledger · 2 of 6 objects', region: 'us', completed: 2, total: 6, unit: 'objects' }); });
+    const status = document.querySelector('.dv-statusbar .dv-busy:last-child')!;
+    expect(status).toHaveTextContent(/^Build preparation · Building download ledger · 2 of 6 objects · 33% of current stage$/);
+    await act(async () => pending.resolve({ ok: false, error: { code: 'CANCELED', message: 'Authored stop.', retryable: true } }));
+  });
+  it('keeps every fact once for real engine stage text, with or without a count', () => {
+    expect(summaryLine({ label: 'Build preparation · Reading download sizes · 65,536 of 131,072 entries · 50%', measurement: '65,536 of 131,072 entries · 50% of current stage' }))
+      .toBe('Build preparation · Reading download sizes · 65,536 of 131,072 entries · 50% of current stage');
+    expect(summaryLine({ label: 'Build preparation · Reading download sizes · 0 entries', measurement: '0 of 0 entries · no percentage for zero total' }))
+      .toBe('Build preparation · Reading download sizes · 0 of 0 entries · no percentage for zero total');
+    expect(summaryLine({ label: 'Items · Preparing ItemSparse prerequisite', measurement: '25 of 100 bytes · 25% of current stage' }))
+      .toBe('Items · Preparing ItemSparse prerequisite · 25 of 100 bytes · 25% of current stage');
+    expect(summaryLine({ label: 'Build preparation · Matching archive locations · 10 of 20 download objects · 50%', measurement: '12 of 20 download objects · 60% of current stage' }))
+      .toBe('Build preparation · Matching archive locations · 10 of 20 download objects · 50% · 12 of 20 download objects · 60% of current stage');
+    expect(summaryLine({ label: 'Build preparation · Matching archive locations · 10 of 20 download objects · 50%', measurement: '11 of 22 download objects · 50% of current stage' }))
+      .toBe('Build preparation · Matching archive locations · 10 of 20 download objects · 50% · 11 of 22 download objects · 50% of current stage');
+    expect(summaryLine({ label: 'Build preparation · Preparing compact download ledger', measurement: null })).toBe('Build preparation · Preparing compact download ledger');
+    expect(summaryLine({ label: 'Published encoded content · all variants · Encoded retention pass underway', measurement: '3 objects · total unknown' }))
+      .toBe('Published encoded content · all variants · Encoded retention pass underway · 3 objects · total unknown');
   });
 });

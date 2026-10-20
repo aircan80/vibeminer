@@ -1,5 +1,5 @@
 import {DownloadActivity,ActivityTrigger,useDownloadActivity} from './DownloadActivity';
-import {stageMeasurement,retentionActivity,type ActivityTask,type ActivityIdentity} from './download-activity-state';
+import {stageMeasurement,summaryLine,retentionActivity,type ActivityTask,type ActivityIdentity} from './download-activity-state';
 import {retentionKey} from '../shared/retention';
 import {useItemEffects} from './useItemEffects';
 import {ItemEffectsActivity} from './ItemEffects';
@@ -383,7 +383,7 @@ function DiscoveryWorkspace({ active: visibleView, productId, product, autoRefre
       <span>Last check <strong>{stamp(page?.lastCheckedAt || null)}</strong></span>
       <span role="status" aria-live="polite" className="dv-message">{stopping ? 'Stopping discovery…' : refused ? 'The saved catalog was not opened.' : message}</span>
       <span className="dv-spacer"/>
-      {summary && <span className={activity_!.attention ? 'dv-warn' : 'dv-busy'} aria-live="off">{!activity_!.attention && activity_!.active && <span className="dv-pulse" aria-hidden="true"/>}{summary.label}{summary.measurement ? ` · ${summary.measurement}` : ''}</span>}
+      {summary && <span className={activity_!.attention ? 'dv-warn' : 'dv-busy'} aria-live="off">{!activity_!.attention && activity_!.active && <span className="dv-pulse" aria-hidden="true"/>}{summaryLine(summary)}</span>}
     </footer>
   </div>;
 }
