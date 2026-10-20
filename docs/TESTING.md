@@ -39,6 +39,7 @@ These caused real flaky tests:
 - **Don't count on a spare thread-pool thread.** If a test needs a thread blocked on purpose (an observer that holds a lock or waits synchronously), use a dedicated `Thread`. The pool may not inject another worker in time.
 - **Races show up only in full cohorts.** A focused filter can pass while the full suite fails. Run the full backend suite with `--blame-hang-timeout 30s`, and loop suspicious tests repeatedly before calling a race fixed.
 - **Process-wide gates leak across classes.** `RetentionDriverTests`, `BulkArchiveLocatorTests` and `SourceIntegrityOrderingTests` share the `Bulk archive locator` xUnit collection because the bulk map builder is one process-wide gate. Any new test that builds a bulk archive map must join that collection.
+- **Heap samples are process-wide.** `GC.GetTotalMemory` counts every test running in the process. A delta between two samples once read -43,895,784 bytes because a parallel test freed its objects in between. Tests that sample it must sit in a `DisableParallelization` collection, usually `Managed heap budget`. `ManagedHeapBudgetTests` fails if one doesn't. `GC.GetTotalAllocatedBytes` is process-wide too; use it for logged numbers only, or isolate the test.
 
 ### Float32 over the wire
 

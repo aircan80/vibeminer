@@ -10,7 +10,7 @@ using Harness = VibeMiner.Backend.Tests.ItemsStoreTests.Harness;
 
 namespace VibeMiner.Backend.Tests;
 
-[Collection("Items projection builder")]
+[Collection(ManagedHeapBudgetCollection.Name)]
 public sealed class ItemEffectsConfigurationBudgetTests(ITestOutputHelper output)
 {
     [Fact]

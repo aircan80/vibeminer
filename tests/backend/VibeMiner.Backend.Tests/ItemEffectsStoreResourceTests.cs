@@ -9,7 +9,7 @@ using Xunit.Abstractions;
 
 namespace VibeMiner.Backend.Tests;
 
-[Collection("Items projection builder")]
+[Collection(ManagedHeapBudgetCollection.Name)]
 public sealed class ItemEffectsStoreResourceTests(ITestOutputHelper output)
 {
     [Theory]
