@@ -148,6 +148,38 @@ public sealed class ItemIconsServiceTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued); Assert.Equal(1, store.Calls); await service.DisposeAsync();
     }
     [Fact]
+    public async Task Shutdown_never_admits_a_queued_demand_while_it_is_still_canceling_earlier_demands()
+    {
+        // Regression for #22. Shutdown cancels its demands one at a time. The running producer can
+        // retire before shutdown reaches the queued demand's token; the worker must not admit it.
+        var prior = SynchronizationContext.Current; var context = new QueuedContext();
+        var entered = Signal(); var notified = Signal(); using var shutdownReturned = new ManualResetEventSlim();
+        var queuedEntered = Signal(); var store = new Store();
+        store.Prepare = async (request, _, token) =>
+        {
+            if (request.ItemIds[0] != "1") { queuedEntered.TrySetResult(); return Result(request); }
+            // Not disposed here: disposing waits for a running callback. The service owns the source.
+            token.Register(() => { notified.TrySetResult(); shutdownReturned.Wait(Deadline); });
+            entered.SetResult(); await notified.Task; token.ThrowIfCancellationRequested(); return Result(request);
+        };
+        var service = new ItemIconsService(store); var first = service.PrepareBatchAsync(Request("1"));
+        await entered.Task.WaitAsync(Deadline); var queued = service.PrepareBatchAsync(Request("2")); Task stopping;
+        SynchronizationContext.SetSynchronizationContext(context);
+        // The callback holds the first cancellation open until DisposeAsync has yielded, so its
+        // continuation is parked on the queued context before it can cancel the second demand.
+        try { stopping = service.DisposeAsync().AsTask(); }
+        finally { SynchronizationContext.SetSynchronizationContext(prior); shutdownReturned.Set(); }
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first.WaitAsync(Deadline));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued.WaitAsync(Deadline));
+            Assert.False(queuedEntered.Task.IsCompleted, "The queued demand reached the store after shutdown began.");
+            Assert.False(stopping.IsCompleted);
+        }
+        finally { await context.DrainUntilAsync(stopping, Deadline); }
+        Assert.Equal(1, store.Calls);
+    }
+    [Fact]
     public async Task Detaching_one_consumer_restores_global_capacity_across_four_batches()
     {
         var entered = Signal(); var release = Signal(); var store = new Store();

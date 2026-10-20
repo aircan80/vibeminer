@@ -121,16 +121,20 @@ public sealed class ItemIconsService : IAsyncDisposable
             await wake.WaitAsync();
             while (true)
             {
-                Demand? demand;
+                Demand? demand; bool stopping;
                 lock (gate)
                 {
                     demand = queue.TryDequeue(out var next) ? next : null;
                     if (demand is null && closed) return;
+                    // This dequeue is admission. Shutdown and a last canceling consumer set Stopping under
+                    // the gate before they cancel, and may not have reached this token yet (#22).
+                    stopping = demand?.Stopping == true;
                 }
                 if (demand is null) break;
                 ItemIconBatch? result = null; Exception? failure = null;
                 try
                 {
+                    if (stopping) throw new OperationCanceledException(demand.Cancellation.Token);
                     demand.Cancellation.Token.ThrowIfCancellationRequested();
                     result = await store.PrepareBatchAsync(demand.Request, value => ReportAsync(demand, value), demand.Cancellation.Token);
                 }
