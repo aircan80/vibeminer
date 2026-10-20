@@ -16,21 +16,21 @@ Rules every screen follows. Use them when building or reviewing renderer changes
 
 Views keep their own scoped tokens. Don't merge them into one palette, and don't let one view's stylesheet override another's.
 
-Discovery has its own reference ([desktop discovery](design/desktop-discovery/README.md)): 14px base (`.933333rem`), 11/13/14/19px scale, muted `#586a64`, scoped in `discovery.css`. The columns below cover the shared `:root` tokens and the views that still follow D021.
+Discovery has its own reference ([desktop discovery](design/desktop-discovery/README.md)): 14px base (`.933333rem`), 11/13/14/19px scale, muted `#586a64`, scoped in `discovery.css`. Home, Tables and Files follow [desktop home](design/desktop-home/README.md) with the same tokens and scale, scoped to `.desktop-home` in `desktop-home.css` ([D063](DECISIONS.md)). The columns below cover the shared `:root` tokens and Preparation, which still follows D021.
 
-| Token | Shared `:root` (`styles.css`) | Preparation (`.preparation-view`) | Home (`.home-view`) | Tables (`.tables-explorer`) |
-| --- | --- | --- | --- | --- |
-| Body | 15px / 1.5 | 15px / 1.5 | 15px / 1.5 | 14px / 1.5 (`.933333rem`) |
-| bg / paper | `#f5f3ed` / `#fffefa` | same | same | same |
-| ink | `#243b3a` | same | same | same |
-| line | `#dce2d9` | same | same | same |
-| teal | `#176e66` | same | same | same |
-| muted | `#697b76` | `#697b76` | `#657870` | `#697b72` |
-| mint | `#e4f1e9` | `#e4f1e9` | `#e4f1e9` | `#e5f1e9` |
-| gold / amber | gold `#a67729` | amber `#8a6425` | gold `#94672a` | gold `#936729` |
-| Focus ring | `#e6ad46` | `#e6ad46` | `#e6ad46` | `#dda33a` |
+| Token | Shared `:root` (`styles.css`) | Preparation (`.preparation-view`) |
+| --- | --- | --- |
+| Body | 15px / 1.5 | 15px / 1.5 |
+| bg / paper | `#f5f3ed` / `#fffefa` | same |
+| ink | `#243b3a` | same |
+| line | `#dce2d9` | same |
+| teal | `#176e66` | same |
+| muted | `#697b76` | `#697b76` |
+| mint | `#e4f1e9` | `#e4f1e9` |
+| gold / amber | gold `#a67729` | amber `#8a6425` |
+| Focus ring | `#e6ad46` | `#e6ad46` |
 
-Items, Effects, the activity header/panel and the geometry view use the `#dda33a` ring too.
+Items, Effects and the geometry view keep their own stylesheets inside the Home shell and use the `#dda33a` ring.
 
 ### Focus and selection
 
@@ -39,11 +39,11 @@ Items, Effects, the activity header/panel and the geometry view use the `#dda33a
 
 ### Shell and navigation
 
-- The build header holds Product / Build / Source / Locale / Status, a labelled **Download mode**, the **Downloads & activity** entry and **Choose build**.
-- Discovery is a fixed window: one toolbar row, panes that scroll on their own, a one-line status bar. The window never scrolls; at very small sizes only the list pane scrolls as a whole. The menu bar is hidden but the application menu stays for edit, zoom, close and quit accelerators.
-- Area navigation is a horizontal bar directly under the build header: 12px text, muted `#657870`, active item teal with weight 750 and a 3px bottom rule. It uses `aria-current="page"` and scrolls on its own when narrow.
-- There is no global sidebar. Areas own their internal navigation, such as the Tables catalogue on the left. Home utilities (Metadata, Storage) stay inside Home.
-- The Tables workbench is one rounded surface: catalogue `224px`, flexible center, inspector `340px`. Other inspectors follow their own reference (Discovery and Preparation use `330px`).
+- The build header is one row: brand, then label-over-value Product / Build / Source / Locale / Status and a labelled **Download mode**, the **Downloads & activity** entry while there is something to show, and **← Choose build** as a primary teal button. Below 65.333333rem of window width (200% text at 1280px) it takes two rows: identity first, with Source and Locale moved to the status bar and the identity popover, then the area bar, the entry and Choose build.
+- Discovery, Home, Tables and Files are fixed windows: a toolbar, panes that scroll on their own, a one-line status bar. The window never scrolls; at very small sizes only the list pane scrolls as a whole. The menu bar is hidden but the application menu stays for edit, zoom, close and quit accelerators. The Home shell's status bar starts with the exact build, source and locale on every area.
+- Area navigation is a horizontal bar directly under the build header: Home · Tables · Files | Items · Creatures, 13px text, muted `#586a64`, active item teal with weight 700 and a 3px bottom rule. Tables and Files (the raw source layer) and Items and Creatures (joined views) are labelled groups split by a separator. Items and Creatures are hidden when unavailable, and Build readiness says why. It uses `aria-current="page"` and scrolls on its own when narrow.
+- There is no global sidebar. Areas own their internal navigation, such as the Tables catalogue on the left. Home utilities (Metadata, Source details) sit in the Home pane head.
+- The Tables workbench is three tiled panes: catalogue `17rem` (238px at 100%), records with Data, Structure and Relationships, inspector `340px`. Files is a list and a `340px` inspector. Below 65.333333rem they show one pane at a time with a switcher (**Tables list / Records / Selected record**, **Files list / Selected …**). Other inspectors follow their own reference (Discovery and Preparation use `330px`).
 
 ### Enlarged text and long values
 
@@ -52,7 +52,7 @@ Items, Effects, the activity header/panel and the geometry view use the `#dda33a
 - The page never scrolls horizontally. Wide data tables scroll inside a labelled, keyboard-reachable region.
 - Long IDs, hashes, URLs and raw hex wrap (`overflow-wrap:anywhere`), stay selectable or copyable, and are never elided. A short prefix (`a1a1a1a1…`) is fine as a visual cue in a list, as long as the full value is in the inspector.
 - Short status words and control labels never break mid-word.
-- When the inspector stacks below the content, show a **View selected …** jump (build, field, record, item) near the list heading, plus a return to the invoking row. Show only the jump for the active inspector mode.
+- When the inspector stacks below the content, show a **View selected …** jump (build, field, record, item) near the list heading, plus a return to the invoking row. Show only the jump for the active inspector mode. Tables and Files don't stack: at enlarged text they show one pane at a time with a switcher, and picking or following a table shows Records and focuses its title.
 
 ## State and wording
 
@@ -97,7 +97,8 @@ Items, Effects, the activity header/panel and the geometry view use the `#dda33a
 ### Activity
 
 - There's one compact **Downloads & activity** entry and one nonmodal side panel for all background work. Individual screens don't add their own progress bars.
-- On Discovery the entry exists only while something is active, paused or waiting, needs attention (it then reads **Needs attention**), or has an outcome to dismiss. Finished or canceled work with nothing to dismiss doesn't keep it. With nothing to show there is no entry, no badge and no floating button. The Home build header keeps its always-present entry for now.
+- On Discovery and Home the entry exists only while something is active, paused or waiting, needs attention (it then reads **Needs attention**), or has an outcome to dismiss. Finished or canceled work with nothing to dismiss doesn't keep it. With nothing to show there is no entry, no badge and no floating button.
+- The panel docks below the header and above the status bar. On Home it covers the side column or inspector, which are inert while it is open; in the compact layout it covers the whole area, which is inert instead. The header and status bar stay reachable and there is no modal trap.
 - A screen that needs missing data says so in place ("Waiting for required data") and links to the exact task with **View task**.
 - The activity entry and panel never open themselves, steal focus, navigate or reorder rows while you read.
 
@@ -164,5 +165,5 @@ Items, Effects, the activity header/panel and the geometry view use the `#dda33a
 
 ## Known gaps
 
-- Discovery's muted `#586a64` meets AA on every surface it uses. Elsewhere, muted text is below WCAG AA for normal text. `#697b76` on `#f5f3ed` is about 4.0:1, and Tables `#697b72` is about the same. Home's `#657870` is about 4.2:1 on the background and 4.65:1 on paper. The colours are kept for mockup fidelity ([D021](DECISIONS.md)). Changing them is an open decision; don't fold it silently into fidelity work.
+- Discovery's and Home's muted `#586a64` meets AA on every surface it uses. Elsewhere, muted text is below WCAG AA for normal text: `#697b76` on `#f5f3ed` is about 4.0:1 (shared `:root`, Preparation). The colours are kept for mockup fidelity ([D021](DECISIONS.md)). Changing them is an open decision; don't fold it silently into fidelity work.
 - `retention.css` uses a 2px teal focus outline on retention activity controls, which breaks the gold-ring rule above.

@@ -1,6 +1,6 @@
 # VibeMiner UI design references
 
-The first screen follows **[desktop discovery](desktop-discovery/index.html)** ([D059](../DECISIONS.md)), with every product in one grid as in [all-products.html](desktop-discovery/all-products.html) ([D062](../DECISIONS.md)). It replaced the layout of **guided build discovery** ([`build-discovery/index.html?concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow)), whose meaning it keeps. The repository keeps that exact HTML and its local navigation dependencies. The other concepts in its selector are historical alternatives. The older standalone `mockups/atlas` prototype is superseded and is not a reference.
+The first screen follows **[desktop discovery](desktop-discovery/index.html)** ([D059](../DECISIONS.md)), with every product in one grid as in [all-products.html](desktop-discovery/all-products.html) ([D062](../DECISIONS.md)). It replaced the layout of **guided build discovery** ([`build-discovery/index.html?concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow)), whose meaning it keeps. The repository keeps that exact HTML and its local navigation dependencies. The other concepts in its selector are historical alternatives. The older standalone `mockups/atlas` prototype is superseded and is not a reference. Home, Tables and Files follow **[desktop home](desktop-home/index.html)** ([D063](../DECISIONS.md)).
 
 Cross-screen rules (tokens, states, progress, focus, verification) are in [UI guidelines](../UI-GUIDELINES.md).
 
@@ -11,16 +11,19 @@ Cross-screen rules (tokens, states, progress, focus, verification) are in [UI gu
 | Desktop discovery | [`desktop-discovery/all-products.html`](desktop-discovery/all-products.html) on top of [`desktop-discovery/index.html`](desktop-discovery/index.html) (states via `?state=`; see its [README](desktop-discovery/README.md)) | Selected first screen |
 | Guided discovery | [`concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow) | Superseded layout; its discovery contract still applies |
 | Preparation | [`option=dedicated&state=indexUnknown`](build-preparation/index.html?option=dedicated&state=indexUnknown) | Selected in Java; carried forward |
-| C build overview (Home) | [`concept=archive&state=ready`](build-mining-home/index.html?concept=archive&state=ready) | Selected in Java; discovery's destination |
-| Home and Tables with area navigation | [Home](top-navigation/home.html), [Tables](top-navigation/tables.html) | Selected horizontal shell and Tables workbench |
+| Desktop home | [`desktop-home/index.html`](desktop-home/index.html) (areas via `?area=home\|tables\|files`, states via `?state=`; see its [README](desktop-home/README.md)) | Selected Home, Tables and Files |
+| C build overview (Home) | [`concept=archive&state=ready`](build-mining-home/index.html?concept=archive&state=ready) | Superseded layout; its Home facts and wording still apply |
+| Home and Tables with area navigation | [Home](top-navigation/home.html), [Tables](top-navigation/tables.html) | Superseded layout; its Tables meaning still applies |
 | Downloads and activity | [Option A: side panel](download-activity/index.html?concept=drawer&state=active&panel=open) | Option A selected as the default; B kept for comparison |
 
 The HTML files can contain older alternatives. Only the views above guide the app. Their selectors, demo controls, counters, product aliases and quantities are authored examples, not production controls or facts.
 
 ## Horizontal navigation and Tables
 
-- Area navigation is horizontal under the build header. There is no global sidebar.
-- Tables uses the Explorer layout: catalogue on the left, then the center, then a 340px inspector.
+- Area navigation is horizontal under the build header: Home · Tables · Files | Items · Creatures. There is no global sidebar.
+- Tables uses the workbench layout: catalogue on the left, then records with Data, Structure and Relationships, then a 340px inspector. Files is a list and an inspector.
+- The desktop-home reference draws work that is not built yet: Follow by column value ([#19](https://github.com/aircan80/vibeminer/issues/19)), Files grouped per FileDataID with filters ([#20](https://github.com/aircan80/vibeminer/issues/20)), reference text ([#17](https://github.com/aircan80/vibeminer/issues/17)) and the community listfile ([#21](https://github.com/aircan80/vibeminer/issues/21)). The app draws none of them until those issues land: Data cells are plain values, Files lists today's membership pages (or the download manifest's encoded objects when no catalog is prepared) and has no filters.
+- Implementation differences from the reference: the fixture label sits in the status bar; Data has a one-line **Table data** bar like Structure's **DBD structure** bar, naming the research locale and admission scope (at enlarged text the **Table data** heading joins the title row instead); the record inspector heading stays **Record #ID** with the table name below it; Relationships looks each target up in the local provider catalogue and says **Can’t follow: no bundled definition** when it isn't bundled. At enlarged text the calm “A field uses raw physical values…” notice on Data is hidden (each column header still names its raw physical type), and the record pager shows **First / Previous / Next** (accessible names “First page of records” and so on); at 100% it reads **First page / Previous page / Next page** as in the reference.
 - Prototype rows, controls and coverage figures are examples. What production shows is defined in [tables-v1](../../contracts/tables-v1.md) and [table-data-v1](../../contracts/table-data-v1.md).
 - [Table research](tables/RESEARCH.md) records the definition sources. The historical Java [Tables stories](../migration/java-tables/TABLES-STORIES.md) and [relationship-label rules](../migration/java-tables/TABLE-RELATION-LABELS.md) keep the larger phased scope.
 
@@ -45,7 +48,7 @@ The HTML files can contain older alternatives. Only the views above guide the ap
 ## Fidelity
 
 - Carry the selected mockups' HTML structure, fonts, sizes, weights and colours into React faithfully ([D021](../DECISIONS.md)).
-- Discovery follows the desktop reference: toolbar, build listbox, pinned-action inspector and status bar in a window that never scrolls.
+- Discovery follows the desktop reference: toolbar, build listbox, pinned-action inspector and status bar in a window that never scrolls. Home, Tables and Files follow the desktop-home reference in the same kind of window.
 - Fix real accessibility or usability defects on purpose and record them. Don't drift silently.
 - Record future redesigns as new design references instead of editing the imported source. Then compare the implementation against the new reference.
 - Compare real Electron captures with the reference at 1280×800 and 1440×1100, 100% and 200% text. A copied HTML file is a reference asset, not implemented UI.

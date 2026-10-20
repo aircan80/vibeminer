@@ -1,0 +1,448 @@
+/* Desktop Home, Tables and Files: docs/design/desktop-home. Converted from the reference at a 15px root (rem = px / 15); type scale 11 / 13 / 14 / 19px. HomeShell sets .dh-medium below 78.4rem and .dh-compact below 65.333333rem of window width, measured against the current root text size. */
+.desktop-home{--bg:#f5f3ed;--paper:#fffefa;--ink:#243b3a;--muted:#586a64;--line:#dce2d9;--line-soft:#e9ece5;--teal:#176e66;--mint:#e4f1e9;--hover:#eef4ef;--pill:#b9d5c8;--gold-ink:#7d561b;--gold-line:#e4cfa5;--gold-bg:#fbf5e8;--warn-bg:#fbf3e4;--warn-line:#e7c98f;--err-bg:#fbeeea;--err-line:#e3b5a8;--focus:#e6ad46;--toolbar:#fbfaf6;--status:#eceae2;--side:#f9f8f3;
+  --fs-s:.733333rem;--fs-m:.866667rem;--fs-l:1.266667rem;--pane-head:3.2rem;--thead:1.866667rem;--side-w:clamp(16.8rem,24.733333rem,40%);--insp-w:clamp(16.8rem,22.68rem,34%);--title-row:2.426667rem;--panel-w:var(--side-w);font-size:.933333rem}
+.desktop-home[data-area="tables"]{--panel-w:var(--insp-w)}
+.desktop-home{height:100%;margin:0}
+.desktop-home{background:var(--bg);color:var(--ink);font:.933333rem/1.45 system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none}
+.desktop-home button,.desktop-home select,.desktop-home input{font:inherit;color:inherit}
+.desktop-home :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.desktop-home .dh-mono{font-family:ui-monospace,monospace}
+.desktop-home .dh-selectable{user-select:text;-webkit-user-select:text;cursor:text}
+.desktop-home .dh-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.desktop-home .dh-skip{position:absolute;left:.466667rem;top:-2.8rem;z-index:20;background:var(--paper);padding:.28rem .56rem;border-radius:6px}
+.desktop-home .dh-skip:focus{top:.466667rem}
+.desktop-home .dh-dim{color:var(--muted)}
+.desktop-home .dh-spacer{flex:1}
+.desktop-home .dh-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.401333rem .802667rem;padding:.401333rem .802667rem 0;background:var(--toolbar);border-bottom:1px solid var(--line)}
+.desktop-home .dh-brand{display:flex;align-items:center;gap:.56rem;font-weight:700;font-size:1.133067rem;letter-spacing:-.01em;white-space:nowrap;flex:none}
+.desktop-home .dh-brand img{width:1.866667rem;height:1.866667rem;display:block;flex:none}
+.desktop-home .dh-brand .dh-word span{color:var(--teal)}
+.desktop-home .dh-divider{width:1px;align-self:stretch;background:var(--line);margin:.14rem 0;flex:none}
+.desktop-home .dh-idfields{display:flex;align-items:center;gap:.373333rem 1.073333rem;margin:0;min-width:0;flex-wrap:wrap}
+.desktop-home .dh-idf{display:flex;flex-direction:column;min-width:0}
+.desktop-home .dh-idf>dt{font-size:var(--fs-s);color:var(--muted);font-weight:600;line-height:1.25;white-space:nowrap}
+.desktop-home .dh-idf>dd{margin:0;font-weight:600;line-height:1.35;white-space:nowrap;height:1.306667rem;display:flex;align-items:center}
+.desktop-home .dh-idf .dh-pid{font-family:ui-monospace,monospace;font-size:var(--fs-m);color:var(--muted);font-weight:400}
+.desktop-home .dh-vbtn{display:inline-flex;align-items:center;gap:.28rem;border:0;background:none;padding:0 .28rem;margin:0 -.28rem;border-radius:4px;font-weight:600;cursor:pointer;line-height:inherit}
+.desktop-home .dh-vbtn:hover{background:var(--hover)}
+.desktop-home .dh-vbtn[aria-expanded="true"]{background:var(--mint);color:var(--teal)}
+.desktop-home .dh-vbtn .dh-chev{font-size:var(--fs-s);color:var(--muted);font-weight:400}
+.desktop-home .dh-hgroup{display:flex;align-items:center;gap:.802667rem;margin-left:auto;flex:none;min-height:2.146667rem}
+.desktop-home .dh-btn{height:2.006667rem;display:inline-flex;align-items:center;gap:.373333rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .746667rem;cursor:pointer;white-space:nowrap;flex:none}
+.desktop-home .dh-btn:hover:not(:disabled){background:var(--hover);border-color:#c5d3cb}
+.desktop-home .dh-btn.dh-primary{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+.desktop-home .dh-btn.dh-primary:hover:not(:disabled){background:#125b54}
+.desktop-home .dh-btn.dh-small{height:1.773333rem;font-size:var(--fs-m);padding:0 .606667rem}
+.desktop-home .dh-btn:disabled,.desktop-home .dh-btn[aria-disabled="true"]{opacity:.55;cursor:default}
+.desktop-home .dh-switch{display:inline-flex;align-items:center;gap:.42rem;border:0;background:none;padding:0 .28rem;margin:0 -.28rem;border-radius:4px;font-weight:600;cursor:pointer;line-height:inherit;white-space:nowrap}
+.desktop-home .dh-switch:hover{background:var(--hover)}
+.desktop-home .dh-switch .dh-track{position:relative;width:1.726667rem;height:.98rem;border-radius:999px;background:#c9d2cc;flex:none}
+.desktop-home .dh-switch .dh-track::after{content:"";position:absolute;top:.14rem;left:.14rem;width:.7rem;height:.7rem;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.desktop-home .dh-switch[aria-checked="true"] .dh-track{background:var(--teal)}
+.desktop-home .dh-switch[aria-checked="true"] .dh-track::after{left:auto;right:.14rem}
+.desktop-home .dh-areas{order:9;flex:1 1 100%;display:flex;align-items:stretch;gap:.186667rem;height:2.286667rem;margin:0 -.802667rem;padding:0 .466667rem;border-top:1px solid var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.desktop-home .dh-area-group{display:flex;align-items:stretch;gap:.186667rem}
+.desktop-home .dh-area-sep{align-self:center;width:1px;height:1.213333rem;background:var(--line);margin:0 .42rem;flex:none}
+.desktop-home .dh-areas button{border:0;background:none;padding:0 .7rem;font-size:var(--fs-m);font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;box-shadow:inset 0 -3px 0 transparent}
+.desktop-home .dh-areas button:hover{color:var(--ink);background:var(--hover)}
+.desktop-home .dh-areas button[aria-current="page"]{color:var(--teal);font-weight:700;box-shadow:inset 0 -3px 0 var(--teal)}
+.desktop-home .dh-areas button:focus-visible{outline-offset:-3px}
+.desktop-home .dh-pane{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--paper);overflow:auto}
+.desktop-home .dh-pane>*{flex:none}
+.desktop-home .dh-pane>.dh-grid-scroll,.desktop-home .dh-pane>.dh-cat-list,.desktop-home .dh-pane>.dh-pane-scroll{flex:1 1 auto;min-height:5.6rem}
+.desktop-home .dh-pane-head{display:flex;align-items:center;gap:.56rem;min-height:var(--pane-head);padding:.401333rem .802667rem;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--bg)}
+.desktop-home .dh-pane-head h1,.desktop-home .dh-pane-head h2{font-size:.933333rem;margin:0 .28rem 0 0;font-weight:700;white-space:nowrap}
+.desktop-home .dh-pane-head .dh-n{color:var(--muted);font-weight:400;margin-left:-.373333rem}
+.desktop-home .dh-pane-head .dh-sub{font-size:var(--fs-m);color:var(--muted);min-width:0}
+.desktop-home .dh-label{font-size:var(--fs-s);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.desktop-home .dh-control{height:2.006667rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .606667rem;min-width:0}
+.desktop-home .dh-segmented{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper);flex:none}
+.desktop-home .dh-segmented button{border:0;background:none;height:1.913333rem;padding:0 .7rem;cursor:pointer;white-space:nowrap}
+.desktop-home .dh-segmented button+button{border-left:1px solid var(--line)}
+.desktop-home .dh-segmented button[aria-pressed="true"]{background:var(--mint);color:var(--teal);font-weight:600}
+.desktop-home .dh-pill{display:inline-block;padding:0 .373333rem;border-radius:4px;border:1px solid var(--pill);background:var(--paper);color:var(--teal);font-size:var(--fs-s);font-weight:600;line-height:1.5;white-space:nowrap}
+.desktop-home .dh-pill.dh-gold{border-color:var(--gold-line);background:var(--gold-bg);color:var(--gold-ink)}
+.desktop-home .dh-notice{margin:.56rem .802667rem 0;padding:.513333rem .7rem;border-radius:6px;border:1px solid var(--warn-line);background:var(--warn-bg);font-size:var(--fs-m);display:flex;gap:.746667rem;align-items:flex-start}
+.desktop-home .dh-notice.dh-error{border-color:var(--err-line);background:var(--err-bg)}
+.desktop-home .dh-notice.dh-calm{border-color:var(--line);background:var(--bg)}
+.desktop-home .dh-notice .dh-text{flex:1;min-width:0}
+.desktop-home .dh-notice strong{display:block}
+.desktop-home .dh-notice code{font-size:var(--fs-s)}
+.desktop-home .dh-notice .dh-btn{height:1.773333rem}
+.desktop-home .dh-state-box{border:1px solid #cfe2d6;background:var(--mint);border-radius:6px;padding:.513333rem .653333rem;font-size:var(--fs-m)}
+.desktop-home .dh-state-box.dh-warn{border-color:var(--warn-line);background:var(--warn-bg)}
+.desktop-home .dh-state-box.dh-plain{border-color:var(--line);background:var(--bg)}
+.desktop-home .dh-state-box strong{display:block}
+.desktop-home .dh-state-box p{margin:.14rem 0 0}
+.desktop-home .dh-state-box .dh-row{display:flex;gap:.373333rem;margin-top:.42rem;flex-wrap:wrap}
+.desktop-home .dh-state-box code{font-size:var(--fs-s)}
+.desktop-home dl.dh-facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.326667rem .84rem;margin:0;font-size:var(--fs-m)}
+.desktop-home dl.dh-facts dt{color:var(--muted);white-space:nowrap}
+.desktop-home dl.dh-facts dd{margin:0;overflow-wrap:anywhere}
+.desktop-home dl.dh-facts dd.dh-mono{font-size:var(--fs-s);line-height:1.7}
+.desktop-home .dh-ok{color:var(--teal);font-weight:600}
+.desktop-home .dh-warn-t{color:var(--gold-ink);font-weight:600}
+.desktop-home .dh-reason{margin:0;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .dh-tiny{font-size:var(--fs-s);color:var(--muted);margin:.56rem 0 0}
+.desktop-home .dh-home{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0}
+.desktop-home .dh-home-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) var(--side-w);grid-template-rows:auto minmax(0,1fr);gap:1px;background:var(--line);min-height:0}
+.desktop-home .dh-panel{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;min-width:0;background:var(--paper)}
+.desktop-home .dh-panel.dh-side{grid-column:3;grid-row:1/3;background:var(--side)}
+.desktop-home .dh-panel.dh-wide{grid-column:1/3}
+.desktop-home .dh-panel-head{display:flex;align-items:baseline;gap:.56rem;padding:.56rem .933333rem .42rem;flex-wrap:wrap}
+.desktop-home .dh-panel-head h2{margin:0;font-size:.933333rem;font-weight:700;white-space:nowrap}
+.desktop-home .dh-panel-head .dh-scope{margin-left:auto;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .dh-panel-body{overflow:auto;padding:.14rem .933333rem .746667rem;min-height:0}
+.desktop-home .dh-panel-foot{display:flex;align-items:center;gap:.513333rem;flex-wrap:wrap;padding:.513333rem .933333rem;border-top:1px solid var(--line-soft)}
+.desktop-home .dh-panel.dh-side .dh-panel-foot{border-top-color:var(--line);background:var(--paper)}
+.desktop-home .dh-panel.dh-side .dh-panel-foot .dh-btn{flex:1;justify-content:center}
+.desktop-home .dh-panel.dh-side .dh-panel-foot .dh-reason{flex:1 1 100%}
+.desktop-home .dh-metric{display:flex;flex-direction:column;margin-bottom:.653333rem}
+.desktop-home .dh-metric .dh-mlabel{font-size:var(--fs-m);color:var(--muted)}
+.desktop-home .dh-metric strong{font-size:var(--fs-l);line-height:1.3;font-variant-numeric:tabular-nums}
+.desktop-home .dh-metric strong.dh-unknown{color:var(--muted)}
+.desktop-home .dh-metric .dh-exact{font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .dh-stack{display:flex;height:.56rem;border-radius:999px;background:var(--line-soft);overflow:hidden;margin:.28rem 0 .42rem}
+.desktop-home .dh-stack i{display:block;height:100%}
+.desktop-home .dh-stack .dh-own{background:var(--teal)}
+.desktop-home .dh-stack .dh-shared{background:#7fb3a3}
+.desktop-home .dh-legend{display:flex;flex-wrap:wrap;gap:.233333rem .933333rem;font-size:var(--fs-s);color:var(--muted);margin-bottom:.373333rem}
+.desktop-home .dh-legend span{display:inline-flex;align-items:center;gap:.326667rem;white-space:nowrap}
+.desktop-home .dh-legend i{width:.56rem;height:.56rem;border-radius:2px;background:var(--line-soft);border:1px solid var(--line)}
+.desktop-home .dh-legend i.dh-own{background:var(--teal);border-color:var(--teal)}
+.desktop-home .dh-legend i.dh-shared{background:#7fb3a3;border-color:#7fb3a3}
+.desktop-home .dh-ledger{display:grid;grid-template-columns:minmax(0,1fr) auto auto;font-size:var(--fs-m);margin:0}
+.desktop-home .dh-ledger>div{display:contents}
+.desktop-home .dh-ledger dt,.desktop-home .dh-ledger dd{padding:.392rem 0;border-bottom:1px solid var(--line-soft);margin:0}
+.desktop-home .dh-ledger dt{color:var(--ink);min-width:0}
+.desktop-home .dh-ledger dd{padding-left:1.12rem;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.desktop-home .dh-ledger dd.dh-exact{font-weight:400;color:var(--muted);font-family:ui-monospace,monospace;font-size:var(--fs-s)}
+.desktop-home .dh-storage-cols{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(14rem,1fr);gap:1.12rem;align-items:start}
+.desktop-home .dh-tables{display:grid;grid-template-columns:15.866667rem minmax(0,1fr) var(--insp-w);grid-template-rows:minmax(0,1fr);gap:1px;background:var(--line);min-height:0}
+.desktop-home .dh-pane-switch{display:none}
+.desktop-home .dh-catalog{background:var(--side)}
+.desktop-home .dh-catalog .dh-pane-head{flex-wrap:nowrap}
+.desktop-home .dh-catalog .dh-pane-head .dh-search{flex:1;width:100%}
+.desktop-home .dh-cat-list{flex:1;overflow:auto;min-height:0;padding:.28rem 0}
+.desktop-home .dh-tableitem{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.513333rem;align-items:start;width:100%;border:0;background:none;text-align:left;padding:.392rem .802667rem;cursor:pointer;border-bottom:1px solid var(--line-soft)}
+.desktop-home .dh-tableitem:hover{background:var(--hover)}
+.desktop-home .dh-tableitem[aria-pressed="true"]{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+.desktop-home .dh-tableitem:focus-visible{outline-offset:-3px}
+.desktop-home .dh-tableitem .dh-glyph{color:var(--teal);line-height:1.45}
+.desktop-home .dh-tableitem b{display:block;font-weight:600;overflow-wrap:normal;word-break:normal}
+.desktop-home .dh-tableitem small{display:block;font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.desktop-home .dh-pane-foot{display:flex;align-items:center;gap:.42rem;flex-wrap:wrap;padding:.466667rem .802667rem;border-top:1px solid var(--line);background:var(--paper);font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .dh-pane-foot .dh-btn{height:1.633333rem;font-size:var(--fs-s);padding:0 .513333rem}
+.desktop-home .dh-catalog .dh-pane-foot .dh-count{flex:1 1 100%}
+.desktop-home .dh-records .dh-pane-head{row-gap:.326667rem}
+.desktop-home .dh-trail{display:flex;align-items:center;gap:.233333rem;min-width:0}
+.desktop-home .dh-trail .dh-nav{width:1.866667rem;padding:0;justify-content:center}
+.desktop-home .dh-crumb{border:0;background:none;padding:.14rem .373333rem;border-radius:4px;cursor:pointer;color:var(--muted);white-space:nowrap}
+.desktop-home .dh-crumb[aria-current="step"]{background:var(--mint);color:var(--teal);font-weight:600}
+.desktop-home .dh-crumb-sep{color:var(--muted);font-size:var(--fs-s)}
+.desktop-home .dh-titlerow{display:flex;align-items:center;gap:.56rem;min-height:var(--title-row);padding:.42rem .802667rem;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--paper)}
+.desktop-home .dh-titlerow h2{margin:0;font-size:var(--fs-l);line-height:1.25}
+.desktop-home .dh-titlerow .dh-meta{font-size:var(--fs-m);color:var(--muted);min-width:0}
+.desktop-home .dh-idfilter{display:flex;align-items:center;gap:.373333rem}
+.desktop-home .dh-idfilter label{font-size:var(--fs-m);color:var(--muted);white-space:nowrap}
+.desktop-home .dh-idfilter input{width:7rem}
+.desktop-home .dh-idfilter .dh-btn{height:2.006667rem}
+.desktop-home .dh-grid-scroll{flex:1;overflow:auto;min-height:0;position:relative}
+.desktop-home .dh-grid-scroll:focus-visible{outline-offset:-3px}
+.desktop-home table.dh-records-grid{border-collapse:separate;border-spacing:0;min-width:100%;font-size:var(--fs-m);font-variant-numeric:tabular-nums}
+.desktop-home .dh-records-grid th{position:sticky;top:0;z-index:1;background:var(--toolbar);border-bottom:1px solid var(--line);text-align:left;padding:.326667rem .7rem;font-size:var(--fs-s);font-weight:600;white-space:nowrap;vertical-align:bottom}
+.desktop-home .dh-records-grid th small{display:block;font-weight:400;color:var(--muted)}
+.desktop-home .dh-records-grid td{padding:0 .7rem;height:2.146667rem;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+.desktop-home .dh-records-grid tbody tr{cursor:default}
+.desktop-home .dh-records-grid tbody tr:hover{background:var(--hover)}
+.desktop-home .dh-records-grid tbody tr[aria-selected="true"]{background:var(--mint)}
+.desktop-home .dh-records-grid tbody tr[aria-selected="true"] td:first-child{box-shadow:inset 3px 0 0 var(--teal)}
+.desktop-home .dh-records-grid .dh-rowsel{border:0;background:none;padding:0;font-weight:600;cursor:pointer}
+.desktop-home .dh-records-grid td.dh-zero{color:var(--muted)}
+.desktop-home .dh-local-wait{margin:.933333rem .802667rem;max-width:31.733333rem}
+.desktop-home .dh-inspector{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;background:var(--side);overflow:auto}
+.desktop-home .dh-insp-head{padding:.513333rem .933333rem;border-bottom:1px solid var(--line);min-height:calc(var(--pane-head) + var(--title-row));display:flex;flex-direction:column;justify-content:center}
+.desktop-home .dh-insp-head h2{margin:0;font-size:var(--fs-l);font-weight:700;line-height:1.25}
+.desktop-home .dh-insp-head p{margin:0;color:var(--muted);font-size:var(--fs-m)}
+.desktop-home .dh-insp-body{overflow:auto;padding:.653333rem .933333rem;min-height:0}
+.desktop-home .dh-insp-body .dh-label{margin:.933333rem 0 .373333rem}
+.desktop-home .dh-insp-body .dh-label:first-child{margin-top:0}
+.desktop-home .dh-fieldrow{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:.56rem;padding:.373333rem 0;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m)}
+.desktop-home .dh-fieldrow .dh-fname{color:var(--muted)}
+.desktop-home .dh-fieldrow .dh-ftype{font-size:var(--fs-s);color:var(--muted);font-family:ui-monospace,monospace;text-align:right}
+.desktop-home .dh-fieldrow .dh-fval{grid-column:1/-1;font-weight:600;font-size:.933333rem}
+.desktop-home .dh-fieldrow .dh-rel{grid-column:1/-1;display:flex;align-items:center;gap:.466667rem;flex-wrap:wrap;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .dh-linkbtn{border:0;background:none;padding:0;color:var(--teal);text-decoration:underline;cursor:pointer;font-size:var(--fs-s)}
+.desktop-home .dh-insp-foot{padding:.56rem .933333rem;border-top:1px solid var(--line);background:var(--paper);display:flex;gap:.513333rem;flex-wrap:wrap}
+.desktop-home .dh-insp-foot .dh-btn{flex:1;justify-content:center}
+.desktop-home .dh-return-link{flex:none}
+.desktop-home .dh-titlerow .dh-return-link{height:1.586667rem}
+.desktop-home .dh-trail-sep{width:1px;height:1.213333rem;background:var(--line);margin:0 .326667rem;flex:none}
+.desktop-home .dh-statusbar{display:flex;align-items:center;gap:1.026667rem;height:1.633333rem;padding:0 .802667rem;background:var(--status);border-top:1px solid var(--line);font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden}
+.desktop-home .dh-statusbar strong{color:var(--ink);font-weight:600}
+.desktop-home .dh-statusbar .dh-busy{display:inline-flex;align-items:center;gap:.373333rem;color:var(--teal);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.desktop-home .dh-statusbar .dh-warn{color:var(--gold-ink);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.desktop-home .dh-records-grid th:first-child,.desktop-home .dh-records-grid td:first-child{position:sticky;left:0;z-index:1;background:var(--paper);box-shadow:inset -1px 0 0 var(--line-soft)}
+.desktop-home .dh-records-grid th:first-child{z-index:2;background:var(--toolbar)}
+.desktop-home .dh-records-grid tbody tr:hover td:first-child{background:var(--hover)}
+.desktop-home .dh-records-grid tbody tr[aria-selected="true"] td:first-child{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal),inset -1px 0 0 var(--line-soft)}
+.desktop-home .dh-records-grid td.dh-txt{white-space:nowrap}
+.desktop-home .dh-records-grid .dh-unv,.desktop-home .dh-unv{color:var(--gold-ink);font-weight:700;margin-left:.093333rem}
+.desktop-home .dh-records-grid.dh-struct td{height:2.053333rem}
+.desktop-home .dh-records-grid.dh-struct td:first-child{min-width:2.053333rem}
+.desktop-home .dh-subbar{display:flex;align-items:center;gap:.373333rem .653333rem;flex-wrap:wrap;padding:.373333rem .802667rem;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m);color:var(--muted);background:var(--paper)}
+.desktop-home .dh-subbar .dh-ink{color:var(--ink)}
+.desktop-home .dh-records>.dh-notice{margin-bottom:.56rem}
+.desktop-home .dh-rel-list{overflow:auto;padding:.28rem .802667rem .933333rem}
+.desktop-home .dh-rel-list .dh-label{margin:.84rem 0 .373333rem}
+.desktop-home .dh-relcard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.186667rem .746667rem;align-items:center;border:1px solid var(--line);border-radius:6px;padding:.466667rem .653333rem;margin-bottom:.42rem;background:var(--paper)}
+.desktop-home .dh-relcard.dh-current{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+.desktop-home .dh-relcard b{font-weight:600;font-size:var(--fs-m);overflow-wrap:anywhere}
+.desktop-home .dh-relcard .dh-st{grid-column:1;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .dh-relcard .dh-act{grid-column:2;grid-row:1/3}
+.desktop-home .dh-relcard code{font-size:var(--fs-s)}
+.desktop-home .dh-fieldrow .dh-fmeta{grid-column:1/-1;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .dh-fieldrow .dh-rtext{grid-column:1/-1;font-size:var(--fs-m);margin-top:.093333rem}
+.desktop-home .dh-fieldrow .dh-rtext .dh-dim{font-size:var(--fs-s)}
+.desktop-home[data-area="files"]{--panel-w:var(--insp-w)}
+.desktop-home .dh-files{display:grid;grid-template-columns:minmax(0,1fr) var(--insp-w);grid-template-rows:minmax(0,1fr);gap:1px;background:var(--line);min-height:0}
+.desktop-home .dh-files-filters{flex-wrap:nowrap}
+.desktop-home .dh-list-scroll{position:relative;flex:1 1 auto;overflow:auto;min-height:5.6rem;background:var(--paper);scroll-padding-top:var(--thead)}
+.desktop-home .dh-fcols{display:grid;grid-template-columns:6.066667rem minmax(8.4rem,2.2fr) 6.066667rem minmax(6.066667rem,1.1fr) minmax(5.133333rem,.9fr) 6.066667rem;align-items:center;column-gap:.802667rem;padding:0 .802667rem}
+.desktop-home .dh-fthead{position:sticky;top:0;z-index:1;height:var(--thead);background:var(--toolbar);border-bottom:1px solid var(--line);font-size:var(--fs-s);font-weight:600;color:var(--muted);white-space:nowrap}
+.desktop-home [role="listbox"]:focus-visible{outline:none}
+.desktop-home .dh-files [role="option"]{position:relative;min-height:2.286667rem;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m);white-space:nowrap;cursor:default}
+.desktop-home .dh-files [role="option"]>span{overflow:hidden;text-overflow:ellipsis}
+.desktop-home .dh-files [role="option"]:hover{background:var(--hover)}
+.desktop-home .dh-files [role="option"][aria-selected="true"]{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+.desktop-home [role="listbox"]:focus-visible [role="option"].dh-active{outline:3px solid var(--focus);outline-offset:-3px}
+.desktop-home .dh-fid{font-weight:600;font-variant-numeric:tabular-nums}
+.desktop-home .dh-fname-cell .dh-mono{font-size:var(--fs-s)}
+.desktop-home .dh-files [role="option"]>span.dh-fname-cell{white-space:normal;overflow-wrap:anywhere;overflow:visible;padding:.28rem 0}
+.desktop-home .dh-files .dh-insp-head{min-height:calc(var(--pane-head) + var(--thead))}
+.desktop-home.dh-medium .dh-storage-cols{grid-template-columns:minmax(0,1fr)}
+.desktop-home.dh-compact .dh-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"brand ids ids" "areas areas actions";column-gap:.653333rem}
+.desktop-home.dh-compact .dh-brand{grid-area:brand}
+.desktop-home.dh-compact .dh-idfields{grid-area:ids}
+.desktop-home.dh-compact .dh-brand .dh-word,.desktop-home.dh-compact .dh-toolbar .dh-divider{display:none}
+.desktop-home.dh-compact .dh-idfields{gap:.28rem .84rem}
+.desktop-home.dh-compact .dh-idf{flex-direction:row;align-items:center;gap:.326667rem}
+.desktop-home.dh-compact .dh-idf>dt{font-size:var(--fs-m)}
+.desktop-home.dh-compact .dh-idf.dh-named>dt{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.desktop-home.dh-compact .dh-idf.dh-moved{display:none}
+.desktop-home.dh-compact .dh-areas{grid-area:areas;align-self:stretch;min-width:0;margin:0 -.653333rem 0 -.802667rem;height:auto;min-height:2.286667rem}
+.desktop-home.dh-compact .dh-hgroup{grid-area:actions;align-self:stretch;margin:0 -.802667rem 0 0;padding:.28rem .802667rem .28rem .653333rem;border-top:1px solid var(--line)}
+.desktop-home.dh-compact .dh-home-grid{display:block;overflow:auto;background:var(--paper)}
+.desktop-home.dh-compact .dh-panel{display:block;border-bottom:1px solid var(--line)}
+.desktop-home.dh-compact .dh-panel.dh-side{background:var(--side)}
+.desktop-home.dh-compact .dh-panel-body{overflow:visible}
+.desktop-home.dh-compact .dh-panel.dh-side .dh-panel-foot .dh-btn{flex:none}
+.desktop-home.dh-compact .dh-pane-head .dh-sub{display:none}
+.desktop-home.dh-compact .dh-tables{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+.desktop-home.dh-compact .dh-pane-switch{display:flex;align-items:center;gap:.56rem;padding:.326667rem .802667rem;background:var(--bg);border-bottom:1px solid var(--line)}
+.desktop-home.dh-compact .dh-tables>.dh-catalog,.desktop-home.dh-compact .dh-tables>.dh-records,.desktop-home.dh-compact .dh-tables>.dh-inspector{display:none}
+.desktop-home.dh-compact .dh-tables[data-pane="catalog"]>.dh-catalog,.desktop-home.dh-compact .dh-tables[data-pane="records"]>.dh-records{display:flex}
+.desktop-home.dh-compact .dh-tables[data-pane="inspector"]>.dh-inspector{display:grid}
+.desktop-home.dh-compact .dh-insp-head{min-height:0}
+.desktop-home.dh-compact .dh-titlerow{min-height:0;padding:.28rem .802667rem}
+.desktop-home.dh-compact .dh-titlerow>.dh-meta{display:none}
+.desktop-home.dh-compact .dh-records .dh-pane-head .dh-spacer{flex:0 0 0}
+.desktop-home.dh-compact .dh-files{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+.desktop-home.dh-compact .dh-files>.dh-list,.desktop-home.dh-compact .dh-files>.dh-inspector{display:none}
+.desktop-home.dh-compact .dh-files[data-pane="list"]>.dh-list{display:flex}
+.desktop-home.dh-compact .dh-files[data-pane="inspector"]>.dh-inspector{display:grid}
+.desktop-home.dh-compact .dh-files .dh-insp-head{min-height:0}
+.desktop-home.dh-compact .dh-files-filters{flex-wrap:wrap}
+.desktop-home.dh-compact .dh-files-filters .dh-fsearch{flex:1 1 9.333333rem}
+.desktop-home.dh-compact .dh-fcols{grid-template-columns:minmax(5.133333rem,1fr) minmax(6.533333rem,1.6fr) minmax(4.2rem,.7fr) minmax(5.133333rem,1fr) minmax(4.666667rem,.9fr)}
+.desktop-home.dh-compact .dh-fcols>:nth-child(5){display:none}
+.desktop-home.dh-compact .dh-files-filters{flex-wrap:wrap}
+.desktop-home.dh-compact .dh-list-scroll{overflow-x:hidden}
+.desktop-home.dh-compact .dh-statusbar .dh-secondary{display:none}
+
+/* App shell additions: window grid, hidden areas, fixture label, scrolling area panes. */
+.desktop-home{height:100vh;line-height:1.45}
+.desktop-home[hidden],.desktop-home [hidden]{display:none!important}
+.desktop-home .dh-app{height:100%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto}
+.desktop-home .dh-area{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;min-width:0;outline:none}
+.desktop-home .dh-area>*{grid-area:1/1;min-height:0;min-width:0}
+.desktop-home .dh-area>.dh-home{display:grid}
+.desktop-home h1,.desktop-home h2,.desktop-home h3{letter-spacing:0}
+.desktop-home code{font-family:ui-monospace,monospace;font-size:var(--fs-s);line-height:inherit}
+.desktop-home p{margin:0}
+.desktop-home .dh-fixture{font-size:var(--fs-s);color:#76632e;background:#f5efd9;border:1px solid #e7dfc3;border-radius:5px;padding:.133333rem .466667rem;white-space:nowrap;flex:none}
+.desktop-home.dh-compact .dh-fixture span{display:none}
+.desktop-home .dh-area-scroll{overflow:auto;padding:1.2rem 1.466667rem;background:var(--bg)}
+.desktop-home .dh-btn{color:var(--ink);font-size:inherit}
+.desktop-home .dh-btn.dh-primary{color:#fff}
+.desktop-home .dh-control{font-size:inherit;color:var(--ink)}
+.desktop-home .dh-pane-scroll{overflow:auto;min-height:0}
+.desktop-home .dh-pane>.dh-notice{flex:none}
+.desktop-home .dh-notice{overflow-wrap:anywhere}
+.desktop-home .dh-notice .dh-row{display:flex;gap:.373333rem;margin-top:.42rem;flex-wrap:wrap}
+.desktop-home .dh-state-box{overflow-wrap:anywhere}
+.desktop-home .dh-state-box details{margin-top:.42rem}
+.desktop-home .dh-local-wait .dh-state-box+.dh-state-box{margin-top:.56rem}
+.desktop-home .dh-panel-body .dh-state-box+.dh-state-box,.desktop-home .dh-panel-body .dh-state-box+p{margin-top:.56rem}
+.desktop-home .dh-retention-line{font-weight:600;color:var(--teal);margin-top:.28rem}
+.desktop-home .dh-state-box.dh-warn .dh-retention-line{color:var(--gold-ink)}
+
+/* Header field values that are buttons keep the strip's own type, not the shared button rules. */
+.desktop-home .dh-idf>dd>.dh-vbtn,.desktop-home .dh-idf>dd>.dh-switch{font-size:inherit;color:var(--ink)}
+.desktop-home .dh-idf>dd>.dh-vbtn[aria-expanded="true"]{color:var(--teal)}
+.desktop-home .dh-switch[aria-disabled="true"]{opacity:.6;cursor:default}
+.desktop-home .dh-pop-slot{display:contents}
+
+/* Activity entry: the shared compact chip, styled as on Discovery. Hidden when there is nothing to show. */
+.desktop-home .dv-chip{display:inline-flex;align-items:center;gap:.466667rem;height:2.006667rem;padding:0 .7rem;border:1px solid var(--pill);border-radius:6px;background:var(--mint);color:var(--teal);font-weight:600;font-size:inherit;white-space:nowrap;flex:none;cursor:pointer}
+.desktop-home .dv-chip:hover{background:#d9ece1;border-color:var(--teal)}
+.desktop-home .dv-chip.attention{border-color:var(--warn-line);background:var(--warn-bg);color:var(--gold-ink)}
+.desktop-home .dv-chip[aria-expanded="true"]{box-shadow:inset 0 0 0 1px currentColor}
+.desktop-home .dv-chip-short{display:none}
+.desktop-home.dh-medium .dv-chip-long{display:none}
+.desktop-home.dh-medium .dv-chip-short{display:inline}
+.desktop-home .dv-count{min-width:1.213333rem;height:1.213333rem;border-radius:999px;display:grid;place-items:center;padding:0 .28rem;font-size:var(--fs-s);color:#fff;background:var(--teal)}
+.desktop-home .dv-chip.attention .dv-count{background:var(--gold-ink)}
+.desktop-home .dv-pulse,.desktop-home .dh-pulse{display:inline-block;width:.466667rem;height:.466667rem;border-radius:50%;background:currentColor;animation:dh-pulse 1.6s ease-in-out infinite;flex:none}
+@keyframes dh-pulse{50%{opacity:.35}}
+.desktop-home .dv-panel-slot{display:contents}
+
+/* Activity panel docked after the entry: below the header, above the status bar, over the side column or inspector. */
+.desktop-home aside.download-activity-panel{top:var(--dh-panel-top,5.5rem);bottom:var(--dh-panel-bottom,1.633333rem);right:0;left:auto;width:var(--panel-w);border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:-8px 0 24px rgba(36,59,58,.08);font-size:var(--fs-m);z-index:3}
+.desktop-home.dh-compact aside.download-activity-panel{width:100%}
+.desktop-home aside.download-activity-panel .download-panel-heading{padding:.56rem .933333rem;align-items:center}
+.desktop-home aside.download-activity-panel .download-panel-heading h2{font-size:.933333rem;margin:0 0 .4rem}
+.desktop-home aside.download-activity-panel .download-task{border:1px solid var(--line);border-radius:6px;padding:.56rem .653333rem;margin:.56rem .933333rem}
+.desktop-home aside.download-activity-panel .download-task button,.desktop-home aside.download-activity-panel .download-panel-heading>button{height:1.773333rem;padding:0 .606667rem;border-radius:6px;font-size:var(--fs-m);border:1px solid var(--line);background:var(--paper);color:var(--ink)}
+
+/* Identity and Status popovers: nonmodal dialogs right after their trigger in the DOM. */
+.desktop-home aside.build-header-popover{position:fixed;z-index:4;right:auto;bottom:auto;white-space:normal;font-weight:400;line-height:1.45;color:var(--ink);width:min(23.333333rem,calc(100vw - .933333rem));max-height:calc(100vh - 1rem);background:var(--paper);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px rgba(36,59,58,.16);display:block;overflow:auto;font-size:var(--fs-m);text-align:left}
+.desktop-home aside.build-header-popover .download-panel-heading{position:sticky;top:0;z-index:1;background:var(--paper);display:flex;align-items:center;justify-content:space-between;gap:.56rem;padding:.513333rem .84rem;border-bottom:1px solid var(--line)}
+.desktop-home aside.build-header-popover .download-panel-heading h2{margin:0;font-size:.933333rem}
+.desktop-home aside.build-header-popover .download-panel-heading>button{height:1.773333rem;padding:0 .606667rem;border-radius:6px;font-size:var(--fs-m);border:1px solid var(--line);background:var(--paper);color:var(--ink)}
+.desktop-home aside.build-header-popover .download-info-body{overflow:visible;padding:.653333rem .84rem .746667rem;font-size:var(--fs-m);color:var(--ink);user-select:text}
+.desktop-home aside.build-header-popover .download-info-body dl{display:block;margin:0}
+.desktop-home aside.build-header-popover .download-info-body dl>div{margin:0 0 .42rem}
+.desktop-home aside.build-header-popover .download-info-body dt{font-size:var(--fs-s);color:var(--muted)}
+.desktop-home aside.build-header-popover .download-info-body dd{margin:0;font-weight:600;overflow-wrap:anywhere}
+.desktop-home aside.build-header-popover .download-info-body>p{font-size:var(--fs-s);color:var(--muted);margin:.653333rem 0 0}
+.desktop-home aside.build-header-popover .download-task-actions{margin-top:.653333rem}
+.desktop-home aside.build-header-popover .download-task-actions button{height:1.773333rem;padding:0 .606667rem;border-radius:6px;font-size:var(--fs-m);border:1px solid var(--line);background:var(--paper);color:var(--ink)}
+.desktop-home aside.build-header-popover :focus-visible,.desktop-home aside.download-activity-panel :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+
+/* Tables: catalogue names wrap only at CamelCase boundaries. */
+.desktop-home .dh-tableitem b{overflow-wrap:normal;word-break:normal}
+.desktop-home .dh-records-grid th{line-height:1.3}
+.desktop-home .dh-records-grid th button.dh-rowsel,.desktop-home .dh-records-grid td button.dh-rowsel{color:var(--ink);font-size:inherit}
+.desktop-home .dh-records-grid .dh-raw-note{display:block;font-size:var(--fs-s);color:var(--muted);white-space:normal;min-width:14rem}
+.desktop-home .dh-records-grid td.dh-issue{color:var(--gold-ink);font-weight:600}
+.desktop-home .dh-records-grid tbody tr.dh-copy td:first-child .dh-rowsel::after{content:none}
+.desktop-home .dh-subbar select{height:1.773333rem}
+.desktop-home .dh-subbar label{display:inline-flex;align-items:center;gap:.373333rem}
+.desktop-home .dh-data{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+.desktop-home .dh-data>*{flex:none}
+.desktop-home .dh-data>.dh-grid-scroll,.desktop-home .dh-data>.dh-pane-scroll{flex:1 1 auto;min-height:5.6rem}
+.desktop-home .dh-records>.dh-pane-scroll{flex:1 1 auto}
+.desktop-home .dh-idfilter input{height:2.006667rem}
+.desktop-home .dh-idfilter form{display:contents}
+.desktop-home .dh-field-error{color:#8a3a26;font-size:var(--fs-s);margin:.28rem .802667rem 0}
+.desktop-home .dh-data-slot,.desktop-home .dh-foot-slot{display:contents}
+.desktop-home .dh-admission{margin:.56rem .802667rem 0;padding:.513333rem .7rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);font-size:var(--fs-s);overflow:auto;max-height:16rem;user-select:text}
+.desktop-home .dh-admission dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.233333rem .84rem;margin:0}
+.desktop-home .dh-admission dt{color:var(--muted)}
+.desktop-home .dh-admission dd{margin:0;overflow-wrap:anywhere;font-family:ui-monospace,monospace}
+.desktop-home .dh-admission pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:.28rem 0}
+.desktop-home .dh-admission h4{margin:.56rem 0 .28rem;font-size:var(--fs-m)}
+.desktop-home .dh-fieldrow{user-select:text}
+.desktop-home .dh-fieldrow .dh-fval{overflow-wrap:anywhere}
+.desktop-home .dh-fieldrow pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--fs-s);margin:.28rem 0}
+.desktop-home .dh-fieldrow:focus-visible{outline-offset:-3px}
+.desktop-home .dh-fieldrow p{grid-column:1/-1;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .dh-relcard .dh-act .dh-btn{white-space:normal;height:auto;min-height:1.773333rem;text-align:left}
+.desktop-home.dh-compact .dh-relcard{grid-template-columns:minmax(0,1fr)}
+.desktop-home.dh-compact .dh-relcard .dh-act{grid-column:1;grid-row:auto}
+
+/* Files: membership and object lists use their own column sets. */
+.desktop-home .dh-mcols{display:grid;grid-template-columns:6.066667rem minmax(9.333333rem,2fr) 5.6rem 7rem minmax(6.533333rem,1fr) 6.533333rem;align-items:center;column-gap:.802667rem;padding:0 .802667rem}
+.desktop-home .dh-ocols{display:grid;grid-template-columns:5.133333rem minmax(12rem,3fr) 7rem minmax(8.4rem,1fr);align-items:center;column-gap:.802667rem;padding:0 .802667rem}
+.desktop-home .dh-files [role="option"] .dh-mono{font-size:var(--fs-s)}
+.desktop-home .dh-files [role="option"]>span.dh-wrap{white-space:normal;overflow-wrap:anywhere;overflow:visible;padding:.28rem 0}
+.desktop-home.dh-compact .dh-mcols{grid-template-columns:minmax(5.133333rem,1fr) minmax(6.533333rem,1.6fr) minmax(4.2rem,.7fr) minmax(5.133333rem,1fr) minmax(4.666667rem,.9fr)}
+.desktop-home.dh-compact .dh-mcols>:nth-child(5){display:none}
+.desktop-home.dh-compact .dh-ocols{grid-template-columns:minmax(4.2rem,.8fr) minmax(6.533333rem,2fr) minmax(5.133333rem,1fr) minmax(5.133333rem,1fr)}
+.desktop-home .dh-files .dh-pane-foot .dh-btn{white-space:nowrap}
+
+/* Evidence dialogs keep their modal side-sheet layout. */
+.desktop-home .evidence-dialog{user-select:text;padding:0;font-size:var(--fs-m);line-height:1.5;color:var(--ink);background:var(--paper)}
+.desktop-home .evidence-dialog>header{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1.2rem 1.4rem 1rem;background:var(--paper);border-bottom:1px solid var(--line)}
+.desktop-home .evidence-dialog>header h2{margin:0;font-size:var(--fs-l)}
+.desktop-home .evidence-dialog>header button{border:1px solid var(--line);background:var(--paper);border-radius:6px;padding:.28rem .6rem;color:var(--ink)}
+.desktop-home .evidence-dialog>:not(header){margin-left:1.4rem;margin-right:1.4rem}
+.desktop-home .evidence-dialog>p{margin-top:.8rem;margin-bottom:.8rem}
+.desktop-home .evidence-dialog .muted{color:var(--muted)}
+.desktop-home .evidence-dialog h3{font-size:.933333rem;margin:1.2rem 1.4rem .4rem}
+.desktop-home .evidence-dialog .detail-list{display:grid;grid-template-columns:minmax(9rem,auto) minmax(0,1fr);gap:.326667rem .84rem;margin:.4rem 1.4rem .8rem}
+.desktop-home .evidence-dialog .detail-list>div{display:contents}
+.desktop-home .evidence-dialog .detail-list dt{color:var(--muted)}
+.desktop-home .evidence-dialog .detail-list dd{margin:0;overflow-wrap:anywhere}
+.desktop-home .evidence-dialog .configuration-receipt{border-top:1px solid var(--line-soft);margin:.6rem 1.4rem;padding-top:.4rem}
+.desktop-home .evidence-dialog .configuration-receipt h3,.desktop-home .evidence-dialog .configuration-receipt .detail-list{margin-left:0;margin-right:0}
+.desktop-home .evidence-dialog details{margin:.8rem 1.4rem 1.4rem}
+.desktop-home .evidence-dialog details .detail-list{margin-left:0;margin-right:0}
+.desktop-home .evidence-dialog .tiny{font-size:var(--fs-s);color:var(--muted);margin:.8rem 1.4rem}
+.desktop-home .evidence-dialog :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.desktop-home .dh-pages{display:inline-flex;flex-wrap:wrap;gap:.42rem}
+.desktop-home .activity-task-link{height:1.773333rem;display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);padding:0 .606667rem;font-size:var(--fs-m);white-space:nowrap;cursor:pointer}
+.desktop-home .activity-task-link:hover{background:var(--hover);border-color:#c5d3cb}
+.desktop-home .dh-statusbar .dh-fixture{padding:0 .373333rem;line-height:1.4}
+.desktop-home .dh-subhead{margin:0;font-size:inherit;font-weight:700}
+.desktop-home .dh-data-note{margin:.28rem .802667rem .42rem}
+.desktop-home .dh-records-grid tbody th{position:sticky;left:0;top:auto;z-index:1;background:var(--paper);box-shadow:inset -1px 0 0 var(--line-soft);font-size:inherit;font-weight:600;padding:0 .7rem;height:2.146667rem;border-bottom:1px solid var(--line-soft);vertical-align:middle;text-align:left;white-space:nowrap}
+.desktop-home .dh-records-grid tbody tr:hover th{background:var(--hover)}
+.desktop-home .dh-records-grid tbody tr[aria-selected="true"] th{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal),inset -1px 0 0 var(--line-soft)}
+.desktop-home .dh-state-title{margin:0;font-size:inherit;font-weight:700}
+.desktop-home .dh-utilities{display:flex;gap:.56rem;flex-wrap:wrap}
+.desktop-home .dh-status-slot{display:contents}
+.desktop-home .dh-sentences>span+span::before{content:' '}
+.desktop-home .dh-fieldrow pre{max-height:14rem;overflow:auto;user-select:text}
+.desktop-home.dh-compact .dh-subbar .dh-secondary,.desktop-home.dh-compact .dh-subbar .dh-locale-note,.desktop-home.dh-compact .dh-data-note{display:none}
+/* Shared button rules (styles.css) must not round flat controls the reference draws square. */
+.desktop-home .dh-areas button,.desktop-home .dh-segmented button,.desktop-home .dh-tableitem,.desktop-home .dh-records-grid .dh-rowsel{border-radius:0}
+/* Popover hashes and identifiers: monospace, regular weight, 11px. */
+.desktop-home aside.build-header-popover .download-info-body dd.download-info-mono{font-family:ui-monospace,monospace;font-weight:400;font-size:var(--fs-s);line-height:1.7}
+/* Tables records pane: head, title, data bar and notices stay put; only the grid or body scrolls. */
+.desktop-home .dh-records{overflow:clip}
+.desktop-home .dh-records #table-title{scroll-margin-top:calc(var(--pane-head) + .5rem)}
+.desktop-home .dh-data-bar{flex-wrap:nowrap;white-space:nowrap;overflow:hidden}
+.desktop-home .dh-data-bar .dh-locale-note{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.desktop-home .dh-data-bar .dh-scope-note,.desktop-home .dh-data-bar .activity-task-link{flex:none}
+.desktop-home .dh-data>.dh-notice{overflow:auto}
+.desktop-home .dh-data>.dh-grid-scroll{min-height:0}
+.desktop-home .dh-insp-foot:empty{display:none}
+.desktop-home .dh-insp-details .dh-admission{margin:.746667rem 0 0;max-height:none}
+/* Status bar: secondary facts give way before the activity summary. */
+.desktop-home .dh-statusbar>span{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+.desktop-home .dh-statusbar>span:first-child{flex-shrink:0}
+.desktop-home .dh-statusbar .dh-secondary,.desktop-home .dh-status-slot>span{flex-shrink:1000}
+.desktop-home .dh-statusbar .dh-fixture{flex-shrink:100}
+.desktop-home .dh-statusbar>.dh-spacer{flex:1 1 0}
+.desktop-home.dh-compact .dh-statusbar .dh-fixture .dh-secondary{display:none}
+.desktop-home .dh-data{overflow:clip}
+.desktop-home .dh-heading-slot{display:contents}
+.desktop-home .dh-titlerow .dh-subhead{color:var(--muted);font-size:var(--fs-m)}
+.desktop-home.dh-compact .dh-compact-hide{display:none}
+/* Enlarged text: notices keep their whole text and scroll within a bound, the pager count wraps above its buttons. */
+.desktop-home.dh-compact .dh-data>.dh-notice{margin-top:.28rem;padding:.28rem .56rem}
+.desktop-home.dh-compact .dh-records>.dh-pane-foot{row-gap:.186667rem;padding-top:.28rem;padding-bottom:.28rem}
+.desktop-home.dh-compact .dh-records .dh-pane-foot .dh-foot-count{flex:1 1 100%}
+.desktop-home.dh-compact .dh-records>.dh-pane-head{column-gap:.373333rem}
+/* Enlarged text: the pager keeps its count and buttons on one line; each button keeps its full accessible name. */
+.desktop-home.dh-compact .dh-records .dh-pane-foot .dh-long{display:none}
+.desktop-home.dh-compact .dh-records .dh-pane-foot .dh-foot-count{flex:1 1 auto}
+.desktop-home.dh-compact .dh-records>.dh-pane-head{padding-top:.233333rem;padding-bottom:.233333rem;min-height:0}
+.desktop-home.dh-compact .dh-titlerow{padding-top:.186667rem;padding-bottom:.186667rem}
+/* Keyboard-selected rows scroll into view below the sticky two-line column header. */
+.desktop-home .dh-records-grid tbody tr{scroll-margin-top:2.8rem}
+/* The corner header stays above the sticky Record ID cells of scrolled rows. */
+.desktop-home .dh-records-grid thead th:first-child{z-index:3}
+.desktop-home .dh-records-grid tbody th:first-child{z-index:1}

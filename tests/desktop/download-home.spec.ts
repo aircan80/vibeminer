@@ -11,7 +11,7 @@ async function capture(page: Page, app: ElectronApplication, state: string) {
     for (const scale of [1, 2]) {
       await page.evaluate(font => { document.documentElement.style.fontSize = `${font}px`; }, base * scale);
       expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1), `${state} ${width}x${height} ${scale * 100}%`).toBe(false);
-      expect(await page.locator('.aside .row b').evaluateAll(elements => elements.filter(element => element.textContent === 'Unknown' && element.getClientRects().length > 0).every(element => { const range = document.createRange(); range.selectNodeContents(element); return range.getClientRects().length === 1; })), `Unknown stays a whole word at ${width}x${height} ${scale * 100}%`).toBe(true);
+      expect(await page.locator('.dh-side dd').evaluateAll(elements => elements.filter(element => element.textContent === 'Unknown' && element.getClientRects().length > 0).every(element => { const range = document.createRange(); range.selectNodeContents(element); return range.getClientRects().length === 1; })), `Unknown stays a whole word at ${width}x${height} ${scale * 100}%`).toBe(true);
       await page.screenshot({ path: path.join(directory, `${state}-${width}x${height}-${scale * 100}.png`), fullPage: true });
     }
   }
@@ -24,9 +24,9 @@ test('unknown download sizing enters honest Home and restores Discovery without 
     const open = session.page.getByRole('button', { name: 'Open build', exact: true }); await open.focus(); await session.page.keyboard.press('Enter');
     await writeFile(path.join(session.data, 'release-open'), 'release');
     await expect(session.page.getByRole('heading', { name: 'Build overview' })).toBeFocused();
-    await expect(session.page.getByText('Published download size is unknown.', { exact: true })).toBeVisible();
+    await expect(session.page.getByText('Published download size is unknown', { exact: true })).toBeVisible();
     await expect(session.page.getByText('DOWNLOAD_UNDECLARED', { exact: true })).toBeVisible();
-    await expect(session.page.getByRole('button', { name: 'Browse download objects' })).toHaveCount(0);
+    await expect(session.page.getByRole('switch')).toHaveCount(0); await expect(session.page.getByText('On demand only · Download all unavailable')).toBeVisible();
     await expect(session.page.getByRole('button', { name: 'Download all', exact: true })).toHaveCount(0);
     await capture(session.page, session.app, 'download-unavailable');
     await session.page.getByRole('button', { name: /Choose build/ }).click(); await expect(open).toBeFocused();
@@ -43,7 +43,7 @@ test('download object paging retains rows and keyboard anchor during local reads
     await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
     await capture(page, session.app, 'download-home');
     await page.evaluate(() => { document.documentElement.style.fontSize = '15px'; });
-    const browse = page.getByRole('button', { name: 'Browse download objects' }); await browse.focus(); await page.keyboard.press('Enter');
+    const browse = page.getByRole('button', { name: 'Browse in Files' }); await browse.focus(); await page.keyboard.press('Enter');
     await expect(page.getByText('Object 1', { exact: true })).toBeVisible();
     await writeFile(path.join(session.data, 'hold-download-page'), 'hold'); await writeFile(path.join(session.data, 'download-page-error'), 'error');
     const next = page.getByRole('button', { name: 'Next page', exact: true }); await next.focus(); await page.keyboard.press('Enter');
@@ -53,7 +53,7 @@ test('download object paging retains rows and keyboard anchor during local reads
     await expect(page.getByRole('alert')).toContainText('LOCAL_READ_FAILED'); await expect(page.getByText('Object 1', { exact: true })).toBeVisible();
     await capture(page, session.app, 'download-objects-error');
     await unlink(path.join(session.data, 'download-page-error')); const retry = page.getByRole('button', { name: 'Retry page' }); await retry.focus(); await page.keyboard.press('Enter');
-    await expect(page.getByText('Object 51', { exact: true })).toBeVisible(); await expect(page.getByRole('heading', { name: 'Download objects' })).toBeFocused();
+    await expect(page.getByText('Object 51', { exact: true })).toBeVisible(); await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeFocused();
     await page.getByRole('button', { name: /Return to build overview/ }).click(); await expect(browse).toBeFocused();
   } finally { await session.close(); }
 });

@@ -5,6 +5,7 @@ import { launch, root } from './helpers';
 
 async function opened() {
   const session = await launch(true);
+  await session.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 800));
   await session.page.locator('.build-row').first().click();
   await session.page.getByRole('button', { name: 'Open build', exact: true }).click();
   await writeFile(path.join(session.data, 'release-open'), 'release');
@@ -34,34 +35,34 @@ test('horizontal areas preserve exact build, object pages and a keyboard definit
   const session = await opened();
   try {
     const { page } = session, areas = page.getByRole('navigation', { name: 'Build areas' });
-    await expect(page.locator('.home-view .sidebar')).toHaveCount(0);
-    await areas.getByRole('button', { name: 'Download objects', exact: true }).click();
+    await expect(page.locator('.sidebar')).toHaveCount(0);
+    await areas.getByRole('button', { name: 'Files', exact: true }).click();
     await page.getByRole('button', { name: 'Next page', exact: true }).click();
     await expect(page.getByText('Object 51', { exact: true })).toBeVisible();
     const tables = areas.getByRole('button', { name: 'Tables', exact: true }); await tables.focus(); await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Tables', exact: true })).toBeFocused();
     await expect(page.locator('.tableitem')).toHaveCount(50);
     const item = definition(page, 'Item'); await item.focus(); await page.keyboard.press('Enter');
-    await expect(page.locator('.table-title h2')).toHaveText('Item');
+    await expect(page.locator('#table-title')).toHaveText('Item');
     await page.getByRole('button',{name:'Structure',exact:true}).click();
-    await expect(page.locator('.field-count')).toContainText('16 declared fields');
-    await expect(page.locator('.candidate-choice')).toContainText('996192AA');
+    await expect(page.locator('.dh-structure-bar')).toContainText('16 declared fields');
+    await expect(page.locator('.dh-structure-bar')).toContainText('996192AA');
     await page.getByRole('button', { name: 'Relationships', exact: true }).click();
     const relation = page.locator('.declared-relations').getByRole('button', { name: 'Open ItemClass.ClassID definition', exact: true });
     await relation.focus(); await page.keyboard.press('Enter');
-    await expect(page.locator('.table-title h2')).toHaveText('ItemClass');
-    await expect(page.getByRole('heading', { name: 'ClassID', exact: true })).toBeVisible();
+    await expect(page.locator('#table-title')).toHaveText('ItemClass');
+    await expect(page.getByRole('heading', { name: 'ItemClass.ClassID', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Back through definitions' }).click();
-    await expect(page.locator('.table-title h2')).toHaveText('Item'); await expect(relation).toBeFocused();
+    await expect(page.locator('#table-title')).toHaveText('Item'); await expect(relation).toBeFocused();
     await page.getByRole('button', { name: 'Structure', exact: true }).click();
     await captures(page, session.app, 'structure');
     const search = page.getByRole('searchbox', { name: 'Search definitions' }); await search.fill('no_such_table_0011');
     await expect(page.getByText('No provider definitions match this search.', { exact: false })).toBeVisible();
-    await expect(search).toBeFocused(); await expect(page.locator('.table-title h2')).toHaveText('Item');
+    await expect(search).toBeFocused(); await expect(page.locator('#table-title')).toHaveText('Item');
     await areas.getByRole('button', { name: 'Home', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeFocused();
-    await tables.click(); await expect(search).toHaveValue('no_such_table_0011'); await expect(page.locator('.table-title h2')).toHaveText('Item');
-    await areas.getByRole('button', { name: 'Download objects', exact: true }).click();
+    await tables.click(); await expect(search).toHaveValue('no_such_table_0011'); await expect(page.locator('#table-title')).toHaveText('Item');
+    await areas.getByRole('button', { name: 'Files', exact: true }).click();
     await expect(page.getByText('Object 51', { exact: true })).toBeVisible();
     const requests = await calls(session.data);
     expect(requests.filter(request => request.method === 'workspace.open')).toHaveLength(1);
@@ -75,14 +76,14 @@ test('catalogue failures preserve definitions and clearing a failed search remov
   try {
     const { page } = session; await page.getByRole('navigation', { name: 'Build areas' }).getByRole('button', { name: 'Tables', exact: true }).click();
     await expect(page.locator('.tableitem')).toHaveCount(50); await definition(page, 'Item').click();
-    await expect(page.locator('.table-title h2')).toHaveText('Item');
+    await expect(page.locator('#table-title')).toHaveText('Item');
     await writeFile(path.join(session.data, 'hold-table-catalog'), 'hold'); await writeFile(path.join(session.data, 'table-catalog-error'), 'error');
     const search = page.getByRole('searchbox', { name: 'Search definitions' }); await search.fill('Item');
     await expect(page.getByText('Reading local provider metadata…', { exact: true })).toBeVisible();
     await captures(page, session.app, 'catalogue-loading');
     await writeFile(path.join(session.data, 'release-table-catalog'), 'release');
     await expect(page.getByRole('alert')).toContainText('PROVIDER_UNAVAILABLE');
-    await expect(page.locator('.table-title h2')).toHaveText('Item'); await expect(page.locator('.tableitem')).toHaveCount(50);
+    await expect(page.locator('#table-title')).toHaveText('Item'); await expect(page.locator('.tableitem')).toHaveCount(50);
     await captures(page, session.app, 'catalogue-error');
     await search.fill(''); await expect(page.getByRole('button', { name: 'Retry catalogue' })).toHaveCount(0);
     await expect(page.getByRole('alert')).toHaveCount(0); await expect(search).toBeFocused();
@@ -91,7 +92,7 @@ test('catalogue failures preserve definitions and clearing a failed search remov
     await captures(page, session.app, 'catalogue-empty');
     await page.getByRole('button', { name: 'Clear search', exact: true }).click(); await expect(page.locator('.tableitem')).toHaveCount(50);
     await definition(page, 'Achievement').click();
-    await expect(page.locator('.table-title h2')).toHaveText('Achievement'); await expect(page.getByText('DEFINITION_NOT_BUNDLED', { exact: true })).toBeVisible();
+    await expect(page.locator('#table-title')).toHaveText('Achievement'); await expect(page.getByText('DEFINITION_NOT_BUNDLED', { exact: true })).toBeVisible();
     await captures(page, session.app, 'definition-unbundled');
     await page.getByRole('button', { name: 'Data', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Waiting for the active table', exact: true })).toBeVisible();
@@ -104,28 +105,28 @@ test('superseded definition reads cannot replace a newer selection and typed fai
   const session = await opened();
   try {
     const { page } = session; await page.getByRole('navigation', { name: 'Build areas' }).getByRole('button', { name: 'Tables', exact: true }).click();
-    await expect(page.locator('.tableitem')).toHaveCount(50); await definition(page, 'Item').click(); await expect(page.locator('.table-title h2')).toHaveText('Item');
+    await expect(page.locator('.tableitem')).toHaveCount(50); await definition(page, 'Item').click(); await expect(page.locator('#table-title')).toHaveText('Item');
     await writeFile(path.join(session.data, 'hold-definition-a4c11069'), 'hold');
     await definition(page, 'Material').click(); await expect(page.getByText('Reading a local definition… Previous selection remains visible.', { exact: true })).toBeVisible();
     await captures(page, session.app, 'definition-loading');
-    await definition(page, 'ItemClass').click(); await expect(page.locator('.table-title h2')).toHaveText('ItemClass');
+    await definition(page, 'ItemClass').click(); await expect(page.locator('#table-title')).toHaveText('ItemClass');
     await writeFile(path.join(session.data, 'release-definition-a4c11069'), 'release');
     // A subsequent exact query gives the older response a deterministic opportunity to arrive.
-    await definition(page, 'ItemClass').click(); await expect(page.locator('.table-title h2')).toHaveText('ItemClass');
+    await definition(page, 'ItemClass').click(); await expect(page.locator('#table-title')).toHaveText('ItemClass');
     await writeFile(path.join(session.data, 'table-definition-error'), 'error');
     await definition(page, 'Item').click(); await expect(page.getByRole('alert')).toContainText('DEFINITION_READ_FAILED');
-    await expect(page.locator('.table-title h2')).toHaveText('ItemClass'); await captures(page, session.app, 'definition-error');
+    await expect(page.locator('#table-title')).toHaveText('ItemClass'); await captures(page, session.app, 'definition-error');
     await unlink(path.join(session.data, 'table-definition-error')); await writeFile(path.join(session.data, 'definition-no-candidate'), 'no candidate');
-    await definition(page, 'Item').click(); await expect(page.locator('.table-title h2')).toHaveText('Item');
+    await definition(page, 'Item').click(); await expect(page.locator('#table-title')).toHaveText('Item');
     await expect(page.getByText('SCHEMA_BUILD_NOT_LISTED', { exact: true })).toBeVisible();
-    await page.getByRole('button',{name:'Structure',exact:true}).click();await expect(page.locator('.candidate-choice')).toContainText('Universal COLUMNS declarations');
+    await page.getByRole('button',{name:'Structure',exact:true}).click();await expect(page.locator('.dh-structure-bar')).toContainText('Universal COLUMNS declarations');
     await captures(page, session.app, 'definition-no-candidate');
   } finally { await session.close(); }
 });
 
 test('Tables source layout follows dynamic text scaling and hidden activation without clipping its inspector',async()=>{
  const session=await opened();try{const{page,app}=session,areas=page.getByRole('navigation',{name:'Build areas'});await areas.getByRole('button',{name:'Tables',exact:true}).click();await definition(page,'Item').click();await page.getByRole('button',{name:'Structure',exact:true}).click();await page.getByRole('button',{name:'Inspect field ClassID',exact:true}).click();
- async function bounds(font:number){await page.evaluate(size=>document.documentElement.style.fontSize=`${size}px`,font);await expect.poll(async()=>page.locator('.tables-explorer').getAttribute('data-layout')).toBe(font===30?(await page.evaluate(()=>innerWidth))<1400?'compact':'medium':'wide');const geometry=await page.locator('.table-workbench').evaluate(el=>{const c=el.querySelector('.tables-center')!.getBoundingClientRect(),i=el.querySelector('.table-inspector')!.getBoundingClientRect();return{center:{x:c.x,y:c.y,bottom:c.bottom},inspector:{x:i.x,y:i.y,right:i.right},viewport:innerWidth};});expect(geometry.inspector.right).toBeLessThanOrEqual(geometry.viewport+1);if(font===30)expect(geometry.inspector.y).toBeGreaterThanOrEqual(geometry.center.bottom-1);else expect(geometry.inspector.x).toBeGreaterThan(geometry.center.x);}
+ async function bounds(font:number){await page.evaluate(size=>document.documentElement.style.fontSize=`${size}px`,font);const compact=font===30;await expect.poll(()=>page.evaluate(()=>document.querySelector('.desktop-home')!.classList.contains('dh-compact'))).toBe(compact);const geometry=await page.locator('.dh-tables').evaluate(el=>{const box=(s:string)=>{const r=el.querySelector(s)!.getBoundingClientRect();return{x:r.x,right:r.right,width:r.width};};return{records:box('.dh-records'),inspector:box('.dh-inspector'),catalog:box('.dh-catalog'),switcher:box('.dh-pane-switch'),viewport:innerWidth,scroll:document.documentElement.scrollHeight<=document.documentElement.clientHeight};});expect(geometry.scroll).toBe(true);if(compact){expect(geometry.switcher.width).toBeGreaterThan(0);expect(geometry.records.width).toBeGreaterThan(0);expect(geometry.inspector.width).toBe(0);expect(geometry.catalog.width).toBe(0);expect(geometry.records.right).toBeLessThanOrEqual(geometry.viewport+1);}else{expect(geometry.switcher.width).toBe(0);expect(geometry.inspector.right).toBeLessThanOrEqual(geometry.viewport+1);expect(geometry.inspector.x).toBeGreaterThan(geometry.records.x);expect(geometry.records.x).toBeGreaterThan(geometry.catalog.x);}}
  for(const[width,height]of[[1280,800],[1440,1100]]){await app.evaluate(({BrowserWindow},size)=>BrowserWindow.getAllWindows()[0].setContentSize(size.width,size.height),{width,height});await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(width);for(const font of[15,30,15])await bounds(font);await areas.getByRole('button',{name:'Home',exact:true}).click();await page.evaluate(()=>document.documentElement.style.fontSize='30px');await areas.getByRole('button',{name:'Tables',exact:true}).click();await bounds(30);await bounds(15);}
  }finally{await session.close();}
 });

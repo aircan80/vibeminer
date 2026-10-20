@@ -1,0 +1,1023 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeMiner · Desktop Home</title>
+<link rel="icon" type="image/svg+xml" href="../../../branding/vibeminer.svg">
+<style>
+/* Tokens, type scale and chrome come from ../desktop-discovery/. Type scale: 11 / 13 / 14 / 19px at 100%. */
+:root{--bg:#f5f3ed;--paper:#fffefa;--ink:#243b3a;--muted:#586a64;--line:#dce2d9;--line-soft:#e9ece5;--teal:#176e66;--mint:#e4f1e9;--hover:#eef4ef;--pill:#b9d5c8;--gold-ink:#7d561b;--gold-line:#e4cfa5;--gold-bg:#fbf5e8;--warn-bg:#fbf3e4;--warn-line:#e7c98f;--err-bg:#fbeeea;--err-line:#e3b5a8;--focus:#e6ad46;--toolbar:#fbfaf6;--status:#eceae2;--side:#f9f8f3;
+  --fs-s:.786rem;--fs-m:.929rem;--fs-l:1.357rem;--pane-head:3.43rem;--thead:2rem;--side-w:clamp(18rem,26.5rem,40%);--insp-w:clamp(18rem,24.3rem,34%);--title-row:2.6rem;--panel-w:var(--side-w);font-size:14px}
+.app[data-area="tables"]{--panel-w:var(--insp-w)}
+:root[data-text="200"]{font-size:28px}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:1rem/1.45 system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.mono{font-family:ui-monospace,monospace}
+.selectable{user-select:text;-webkit-user-select:text;cursor:text}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip{position:absolute;left:.5rem;top:-3rem;z-index:20;background:var(--paper);padding:.3rem .6rem;border-radius:6px}
+.skip:focus{top:.5rem}
+.dim{color:var(--muted)}
+.spacer{flex:1}
+
+/* Window: fixed chrome, only panes scroll. */
+.app{height:100vh;container:window/inline-size;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+
+/* Build header: one row. Identity fields are a strip of small label over value. */
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.43rem .86rem;padding:.43rem .86rem 0;background:var(--toolbar);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:.6rem;font-weight:700;font-size:1.214rem;letter-spacing:-.01em;white-space:nowrap;flex:none}
+.brand img{width:2rem;height:2rem;display:block;flex:none}
+.brand .word span{color:var(--teal)}
+.divider{width:1px;align-self:stretch;background:var(--line);margin:.15rem 0;flex:none}
+.idfields{display:flex;align-items:center;gap:.4rem 1.15rem;margin:0;min-width:0;flex-wrap:wrap}
+.idf{display:flex;flex-direction:column;min-width:0}
+.idf dt{font-size:var(--fs-s);color:var(--muted);font-weight:600;line-height:1.25;white-space:nowrap}
+.idf dd{margin:0;font-weight:600;line-height:1.35;white-space:nowrap;height:1.4rem;display:flex;align-items:center}
+.idf .pid{font-family:ui-monospace,monospace;font-size:var(--fs-m);color:var(--muted);font-weight:400}
+.vbtn{display:inline-flex;align-items:center;gap:.3rem;border:0;background:none;padding:0 .3rem;margin:0 -.3rem;border-radius:4px;font-weight:600;cursor:pointer;line-height:inherit}
+.vbtn:hover{background:var(--hover)}
+.vbtn[aria-expanded="true"]{background:var(--mint);color:var(--teal)}
+.vbtn .chev{font-size:var(--fs-s);color:var(--muted);font-weight:400}
+.hgroup{display:flex;align-items:center;gap:.86rem;margin-left:auto;flex:none;min-height:2.3rem}
+.btn{height:2.15rem;display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .8rem;cursor:pointer;white-space:nowrap;flex:none}
+.btn:hover:not(:disabled){background:var(--hover);border-color:#c5d3cb}
+.btn.primary{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+.btn.primary:hover:not(:disabled){background:#125b54}
+.btn.small{height:1.9rem;font-size:var(--fs-m);padding:0 .65rem}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.55;cursor:default}
+/* Download mode: a labelled switch in the identity strip. */
+.switch{display:inline-flex;align-items:center;gap:.45rem;border:0;background:none;padding:0 .3rem;margin:0 -.3rem;border-radius:4px;font-weight:600;cursor:pointer;line-height:inherit;white-space:nowrap}
+.switch:hover{background:var(--hover)}
+.switch .track{position:relative;width:1.85rem;height:1.05rem;border-radius:999px;background:#c9d2cc;flex:none}
+.switch .track::after{content:"";position:absolute;top:.15rem;left:.15rem;width:.75rem;height:.75rem;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch[aria-checked="true"] .track{background:var(--teal)}
+.switch[aria-checked="true"] .track::after{left:auto;right:.15rem}
+.activity-chip{display:inline-flex;align-items:center;gap:.5rem;height:2.15rem;padding:0 .75rem;border:1px solid var(--pill);border-radius:6px;background:var(--mint);color:var(--teal);font-weight:600;cursor:pointer;white-space:nowrap;flex:none}
+.chip-short{display:none}
+.activity-chip .count{min-width:1.3rem;height:1.3rem;border-radius:999px;background:var(--teal);color:#fff;font-size:var(--fs-s);display:grid;place-items:center;padding:0 .3rem}
+.activity-chip.attention{border-color:var(--warn-line);background:var(--warn-bg);color:var(--gold-ink)}
+.activity-chip.attention .count{background:var(--gold-ink)}
+.activity-chip[aria-expanded="true"]{box-shadow:inset 0 0 0 1px currentColor}
+.pulse{width:.5rem;height:.5rem;border-radius:50%;background:currentColor;animation:pulse 1.6s ease-in-out infinite;flex:none}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+
+/* Area navigation: directly under the header. */
+.areas{order:9;flex:1 1 100%;display:flex;align-items:stretch;gap:.2rem;height:2.45rem;margin:0 -.86rem;padding:0 .5rem;border-top:1px solid var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.area-group{display:flex;align-items:stretch;gap:.2rem}
+.area-sep{align-self:center;width:1px;height:1.3rem;background:var(--line);margin:0 .45rem;flex:none}
+.areas button{border:0;background:none;padding:0 .75rem;font-size:var(--fs-m);font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;box-shadow:inset 0 -3px 0 transparent}
+.areas button:hover{color:var(--ink);background:var(--hover)}
+.areas button[aria-current="page"]{color:var(--teal);font-weight:700;box-shadow:inset 0 -3px 0 var(--teal)}
+.areas button:focus-visible{outline-offset:-3px}
+
+/* Shared pane parts */
+.pane{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--paper);overflow:auto}
+.pane>*{flex:none}
+.pane>.grid-scroll,.pane>.cat-list,.pane>.pane-scroll{flex:1 1 auto;min-height:6rem}
+.pane-head{display:flex;align-items:center;gap:.6rem;min-height:var(--pane-head);padding:.43rem .86rem;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--bg)}
+.pane-head h1,.pane-head h2{font-size:1rem;margin:0 .3rem 0 0;font-weight:700;white-space:nowrap}
+.pane-head .n{color:var(--muted);font-weight:400;margin-left:.3rem}
+.pane-head .sub{font-size:var(--fs-m);color:var(--muted);min-width:0}
+.label{font-size:var(--fs-s);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.control{height:2.15rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .65rem;min-width:0}
+.segmented{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper);flex:none}
+.segmented button{border:0;background:none;height:2.05rem;padding:0 .75rem;cursor:pointer;white-space:nowrap}
+.segmented button+button{border-left:1px solid var(--line)}
+.segmented button[aria-pressed="true"]{background:var(--mint);color:var(--teal);font-weight:600}
+.pill{display:inline-block;padding:0 .4rem;border-radius:4px;border:1px solid var(--pill);background:var(--paper);color:var(--teal);font-size:var(--fs-s);font-weight:600;line-height:1.5;white-space:nowrap}
+.pill.gold{border-color:var(--gold-line);background:var(--gold-bg);color:var(--gold-ink)}
+.notice{margin:.6rem .86rem 0;padding:.55rem .75rem;border-radius:6px;border:1px solid var(--warn-line);background:var(--warn-bg);font-size:var(--fs-m);display:flex;gap:.8rem;align-items:flex-start}
+.notice.error{border-color:var(--err-line);background:var(--err-bg)}
+.notice.calm{border-color:var(--line);background:var(--bg)}
+.notice .text{flex:1;min-width:0}
+.notice strong{display:block}
+.notice code{font-size:var(--fs-s)}
+.notice .btn{height:1.9rem}
+.state-box{border:1px solid #cfe2d6;background:var(--mint);border-radius:6px;padding:.55rem .7rem;font-size:var(--fs-m)}
+.state-box.warn{border-color:var(--warn-line);background:var(--warn-bg)}
+.state-box.plain{border-color:var(--line);background:var(--bg)}
+.state-box strong{display:block}
+.state-box p{margin:.15rem 0 0}
+.state-box .row{display:flex;gap:.4rem;margin-top:.45rem;flex-wrap:wrap}
+.state-box code{font-size:var(--fs-s)}
+dl.facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.35rem .9rem;margin:0;font-size:var(--fs-m)}
+dl.facts dt{color:var(--muted);white-space:nowrap}
+dl.facts dd{margin:0;overflow-wrap:anywhere}
+dl.facts dd.mono{font-size:var(--fs-s);line-height:1.7}
+.ok{color:var(--teal);font-weight:600}
+.warn-t{color:var(--gold-ink);font-weight:600}
+.reason{margin:0;font-size:var(--fs-s);color:var(--muted)}
+.tiny{font-size:var(--fs-s);color:var(--muted);margin:.6rem 0 0}
+
+/* Home: tiled panels with 1px splits, like a desktop overview. The side panel matches the Discovery inspector. */
+.home{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0}
+.home-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) var(--side-w);grid-template-rows:auto minmax(0,1fr);gap:1px;background:var(--line);min-height:0}
+.panel{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;min-width:0;background:var(--paper)}
+.panel.side{grid-column:3;grid-row:1/3;background:var(--side)}
+.panel.wide{grid-column:1/3}
+.panel-head{display:flex;align-items:baseline;gap:.6rem;padding:.6rem 1rem .45rem;flex-wrap:wrap}
+.panel-head h2{margin:0;font-size:1rem;font-weight:700;white-space:nowrap}
+.panel-head .scope{margin-left:auto;font-size:var(--fs-s);color:var(--muted)}
+.panel-body{overflow:auto;padding:.15rem 1rem .8rem;min-height:0}
+.panel-foot{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;padding:.55rem 1rem;border-top:1px solid var(--line-soft)}
+.panel.side .panel-foot{border-top-color:var(--line);background:var(--paper)}
+.panel.side .panel-foot .btn{flex:1;justify-content:center}
+.panel.side .panel-foot .reason{flex:1 1 100%}
+.metric{display:flex;flex-direction:column;margin-bottom:.7rem}
+.metric .mlabel{font-size:var(--fs-m);color:var(--muted)}
+.metric strong{font-size:var(--fs-l);line-height:1.3;font-variant-numeric:tabular-nums}
+.metric strong.unknown{color:var(--muted)}
+.metric .exact{font-size:var(--fs-s);color:var(--muted)}
+.loading-line{display:flex;align-items:center;gap:.5rem;color:var(--teal);font-weight:600;font-size:var(--fs-m)}
+/* Local storage */
+.stack{display:flex;height:.6rem;border-radius:999px;background:var(--line-soft);overflow:hidden;margin:.3rem 0 .45rem}
+.stack i{display:block;height:100%}
+.stack .own{background:var(--teal)}
+.stack .shared{background:#7fb3a3}
+.legend{display:flex;flex-wrap:wrap;gap:.25rem 1rem;font-size:var(--fs-s);color:var(--muted);margin-bottom:.4rem}
+.legend span{display:inline-flex;align-items:center;gap:.35rem;white-space:nowrap}
+.legend i{width:.6rem;height:.6rem;border-radius:2px;background:var(--line-soft);border:1px solid var(--line)}
+.legend i.own{background:var(--teal);border-color:var(--teal)}
+.legend i.shared{background:#7fb3a3;border-color:#7fb3a3}
+.ledger{display:grid;grid-template-columns:minmax(0,1fr) auto auto;font-size:var(--fs-m);margin:0}
+.ledger>div{display:contents}
+.ledger dt,.ledger dd{padding:.42rem 0;border-bottom:1px solid var(--line-soft);margin:0}
+.ledger dt{color:var(--ink);min-width:0}
+.ledger dd{padding-left:1.2rem;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ledger dd.exact{font-weight:400;color:var(--muted);font-family:ui-monospace,monospace;font-size:var(--fs-s)}
+.storage-cols{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(15rem,1fr);gap:1.2rem;align-items:start}
+
+/* Tables workbench: catalogue | records | inspector */
+.tables{display:grid;grid-template-columns:17rem minmax(0,1fr) var(--insp-w);grid-template-rows:minmax(0,1fr);gap:1px;background:var(--line);min-height:0}
+.pane-switch{display:none}
+.catalog{background:var(--side)}
+.catalog .pane-head{flex-wrap:nowrap}
+.catalog .pane-head .search{flex:1;width:100%}
+.cat-list{flex:1;overflow:auto;min-height:0;padding:.3rem 0}
+.tableitem{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.55rem;align-items:start;width:100%;border:0;background:none;text-align:left;padding:.42rem .86rem;cursor:pointer;border-bottom:1px solid var(--line-soft)}
+.tableitem:hover{background:var(--hover)}
+.tableitem[aria-pressed="true"]{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+.tableitem:focus-visible{outline-offset:-3px}
+.tableitem .glyph{color:var(--teal);line-height:1.45}
+.tableitem b{display:block;font-weight:600;overflow-wrap:normal;word-break:normal}
+.tableitem small{display:block;font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pane-foot{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;padding:.5rem .86rem;border-top:1px solid var(--line);background:var(--paper);font-size:var(--fs-s);color:var(--muted)}
+.pane-foot .btn{height:1.75rem;font-size:var(--fs-s);padding:0 .55rem}
+.catalog .pane-foot .count{flex:1 1 100%}
+.records .pane-head{row-gap:.35rem}
+.trail{display:flex;align-items:center;gap:.25rem;min-width:0}
+.trail .nav{width:2rem;padding:0;justify-content:center}
+.crumb{border:0;background:none;padding:.15rem .4rem;border-radius:4px;cursor:pointer;color:var(--muted);white-space:nowrap}
+.crumb[aria-current="step"]{background:var(--mint);color:var(--teal);font-weight:600}
+.crumb-sep{color:var(--muted);font-size:var(--fs-s)}
+.titlerow{display:flex;align-items:center;gap:.6rem;min-height:var(--title-row);padding:.45rem .86rem;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--paper)}
+.titlerow h2{margin:0;font-size:var(--fs-l);line-height:1.25}
+.titlerow .meta{font-size:var(--fs-m);color:var(--muted);min-width:0}
+.idfilter{display:flex;align-items:center;gap:.4rem}
+.idfilter label{font-size:var(--fs-m);color:var(--muted);white-space:nowrap}
+.idfilter input{width:7.5rem}
+.idfilter .btn{height:2.15rem}
+.grid-scroll{flex:1;overflow:auto;min-height:0;position:relative}
+.grid-scroll:focus-visible{outline-offset:-3px}
+table.records-grid{border-collapse:separate;border-spacing:0;min-width:100%;font-size:var(--fs-m);font-variant-numeric:tabular-nums}
+.records-grid th{position:sticky;top:0;z-index:1;background:var(--toolbar);border-bottom:1px solid var(--line);text-align:left;padding:.35rem .75rem;font-size:var(--fs-s);font-weight:600;white-space:nowrap;vertical-align:bottom}
+.records-grid th small{display:block;font-weight:400;color:var(--muted)}
+.records-grid td{padding:0 .75rem;height:2.3rem;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+.records-grid tbody tr{cursor:default}
+.records-grid tbody tr:hover{background:var(--hover)}
+.records-grid tbody tr[aria-selected="true"]{background:var(--mint)}
+.records-grid tbody tr[aria-selected="true"] td:first-child{box-shadow:inset 3px 0 0 var(--teal)}
+.records-grid .rowsel{border:0;background:none;padding:0;font-weight:600;cursor:pointer}
+.records-grid td.zero{color:var(--muted)}
+.local-wait{margin:1rem .86rem;max-width:34rem}
+.inspector{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;background:var(--side);overflow:auto}
+.insp-head{padding:.55rem 1rem;border-bottom:1px solid var(--line);min-height:calc(var(--pane-head) + var(--title-row));display:flex;flex-direction:column;justify-content:center}
+.insp-head h2{margin:0;font-size:var(--fs-l);font-weight:700;line-height:1.25}
+.insp-head p{margin:0;color:var(--muted);font-size:var(--fs-m)}
+.insp-body{overflow:auto;padding:.7rem 1rem;min-height:0}
+.insp-body .label{margin:1rem 0 .4rem}
+.insp-body .label:first-child{margin-top:0}
+.fieldrow{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:.6rem;padding:.4rem 0;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m)}
+.fieldrow .fname{color:var(--muted)}
+.fieldrow .ftype{font-size:var(--fs-s);color:var(--muted);font-family:ui-monospace,monospace;text-align:right}
+.fieldrow .fval{grid-column:1/-1;font-weight:600;font-size:1rem}
+.fieldrow .rel{grid-column:1/-1;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:var(--fs-s);color:var(--muted)}
+.linkbtn{border:0;background:none;padding:0;color:var(--teal);text-decoration:underline;cursor:pointer;font-size:var(--fs-s)}
+.insp-foot{padding:.6rem 1rem;border-top:1px solid var(--line);background:var(--paper);display:flex;gap:.55rem;flex-wrap:wrap}
+.insp-foot .btn{flex:1;justify-content:center}
+.placeholder{display:grid;place-items:center;text-align:center;color:var(--muted);padding:2rem;background:var(--paper)}
+.placeholder div{border:1px dashed var(--line);border-radius:6px;padding:1.2rem 1.6rem;max-width:30rem}
+.placeholder h1{font-size:1rem;color:var(--ink);margin:0 0 .3rem}
+.placeholder p{margin:0;font-size:var(--fs-m)}
+.placeholder .btn{margin-top:.8rem}
+.return-link{flex:none}
+.titlerow .return-link{height:1.7rem}
+.trail-sep{width:1px;height:1.3rem;background:var(--line);margin:0 .35rem;flex:none}
+.cdn-note{margin:.7rem 0 0;padding:.5rem .65rem;border:1px solid var(--warn-line);background:var(--warn-bg);border-radius:6px;font-size:var(--fs-m)}
+.cdn-note code{font-size:var(--fs-s)}
+
+/* Activity panel: nonmodal, follows the chip in DOM order, covers exactly the side column (Home) or inspector (Tables) below the header. Whatever it covers is inert. */
+.activity-panel{position:fixed;right:0;width:var(--panel-w);background:var(--paper);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(36,59,58,.08);display:flex;flex-direction:column;z-index:3;white-space:normal;font-weight:400;color:var(--ink);text-align:left}
+.activity-panel header{display:flex;align-items:center;justify-content:space-between;padding:.6rem 1rem;border-bottom:1px solid var(--line)}
+.activity-panel h2{margin:0;font-size:1rem}
+.activity-panel .rows{overflow:auto;padding:.4rem 1rem .8rem;flex:1}
+.activity-panel .label{margin:.6rem 0 .4rem}
+.task{border:1px solid var(--line);border-radius:6px;padding:.6rem .7rem;margin-bottom:.6rem;font-size:var(--fs-m)}
+.task.failed{border-color:var(--err-line);background:var(--err-bg)}
+.task .t{font-weight:600}
+.task .s{color:var(--muted)}
+.task code{font-size:var(--fs-s)}
+.bar{height:.36rem;background:var(--line-soft);border-radius:999px;margin:.45rem 0 .3rem;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--teal);border-radius:999px}
+.bar.indeterminate i{width:30%;animation:slide 1.8s ease-in-out infinite}
+@keyframes slide{0%{margin-left:-30%}100%{margin-left:100%}}
+@media (prefers-reduced-motion:reduce){.bar.indeterminate i{animation:none;width:100%;opacity:.35}}
+.task .row{display:flex;gap:.4rem;margin-top:.45rem;flex-wrap:wrap}
+.task .btn{height:1.9rem;font-size:var(--fs-m)}
+
+/* Identity and Status popovers: nonmodal dialogs placed right after their trigger in the DOM, one surface at a time. */
+.popover{position:fixed;z-index:4;white-space:normal;font-weight:400;line-height:1.45;color:var(--ink);width:min(25rem,calc(100vw - 1rem));background:var(--paper);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px rgba(36,59,58,.16);display:flex;flex-direction:column;overflow:hidden}
+.popover header{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.55rem .9rem;border-bottom:1px solid var(--line)}
+.popover h2{margin:0;font-size:1rem}
+.popover .pop-body{overflow:auto;padding:.7rem .9rem .8rem}
+.popover .tiny{margin-top:.7rem}
+.popover dl.facts{grid-template-columns:minmax(0,1fr);gap:0}
+.popover dl.facts dt{font-size:var(--fs-s);white-space:normal;margin-top:.45rem}
+.popover dl.facts dt:first-child{margin-top:0}
+.popover dl.facts dd{font-weight:600}
+.popover dl.facts dd.mono{font-weight:400}
+.popover .row{margin-top:.7rem}
+
+/* Status bar: always one line. */
+.statusbar{display:flex;align-items:center;gap:1.1rem;height:1.75rem;padding:0 .86rem;background:var(--status);border-top:1px solid var(--line);font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden}
+.statusbar strong{color:var(--ink);font-weight:600}
+.statusbar .busy{display:inline-flex;align-items:center;gap:.4rem;color:var(--teal);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.statusbar .warn{color:var(--gold-ink);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+
+/* Tables: reference cells, sticky ID column, structure and relationships. */
+.records-grid th:first-child,.records-grid td:first-child{position:sticky;left:0;z-index:1;background:var(--paper);box-shadow:inset -1px 0 0 var(--line-soft)}
+.records-grid th:first-child{z-index:2;background:var(--toolbar)}
+.records-grid tbody tr:hover td:first-child{background:var(--hover)}
+.records-grid tbody tr[aria-selected="true"] td:first-child{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal),inset -1px 0 0 var(--line-soft)}
+.records-grid td.refcell{cursor:pointer}
+.ref{color:var(--teal);font-weight:600;text-decoration:underline dotted;text-underline-offset:3px}
+.refcell:hover .ref{text-decoration-style:solid}
+.rt{color:var(--muted);font-weight:400}
+.rt.pending{letter-spacing:.08em}
+.records-grid td.txt{white-space:nowrap}
+.records-grid .unv,.unv{color:var(--gold-ink);font-weight:700;margin-left:.1rem}
+.records-grid.struct td{height:2.2rem}
+.records-grid.struct td:first-child{min-width:2.2rem}
+.subbar{display:flex;align-items:center;gap:.4rem .7rem;flex-wrap:wrap;padding:.4rem .86rem;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m);color:var(--muted);background:var(--paper)}
+.subbar .ink{color:var(--ink)}
+.chip-filter{display:inline-flex;align-items:center;gap:.3rem;border:1px solid var(--pill);background:var(--mint);color:var(--teal);border-radius:999px;padding:0 .2rem 0 .6rem;font-weight:600;white-space:nowrap}
+.chip-x{border:0;background:none;color:inherit;cursor:pointer;width:1.4rem;height:1.4rem;border-radius:50%;padding:0}
+.chip-x:hover{background:#d5eadf}
+.records>.notice{margin-bottom:.6rem}
+.rel-list{overflow:auto;padding:.3rem .86rem 1rem}
+.rel-list .label{margin:.9rem 0 .4rem}
+.relcard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.2rem .8rem;align-items:center;border:1px solid var(--line);border-radius:6px;padding:.5rem .7rem;margin-bottom:.45rem;background:var(--paper)}
+.relcard.current{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+.relcard b{font-weight:600;font-size:var(--fs-m);overflow-wrap:anywhere}
+.relcard .st{grid-column:1;font-size:var(--fs-s);color:var(--muted)}
+.relcard .act{grid-column:2;grid-row:1/3}
+.relcard code{font-size:var(--fs-s)}
+.fieldrow .fmeta{grid-column:1/-1;font-size:var(--fs-s);color:var(--muted)}
+.fieldrow .rtext{grid-column:1/-1;font-size:var(--fs-m);margin-top:.1rem}
+.fieldrow .rtext .dim{font-size:var(--fs-s)}
+/* Files: filter row, membership list (listbox), file inspector. */
+.app[data-area="files"]{--panel-w:var(--insp-w)}
+.files{display:grid;grid-template-columns:minmax(0,1fr) var(--insp-w);grid-template-rows:minmax(0,1fr);gap:1px;background:var(--line);min-height:0}
+.files-filters{flex-wrap:nowrap}
+.files-filters .fsearch{width:12.5rem;flex:0 1 12.5rem}
+.files-filters select{flex:0 1 auto;min-width:0}
+.fbtn{display:none}
+.fbtn .fcount{min-width:1.3rem;height:1.3rem;border-radius:999px;background:var(--teal);color:#fff;font-size:var(--fs-s);display:grid;place-items:center;padding:0 .3rem;font-weight:600}
+.fbtn .chev{font-size:var(--fs-s);color:var(--muted)}
+.fbtn[aria-expanded="true"]{background:var(--mint);border-color:var(--pill);color:var(--teal)}
+.fextra{display:contents}
+.check{display:inline-flex;align-items:center;gap:.35rem;font-size:var(--fs-m);white-space:nowrap}
+.check input{width:1rem;height:1rem;margin:0;accent-color:var(--teal)}
+.list-scroll{position:relative;flex:1 1 auto;overflow:auto;min-height:6rem;background:var(--paper);scroll-padding-top:var(--thead)}
+.fcols{display:grid;grid-template-columns:6.5rem minmax(9rem,2.2fr) 6.5rem minmax(6.5rem,1.1fr) minmax(5.5rem,.9fr) 6.5rem;align-items:center;column-gap:.86rem;padding:0 .86rem}
+.fthead{position:sticky;top:0;z-index:1;height:var(--thead);background:var(--toolbar);border-bottom:1px solid var(--line);font-size:var(--fs-s);font-weight:600;color:var(--muted);white-space:nowrap}
+[role="listbox"]:focus-visible{outline:none}
+.files [role="option"]{position:relative;min-height:2.45rem;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m);white-space:nowrap;cursor:default}
+.files [role="option"]>span{overflow:hidden;text-overflow:ellipsis}
+.files [role="option"]:hover{background:var(--hover)}
+.files [role="option"][aria-selected="true"]{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+[role="listbox"]:focus-visible [role="option"].active{outline:3px solid var(--focus);outline-offset:-3px}
+.fid{font-weight:600;font-variant-numeric:tabular-nums}
+.fname-cell .mono{font-size:var(--fs-s)}
+.files [role="option"]>span.fname-cell{white-space:normal;overflow-wrap:anywhere;overflow:visible;padding:.3rem 0}
+.pill.community{border-color:#c9cfdc;background:#f3f4f8;color:#4a5670;margin-left:.4rem}
+.files .insp-head{min-height:calc(var(--pane-head) + var(--thead))}
+.member{border:1px solid var(--line);border-radius:6px;padding:.5rem .65rem;margin-top:.6rem;background:var(--paper)}
+.member.current{border-color:var(--teal);box-shadow:inset 3px 0 0 var(--teal)}
+.member dl.facts{font-size:var(--fs-s)}
+.member dl.facts dd.mono{font-size:var(--fs-s)}
+
+/* Medium window: the activity entry uses its short label. */
+@container window (max-width:84rem){
+  .chip-long{display:none}
+  .chip-short{display:inline}
+  .storage-cols{grid-template-columns:minmax(0,1fr)}
+}
+/* Enlarged text or narrow window (like .dv-compact): the header wraps to a second row, panes stack, the window still never scrolls. */
+@container window (max-width:70rem){
+  /* Row 1: logo and identity, with Product and Build named by their buttons, Source and Locale moved to the status bar.
+     Row 2: area bar, then the activity entry and Choose build. */
+  .toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"brand ids ids" "areas areas actions";column-gap:.7rem}
+  .brand{grid-area:brand}
+  .idfields{grid-area:ids}
+  .brand .word,.toolbar .divider{display:none}
+  .idfields{gap:.3rem .9rem}
+  .idf{flex-direction:row;align-items:center;gap:.35rem}
+  .idf dt{font-size:var(--fs-m)}
+  .idf.named dt{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .idf.moved{display:none}
+  .areas{grid-area:areas;align-self:stretch;min-width:0;margin:0 -.7rem 0 -.86rem;height:auto;min-height:2.45rem}
+  .hgroup{grid-area:actions;align-self:stretch;margin:0 -.86rem 0 0;padding:.3rem .86rem .3rem .7rem;border-top:1px solid var(--line)}
+  /* Home: one scrolling pane, panels stacked. */
+  .home-grid{display:block;overflow:auto;background:var(--paper)}
+  .panel{display:block;border-bottom:1px solid var(--line)}
+  .panel.side{background:var(--side)}
+  .panel-body{overflow:visible}
+  .panel.side .panel-foot .btn{flex:none}
+  .pane-head .sub{display:none}
+  /* Tables: one pane at a time, chosen from a switcher. */
+  .tables{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .pane-switch{display:flex;align-items:center;gap:.6rem;padding:.35rem .86rem;background:var(--bg);border-bottom:1px solid var(--line)}
+  .tables>.catalog,.tables>.records,.tables>.inspector{display:none}
+  .tables[data-pane="catalog"]>.catalog,.tables[data-pane="records"]>.records{display:flex}
+  .tables[data-pane="inspector"]>.inspector{display:grid}
+  .insp-head{min-height:0}
+  .titlerow:not(.has-return){position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);padding:0;border:0}
+  .titlerow.has-return>h2,.titlerow.has-return>.meta,.titlerow.has-return>.trail-sep{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .records .pane-head .spacer{flex:0 0 0}
+  .files{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .files>.list,.files>.inspector{display:none}
+  .files[data-pane="list"]>.list{display:flex}
+  .files[data-pane="inspector"]>.inspector{display:grid}
+  .files .insp-head{min-height:0}
+  .files-filters{flex-wrap:wrap}
+  .files-filters .fsearch{flex:1 1 10rem}
+  .fcols{grid-template-columns:minmax(5.5rem,1fr) minmax(7rem,1.6fr) minmax(4.5rem,.7fr) minmax(5.5rem,1fr) minmax(5rem,.9fr)}
+  .fcols>:nth-child(5){display:none}
+  /* Filters collapse behind a nonmodal Filters disclosure; search stays visible. */
+  .files-filters{flex-wrap:wrap}
+  .fbtn{display:inline-flex}
+  .fextra{display:none}
+  .fextra.open{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .6rem;flex:1 1 100%}
+  .list-scroll{overflow-x:hidden}
+  .subbar>span:last-child:not(.chip-filter){display:none}
+  .activity-panel{width:100%}
+  .statusbar .secondary{display:none}
+}
+
+/* Mockup-only state control. Not part of the design. */
+.mock{position:fixed;left:.6rem;bottom:2.3rem;z-index:10;max-width:calc(100vw - 1.2rem);background:#243b3a;color:#fff;border-radius:6px;padding:.35rem .5rem;font:12px/1.6 system-ui,sans-serif;display:flex;flex-wrap:wrap;gap:.2rem;align-items:center;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.mock a{color:#cde7dc;text-decoration:none;padding:0 .35rem;border-radius:4px}
+.mock a[aria-current="true"]{background:#176e66;color:#fff}
+.mock .sep{opacity:.5}
+</style></head>
+<body>
+<a class="skip" href="#area">Skip to content</a>
+<div class="app" id="app">
+  <header class="toolbar" id="toolbar">
+    <div class="brand"><img src="../../../branding/vibeminer.svg" alt="VibeMiner"><span class="word" aria-hidden="true">Vibe<span>Miner</span></span></div>
+    <div class="divider"></div>
+    <dl class="idfields" id="idfields" aria-label="Open build"></dl>
+    <div class="hgroup"><span id="activity-slot"></span><button class="btn primary" id="choose">← Choose build</button></div>
+    <nav class="areas" id="areas" aria-label="Build areas"></nav>
+  </header>
+  <main id="area" tabindex="-1" style="display:grid;min-height:0;outline:none"></main>
+  <footer class="statusbar" id="statusbar"></footer>
+</div>
+
+<nav class="mock" aria-label="Mockup state (not part of the design)" id="mock"></nav>
+
+<script>
+const p=new URLSearchParams(location.search);
+const state=p.get('state')||'idle';           // idle loading stopped downloading attention partial
+let area=p.get('area')||'home';               // home tables files items creatures
+let panelOpen=p.get('panel')==='open';
+let popover=null, popoverTrigger=null;
+const fromItems=p.get('from')==='items';      // Tables reached from an Items source
+const gameData=p.get('game')!=='0';            // Items and Creatures available for this build
+const newerCdn=p.get('cdn')==='newer';         // the source region now advertises a different CDN config
+// Tables data state for the main table (Item): ready definition waiting stopped partial unsupported failed.
+const tdata=p.get('tdata')||{loading:'waiting',stopped:'stopped',partial:'partial'}[state]||'ready';
+const reftext=p.get('reftext')||'resolved';   // resolved pending unreadable: state of the reference-text lookup (#17)
+// File catalog: ready notprepared preparing partial empty.
+const catalog=p.get('catalog')||(state==='partial'?'notprepared':'ready');
+const listfile=p.get('listfile')==='1';       // opt-in community listfile names
+let homeOrigin=null;                           // control that left Home for a local destination (Browse in Files)
+let tablesOrigin=null;                         // Tables record that followed a FileDataID into Files
+if(p.get('text')==='200')document.documentElement.dataset.text='200';
+if(p.get('chrome')==='0')document.getElementById('mock').remove();
+
+const hex=seed=>{let h='',x=(seed*2654435761)>>>0;for(let i=0;i<32;i++){x=(x*1103515245+12345)>>>0;h+='0123456789abcdef'[x>>>28];}return h;};
+const rand=s=>{let x=(s*2654435761)>>>0;return ()=>{x=(x*1103515245+12345)>>>0;return x>>>16;};};
+const n=v=>v.toLocaleString('en-US');
+const esc=v=>String(v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const GiB=1073741824;
+const gib=b=>(b/GiB).toFixed(1)+' GiB';
+const kib=b=>b<1048576?(b/1024).toFixed(1)+' KiB':(b/1048576).toFixed(1)+' MiB';
+const hx=v=>'0x'+v.toString(16).toUpperCase().padStart(8,'0');
+// Authored sample: wow Retail, one exact build identity, US source, research locale enUS.
+const build={product:'wow',label:'Retail',version:'12.1.5.70448',buildId:'70448',source:'US',advertised:['US','EU','KR'],id:hex(401),cfg:hex(1),cdn:hex(101),productCfg:hex(201)};
+const dl={total:127131034112,verified:4509715660,shared:1503238553,metadata:299892736,objects:1312577,assessed:'Oct 18, 2026, 8:00 AM'};
+dl.remaining=dl.total-dl.verified;
+const cat={members:1284630,root:1207914,unique:1190882,generation:3};
+const measured=state!=='partial';
+const mode={idle:'off',loading:'checking',downloading:'on',attention:'on',partial:'unavailable',stopped:'off'}[state];
+const attention=state==='attention';
+
+/* ---------- Background work (one App-level list) ---------- */
+const tasks=[];
+if(state==='loading')tasks.push({group:'research',kind:'table'});
+if(catalog==='preparing')tasks.push({group:'research',kind:'catalog'});
+if(state==='downloading')tasks.push({group:'build',kind:'download'});
+if(state==='attention')tasks.push({group:'outcome',kind:'failed'});
+if(state==='stopped')tasks.push({group:'outcome',kind:'stopped'});
+const showActivity=tasks.length>0;
+// The badge counts research requests, saved Download all intents and records that need attention. Stopped outcomes are not counted.
+const badge=tasks.filter(t=>t.kind!=='stopped').length;
+const active=tasks.some(t=>t.group!=='outcome');
+
+/* ---------- Header ---------- */
+function renderHeader(){
+  const ex=id=>popover===id, pop=id=>popover===id?popoverMarkup(id):'';
+  const modeHtml=mode==='checking'?'<span class="dim" id="mode-value">Checking…</span>'
+    :mode==='unavailable'?'<span class="dim" id="mode-value">On demand only</span>'
+    :`<button class="switch" role="switch" id="mode-switch" aria-checked="${mode==='on'}" aria-labelledby="mode-label mode-value"><span class="track" aria-hidden="true"></span><span id="mode-value">${mode==='on'?'Download all':'On demand'}</span></button>`;
+  document.getElementById('idfields').innerHTML=`
+    <div class="idf named"><dt id="product-label">Product</dt><dd><button class="vbtn" id="product-btn" aria-haspopup="dialog" aria-expanded="${ex('identity-product')}" aria-labelledby="product-label product-value"><span id="product-value">${build.label} <span class="pid">${build.product}</span></span><span class="chev" aria-hidden="true">▾</span></button>${pop('identity-product')}</dd></div>
+    <div class="idf named"><dt id="build-label">Build</dt><dd><button class="vbtn" id="build-btn" aria-haspopup="dialog" aria-expanded="${ex('identity-build')}" aria-labelledby="build-label build-value"><span id="build-value" class="selectable">${build.version}</span><span class="chev" aria-hidden="true">▾</span></button>${pop('identity-build')}</dd></div>
+    <div class="idf moved"><dt>Source</dt><dd>${build.source}</dd></div>
+    <div class="idf moved"><dt>Locale</dt><dd>English · enUS</dd></div>
+    <div class="idf"><dt id="status-label">Status</dt><dd><button class="vbtn" id="status-btn" aria-haspopup="dialog" aria-expanded="${ex('status')}" aria-labelledby="status-label status-value"><span id="status-value">${measured?'Partial':'Configuration verified'}</span><span class="chev" aria-hidden="true">▾</span></button>${pop('status')}</dd></div>
+    <div class="idf"><dt id="mode-label">Download mode</dt><dd>${modeHtml}</dd></div>`;
+  document.getElementById('product-btn').onclick=e=>togglePopover('identity-product',e.currentTarget);
+  document.getElementById('build-btn').onclick=e=>togglePopover('identity-build',e.currentTarget);
+  document.getElementById('status-btn').onclick=e=>togglePopover('status',e.currentTarget);
+  const sw=document.getElementById('mode-switch');
+  // Mockup only: the switch jumps to the matching sample state. The real control commits a saved policy first.
+  if(sw)sw.onclick=()=>go({state:mode==='on'?'idle':'downloading',panel:null});
+  const close=document.getElementById('pop-close');
+  if(close)close.onclick=()=>closePopover(true);
+}
+
+/* ---------- Activity entry and panel ---------- */
+function taskHtml(t){
+  if(t.kind==='table')return `<div class="task"><div class="t">Item · Table data · enUS</div><div class="s"><span aria-hidden="true">[2/4] </span>Downloading encoded object · ${build.source}<span class="visually-hidden">Stage 2 of 4.</span></div><div class="bar indeterminate" aria-hidden="true"><i></i></div><div class="s">Size of this stage not known yet</div><div class="row"><button class="btn">Stop loading Item</button><button class="btn" data-go="tables">View</button></div></div>`;
+  if(t.kind==='catalog')return `<div class="task"><div class="t">File catalog · all published variants</div><div class="s"><span aria-hidden="true">[2/4] </span>Resolving ROOT metadata source · ${build.source}<span class="visually-hidden">Stage 2 of 4.</span></div><div class="bar indeterminate" aria-hidden="true"><i></i></div><div class="s">Size of this stage not known yet</div><div class="row"><button class="btn">Stop preparing catalog</button><button class="btn" data-go="files">View</button></div></div>`;
+  if(t.kind==='download')return `<div class="task"><div class="t">${build.version} · Download all</div><div class="s"><span aria-hidden="true">[2/3] </span>Downloading encoded content · ${build.source}<span class="visually-hidden">Stage 2 of 3.</span></div><div class="bar" aria-hidden="true"><i style="width:25%"></i></div><div class="s">28.6 of 114.2 GiB · 25% of current stage</div><div class="row"><button class="btn">Pause build download</button><button class="btn">On demand</button></div></div>`;
+  if(t.kind==='failed')return `<div class="task failed"><div class="t">${build.version} · Download all</div><div class="s">Failed at [2/3] Downloading encoded content · ${build.source}</div><div class="s">CDN returned 404 for 3 archives <code>(ARCHIVE_NOT_FOUND)</code></div><div class="s">Download all stays selected. Previously verified content is kept.</div><div class="row"><button class="btn">Resume build download</button><button class="btn">Dismiss outcome</button></div></div>`;
+  return `<div class="task"><div class="t">Item · Table data · enUS</div><div class="s">Loading stopped at [2/4] Downloading encoded object · ${build.source}</div><div class="s">Previously verified content is preserved. Retry is a deliberate new request, from Tables.</div><div class="row"><button class="btn" data-go="tables">View</button><button class="btn">Dismiss outcome</button></div></div>`;
+}
+function panelHtml(){
+  const sec=(g,label)=>{const list=tasks.filter(t=>t.group===g);return list.length?`<div class="label">${label}</div>${list.map(taskHtml).join('')}`:'';};
+  return `<section class="activity-panel" id="activity" aria-labelledby="act-title"><header><h2 id="act-title" tabindex="-1">Downloads &amp; activity</h2><button class="btn small" id="activity-close">Close</button></header><div class="rows">${sec('research','Needed by your research')}${sec('build','Build downloads')}${sec('outcome','Recent outcome')}</div></section>`;
+}
+function renderActivity(){
+  const slot=document.getElementById('activity-slot');
+  if(!showActivity){slot.innerHTML='';return;}
+  const parts=[];const r=tasks.filter(t=>t.group==='research').length;
+  if(r)parts.push(`${r} current research request${r>1?'s':''}`);
+  if(state==='downloading')parts.push('1 saved Download all intent');
+  if(attention)parts.push('1 outcome to review');
+  slot.innerHTML=`<button class="activity-chip${attention?' attention':''}" id="chip" aria-expanded="${panelOpen}" aria-controls="activity">${active?'<span class="pulse" aria-hidden="true"></span>':''}<span class="chip-long">${attention?'Needs attention':'Downloads &amp; activity'}</span><span class="chip-short">${attention?'Attention':'Activity'}</span>${badge?`<span class="count" aria-label="${parts.join(', ')}">${badge}</span>`:''}</button>${panelOpen?panelHtml():''}`;
+  document.getElementById('chip').onclick=()=>{panelOpen=!panelOpen;closePopover(false);renderActivity();renderStatus();placeSurfaces();setInert();if(panelOpen)document.getElementById('act-title').focus();};
+  const close=document.getElementById('activity-close');
+  if(close)close.onclick=closePanel;
+  slot.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{closePanel();setArea(b.dataset.go);});
+  setInert();
+}
+function openPanel(){if(!showActivity)return;panelOpen=true;closePopover(false);renderActivity();renderStatus();placeSurfaces();setInert();document.getElementById('act-title').focus();}
+function closePanel(){panelOpen=false;renderActivity();renderStatus();setInert();document.getElementById('chip')?.focus();}
+// Everything the panel covers is inert. At full width (enlarged text) that is the whole area; otherwise the side column or inspector.
+function setInert(){
+  const main=document.getElementById('area'),side=document.querySelector('.panel.side,.tables>.inspector,.files>.inspector'),panel=document.getElementById('activity');
+  const full=!!panel&&panel.offsetWidth>=document.documentElement.clientWidth-1;
+  main.inert=panelOpen&&full;
+  if(side)side.inert=panelOpen&&!full;
+}
+
+/* ---------- Popovers (identity, Status): nonmodal dialogs right after their trigger ---------- */
+function popoverHtml(id){
+  if(id==='status'){
+    const rows=measured?[
+      ['Selected build',`${build.product} · ${build.version} · source ${build.source} · enUS`],
+      ['Published encoded content',`${n(dl.total)} bytes`],
+      ['Verified locally at opening assessment',`${n(dl.verified)} bytes`],
+      ['Remaining at opening assessment',`${n(dl.remaining)} bytes`],
+      ['Opening assessment scope','Download manifest · all published variants (encoded)'],
+      ['Declared encoded objects',n(dl.objects)],
+      ['Opening assessment',dl.assessed],
+      ['Current presence assessment',state==='loading'?'Checking saved download status…':'Not available for this exact scope'],
+      ['Fresh content verification','Not assessed by this view']]
+     :[['Selected build',`${build.product} · ${build.version} · source ${build.source} · enUS`],['Published encoded scope','Unknown · DOWNLOAD_MANIFEST_UNSUPPORTED'],['Current presence assessment','Not available for this exact scope'],['Fresh content verification','Not assessed by this view']];
+    return {title:'Local content & storage',body:`<dl class="facts">${rows.map(([k,v])=>`<dt>${k}</dt><dd class="selectable">${v}</dd>`).join('')}</dl>
+      <p class="tiny">Presence is a dated existence and length check, not a fresh hash check. Encoded published variants are not installed size, disk usage or remaining network traffic.</p>
+      ${measured&&state!=='loading'?'<div class="row"><button class="btn small">Check download status</button></div>':''}`};
+  }
+  return {title:'Selected build identity',body:`<dl class="facts">
+    <dt>Product</dt><dd>World of Warcraft · ${build.label}</dd>
+    <dt>Exact product ID</dt><dd class="mono selectable">${build.product}</dd>
+    <dt>Build version</dt><dd class="selectable">${build.version}</dd>
+    <dt>Build identity</dt><dd class="mono selectable">${build.id}</dd>
+    <dt>Acquisition source</dt><dd>${build.source}</dd>
+    <dt>Research locale</dt><dd>English · enUS</dd>
+    <dt>Build config</dt><dd class="mono selectable">${build.cfg}</dd>
+    <dt>CDN config</dt><dd class="mono selectable">${build.cdn}</dd></dl>
+    <p class="tiny">Source observations stay bound to this exact build. Acquisition source and research locale are separate.</p>
+    ${newerCdn?`<p class="cdn-note" role="note"><strong>${build.source} now advertises a different CDN configuration.</strong> This open build keeps the one it was opened with (<code>${build.cdn.slice(0,8)}…</code>). Open again to switch; retained content is reused.</p>`:''}`};
+}
+function popoverMarkup(id){
+  const {title,body}=popoverHtml(id);
+  return `<section class="popover" id="pop" role="dialog" aria-modal="false" aria-labelledby="pop-title"><header><h2 id="pop-title" tabindex="-1">${title}</h2><button class="btn small" id="pop-close" aria-label="Close ${title}">Close</button></header><div class="pop-body">${body}</div></section>`;
+}
+function togglePopover(id,trigger){
+  if(popover===id){closePopover(true);return;}
+  if(panelOpen){panelOpen=false;renderActivity();renderStatus();setInert();}
+  popover=id;popoverTrigger=trigger.id;
+  renderHeader();placeSurfaces();
+  document.getElementById('pop-title').focus();
+}
+function closePopover(restore){
+  if(!popover)return;
+  const t=popoverTrigger;popover=null;popoverTrigger=null;
+  renderHeader();
+  if(restore&&t)document.getElementById(t)?.focus();
+}
+function placeSurfaces(){
+  const head=document.getElementById('toolbar'),sb=document.getElementById('statusbar');
+  const top=head.getBoundingClientRect().bottom,bottom=sb.offsetHeight;
+  const panel=document.getElementById('activity');
+  if(panel){panel.style.top=top+'px';panel.style.bottom=bottom+'px';}
+  const pop=document.getElementById('pop');
+  if(pop&&popoverTrigger){const r=document.getElementById(popoverTrigger).getBoundingClientRect();
+    const w=pop.offsetWidth,left=Math.max(8,Math.min(r.left-8,innerWidth-w-8));
+    pop.style.left=left+'px';pop.style.top=(r.bottom+6)+'px';pop.style.maxHeight=(innerHeight-r.bottom-6-bottom-8)+'px';}
+}
+
+/* ---------- Area navigation ---------- */
+function renderAreas(){
+  // Home, then the raw source layer (Tables, Files), then VibeMiner's joined views (Items, Creatures).
+  // Items and Creatures are omitted, with their separator, when this build or engine can't provide them (as BuildAreas does today).
+  const groups=[[null,[['home','Home']]],['Source data',[['tables','Tables'],['files','Files']]],...(gameData?[['Game data',[['items','Items'],['creatures','Creatures']]]]:[])];
+  const btn=([id,l])=>`<button data-area="${id}"${area===id?' aria-current="page"':''}>${l}</button>`;
+  const nav=document.getElementById('areas');
+  nav.innerHTML=groups.map(([label,items],i)=>(i===2?'<span class="area-sep" aria-hidden="true"></span>':'')+(label?`<span class="area-group" role="group" aria-label="${label}">${items.map(btn).join('')}</span>`:items.map(btn).join(''))).join('');
+  nav.querySelectorAll('button').forEach(b=>b.onclick=()=>{homeOrigin=null;tablesOrigin=null;setArea(b.dataset.area);});
+}
+// The area bar focuses the destination heading. A local return (Return to build overview) restores the control that left Home instead.
+function setArea(a,restore){
+  area=a;document.getElementById('app').dataset.area=a;
+  const q=new URLSearchParams(location.search);q.set('area',a);history.replaceState(null,'','?'+q);
+  renderAreas();renderArea();renderStatus();renderMock();setInert();
+  const back=restore&&document.getElementById(restore.id);
+  if(back){const grid=document.querySelector('.home-grid');if(grid)grid.scrollTop=restore.scroll;back.focus({preventScroll:true});return;}
+  const h=document.querySelector('#area h1');if(h){h.tabIndex=-1;h.focus({preventScroll:true});}
+}
+
+/* ---------- Home ---------- */
+function homeHtml(){
+  const pct=(dl.verified/dl.total*100).toFixed(2);
+  const own=(dl.verified-dl.shared)/dl.total*100, sh=dl.shared/dl.total*100;
+  const sizes=measured?`
+      <div class="metric"><span class="mlabel">Published download content</span><strong>${gib(dl.total)}</strong><span class="exact mono selectable">${n(dl.total)} bytes</span></div>
+      <dl class="facts"><dt>Unique encoded objects</dt><dd>${n(dl.objects)}</dd><dt>Scope</dt><dd>Download manifest · all variants</dd><dt>Decoded / installed size</dt><dd class="dim">Unknown</dd></dl>`
+    :`<div class="metric"><span class="mlabel">Published download content</span><strong class="unknown">Unknown</strong><span class="exact">Encoded scope unknown</span></div>
+      <div class="state-box warn"><strong>Published download size is unknown</strong><p>This build's download manifest version is not supported. No download total or local coverage is inferred. <code>(DOWNLOAD_MANIFEST_UNSUPPORTED)</code></p><div class="row"><button class="btn small">Recheck this build</button></div></div>`;
+  const ready=catalog==='ready'||catalog==='partial'||catalog==='empty';
+  const catalogHtml=ready?`
+      <div class="metric"><span class="mlabel">Catalog memberships</span><strong>${n(cat.members)}</strong><span class="exact">All published variants</span></div>
+      <dl class="facts"><dt>ROOT memberships</dt><dd>${n(cat.root)}</dd><dt>Unique ROOT/IN contents</dt><dd>${n(cat.unique)}</dd><dt>Catalog</dt><dd class="${catalog==='partial'?'warn-t':'ok'}">${catalog==='partial'?'Ready · 10 content keys unresolved':'Ready to browse'}</dd></dl>`
+    :catalog==='preparing'?`<div class="metric"><span class="mlabel">Catalog memberships</span><strong class="unknown">Preparing…</strong><span class="exact">No membership count until the catalog is sealed</span></div><div class="row"><button class="btn small" data-task>View task</button></div>`
+    :`<div class="metric"><span class="mlabel">Catalog memberships</span><strong class="unknown">Not prepared</strong><span class="exact">No membership count is inferred</span></div>
+      <p class="reason">Prepare it from Files. Tables, Items and Creatures prepare their own data.</p>`;
+  const modeBox={
+    off:`<div class="state-box plain"><strong>On demand by default</strong><p>Content is fetched as you explore. Opening table data prepares missing content automatically. Switch Download mode to keep the whole build locally.</p></div>`,
+    checking:`<div class="state-box plain" role="status"><strong>Checking saved download policy…</strong><p>The current mode is not confirmed yet, so no switch is shown.</p></div>`,
+    on:attention?`<div class="state-box warn"><strong>Build download needs attention</strong><p>Failed at [2/3] Downloading encoded content · ${build.source} <code>(ARCHIVE_NOT_FOUND)</code>. Download all stays selected.</p><div class="row"><button class="btn small" data-task>View task</button></div></div>`
+      :`<div class="state-box"><strong>Download all is saved for this build</strong><p>Transfer progress is in Downloads &amp; activity. The figures here are from the last assessment, not a live count.</p><div class="row"><button class="btn small" data-task>View task</button></div></div>`,
+    unavailable:`<div class="state-box plain"><strong>On demand only · Download all unavailable</strong><p>Download all needs a verified download-manifest scope. Research still fetches what it needs.</p></div>`}[mode];
+  // Unknown coverage draws no bar: an empty track would read as 0%.
+  const storage=measured?`
+      <div class="stack" role="img" aria-label="${n(dl.verified)} bytes verified locally at assessment, including ${n(dl.shared)} shared, of ${n(dl.total)} bytes published download content"><i class="own" style="width:${own}%"></i><i class="shared" style="width:${sh}%"></i></div>
+      <div class="legend"><span><i class="own"></i>Verified locally · only this build</span><span><i class="shared"></i>Verified locally · shared</span><span><i></i>Additional encoded content</span></div>
+      <dl class="ledger">
+        <div><dt>Verified locally at assessment <span class="dim">· ${pct}%</span></dt><dd>${gib(dl.verified)}</dd><dd class="exact selectable">${n(dl.verified)}</dd></div>
+        <div><dt>Of those, shared with other builds</dt><dd>${gib(dl.shared)}</dd><dd class="exact selectable">${n(dl.shared)}</dd></div>
+        <div><dt>Additional encoded content required</dt><dd>${gib(dl.remaining)}</dd><dd class="exact selectable">${n(dl.remaining)}</dd></div>
+        <div><dt>Retained metadata (separate)</dt><dd>286 MiB</dd><dd class="exact selectable">${n(dl.metadata)}</dd></div>
+        <div><dt>Assessed</dt><dd>${dl.assessed}</dd><dd class="exact"></dd></div>
+      </dl>`
+    :`<dl class="ledger">
+        <div><dt>Verified locally at assessment</dt><dd class="dim">Unknown</dd><dd class="exact"></dd></div>
+        <div><dt>Additional encoded content required</dt><dd class="dim">Unknown</dd><dd class="exact"></dd></div>
+        <div><dt>Retained metadata (separate)</dt><dd class="dim">Not measured</dd><dd class="exact"></dd></div>
+      </dl>`;
+  const r=(k,v,c='')=>`<dt>${k}</dt><dd${c?` class="${c}"`:''}>${v}</dd>`;
+  const facts=`<dl class="facts">
+      ${r('Build and CDN configs','Verified','ok')}
+      ${r('Download manifest',measured?'Verified':'Unsupported version',measured?'ok':'warn-t')}
+      ${r('Research file catalog',ready?'Ready':catalog==='preparing'?'Preparing…':'Not prepared',ready?'ok':'dim')}
+      ${r('Decoded / installed size','Unknown','dim')}
+      ${r('Payload content locations','Not assessed','dim')}
+      ${r('Every object downloadable?','Not checked','warn-t')}
+      ${r('Research decoders','Selected WDC5 tables')}
+      ${r('Encryption assessment','Not assessed','dim')}
+      ${r('Game data areas',gameData?'Items, Creatures':'Not available for this build',gameData?'':'dim')}</dl>`;
+  return `<section class="home" aria-labelledby="home-title">
+    <div class="pane-head"><h1 id="home-title">Build overview</h1><span class="sub">${build.source} download source · advertised in ${build.advertised.join(', ')} · measurements cover every published variant</span><span class="spacer"></span><button class="btn small" id="metadata">Metadata</button><button class="btn small" id="source">Source details</button></div>
+    <div class="home-grid">
+      <section class="panel" aria-labelledby="p-sizes"><div class="panel-head"><h2 id="p-sizes">Download sizes</h2><span class="scope">Encoded bytes</span></div><div class="panel-body">${sizes}</div><div class="panel-foot"><button class="btn small">Scope and measurement details</button></div></section>
+      <section class="panel" aria-labelledby="p-cat"><div class="panel-head"><h2 id="p-cat">File catalog</h2><span class="scope">ROOT and install manifests</span></div><div class="panel-body">${catalogHtml}</div><div class="panel-foot"><button class="btn small" id="browse-files" data-area-go="files">Browse in Files</button></div></section>
+      <section class="panel wide" aria-labelledby="p-storage"><div class="panel-head"><h2 id="p-storage">Local content &amp; shared storage</h2><span class="scope">Download manifest scope · exact build</span></div>
+        <div class="panel-body"><div class="storage-cols"><div>${storage}<p class="tiny">Shared bytes are part of the verified bytes, not added again. Metadata may overlap content objects, so there is no grand disk total. These are not installed-game sizes.</p></div><div>${modeBox}</div></div></div></section>
+      <aside class="panel side" aria-labelledby="p-ready"><div class="panel-head"><h2 id="p-ready">Build readiness</h2><span class="scope">All published variants</span></div>
+        <div class="panel-body"><div class="state-box${measured?'':' warn'}" style="margin-bottom:.8rem"><strong>${measured?'Partial':'Configuration verified'}</strong><p>${measured?'Metadata and the download manifest are verified. Content stays on demand.':'Configs identify this exact build. Download sizing is unavailable.'}</p></div>${facts}
+        <p class="tiny">Partial is separate from catalog readiness. A complete metadata inventory does not prove every payload is still downloadable or decodable.</p></div>
+        <div class="panel-foot"><button class="btn">View metadata details</button></div></aside>
+    </div></section>`;
+}
+
+/* ---------- Tables: pinned WoWDBDefs definitions plus admitted enUS rows ---------- */
+const PROV={name:'WoWDBDefs contributors',rev:'b9a63096cdd99b26967f17f9515377ae62cadfd7',license:'CC BY-SA 4.0'};
+const F=(n,t,w,s,o={})=>({n,t,w,s,arr:o.arr||1,id:!!o.id,ni:!!o.ni,ref:o.ref||null,v:o.v!==false});
+// Selected-build candidate layouts from the bundled definitions (all list 12.1.5.70448).
+const DEFS={
+  Item:{hash:'50238EC2',fdid:841626,layout:'996192AA',sha:'076ea4c7e80c891b399cc77f285c807071080c0fed95701e447f7c98024ae120',declared:171392,fields:[
+    F('ID','int',32,true,{id:1,ni:1}),F('ClassID','int',32,true,{ref:'ItemClass.ClassID'}),F('SubclassID','int',8,false),F('Material','int',8,false,{ref:'Material.ID'}),
+    F('InventoryType','int',8,true),F('SheatheType','int',8,false),F('Sound_override_subclassID','int',8,true),F('IconFileDataID','int',32,true,{ref:'FileData.ID'}),
+    F('ItemGroupSoundsID','int',32,false,{ref:'ItemGroupSounds.ID'}),F('ContentTuningID','int',32,true,{ref:'ContentTuning.ID',v:false}),
+    F('ModifiedCraftingReagentItemID','int',32,true,{ref:'ModifiedCraftingReagentItem.ID',v:false}),F('Field_12_0_0_63534_010','int',8,false,{v:false}),
+    F('CraftingQualityID','int',32,true,{ref:'CraftingQuality.ID',v:false}),F('ItemSquishEraID','int',32,true,{ref:'ItemSquishEra.ID',v:false}),
+    F('RecraftReagentCountPercentage','float',null,null,{v:false}),F('OrderSource','int',8,false,{v:false})]},
+  ItemClass:{hash:'B977271E',fdid:1140189,layout:'35680EB8',sha:'6e0517e1ae17d3528aefe3eac6ad2b417ae7361d8d5ad77d0c743ffd4d126151',declared:6,fields:[F('ID','int',32,true,{id:1,ni:1}),F('ClassName_lang','locstring',null,null),F('ClassID','int',8,true),F('PriceModifier','float',null,null),F('Flags','int',32,true)]},
+  Material:{hash:'A4C11069',fdid:1294217,layout:'BE3E0E4C',sha:'94332b8ef22c9efa431f6ec35690a92896daf05c7f677fa6ce049006ab487ae7',declared:null,fields:[F('ID','int',32,true,{id:1,ni:1}),F('Flags','int',32,true),F('FoleySoundID','int',32,false,{ref:'SoundKit.ID'}),F('SheatheSoundID','int',32,false,{ref:'SoundKit.ID'}),F('UnsheatheSoundID','int',32,false,{ref:'SoundKit.ID'})]},
+  ItemGroupSounds:{hash:'9F4206C9',fdid:1283023,layout:'A7CEF530',sha:'e108620add5ef881b6189ee7f8c0bb0962c59254ec0dfe405abc889c9061f6de',declared:2,fields:[F('ID','int',32,true,{id:1,ni:1}),F('Sound','int',32,false,{arr:4})]}};
+// Declared targets outside the bundled definitions: the provider lists them, VibeMiner has no definition.
+const OTHER={FileData:{hash:'EEF11C65',fdid:null},ContentTuning:{hash:'BD3635FF',fdid:1962930},ModifiedCraftingReagentItem:{hash:'E598C085',fdid:3386487},CraftingQuality:{hash:'F544670A',fdid:4373538},ItemSquishEra:{hash:'ACAAF53B',fdid:7322706},SoundKit:{hash:'36237731',fdid:1237434}};
+// Reviewed text column per target table (#17). A target without one shows the number only.
+const TEXTCOL={ItemClass:'ClassName_lang'};
+// Catalogue page for the query "Item": bundled definitions first, then provider name.
+const CATALOG=[['Item','50238EC2',841626,1],['ItemClass','B977271E',1140189,1],['ItemEffect','4002A5B1',969941,1],['ItemGroupSounds','9F4206C9',1283023,1],['ItemSparse','919BE54E',1572924,1],['ItemSubClass','95D8638F',1261604,1],['ItemXItemEffect','00CB674F',3177687,1],
+  ['AccountStoreItem','58EFC38B',6197817],['AdventureJournalItem','4B8E0320',5599873],['ArenaCcItem','38890118',3849793],['ArenaTrackedItem','77CC91ED',5226140],['ArtifactItemToTransmog','6765AB7D',2029780],['AzeriteEmpoweredItem','AFB1B60F',1846046],['AzeriteItem','F8BBB475',1846048],['AzeriteItemMilestonePower','6BB71E97',1915395],['ChallengeModeItemBonusOverride','0DDC77B6',2965645],['CharacterLoadoutItem','65C39BA7',1302846],['ChrCustItemGeoModify','7FA857F8',3952714],['ConditionalItemAppearance','746D33FC',5345180],['CooldownViewerItemSpell','BC8023E3',7939216],['CraftingDataItemQuality','0490D46E',4545612],['CraftingItem','B134B886',null],['CraftingItemQuality','82CE757E',null]];
+// Authored rows, not game data. ItemClass ID differs from ClassID on purpose; ClassID 7 appears twice; ClassID 5 has no row.
+const ROWS={
+  Item:Array.from({length:50},(_,i)=>{const g=rand(i+7);return {ID:900001+i,ClassID:[12,4,12,2,7,5,12,4][i%8],SubclassID:i?g()%14:1,Material:i?[21,21,5,99][g()%4]:21,InventoryType:i?[13,5,17,1,0,22][g()%6]:3,SheatheType:g()%5,Sound_override_subclassID:g()%3===0?-1:g()%4,IconFileDataID:800001+i,ItemGroupSoundsID:i?[41,43,0][g()%3]:41,ContentTuningID:g()%3===0?0:g()%900+1,ModifiedCraftingReagentItemID:0,Field_12_0_0_63534_010:0,CraftingQualityID:g()%4===0?g()%5+1:0,ItemSquishEraID:g()%2,RecraftReagentCountPercentage:i?['0','0.25','0.5'][g()%3]:'0.25',OrderSource:g()%3};}),
+  ItemClass:[[301,'Authored class A',12,'1.25',0],[302,'Authored class B',4,'1',0],[303,'Authored class C',2,'1',0],[304,'Authored class D',9,'1',0],[305,'Authored class E',7,'1',0],[306,'Authored class F',7,'1',0]].map(([ID,ClassName_lang,ClassID,PriceModifier,Flags])=>({ID,ClassName_lang,ClassID,PriceModifier,Flags})),
+  ItemGroupSounds:[{ID:41,Sound:[701,702,0,704]},{ID:43,Sound:[705,0,0,706]}]};
+// Data state per table: Item follows the mock state; ItemClass is partial when its lookups are unreadable; Material has no records yet.
+const dataState=t=>t==='Item'?tdata:t==='Material'?'definition':t==='ItemClass'&&reftext==='unreadable'?'partial':t==='ItemClass'&&reftext==='pending'?'definition':DEFS[t]?'ready':'none';
+const typeName=f=>f.t==='float'?'float':f.t==='locstring'?'locstring':`${f.s?'int':'uint'}${f.w}${f.arr>1?`[${f.arr}]`:''}`;
+const widthSign=f=>f.t==='float'?'Float · no width declared':f.t==='locstring'?'Localized string · enUS':`${f.w}-bit ${f.s?'signed':'unsigned'}${f.arr>1?` · array of ${f.arr}`:''}`;
+const fname=f=>`${f.n}${f.v?'':'<span class="unv" title="Unverified name">?</span>'}`;
+const refParts=ref=>{const [t,c]=ref.split('.');return {t,c};};
+const targetKind=t=>DEFS[t]?'bundled':OTHER[t]?(t==='FileData'?'files':'notbundled'):'none';
+
+// Navigation trail: a catalogue pick starts a new trail; Follow extends it. At most 64 entries.
+const startTable=DEFS[p.get('table')]?p.get('table'):'Item';
+let trail=[{table:startTable,tab:p.get('tab')||'data',sel:0,field:startTable==='Item'?'ClassID':'ID',filter:null,label:startTable}], pos=0, tablePane='records';
+let catalogQuery='Item';
+if(p.get('follow')&&startTable==='Item'){const v=+p.get('follow');trail[0].sel=ROWS.Item.findIndex(r=>r.ClassID===v);trail.push({table:'ItemClass',tab:'data',sel:null,field:'ClassID',filter:{col:'ClassID',value:v},label:'ItemClass'});pos=1;}
+const view=()=>trail[pos];
+function showRecords(){tablePane='records';renderArea();renderStatus();document.getElementById('table-title')?.focus({preventScroll:true});}
+function navigate(next){trail=trail.slice(0,pos+1).concat(next).slice(-64);pos=trail.length-1;showRecords();}
+function lookup(t,col,value){return (ROWS[t]||[]).filter(r=>r[col]===value);}
+// Reference text for one declared reference cell (#17).
+function refText(f,value){
+  const {t,c}=refParts(f.ref);if(!TEXTCOL[t])return {kind:'number'};
+  if(reftext==='pending')return {kind:'pending'};
+  const m=lookup(t,c,value);
+  if(m.length===1)return {kind:'resolved',text:m[0][TEXTCOL[t]],row:m[0].ID,t,col:TEXTCOL[t]};
+  if(m.length>1)return {kind:'many',count:m.length,t};
+  return {kind:reftext==='unreadable'?'unreadable':'missing',t};
+}
+function refTextHtml(rt){
+  if(rt.kind==='resolved')return `<span class="rt"> · ${esc(rt.text)}</span>`;
+  if(rt.kind==='pending')return `<span class="rt pending" aria-hidden="true"> · …</span><span class="visually-hidden">, text not prepared yet</span>`;
+  if(rt.kind==='many')return `<span class="rt"> · ${rt.count} matches</span>`;
+  if(rt.kind==='missing')return `<span class="rt"> · not found in ${rt.t}</span>`;
+  if(rt.kind==='unreadable')return `<span class="rt"> · not readable (protected)</span>`;
+  return '';
+}
+function followLabel(f,value){
+  const {t,c}=refParts(f.ref),k=targetKind(t);
+  if(k==='bundled')return `Show ${t} rows where ${c} = ${value}`;
+  if(k==='files')return `Find FileDataID ${value} in Files`;
+  return null;
+}
+function cols(t){const out=[];for(const f of DEFS[t].fields){if(f.arr>1)for(let i=0;i<f.arr;i++)out.push({f,key:f.n,idx:i,label:`${f.n}[${i}]`});else out.push({f,key:f.n,idx:null,label:f.n});}return out;}
+const cellVal=(r,c)=>c.idx===null?r[c.key]:r[c.key][c.idx];
+
+function dataBody(v){
+  const t=v.table,ds=dataState(t),def=DEFS[t];
+  if(ds==='definition')return `<div class="pane-scroll"><div class="local-wait"><div class="state-box plain" role="status"><strong>No records yet</strong><p>${t} table data is not prepared for enUS. Opening Data prepares it automatically through the shared download pipeline.</p><p class="dim">The definition is already local: Structure and Relationships work now.</p></div></div></div>`;
+  if(ds==='waiting')return `<div class="pane-scroll"><div class="local-wait"><div class="state-box" role="status"><strong>Waiting for required data</strong><p>Opening table data for ${t} · enUS. <span class="dim">[2/4] Downloading encoded object · ${build.source}</span></p><p class="dim">Structure and definition browsing stay local. Progress is in Downloads &amp; activity.</p><div class="row"><button class="btn small">Stop loading ${t}</button><button class="btn small" data-task>View task</button></div></div></div></div>`;
+  if(ds==='stopped')return `<div class="pane-scroll"><div class="local-wait"><div class="state-box plain" role="status"><strong>Loading stopped</strong><p>${t} · enUS. You stopped this request at [2/4] Downloading encoded object · ${build.source}.</p><p class="dim">Previously verified content is preserved. Retry is a deliberate new request. Structure and definition browsing stay local.</p><div class="row"><button class="btn small">Retry table data</button></div></div></div></div>`;
+  if(ds==='unsupported')return `<div class="pane-scroll"><div class="local-wait"><div class="state-box plain"><strong>Records unavailable for this layout</strong><p>The WDC5 header of the ${t} file in this build doesn't match the pinned candidate layout ${def.layout}, so no values are decoded <code>(SCHEMA_MISMATCH)</code>.</p><p class="dim">Structure still shows the community declaration. A newer definition revision is needed; Retry wouldn't change this.</p></div></div></div>`;
+  if(ds==='failed')return `<div class="pane-scroll"><div class="local-wait"><div class="state-box warn" role="alert"><strong>Table data needs attention</strong><p>The ${t} source could not be verified for enUS <code>(TABLE_DATA_UNAVAILABLE)</code>. Previously verified content is preserved.</p><div class="row"><button class="btn small">Retry table data</button></div></div></div></div>`;
+  let rows=ROWS[t]||[];let note='';
+  if(v.filter){
+    rows=lookup(t,v.filter.col,v.filter.value);
+    const keyNote=v.filter.col==='ID'?'':` ${v.filter.col} isn't the declared key, so no row is picked.`;
+    note=rows.length>1?`<div class="notice calm"><div class="text"><strong>${rows.length} admitted rows have ${v.filter.col} = ${v.filter.value}</strong>Choose one.${keyNote}</div></div>`
+      :rows.length===1?'':ds==='partial'?`<div class="notice"><div class="text"><strong>Not in the readable ${t} rows</strong>No readable row has ${v.filter.col} = ${v.filter.value}. Protected sections are not loaded, so this isn't an absence.</div></div>`
+      :`<div class="notice calm"><div class="text"><strong>No admitted ${t} row has ${v.filter.col} = ${v.filter.value}</strong>Complete admitted section scope for enUS. Nothing else was searched or fetched.</div></div>`;
+  }
+  const partial=ds==='partial'?`<div class="notice"><div class="text"><strong>Readable rows available · Partial</strong>Protected sections not loaded; results cover admitted rows only. ${t==='Item'?'Header declares 171,392 physical records; 168,904 emitted; 2,512 physical and copy records excluded in 2 protected sections. Excluded counts include copies, so don\'t subtract them from the declared total.':''}</div></div>`:'';
+  const cs=cols(t);
+  return `${partial}${note}
+    <div class="grid-scroll" role="region" aria-label="${t} records, page 1" tabindex="0"><table class="records-grid"><thead><tr>${cs.map(c=>`<th scope="col">${fname(c.f)}${c.idx!==null?`[${c.idx}]`:''}<small>${typeName(c.f).replace(/\[\d+\]$/,'')}${c.f.ref?` · → ${c.f.ref}`:''}</small></th>`).join('')}</tr></thead>
+    <tbody>${rows.map((r,i)=>`<tr aria-selected="${i===v.sel}" data-i="${i}">${cs.map((c,j)=>{const val=cellVal(r,c);
+      if(j===0)return `<td><button class="rowsel" aria-pressed="${i===v.sel}" aria-label="Inspect record ${val}">${val}</button></td>`;
+      if(c.f.ref&&followLabel(c.f,val))return `<td class="refcell" data-follow="${c.key}" title="${followLabel(c.f,val)}"><span class="ref">${val}</span>${refTextHtml(refText(c.f,val))}</td>`;
+      if(c.f.t==='locstring')return `<td class="txt">${esc(val)}</td>`;
+      return `<td${val===0?' class="zero"':''}>${val}</td>`;}).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+function structureBody(v){
+  const t=v.table,def=DEFS[t],ds=dataState(t);
+  const phys=ds==='ready'||ds==='partial'?'Physical layout verified for the admitted enUS artifact':ds==='unsupported'?'Physical header doesn\'t match this candidate (SCHEMA_MISMATCH)':'Physical header not verified · records not prepared';
+  return `<div class="subbar"><strong class="ink">DBD structure</strong><span>Candidate layout ${def.layout} lists build ${build.version} · ${def.fields.length} declared fields</span><span class="spacer"></span><span class="${ds==='unsupported'?'warn-t':''}">${phys}</span></div>
+    <div class="grid-scroll" role="region" aria-label="${t} declared fields" tabindex="0"><table class="records-grid struct"><thead><tr><th>#</th><th>Field</th><th>Type</th><th>Width · sign</th><th>Array</th><th>Key</th><th>Reference</th><th>Annotations</th></tr></thead>
+    <tbody>${def.fields.map((f,i)=>`<tr aria-selected="${f.n===v.field}" data-field="${f.n}"><td class="dim">${i}</td><td><button class="rowsel" aria-pressed="${f.n===v.field}" aria-label="Inspect field ${f.n}">${fname(f)}</button></td><td class="mono">${typeName(f)}</td><td>${f.t==='float'?'<span class="dim">Not declared</span>':f.t==='locstring'?'<span class="dim">String</span>':`${f.w}-bit ${f.s?'signed':'unsigned'}`}</td><td>${f.arr>1?f.arr:'<span class="dim">—</span>'}</td><td>${f.id?'<span class="pill">$id$</span>':'<span class="dim">—</span>'}</td><td>${f.ref?`→ ${f.ref}`:'<span class="dim">None declared</span>'}</td><td>${[f.ni&&'$noninline$',!f.v&&'Unverified name ?'].filter(Boolean).join(' · ')||'<span class="dim">—</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function relationsBody(v){
+  const t=v.table,def=DEFS[t],refs=def.fields.filter(f=>f.ref),plain=def.fields.filter(f=>!f.ref&&!f.id);
+  const status=f=>{const {t:tt,c}=refParts(f.ref),k=targetKind(tt);
+    if(k==='bundled'){const ds=dataState(tt);return {s:`Definition bundled · ${ds==='ready'?'records admitted (enUS)':ds==='partial'?'readable rows only · protected sections not loaded':'records not prepared yet'}${DEFS[tt].fields.find(x=>x.n===c)?.id?'':` · ${c} isn't the declared key, so a value can match several rows`}`,act:`<button class="btn small" data-follow-def="${f.n}">Open ${f.ref} definition</button>`};}
+    if(k==='files')return {s:`Provider entry ${OTHER.FileData.hash}, no DB2 FileDataID, definition not bundled. Values are FileDataIDs.`,act:`<button class="btn small" data-files-of="${f.n}">Open Files (FileDataIDs)</button>`};
+    return {s:`Provider entry ${OTHER[tt].hash} · definition not bundled <code>(DEFINITION_NOT_BUNDLED)</code>`,act:'<span class="reason">Can\'t follow: no bundled definition</span>'};};
+  return `<div class="pane-scroll rel-list">
+    <div class="label">Outgoing · declared by ${t}</div>
+    ${refs.length?refs.map(f=>{const st=status(f);return `<div class="relcard${f.n===v.field?' current':''}"><b class="mono">${t}.${fname(f)} → ${f.ref}</b><span class="act">${st.act}</span><span class="st">${st.s}</span></div>`;}).join(''):`<p class="reason" style="font-size:var(--fs-m)">No references are declared in ${t}.${t==='ItemGroupSounds'?' Sound[4] is a plain integer array; matching numbers never create a link.':''}</p>`}
+    <div class="label">Incoming</div>
+    <p class="reason" style="font-size:var(--fs-m)">Not available. The definition contract returns only ${t}'s own declarations, so references from other tables to ${t} aren't listed.</p>
+    <div class="label">No declared reference</div>
+    <p class="reason" style="font-size:var(--fs-m)">${plain.map(f=>f.n).join(', ')||'None'}. These stay plain values; a matching number never creates a link.</p>
+  </div>`;
+}
+function tablesHtml(){
+  const v=view(),t=v.table,def=DEFS[t],ds=dataState(t);
+  const inPage=CATALOG.some(c=>c[0]===t);
+  const catalogPane=`<aside class="pane catalog" aria-labelledby="tables-title">
+    <div class="pane-head"><h1 id="tables-title">Tables<span class="n">139</span></h1><input class="control search" id="table-search" type="search" value="${catalogQuery}" placeholder="Name, ID or field" aria-label="Search definitions" aria-keyshortcuts="Control+F"></div>
+    ${inPage?'':`<div class="notice calm" style="margin:.5rem .86rem"><div class="text">Selected definition ${t} is outside this catalogue page.</div></div>`}
+    <div class="cat-list" role="region" aria-label="Provider definitions on this page" tabindex="0">${CATALOG.map(([name,id,fdid,b])=>`<button class="tableitem" data-table="${name}" aria-pressed="${name===t}"><span class="glyph" aria-hidden="true">▦</span><span><b>${name.replace(/([a-z0-9])([A-Z])/g,'$1<wbr>$2')}</b><small>${b?'Definition bundled':'Definition not bundled'} · ${id}</small></span></button>`).join('')}</div>
+    <div class="pane-foot" role="group" aria-label="Definition catalogue pages"><span class="count">${CATALOG.length} on this page · 139 matching · 1,346 provider entries</span><button class="btn" aria-disabled="true" aria-label="First catalogue page">First</button><button class="btn" aria-disabled="true" aria-label="Previous catalogue page">Previous</button><button class="btn" aria-label="Next catalogue page">Next</button></div></aside>`;
+  if(!def){ // a not-bundled or undrawn provider entry
+    const entry=CATALOG.find(c=>c[0]===t);
+    return `<section class="tables" data-pane="${tablePane}" aria-label="Tables workbench">${switcher(true)}${catalogPane}<section class="pane records" aria-labelledby="table-title"><div class="pane-head">${trailHtml()}</div><div class="titlerow"><h2 id="table-title" tabindex="-1">${t}</h2><span class="meta">Provider table ${entry[1]} · FileDataID ${entry[2]??'not supplied'}</span></div>
+      <div class="pane-scroll"><div class="local-wait"><div class="state-box plain"><strong>${entry[3]?'Not drawn in this mockup':'Definition not bundled'}</strong><p>${entry[3]?'This bundled definition works like Item.':'The provider lists this table, but VibeMiner ships only reviewed definitions. No structure or records are shown, and this says nothing about the file being in the build.'} ${entry[3]?'':'<code>(DEFINITION_NOT_BUNDLED)</code>'}</p></div></div></div></section>
+      <aside class="inspector" aria-labelledby="insp-title"><div class="insp-head"><div class="label">Definition inspector</div><h2 id="insp-title">Source &amp; interpretation</h2></div><div class="insp-body">${sourceFacts(null)}</div><div class="insp-foot"><button class="btn">Table source &amp; admission details</button></div></aside></section>`;
+  }
+  const ret=fromItems&&pos===0?'<button class="btn small return-link" id="return-items">← Return to Items selection</button><span class="trail-sep" aria-hidden="true"></span>':'';
+  const tabs=`<div class="segmented" role="group" aria-label="Table view">${[['data','Data'],['structure','Structure'],['relations','Relationships']].map(([k,l])=>`<button data-tab="${k}" aria-pressed="${v.tab===k}">${l}</button>`).join('')}</div>`;
+  const noRows=!['ready','partial'].includes(ds);
+  const idf=v.tab==='data'&&!v.filter?`<div class="idfilter"><label for="rid">Record ID</label><input id="rid" class="control" inputmode="numeric" placeholder="Exact raw ID"${noRows?' disabled':''}><button class="btn small"${noRows?' disabled':''}>Apply</button></div>`:'';
+  const filterChip=v.filter&&v.tab==='data'?`<div class="subbar"><span>Followed from ${trail[pos-1]?.table??'Item'}</span><span class="chip-filter">${v.filter.col} = ${v.filter.value}<button class="chip-x" id="clear-filter" aria-label="Clear filter ${v.filter.col} = ${v.filter.value}">✕</button></span><span class="spacer"></span><span>Search runs on admitted ${t} rows for enUS only</span></div>`:'';
+  const body=v.tab==='data'?filterChip+dataBody(v):v.tab==='structure'?structureBody(v):relationsBody(v);
+  const rowsCount=ds==='partial'?(t==='Item'?'168,904 admitted rows · Partial':`${ROWS[t].length} readable rows · Partial`):ds==='ready'?`${n(ROWS[t]?ROWS[t].length===50?171392:ROWS[t].length:0)} admitted rows`:'Records not prepared';
+  const foot=v.tab==='data'?`<div class="pane-foot">${noRows?`<span>${ds==='stopped'?'Records not prepared · loading stopped':ds==='unsupported'?'No records · unsupported layout':ds==='failed'?'No records · needs attention':'Records not prepared yet'}</span>`:`<span>${v.filter?'Filtered':'Rows 1–50'} · ${rowsCount} · enUS</span>`}<span class="spacer"></span><button class="btn" aria-disabled="true">First page</button><button class="btn" aria-disabled="true">Previous page</button><button class="btn"${noRows||v.filter||(ROWS[t]||[]).length<50?' aria-disabled="true"':''}>Next page</button></div>`
+    :`<div class="pane-foot"><span>Definitions: ${PROV.name} · revision <span class="mono">${PROV.rev.slice(0,7)}</span> · ${PROV.license}</span><span class="spacer"></span><span>Not SQL: no UNIQUE, NOT NULL or CASCADE is implied</span></div>`;
+  return `<section class="tables" data-pane="${tablePane}" aria-label="Tables workbench">${switcher(noRows&&v.tab==='data')}
+    ${catalogPane}<section class="pane records" aria-labelledby="table-title"><div class="pane-head">${trailHtml()}<span class="spacer"></span>${idf}${tabs}</div>
+    <div class="titlerow${ret?' has-return':''}">${ret}<h2 id="table-title" tabindex="-1">${t}</h2><span class="meta">Provider table ${def.hash} · FileDataID ${def.fdid}</span></div>${body}${foot}</section>${inspectorHtml(v)}</section>`;
+}
+function switcher(noRecord){return `<div class="pane-switch"><div class="segmented" role="group" aria-label="Show pane"><button data-pane="catalog" aria-pressed="${tablePane==='catalog'}">Tables list</button><button data-pane="records" aria-pressed="${tablePane==='records'}">Records</button><button data-pane="inspector" aria-pressed="${tablePane==='inspector'}">${view().tab==='data'&&!noRecord?'Selected record':'Inspector'}</button></div></div>`;}
+function trailHtml(){
+  return `<div class="trail" aria-label="Definition trail" role="group"><button class="btn nav" id="trail-back" aria-label="Back through the trail"${pos===0?' aria-disabled="true"':''}>←</button><button class="btn nav" id="trail-fwd" aria-label="Forward through the trail"${pos>=trail.length-1?' aria-disabled="true"':''}>→</button>${trail.map((x,i)=>`${i?'<span class="crumb-sep" aria-hidden="true">›</span>':''}<button class="crumb" data-crumb="${i}"${i===pos?' aria-current="step"':''}>${x.label}</button>`).join('')}</div>`;
+}
+function sourceFacts(t){
+  const def=t&&DEFS[t],ds=t?dataState(t):'none',rowsReady=ds==='ready'||ds==='partial';
+  return `<div class="label">Source</div><dl class="facts">
+      <dt>Product / build</dt><dd>${build.product} · ${build.version}</dd>
+      <dt>Build identity</dt><dd class="mono selectable">${build.id}</dd>
+      <dt>Source / locale</dt><dd>${build.source} / enUS</dd>
+      ${def?`<dt>Provider table</dt><dd class="mono selectable">${def.hash}</dd><dt>DB2 FileDataID</dt><dd class="selectable">${def.fdid}</dd><dt>Candidate layout</dt><dd class="mono">${def.layout}</dd>`:''}
+      <dt>Physical source</dt><dd>${!rowsReady?'Not checked':ds==='partial'?'Authenticated encoded source':'Complete encoded object and decoded content verified'}</dd>
+      ${rowsReady?`<dt>Decoded content key</dt><dd>${ds==='partial'?'Not verified · expected key only':'Verified'}</dd>`:''}
+      <dt>Definitions</dt><dd>${PROV.name} · ${PROV.license}</dd>
+      <dt>Revision</dt><dd class="mono selectable">${PROV.rev}</dd>
+      ${def?`<dt>Definition SHA-256</dt><dd class="mono selectable">${def.sha}</dd>`:''}</dl>`;
+}
+function inspectorHtml(v){
+  const t=v.table,def=DEFS[t],ds=dataState(t);
+  const rows=v.filter?lookup(t,v.filter.col,v.filter.value):(ROWS[t]||[]);
+  const sel=v.filter&&rows.length===1&&v.sel===null?0:v.sel;
+  const r=v.tab==='data'&&['ready','partial'].includes(ds)&&sel!==null?rows[sel]:null;
+  if(v.tab==='data'&&!r)return `<aside class="inspector" aria-labelledby="insp-title"><div class="insp-head"><div class="label">Record inspector</div><h2 id="insp-title">No record selected</h2><p>${['ready','partial'].includes(ds)?'Choose a row.':'Records appear when table data is ready.'}</p></div><div class="insp-body">${sourceFacts(t)}</div><div class="insp-foot"><button class="btn">Table source &amp; admission details</button></div></aside>`;
+  if(r){
+    const fieldHtml=def.fields.map(f=>{
+      const raw=f.arr>1?`[${r[f.n].join(', ')}]`:r[f.n];
+      let rel='';
+      if(f.ref){const {t:tt,c}=refParts(f.ref),k=targetKind(tt),rt=refText(f,r[f.n]),fl=followLabel(f,r[f.n]);
+        const text=rt.kind==='resolved'?`<span class="rtext"><b>${esc(rt.text)}</b> <span class="dim">${rt.t}.${rt.col} · row ID ${rt.row} · enUS</span></span>`
+          :rt.kind==='pending'?`<span class="rtext dim">Text not prepared yet · ${tt}.${TEXTCOL[tt]} fills in when ${tt} is ready</span>`
+          :rt.kind==='many'?`<span class="rtext dim">${rt.count} ${tt} rows have ${c} = ${r[f.n]}; none is picked</span>`
+          :rt.kind==='missing'?`<span class="rtext dim">No admitted ${tt} row has ${c} = ${r[f.n]}</span>`
+          :rt.kind==='unreadable'?`<span class="rtext dim">Not in readable ${tt} rows · protected sections not loaded</span>`
+          :k==='bundled'?`<span class="rtext dim">${tt} has no reviewed text column; number only</span>`:'';
+        rel=`<span class="rel">→ ${f.ref}${k==='notbundled'?' · definition not bundled, can\'t follow':''}</span>${text}${fl?`<span class="rel"><button class="linkbtn" data-follow="${f.n}">${fl}</button></span>`:''}`;}
+      return `<div class="fieldrow"><span class="fname">${fname(f)}</span><span class="ftype">${typeName(f)}</span><span class="fval selectable${raw===0?' dim':''}">${esc(raw)}</span><span class="fmeta">${widthSign(f)}${f.id?' · $id$ declared key':''}${f.ni?' · $noninline$':''}</span>${rel}</div>`;}).join('');
+    return `<aside class="inspector" aria-labelledby="insp-title"><div class="insp-head"><div class="label">Record inspector</div><h2 id="insp-title" class="selectable">${t} #${r.ID}</h2><p>Physical row · enUS</p></div>
+      <div class="insp-body"><p class="reason" style="margin-bottom:.4rem">${ds==='partial'?'Readable rows available · Partial. Protected sections not loaded.':'Complete admitted section scope.'}</p>${fieldHtml}<p class="tiny">Raw values. Names, types and references are pinned community interpretations; ? marks an unverified name, not a missing value.</p>${sourceFacts(t)}</div>
+      <div class="insp-foot"><button class="btn">Table source &amp; admission details</button></div></aside>`;
+  }
+  const f=def.fields.find(x=>x.n===v.field)||def.fields[0];
+  const k=f.ref&&targetKind(refParts(f.ref).t);
+  return `<aside class="inspector" aria-labelledby="insp-title"><div class="insp-head"><div class="label">Field inspector</div><h2 id="insp-title">${t}.${fname(f)}</h2><p>${typeName(f)} · ${widthSign(f)}</p></div>
+    <div class="insp-body"><dl class="facts">
+      <dt>Declared type</dt><dd class="mono">${typeName(f)}</dd>
+      <dt>Width / sign</dt><dd>${widthSign(f)}</dd>
+      <dt>Array length</dt><dd>${f.arr}</dd>
+      <dt>Name confidence</dt><dd>${f.v?'Provider name':'Unverified name (?) · not a nullable marker'}</dd>
+      <dt>Declared key</dt><dd>${f.id?'$id$ declaration':'Not declared as ID'}</dd>
+      <dt>Annotations</dt><dd>${f.ni?'$noninline$ · value stored outside the record fields':'None declared'}</dd>
+      <dt>Declared target</dt><dd>${f.ref||'None. No link is inferred from values.'}</dd></dl>
+      ${f.ref?`<div class="row" style="margin-top:.6rem">${k==='bundled'?`<button class="btn small" data-follow-def="${f.n}">Open ${f.ref} definition</button>`:k==='files'?`<button class="btn small" data-files-of="${f.n}">Open Files (FileDataIDs)</button>`:'<span class="reason">Target definition not bundled; can\'t follow.</span>'}</div><p class="tiny">Definition navigation only. It runs no row query and adds no label.</p>`:''}
+      ${sourceFacts(t)}</div>
+    <div class="insp-foot"><button class="btn">Table source &amp; admission details</button></div></aside>`;
+}
+
+/* ---------- Files: the build's catalog of ROOT and install memberships ---------- */
+const LOCALES={0x2:'enUS',0x200:'enGB',0x80:'esES',0x1000:'esMX'};
+const locNames=m=>Object.entries(LOCALES).filter(([b])=>m&+b).map(([,l])=>l);
+const FROWS=(()=>{const out=[];let mid=1207001;
+  for(let i=0;i<40;i++){const fdid=800001+i,g=rand(i+101);
+    const masks=i%9===3?[0x2,0x200]:[0x2];
+    masks.forEach((loc,k)=>{const dec=4096+g()%480000,ckey=hex(900+i*3+loc),unresolved=catalog==='partial'&&i%13===4;
+      out.push({mid:mid++,fdid,family:'ROOT',loc,cf:i%17===6?[0x08000000,0,0]:[0,0,0],hash:hex(5000+i+k).slice(0,16),block:1+(i>>4)+k,entry:i,ckey,ekey:unresolved?null:hex(1900+i*3+loc),dec,enc:unresolved?null:dec+64+g()%900,stored:k?!(i%5===0):i%5===0,name:listfile&&i%4!==2?`interface/icons/authored_icon_${String(i+1).padStart(2,'0')}.blp`:null});});}
+  return out;})();
+// One list row per FileDataID (#20); the inspector lists every membership.
+const FGROUPS=(()=>{const m=new Map();for(const r of FROWS){if(!m.has(r.fdid))m.set(r.fdid,{fdid:r.fdid,name:r.name,members:[]});m.get(r.fdid).members.push(r);}return [...m.values()];})();
+let fq=p.get('q')||(catalog==='empty'?'99999999':'');let fsel=0;
+// Filters: locale mask, content flags, source family, stored locally. ff=1 sets two of them.
+let floc=p.get('ff')==='1'?0x2:0, fflag='any', ffam='all', fstored=p.get('ff')==='1', filtersOpen=p.get('fopen')==='1';
+const activeFilters=()=>(floc?1:0)+(fflag!=='any'?1:0)+(ffam!=='all'?1:0)+(fstored?1:0);
+const memberMatch=r=>(!floc||r.loc&floc)&&(fflag==='any'||(fflag==='none'?!(r.cf[0]|r.cf[1]|r.cf[2]):!!(r.cf[0]&0x08000000)))&&(ffam!=='install')&&(!fstored||r.stored);
+function filesRows(){if(catalog==='empty')return [];return FGROUPS.filter(g=>(!fq||String(g.fdid)===fq||g.members.some(r=>r.ckey.startsWith(fq.toLowerCase())))&&g.members.some(memberMatch));}
+const sizeSummary=g=>{const e=g.members.map(r=>r.enc),known=e.filter(x=>x!==null);if(!known.length)return '<span class="warn-t">Unresolved</span>';const lo=Math.min(...known),hi=Math.max(...known);const s=lo===hi?kib(lo):`${kib(lo)}–${kib(hi)}`;return known.length<e.length?`${s} <span class="warn-t">+1 unresolved</span>`:s;};
+const localSummary=g=>{const s=g.members.filter(r=>r.stored).length;return s===g.members.length?'<span class="ok">Stored</span>':s?`<span class="warn-t">${s} of ${g.members.length} stored</span>`:'<span class="dim">Not stored</span>';};
+function filesHtml(){
+  const off=['notprepared','preparing'].includes(catalog),rows=filesRows(),act=activeFilters();
+  if(fsel>=rows.length)fsel=0;
+  const dis=off?' disabled':'';
+  const filters=`<div class="pane-head files-filters"><h1 id="files-title">Files</h1>
+    <input class="control fsearch" id="file-search" type="search" value="${esc(fq)}" placeholder="FileDataID or CKey" aria-label="Search by FileDataID or content key" aria-keyshortcuts="Control+F"${dis}>
+    <button class="btn fbtn" id="filters-btn" aria-expanded="${filtersOpen}" aria-controls="file-filters"${dis}>Filters${act?`<span class="fcount" aria-hidden="true">${act}</span><span class="visually-hidden">, ${act} active</span>`:''}<span class="chev" aria-hidden="true">${filtersOpen?'▴':'▾'}</span></button>
+    <div class="fextra${filtersOpen?' open':''}" id="file-filters" role="group" aria-label="File filters">
+    <select class="control" id="f-loc" aria-label="Locale flag"${dis}><option value="0">Any locale</option>${Object.entries(LOCALES).map(([b,l])=>`<option value="${b}"${+b===floc?' selected':''}>${l} · ${hx(+b)}</option>`).join('')}</select>
+    <select class="control" id="f-flag" aria-label="Content flags"${dis}>${[['any','Any content flags'],['none','No content flags'],['enc','Includes 0x08000000']].map(([v,l])=>`<option value="${v}"${v===fflag?' selected':''}>${l}</option>`).join('')}</select>
+    <div class="segmented" role="group" aria-label="Source family">${[['all','All'],['root','ROOT'],['install','Install']].map(([v,l])=>`<button data-fam="${v}" aria-pressed="${v===ffam}"${dis}>${l}</button>`).join('')}</div>
+    <label class="check"><input type="checkbox" id="f-stored"${fstored?' checked':''}${dis}> Stored locally</label></div></div>`;
+  let body;
+  if(catalog==='notprepared')body=`<div class="pane-scroll"><div class="local-wait"><div class="state-box plain"><strong>File catalog not prepared</strong><p>The catalog lists every ROOT and install membership of this build, for all published variants. Preparing it reads the ROOT and install manifests; no game files are downloaded.</p><div class="row"><button class="btn small primary">Prepare file catalog</button></div></div></div></div>`;
+  else if(catalog==='preparing')body=`<div class="pane-scroll"><div class="local-wait"><div class="state-box" role="status"><strong>Preparing file catalog</strong><p><span class="dim">[2/4] Resolving ROOT metadata source · ${build.source}</span></p><p class="dim">The list appears when the catalog is sealed. Progress is in Downloads &amp; activity.</p><div class="row"><button class="btn small">Stop preparing catalog</button><button class="btn small" data-task>View task</button></div></div></div></div>`;
+  else if(!rows.length)body=`<div class="pane-scroll"><div class="local-wait"><div class="state-box plain"><strong>No files match</strong><p>No file in this build's prepared catalog ${fq?(/^\d+$/.test(fq)?`has FileDataID ${esc(fq)}`:`has a content key starting ${esc(fq)}`)+(act?` with these filters (${act} active)`:''):'matches these filters'}.</p><div class="row"><button class="btn small" id="clear-files">Clear filters</button></div></div></div></div>`;
+  else body=`<div class="list-scroll" id="file-list"><div class="fcols fthead" aria-hidden="true"><span>FileDataID</span><span>Name</span><span>Memberships</span><span>Encoded size</span><span>Locales</span><span>Local</span></div>
+    <div role="listbox" id="files-lb" aria-label="Files, one row per FileDataID" tabindex="0" aria-activedescendant="fopt-${fsel}">${rows.map((g,i)=>{const ck=new Set(g.members.map(r=>r.ckey)).size,locs=[...new Set(g.members.flatMap(r=>locNames(r.loc)))];
+      return `<div role="option" id="fopt-${i}" class="fcols${i===fsel?' active':''}" aria-selected="${i===fsel}" data-i="${i}"><span class="fid">${g.fdid}</span><span class="fname-cell">${g.name?`<span class="mono">${g.name}</span><span class="pill community">Community</span>`:'<span class="dim">Name not known</span>'}</span><span>${g.members.length}${ck>1?` <span class="dim">· ${ck} CKeys</span>`:''}</span><span>${sizeSummary(g)}</span><span>${locs.join(', ')||'<span class="dim">No known bit</span>'}</span><span>${localSummary(g)}</span></div>`;}).join('')}</div></div>
+    ${catalog==='partial'?'<div class="notice" style="margin-bottom:.6rem"><div class="text"><strong>Catalog ready with unresolved content keys</strong>10 ROOT content keys have no encoding entry in this build <code>(CONTENT_UNRESOLVED)</code>. Those memberships show no EKey or encoded size. They are not corrupt and not absent.</div></div>':''}`;
+  const foot=`<div class="pane-foot">${homeOrigin?'<button class="btn" id="return-home">← Return to build overview</button>':''}${tablesOrigin?`<button class="btn" id="return-table">← Return to ${tablesOrigin.table} record ${tablesOrigin.id}</button>`:''}<span>${off?'Catalog not prepared':rows.length?`FileDataIDs 1–${rows.length}${fq||act?' matching':''} · ${n(cat.members)} memberships · generation ${cat.generation}`:'0 FileDataIDs'}</span><span class="spacer"></span><button class="btn" aria-disabled="true">First page</button><button class="btn" aria-disabled="true">Previous page</button><button class="btn"${off||fq||act||!rows.length?' aria-disabled="true"':''}>Next page</button></div>`;
+  const sel=rows[fsel];
+  const insp=!sel?`<aside class="inspector" aria-labelledby="finsp-title"><div class="insp-head"><div class="label">File inspector</div><h2 id="finsp-title">No file selected</h2></div><div class="insp-body"><p class="reason" style="font-size:var(--fs-m)">${off?'The catalog has no memberships to inspect yet.':'Nothing matches these filters.'}</p><p class="tiny">ROOT maps FileDataIDs to content keys per locale and content variant. It has no file names.</p></div></aside>`
+    :(()=>{const all=sel.members,ck=new Set(all.map(r=>r.ckey)).size;
+      return `<aside class="inspector" aria-labelledby="finsp-title"><div class="insp-head"><div class="label">File inspector</div><h2 id="finsp-title" class="selectable">FileDataID ${sel.fdid}</h2><p>ROOT · ${all.length} membership${all.length>1?'s':''}</p></div>
+      <div class="insp-body"><dl class="facts"><dt>FileDataID</dt><dd class="selectable">${sel.fdid}</dd><dt>Name</dt><dd>${sel.name?`<span class="mono selectable">${sel.name}</span><br><span class="dim">From the community listfile (opt-in). Not from Blizzard; ROOT has no names.</span>`:'Name not known. ROOT has no names; a name hash is not a filename.'}</dd><dt>Memberships</dt><dd>${all.length} in ROOT${ck>1?` · ${ck} different content keys`:''}</dd></dl>
+      ${all.map(r=>`<div class="member"><div class="label" style="margin:0 0 .35rem">Membership ${r.mid}</div><dl class="facts">
+        <dt>Family</dt><dd>ROOT · block ${r.block}, entry ${r.entry}</dd>
+        <dt>Locale flags</dt><dd><span class="mono">${hx(r.loc)}</span> · ${locNames(r.loc).join(', ')||'no known locale bit'}</dd>
+        <dt>Content flags</dt><dd><span class="mono">${hx(r.cf[0]|r.cf[1]|(r.cf[2]<<17))}</span> <span class="dim">raw parts ${hx(r.cf[0])} · ${hx(r.cf[1])} · ${r.cf[2]}</span></dd>
+        <dt>Name hash</dt><dd class="mono selectable">${r.hash}</dd>
+        <dt>Content key</dt><dd class="mono selectable">${r.ckey}</dd>
+        <dt>Encoding key</dt><dd class="mono selectable">${r.ekey??'<span class="warn-t">Unresolved · CONTENT_UNRESOLVED</span>'}</dd>
+        <dt>Decoded length</dt><dd>${n(r.dec)} bytes</dd>
+        <dt>Encoded length</dt><dd>${r.enc===null?'Unknown':`${n(r.enc)} bytes`}</dd>
+        <dt>Local object</dt><dd>${r.stored?'<span class="ok">Stored locally</span> · verified Oct 18, 2026, 8:00 AM':'Not stored. Fetched on demand when something needs it.'}</dd></dl></div>`).join('')}
+      <p class="tiny">A membership is not a unique file. Content flags are raw facts; no platform is inferred from them. Decoded length is a metadata fact, not proof that a decoder supports the file.</p></div></aside>`;})();
+  return `<section class="files" data-pane="${tablePane==='inspector'?'inspector':'list'}" aria-label="Files">
+    <div class="pane-switch"><div class="segmented" role="group" aria-label="Show pane"><button data-fpane="list" aria-pressed="${tablePane!=='inspector'}">Files list</button><button data-fpane="inspector" aria-pressed="${tablePane==='inspector'}">Selected file</button></div></div>
+    <section class="pane list" aria-labelledby="files-title">${filters}${body}${foot}</section>${insp}</section>`;
+}
+
+function placeholderHtml(name){
+  return `<section class="placeholder"><div><h1>${name}</h1><p>Not drawn in this mockup. ${name} uses the same shell: header, area bar, its own panes and the status bar.</p></div></section>`;
+}
+
+function renderArea(){
+  const el=document.getElementById('area');
+  el.innerHTML=area==='home'?homeHtml():area==='tables'?tablesHtml():area==='files'?filesHtml():placeholderHtml({items:'Items',creatures:'Creatures'}[area]||'Area');
+  el.querySelectorAll('[data-area-go]').forEach(b=>b.onclick=()=>{tablesOrigin=null;homeOrigin={id:b.id,scroll:document.querySelector('.home-grid')?.scrollTop||0};setArea(b.dataset.areaGo);});
+  const ret=document.getElementById('return-home');if(ret)ret.onclick=()=>setArea('home',homeOrigin);
+  const rt=document.getElementById('return-table');if(rt)rt.onclick=()=>{const o=tablesOrigin;tablesOrigin=null;pos=o.pos;trail[pos].sel=o.sel;tablePane='records';setArea('tables');const b=document.querySelectorAll('.records-grid:not(.struct) .rowsel')[o.sel];if(b){b.focus({preventScroll:true});b.closest('tr').scrollIntoView({block:'nearest'});}};
+  el.querySelectorAll('[data-task]').forEach(b=>b.onclick=openPanel);
+  el.querySelectorAll('.pane-switch [data-pane]').forEach(b=>b.onclick=()=>{tablePane=b.dataset.pane;renderArea();el.querySelector(`.pane-switch [data-pane="${tablePane}"]`).focus();});
+  el.querySelectorAll('.pane-switch [data-fpane]').forEach(b=>b.onclick=()=>{tablePane=b.dataset.fpane==='inspector'?'inspector':'records';renderArea();el.querySelector(`.pane-switch [data-fpane="${b.dataset.fpane}"]`).focus();});
+  const ri=document.getElementById('return-items');if(ri)ri.onclick=()=>setArea('items');
+  if(area==='tables')wireTables(el);
+  if(area==='files')wireFiles(el);
+  setInert();
+}
+function wireTables(el){
+  const v=view();
+  el.querySelectorAll('.tableitem').forEach(b=>b.onclick=()=>{const t=b.dataset.table;trail=[{table:t,tab:v.tab,sel:DEFS[t]&&ROWS[t]?0:null,field:'ID',filter:null,label:t}];pos=0;showRecords();});
+  el.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{v.tab=b.dataset.tab;renderArea();el.querySelector(`[data-tab="${v.tab}"]`).focus();});
+  el.querySelectorAll('[data-crumb]').forEach(b=>b.onclick=()=>{pos=+b.dataset.crumb;renderArea();renderStatus();document.querySelector(`[data-crumb="${pos}"]`)?.focus();});
+  const back=document.getElementById('trail-back'),fwd=document.getElementById('trail-fwd');
+  if(back)back.onclick=()=>{if(pos>0){pos--;renderArea();renderStatus();document.getElementById('trail-back').focus();}};
+  if(fwd)fwd.onclick=()=>{if(pos<trail.length-1){pos++;renderArea();renderStatus();document.getElementById('trail-fwd').focus();}};
+  const cf=document.getElementById('clear-filter');if(cf)cf.onclick=()=>{v.filter=null;v.sel=0;v.label=v.table;renderArea();(document.getElementById('rid')||document.getElementById('trail-back'))?.focus();};
+  const rows=v.filter?lookup(v.table,v.filter.col,v.filter.value):(ROWS[v.table]||[]);
+  // Follow a declared reference with this record's raw value: same build, source and locale; the target column, never a guess.
+  const follow=(fieldName,row)=>{const f=DEFS[v.table].fields.find(x=>x.n===fieldName),val=row[fieldName],{t,c}=refParts(f.ref),k=targetKind(t);
+    if(k==='files'){fq=String(val);fsel=0;homeOrigin=null;tablesOrigin={table:v.table,sel:v.sel,pos,id:row.ID};setArea('files');return;}
+    if(k!=='bundled')return;
+    v.field=fieldName;const m=lookup(t,c,val);
+    navigate({table:t,tab:'data',sel:m.length===1?0:null,field:c,filter:{col:c,value:val},label:t});};
+  el.querySelectorAll('.records-grid:not(.struct) tbody tr').forEach(tr=>tr.onclick=e=>{const i=+tr.dataset.i,cell=e.target.closest('[data-follow]');v.sel=i;if(cell){follow(cell.dataset.follow,rows[i]);return;}selectRow();});
+  el.querySelectorAll('.inspector [data-follow]').forEach(b=>b.onclick=()=>follow(b.dataset.follow,rows[v.sel===null?0:v.sel]));
+  el.querySelectorAll('.records-grid.struct tbody tr').forEach(tr=>tr.onclick=()=>{v.field=tr.dataset.field;renderArea();el.querySelector(`.struct tr[data-field="${v.field}"] .rowsel`)?.focus({preventScroll:true});});
+  el.querySelectorAll('[data-follow-def]').forEach(b=>b.onclick=()=>{const f=DEFS[v.table].fields.find(x=>x.n===b.dataset.followDef);v.field=f.n;const {t,c}=refParts(f.ref);navigate({table:t,tab:'structure',sel:null,field:c,filter:null,label:`${t}.${c}`});});
+  el.querySelectorAll('[data-files-of]').forEach(b=>b.onclick=()=>{homeOrigin=null;tablesOrigin=null;setArea('files');});
+  const g=el.querySelector('.records-grid:not(.struct)')?.closest('.grid-scroll');
+  if(g)g.onkeydown=e=>{const tgt={ArrowDown:(v.sel??-1)+1,ArrowUp:(v.sel??1)-1,Home:0,End:rows.length-1}[e.key];if(tgt!==undefined){e.preventDefault();v.sel=Math.max(0,Math.min(rows.length-1,tgt));selectRow();}};
+}
+function selectRow(){
+  const g=document.querySelector('.records-grid:not(.struct)')?.closest('.grid-scroll'),top=g?g.scrollTop:0,left=g?g.scrollLeft:0;
+  renderArea();
+  const ng=document.querySelector('.records-grid:not(.struct)')?.closest('.grid-scroll');if(ng){ng.scrollTop=top;ng.scrollLeft=left;}
+  const b=document.querySelectorAll('.records-grid:not(.struct) .rowsel')[view().sel];if(b){b.focus({preventScroll:true});b.closest('tr').scrollIntoView({block:'nearest'});}
+}
+function wireFiles(el){
+  const lb=document.getElementById('files-lb'),rows=filesRows();
+  const move=i=>{fsel=Math.max(0,Math.min(rows.length-1,i));const sc=document.getElementById('file-list')?.scrollTop||0;renderArea();const l=document.getElementById('files-lb');document.getElementById('file-list').scrollTop=sc;l.focus({preventScroll:true});document.getElementById('fopt-'+fsel).scrollIntoView({block:'nearest'});};
+  if(lb){lb.querySelectorAll('[role=option]').forEach(o=>o.onclick=()=>move(+o.dataset.i));
+    lb.onkeydown=e=>{const t={ArrowDown:fsel+1,ArrowUp:fsel-1,Home:0,End:rows.length-1,PageDown:fsel+10,PageUp:fsel-10}[e.key];if(t!==undefined){e.preventDefault();move(t);}};}
+  const s=document.getElementById('file-search');if(s)s.onchange=()=>{fq=s.value.trim();fsel=0;renderArea();document.getElementById('file-search').focus();};
+  const c=document.getElementById('clear-files');if(c)c.onclick=()=>{fq='';floc=0;fflag='any';ffam='all';fstored=false;fsel=0;renderArea();document.getElementById('file-search')?.focus();};
+  const again=id=>{fsel=0;renderArea();document.getElementById(id)?.focus();};
+  const fb=document.getElementById('filters-btn');if(fb)fb.onclick=()=>{filtersOpen=!filtersOpen;again('filters-btn');};
+  const fl=document.getElementById('f-loc');if(fl)fl.onchange=()=>{floc=+fl.value;again('f-loc');};
+  const ff=document.getElementById('f-flag');if(ff)ff.onchange=()=>{fflag=ff.value;again('f-flag');};
+  const fs=document.getElementById('f-stored');if(fs)fs.onchange=()=>{fstored=fs.checked;again('f-stored');};
+  el.querySelectorAll('[data-fam]').forEach(b=>b.onclick=()=>{ffam=b.dataset.fam;fsel=0;renderArea();el.querySelector(`[data-fam="${ffam}"]`)?.focus();});
+}
+
+/* ---------- Status bar: exact build, source and locale on every area ---------- */
+function renderStatus(){
+  const sum=panelOpen?'':attention?`<span class="warn">1 needs attention · ${build.version} download failed</span>`
+    :state==='downloading'?`<span class="busy"><span class="pulse" aria-hidden="true"></span>${build.version} · Downloading encoded content · 25% of current stage</span>`
+    :state==='loading'?'<span class="busy"><span class="pulse" aria-hidden="true"></span>Item · Opening table data · [2/4]</span>'
+    :catalog==='preparing'?'<span class="busy"><span class="pulse" aria-hidden="true"></span>File catalog · Preparing · [2/4]</span>':'';
+  const id=`<span><strong>${build.product} ${build.version}</strong> · ${build.source} · enUS</span>`;
+  const t=area==='tables'?view().table:null,ds=t?dataState(t):null;
+  const left=id+(area==='tables'
+    ?`<span class="secondary">Definitions <strong>WoWDBDefs</strong> · ${PROV.rev.slice(0,7)}</span><span class="secondary">${t} · ${ds==='ready'?`<strong>${t==='Item'?'171,392':ROWS[t]?.length??0}</strong> admitted rows`:ds==='partial'?'readable rows · Partial':ds==='stopped'?'loading stopped':ds==='none'?'no bundled definition':'records not prepared'}</span>`
+    :area==='files'?`<span class="secondary">${['notprepared','preparing'].includes(catalog)?'File catalog not prepared':`Catalog generation <strong>${cat.generation}</strong> · ${n(cat.members)} memberships`}</span>${listfile?'<span class="secondary">Names: community listfile (opt-in)</span>':''}`
+    :area==='home'?(measured?`<span class="secondary">Assessed <strong>${dl.assessed}</strong></span>`:'<span class="secondary">Download size unknown</span>'):'');
+  document.getElementById('statusbar').innerHTML=`${left}<span class="spacer"></span>${sum}`;
+}
+
+/* ---------- Keyboard ---------- */
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'){if(popover){closePopover(true);}else if(panelOpen){closePanel();}
+    else if(area==='files'&&filtersOpen&&document.activeElement?.closest('.files-filters')&&getComputedStyle(document.getElementById('filters-btn')).display!=='none'){filtersOpen=false;renderArea();document.getElementById('filters-btn').focus();}}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&(area==='tables'||area==='files')){e.preventDefault();const id=area==='tables'?'table-search':'file-search';
+    if(area==='tables'&&getComputedStyle(document.querySelector('.catalog')).display==='none'){tablePane='catalog';renderArea();}
+    if(area==='files'&&getComputedStyle(document.querySelector('.files>.list')).display==='none'){tablePane='records';renderArea();}
+    document.getElementById(id)?.focus();}
+});
+addEventListener('resize',()=>{placeSurfaces();setInert();});
+
+/* ---------- Mockup control ---------- */
+function go(changes){const q=new URLSearchParams(location.search);for(const[k,v]of Object.entries(changes)){if(v===null)q.delete(k);else q.set(k,v);}location.search=q.toString();}
+function renderMock(){
+  const mock=document.getElementById('mock');if(!mock)return;
+  const cur=new URLSearchParams(location.search);
+  const link=(k,v,label,def,reset=[])=>{const q=new URLSearchParams(cur);q.set(k,v);for(const r of reset)q.delete(r);if(k==='state')q.delete('panel');const on=(cur.get(k)||def)===v;return `<a href="?${q}" aria-current="${on}">${label}</a>`;};
+  const sep='<span class="sep">|</span>';
+  let h='<strong style="margin-right:.2rem">Mockup</strong>'+[['idle','Idle'],['loading','Loading'],['stopped','Load stopped'],['downloading','Downloading'],['attention','Needs attention'],['partial','Partial data']].map(([v,l])=>link('state',v,l,'idle',['tdata','catalog'])).join('')
+    +sep+link('area','home','Home','home')+link('area','tables','Tables','home')+link('area','files','Files','home');
+  if(area==='tables')h+=sep+[['data','Data'],['structure','Structure'],['relations','Relationships']].map(([v,l])=>link('tab',v,l,'data')).join('')
+    +sep+[['ready','Ready'],['definition','Definition only'],['partial','Encrypted sections'],['unsupported','Unsupported layout'],['failed','Failed']].map(([v,l])=>link('tdata',v,l,'')).join('')
+    +sep+[['resolved','Text resolved'],['pending','Text pending'],['unreadable','Target protected']].map(([v,l])=>link('reftext',v,l,'resolved')).join('')
+    +sep+[['12','Follow: one'],['7','Follow: several'],['5','Follow: none']].map(([v,l])=>link('follow',v,l,'')).join('')+link('from','items','From Items','');
+  if(area==='files')h+=sep+[['ready','Ready'],['notprepared','Not prepared'],['preparing','Preparing'],['partial','Partial'],['empty','No match']].map(([v,l])=>link('catalog',v,l,'')).join('')+link('listfile','1','Community names','')+link('ff','1','Two filters on','')+link('fopen','1','Filters open','');
+  h+=sep+link('game','0','No game data','')+link('cdn','newer','Newer CDN config','')+sep+link('text','100','100%','100')+link('text','200','200%','100')+(showActivity?sep+link('panel','open','Panel open',''):'');
+  mock.innerHTML=h;
+}
+
+document.getElementById('app').dataset.area=area;
+renderHeader();renderActivity();renderAreas();renderArea();renderStatus();renderMock();placeSurfaces();setInert();
+if(p.get('popover')){const t={status:'status-btn',identity:'build-btn'}[p.get('popover')];if(t)document.getElementById(t).click();}
+</script>
+</body></html>

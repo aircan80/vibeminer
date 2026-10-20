@@ -30,9 +30,9 @@ test('Open verifies an exact context, preserves discovery on Back, and exposes h
     await writeFile(path.join(session.data, 'release-open'), 'release');
     const heading = page.getByRole('heading', { name: 'Build overview', exact: true });
     await expect(heading).toBeVisible(); await expect(heading).toBeFocused();
-    await expect(page.getByText('Published download content is measured.', { exact: true })).toBeVisible();
+    await expect(page.getByText('Published download content', { exact: true })).toBeVisible(); await expect(page.locator('.dh-side')).toContainText('Download manifestVerified');
     await expect(page.getByRole('button', { name: 'Download all', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Download objects', exact: true })).toBeEnabled();
+    await expect(page.getByRole('navigation', { name: 'Build areas' }).getByRole('button', { name: 'Files', exact: true })).toBeEnabled();
     await page.getByRole('button', { name: 'View metadata details' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.locator('.configuration-receipt')).toHaveCount(3);
@@ -68,11 +68,11 @@ test('detached preparation cannot navigate while the Product filter and a refres
     await writeFile(path.join(session.data, 'release-open'), 'release');
     await expect(page.getByRole('button', { name: 'View verified overview' })).toBeVisible();
     await expect(page.getByLabel('Product', { exact: true })).toHaveValue('wowt');
-    await expect(page.locator('.home-view')).toHaveCount(0);
+    await expect(page.locator('.desktop-home')).toHaveCount(0);
     // The Product filter only narrows the list, so the verified result opens when asked for.
     await page.getByRole('button', { name: 'View verified overview' }).click();
     await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
-    await page.getByRole('button',{name:'PRODUCT Retail',exact:true}).click();await expect(page.locator('.download-info-body dl>div').filter({has:page.getByText('Exact product ID',{exact:true})}).locator('dd')).toHaveText('wow');
+    await page.getByRole('button',{name:'Product Retail wow',exact:true}).click();await expect(page.locator('.download-info-body dl>div').filter({has:page.getByText('Exact product ID',{exact:true})}).locator('dd')).toHaveText('wow');
     expect((await requests(session.data)).filter(request => request.method === 'workspace.open')).toHaveLength(1);
   } finally { await session.close(); }
 });
@@ -86,14 +86,14 @@ test('cancel waits for preparation retirement and a failed exact build can be re
     await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await page.getByRole('button', { name: 'Cancel preparation', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Stopping preparation…', exact: true })).toHaveAttribute('aria-disabled', 'true');
-    await expect(page.locator('.home-view')).toHaveCount(0);
+    await expect(page.locator('.desktop-home')).toHaveCount(0);
     await writeFile(path.join(session.data, 'retire-open'), 'retire');
     await expect(page.getByRole('status')).toHaveText(/Preparation canceled/);
     await writeFile(path.join(session.data, 'open-error'), 'error');
     await writeFile(path.join(session.data, 'release-open'), 'release');
     await page.getByRole('button', { name: 'Retry this build', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('CONFIGURATION_INTEGRITY');
-    await expect(page.locator('.home-view')).toHaveCount(0);
+    await expect(page.locator('.desktop-home')).toHaveCount(0);
     await page.screenshot({ path: path.join(root, 'artifacts/electron-tests/preparation-failure.png'), fullPage: true });
   } finally { await session.close(); }
 });
@@ -131,12 +131,12 @@ test('Download objects pages a pinned local ledger and returns focus to Home', a
     await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await writeFile(path.join(session.data, 'release-open'), 'release');
     await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Browse download objects', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Download objects', exact: true })).toBeFocused();
-    await expect(page.getByRole('status')).toContainText('50 encoded objects on this page');
+    await page.getByRole('button', { name: 'Browse in Files', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeFocused();
+    await expect(page.getByText(/^50 encoded objects on this page/)).toBeVisible();
     await expect(page.getByText('Object 1', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Next page', exact: true }).click();
-    await expect(page.getByRole('status')).toContainText('10 encoded objects on this page');
+    await expect(page.getByText(/^10 encoded objects on this page/)).toBeVisible();
     await expect(page.getByText('Object 51', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Previous page', exact: true }).click();
     await expect(page.getByText('Object 1', { exact: true })).toBeVisible();
@@ -150,7 +150,7 @@ test('Download objects pages a pinned local ledger and returns focus to Home', a
       }
     }
     await page.getByRole('button', { name: /Return to build overview/ }).click();
-    await expect(page.getByRole('button', { name: 'Browse download objects', exact: true })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Browse in Files', exact: true })).toBeFocused();
     const calls = await requests(session.data);
     expect(calls.filter(call => call.method === 'download.read')).toHaveLength(3);
     expect(calls.filter(call => call.method === 'discovery.refresh')).toHaveLength(0);

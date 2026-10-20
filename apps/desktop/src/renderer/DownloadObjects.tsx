@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { DownloadPage, DownloadSummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
+import type { DownloadObjectEntry, DownloadPage, DownloadSummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
 import { downloadPageMatches, type DownloadReadParams } from '../shared/download';
-import { exactBytes, exactCount } from '../shared/inventory';
-import { CatalogPageControls } from './FilesCatalog';
+import { exactBytes, exactCount, readableBytes } from '../shared/inventory';
+import { CatalogPageControls, FilesFrame, ReturnHome, useListbox } from './FilesCatalog';
+import { useCoveredSide } from './HomeShell';
 
+// Files for a download-sized build: the research file catalog isn't prepared, so the list shows the download manifest's unique encoded objects.
 export function DownloadObjects({ snapshot, summary, bridge, active, onReopen, onReturn }: { snapshot: WorkspaceSnapshot; summary: DownloadSummary; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void }) {
   const [page, setPage] = useState<DownloadPage | null>(null);
   const [busy, setBusy] = useState(false);
@@ -18,6 +20,8 @@ export function DownloadObjects({ snapshot, summary, bridge, active, onReopen, o
   type Movement = 'initial' | 'next' | 'previous' | 'first';
   const attempt = useRef<{ after: string | undefined; movement: Movement }>({ after: undefined, movement: 'initial' });
   const context: DownloadReadParams = { productId: snapshot.build.productId, buildIdentity: snapshot.build.id, sourceRegion: snapshot.sourceReference.region, ledgerId: summary.ledgerId, limit: 50 };
+  const list = useListbox<DownloadObjectEntry>(page?.entries ?? [], entry => entry.id);
+  const covered = useCoveredSide();
   useLayoutEffect(() => {
     const previous = focusAfterRead.current;
     if (!previous || error) return;
@@ -25,7 +29,7 @@ export function DownloadObjects({ snapshot, summary, bridge, active, onReopen, o
     if (!heading.current?.closest('[hidden]') && (document.activeElement === document.body || document.activeElement === previous)) heading.current?.focus({ preventScroll: true });
   }, [page, error]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current++; }; }, []);
-  useEffect(() => { if (active) { heading.current?.focus({ preventScroll: true }); window.scrollTo(0, 0); if (!page && !loading.current) void read(undefined, 'initial'); } }, [active]);
+  useEffect(() => { if (active) { heading.current?.focus({ preventScroll: true }); if (!page && !loading.current) void read(undefined, 'initial'); } }, [active]);
   async function read(after: string | undefined, movement: Movement) {
     if (loading.current) return;
     attempt.current = { after, movement };
@@ -45,15 +49,29 @@ export function DownloadObjects({ snapshot, summary, bridge, active, onReopen, o
     } catch { if (alive.current && generation === request.current) setError({ code: 'ENGINE_UNAVAILABLE', message: 'The saved download ledger could not be read. Previous rows are preserved.', retryable: true }); }
     finally { if (alive.current && generation === request.current) { loading.current = false; setBusy(false); } }
   }
-  function pages(below: boolean) { return <CatalogPageControls below={below} busy={busy} canFirst={cursor !== undefined} canPrevious={history.length > 0} canNext={!!page?.nextCursor} onFirst={() => void read(undefined, 'first')} onPrevious={() => void read(history.at(-1), 'previous')} onNext={() => { if (page?.nextCursor) void read(page.nextCursor, 'next'); }}/>; }
-  const count = page ? `${page.entries.length} encoded objects on this page · ${exactCount(page.totalCount)} total` : 'No download-object page has been read yet.';
-  return <section className="download-objects" hidden={!active} aria-labelledby="download-objects-heading">{onReturn && <button className="return-home" onClick={onReturn}>← Return to build overview</button>}
-    <div className="heading"><div><h1 ref={heading} id="download-objects-heading" tabIndex={-1}>Download objects</h1><p className="muted">Published download content · all published variants · {snapshot.build.productId} · {snapshot.build.version} · {snapshot.sourceReference.region.toUpperCase()} source</p></div></div>
-    <p className="muted">Each row is one unique full encoding key (EKey) declared by the download manifest. These are encoded objects, not filenames, ROOT memberships or installed files.</p>
-    <div className="catalog-context"><span>Assessment <b>{new Date(summary.assessedAt).toLocaleString()}</b></span><span>Locale / platform: <b>Not selected</b></span></div>
-    {error && <div className="notice" role="alert"><strong>{error.code}</strong><br/>{error.message}<p>This view keeps the exact build, source, ledger and assessment. Reopen this build to obtain a new assessment.</p>{error.retryable && <button ref={retry} aria-disabled={busy} onClick={() => void read(attempt.current.after, attempt.current.movement)}>Retry page</button>}<button onClick={onReopen}>Reopen this build</button></div>}
-    <div className="catalog-toolbar"><p role="status" aria-live="polite">{busy ? 'Reading the saved download ledger…' : count}</p>{pages(false)}</div>
-    <div className="panel download-table-panel" aria-busy={busy}><table className="catalog download-table"><caption className="visually-hidden">Unique published download objects, all published variants, assessed {summary.assessedAt}</caption><thead><tr><th scope="col">Full encoding key (EKey)</th><th scope="col">Encoded size</th><th scope="col">Verified locally at assessment</th></tr></thead><tbody>{page?.entries.map(entry => <tr key={entry.id}><td><code>{entry.encodingKey}</code><small>Object {entry.id}</small></td><td>{exactBytes(entry.encodedBytes)}</td><td>{entry.verifiedAtAssessment ? 'Verified locally' : 'Not verified locally'}</td></tr>)}</tbody></table>{page?.entries.length === 0 && <p className="muted">{page.totalCount === '0' ? 'The published manifest declares zero encoded objects.' : 'No more encoded objects follow this cursor.'}</p>}</div>
-    <div className="catalog-toolbar catalog-toolbar-bottom"><p>{count}</p>{pages(true)}</div><p className="tiny">Reads at most 50 unique encoded objects per page from the saved assessment. No global search, sorting, payload download or upstream availability check is performed. Not verified locally is not evidence that an object is unavailable upstream.</p>
-  </section>;
+  const first = page?.entries.length ? BigInt(cursor ?? '0') + 1n : null;
+  const count = busy ? 'Reading the saved download ledger…' : page ? `${page.entries.length} encoded objects on this page · ${exactCount(page.totalCount)} total${page.entries.length ? ` · objects ${first}–${first! + BigInt(page.entries.length) - 1n}` : ''}` : 'No download-object page has been read yet.';
+  const selected = list.selected;
+  return <FilesFrame active={active} pane={list.pane} onPane={list.setPane} headingRef={heading} sub="Download manifest · unique encoded objects · all published variants" covered={covered}
+    notices={<>{error && <div className="dh-notice dh-error" role="alert"><div className="dh-text"><strong>{error.code}</strong>{error.message} This view keeps the exact build, source, ledger and assessment. Reopen this build to obtain a new assessment.<div className="dh-row">{error.retryable && <button ref={retry} className="dh-btn dh-small" aria-disabled={busy} onClick={() => { if (!busy) void read(attempt.current.after, attempt.current.movement); }}>Retry page</button>}<button className="dh-btn dh-small" onClick={onReopen}>Reopen this build</button></div></div></div>}
+      <div className="dh-notice dh-calm"><div className="dh-text">File catalog not prepared: these are the download manifest’s encoded objects.<span className="dh-detail"> Each row is one unique full encoding key (EKey): an encoded object, not a filename, ROOT membership or installed file.</span></div></div></>}
+    list={page && page.entries.length > 0 ? <div className="dh-list-scroll" aria-busy={busy}><div className="dh-ocols dh-fthead" aria-hidden="true"><span>Object</span><span>Encoding key (EKey)</span><span>Encoded size</span><span>Local at assessment</span></div>
+      <div {...list.props} aria-label={`Download objects, one row per encoding key, assessed ${summary.assessedAt}`}>{page.entries.map((entry, index) => <div key={entry.id} {...list.option(index)} className={`dh-ocols${list.option(index).className}`}><span className="dh-fid">Object {entry.id}</span><span className="dh-mono">{entry.encodingKey}</span><span>{readableBytes(entry.encodedBytes)}</span><span>{entry.verifiedAtAssessment ? <span className="dh-ok">Verified locally</span> : <span className="dh-dim">Not verified locally</span>}</span></div>)}</div></div>
+      : <div className="dh-pane-scroll"><div className="dh-local-wait"><div className="dh-state-box dh-plain" role="status"><strong>{busy ? 'Reading the saved download ledger…' : page ? page.totalCount === '0' ? 'No encoded objects' : 'No more encoded objects' : 'Download objects not read yet'}</strong><p>{page ? page.totalCount === '0' ? 'The published manifest declares zero encoded objects.' : 'No more encoded objects follow this cursor.' : 'Reads at most 50 unique encoded objects per page from the saved assessment.'}</p></div></div></div>}
+    foot={<>{onReturn && <ReturnHome onReturn={onReturn}/>}<span role="status" aria-live="polite">{count}</span><span className="dh-spacer"/><CatalogPageControls busy={busy} canFirst={cursor !== undefined} canPrevious={history.length > 0} canNext={!!page?.nextCursor} onFirst={() => void read(undefined, 'first')} onPrevious={() => void read(history.at(-1), 'previous')} onNext={() => { if (page?.nextCursor) void read(page.nextCursor, 'next'); }}/></>}
+    inspector={selected ? <><div className="dh-insp-head"><div className="dh-label">Object inspector</div><h2 id="files-inspector-heading" className="dh-selectable">Encoded object {selected.entry.id}</h2><p>{selected.onPage ? 'Download manifest · encoded object' : 'Outside the current page · same saved assessment'}</p></div>
+      <div className="dh-insp-body"><dl className="dh-facts"><dt>Encoding key</dt><dd className="dh-mono dh-selectable">{selected.entry.encodingKey}</dd><dt>Encoded length</dt><dd>{exactBytes(selected.entry.encodedBytes)}</dd><dt>Local object</dt><dd>{selected.entry.verifiedAtAssessment ? <><span className="dh-ok">Verified locally</span> at assessment</> : 'Not verified locally at assessment'}</dd><dt>Assessed</dt><dd>{new Date(summary.assessedAt).toLocaleString()}</dd><dt>Download ledger</dt><dd className="dh-mono dh-selectable">{summary.ledgerId}</dd><dt>Scope</dt><dd>All published variants</dd><dt>Locale / platform</dt><dd>Not selected</dd></dl>
+        <p className="dh-tiny">Encoded objects are not filenames, ROOT memberships or installed files. Not verified locally is not evidence that an object is unavailable upstream. No global search, sorting, payload download or upstream availability check is performed.</p></div></>
+      : <><div className="dh-insp-head"><div className="dh-label">Object inspector</div><h2 id="files-inspector-heading">No object selected</h2></div><div className="dh-insp-body"><p className="dh-reason">Choose a row. Each page reads at most 50 unique encoded objects from the saved assessment.</p></div></>}/>;
+}
+
+// Files with no readable list: no download ledger and no prepared catalog. A calm capability limit, with no producer to offer.
+export function FilesUnavailable({ snapshot, active, onReturn }: { snapshot: WorkspaceSnapshot; active: boolean; onReturn?: () => void }) {
+  const heading = useRef<HTMLHeadingElement>(null), covered = useCoveredSide();
+  const [pane, setPane] = useState<'list' | 'inspector'>('list');
+  useEffect(() => { if (active) heading.current?.focus({ preventScroll: true }); }, [active]);
+  return <FilesFrame active={active} pane={pane} onPane={setPane} headingRef={heading} sub="All published variants" covered={covered} selectedLabel="Selected file"
+    list={<div className="dh-pane-scroll"><div className="dh-local-wait"><div className="dh-state-box dh-plain"><strong>File catalog not prepared</strong><p>This build opened without a research file catalog or a supported download manifest, so there is no file list to show.{snapshot.downloadProblem && <> <code>({snapshot.downloadProblem.code})</code></>}</p><p className="dh-dim">Tables, Items and Creatures prepare their own data.</p></div></div></div>}
+    foot={<>{onReturn && <ReturnHome onReturn={onReturn}/>}<span>Catalog not prepared</span></>}
+    inspector={<><div className="dh-insp-head"><div className="dh-label">File inspector</div><h2 id="files-inspector-heading">No file selected</h2></div><div className="dh-insp-body"><p className="dh-reason">The catalog has no memberships to inspect yet.</p><p className="dh-tiny">ROOT maps FileDataIDs to content keys per locale and content variant. It has no file names.</p></div></>}/>;
 }
