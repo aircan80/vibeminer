@@ -47,7 +47,7 @@ public sealed class CreatureGeometryServiceTests
     [Fact]
     public async Task Fifteen_minute_deadlines_are_per_consumer_and_wait_actual_cleanup()
     {
-        var clock = new Clock(); var never = Signal(); var cleaning = Signal(); var cleanup = Signal(); var store = new Store();
+        var clock = new ManualTimerClock(); var never = Signal(); var cleaning = Signal(); var cleanup = Signal(); var store = new Store();
         store.Prepare = async (r, _, token) => { try { await never.Task.WaitAsync(token); } finally { if (r.Selection.CreatureId == "123") { cleaning.TrySetResult(); await cleanup.Task; } } return Result(r.Selection); };
         var service = new CreatureGeometryService(store, clock);
         var a = service.PrepareAsync(new(Selection)); clock.Advance(TimeSpan.FromMinutes(5));
@@ -76,12 +76,15 @@ public sealed class CreatureGeometryServiceTests
     [Fact]
     public async Task Observer_coalesces_latest_without_blocking_source_or_peer()
     {
-        var clock = new Clock(); var first = Signal(); var latest = Signal(); var release = Signal(); var store = new Store();
+        var clock = new ManualTimerClock(); var first = Signal(); var latest = Signal(); var release = Signal(); var store = new Store();
         Func<CreatureGeometryProgress, Task>? report = null;
         store.Prepare = async (r, callback, token) => { report = callback; await release.Task.WaitAsync(token); return Result(r.Selection); };
         await using var service = new CreatureGeometryService(store, clock); var seen = new List<long?>();
         var call = service.PrepareAsync(new(Selection), p => { seen.Add(p.Completed); if (p.Completed == 0) first.TrySetResult(); if (p.Completed == 1000) latest.TrySetResult(); return Task.CompletedTask; });
         await report!(new("modelAcquisition", "Acquiring model", "bytes", 0, 1000)); await first.Task.WaitAsync(Guard);
+        // The pump arms its throttle timer after the first callback returns. Advancing before that would arm it at 200 ms, which never fires.
+        // The service's 15-minute preparation deadline is armed too, so skip it.
+        Assert.Equal(TimeSpan.FromMilliseconds(100).Ticks, await clock.Armed(due => due < TimeSpan.FromMinutes(15).Ticks).WaitAsync(Guard));
         for (var i = 1; i <= 1000; i++) Assert.True(report(new("modelAcquisition", "Acquiring model", "bytes", i, 1000)).IsCompletedSuccessfully);
         clock.Advance(TimeSpan.FromMilliseconds(100)); await latest.Task.WaitAsync(Guard); Assert.Equal(new long?[] { 0, 1000 }, seen);
         release.TrySetResult(); await call.WaitAsync(Guard);
@@ -114,7 +117,7 @@ public sealed class CreatureGeometryServiceTests
     [Fact]
     public async Task Absolute_lease_deadline_includes_open_and_never_restarts_on_return()
     {
-        var clock = new Clock(); var open = Signal(); var inner = new Lease(); var store = new Store();
+        var clock = new ManualTimerClock(); var open = Signal(); var inner = new Lease(); var store = new Store();
         store.Open = async (_, _) => { await open.Task; return inner; };
         await using var service = new CreatureGeometryService(store, clock);
         var call = service.OpenAsync(new(Selection, Manifest().ArtifactId)); clock.Advance(TimeSpan.FromSeconds(29)); open.TrySetResult();
@@ -124,7 +127,7 @@ public sealed class CreatureGeometryServiceTests
     [Fact]
     public async Task Expired_open_still_closes_its_late_return_and_reports_deadline()
     {
-        var clock = new Clock(); var open = Signal(); var inner = new Lease(); var store = new Store();
+        var clock = new ManualTimerClock(); var open = Signal(); var inner = new Lease(); var store = new Store();
         store.Open = async (_, _) => { await open.Task; return inner; };
         await using var service = new CreatureGeometryService(store, clock);
         var call = service.OpenAsync(new(Selection, Manifest().ArtifactId)); clock.Advance(TimeSpan.FromSeconds(30)); Assert.False(call.IsCompleted); open.TrySetResult();
@@ -156,7 +159,7 @@ public sealed class CreatureGeometryServiceTests
     [Fact]
     public async Task One_deadline_timer_covers_both_preparations_and_both_held_leases()
     {
-        var clock = new Clock(); var hold = Signal(); var store = new Store();
+        var clock = new ManualTimerClock(); var hold = Signal(); var store = new Store();
         store.Prepare = async (r, _, ct) => { await hold.Task.WaitAsync(ct); return Result(r.Selection); };
         var service = new CreatureGeometryService(store, clock);
         var a = service.PrepareAsync(new(Selection)); var b = service.PrepareAsync(new(Selection));

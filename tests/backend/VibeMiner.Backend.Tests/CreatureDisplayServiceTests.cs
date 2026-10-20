@@ -147,7 +147,7 @@ public sealed class CreatureDisplayServiceTests
     [Fact]
     public async Task SlowObserverCoalescesOneThousandValuesAndCannotDelayUsefulPeerOrProducer()
     {
-        var clock = new Clock(); var sourceRelease = Signal(); var aEntered = Signal(); var aRelease = Signal(); var bFirst = Signal(); var bLatest = Signal();
+        var clock = new ManualTimerClock(); var sourceRelease = Signal(); var aEntered = Signal(); var aRelease = Signal(); var bFirst = Signal(); var bLatest = Signal();
         var aSeen = new List<long?>(); var bSeen = new List<long?>();
         Func<CreaturesPreparationProgress, Task>? emitA = null, emitB = null;
         var store = new Store(); store.Prepare = async (request, report, token) =>
@@ -161,7 +161,7 @@ public sealed class CreatureDisplayServiceTests
             await emitA!(new("Reading", "rows", 0, 1000)); await emitB!(new("Reading", "rows", 0, 1000));
             await Task.WhenAll(aEntered.Task, bFirst.Task).WaitAsync(Deadline);
             // B's pump arms its throttle timer after its first callback returns. Advancing before that would arm it at 200 ms, which never fires.
-            Assert.Equal(TimeSpan.FromMilliseconds(100).Ticks, await clock.FirstArmed.Task.WaitAsync(Deadline));
+            Assert.Equal(TimeSpan.FromMilliseconds(100).Ticks, await clock.Armed().WaitAsync(Deadline));
             for (var i = 1; i <= 1000; i++)
             { Assert.True(emitA(new("Reading", "rows", i, 1000)).IsCompletedSuccessfully); Assert.True(emitB(new("Reading", "rows", i, 1000)).IsCompletedSuccessfully); }
             clock.Advance(TimeSpan.FromMilliseconds(100)); await bLatest.Task.WaitAsync(Deadline);
@@ -218,31 +218,6 @@ public sealed class CreatureDisplayServiceTests
     private static readonly CreatureDisplayMetadataResult Result = new(Context, Request.ArtifactId, Request.CreatureId, 0,
         CreatureDisplayMetadataService.MetadataPolicy, null!, null!, null!, null, CreatureDisplayMetadataState.NotPrepared,
         CreatureDisplayAppearance.NotEvaluated, [], RequiredTableId: "bfdaf9f1");
-    private sealed class Clock : TimeProvider
-    {
-        private readonly object gate = new(); private readonly List<Timer> timers = []; private long ticks;
-        internal readonly TaskCompletionSource<long> FirstArmed = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-        public override long GetTimestamp() { lock (gate) return ticks; }
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        { var timer = new Timer(this, callback, state); lock (gate) { timers.Add(timer); timer.Change(dueTime, period); } return timer; }
-        internal void Advance(TimeSpan amount)
-        {
-            Timer[] ready; lock (gate) { ticks += amount.Ticks; ready = timers.Where(t => t.Due <= ticks).ToArray(); foreach (var timer in ready) timer.Due = long.MaxValue; }
-            foreach (var timer in ready) timer.Callback(timer.State);
-        }
-        private sealed class Timer(Clock clock, TimerCallback callback, object? state) : ITimer
-        {
-            internal readonly TimerCallback Callback = callback; internal readonly object? State = state; internal long Due;
-            public bool Change(TimeSpan dueTime, TimeSpan period)
-            {
-                long due; lock (clock.gate) Due = due = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : clock.ticks + dueTime.Ticks;
-                if (due != long.MaxValue) clock.FirstArmed.TrySetResult(due); return true;
-            }
-            public void Dispose() { lock (clock.gate) Due = long.MaxValue; }
-            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
-        }
-    }
     private sealed class Store : ICreatureDisplayMetadataStore
     {
         internal int Reads, Prepares;

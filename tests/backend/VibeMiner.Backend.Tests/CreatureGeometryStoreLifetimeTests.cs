@@ -94,7 +94,7 @@ public sealed partial class CreatureGeometryStoreTests
     [Fact]
     public async Task ApplicationOwnsOnlyDeadlineWhileStoreHoldsExpiredPhysicalLeaseUntilActualClose()
     {
-        await using var f=await Fixture.Create();await f.Store.DisposeAsync();var clock=new CreatureGeometryTestFixture.Clock();
+        await using var f=await Fixture.Create();await f.Store.DisposeAsync();var clock=new ManualTimerClock();
         f.Store=new(f.Work,new(),new Cpu(),clock);var closing=f.Gate();var release=f.Gate();
         f.Work.Retained=new Retained{Open=()=>Task.FromResult<Stream>(new CloseStream(closing,release))};
         await using var service=new CreatureGeometryService(f.Store,clock);
@@ -158,7 +158,7 @@ public sealed partial class CreatureGeometryStoreTests
     [Fact]
     public async Task FixedClockProgressHoldsOneRunningAndOnlyLatestOfThousandUpdates()
     {
-        var clock=new CreatureGeometryTestFixture.Clock();var entered=Signal();var release=Signal();var latest=Signal();var values=new List<long?>();
+        var clock=new ManualTimerClock();var entered=Signal();var release=Signal();var latest=Signal();var values=new List<long?>();
         var observer=new CreatureGeometryStoreProgress(async p=>
         {
             values.Add(p.Completed);if(p.Completed==0){entered.TrySetResult();await release.Task;}else latest.TrySetResult();

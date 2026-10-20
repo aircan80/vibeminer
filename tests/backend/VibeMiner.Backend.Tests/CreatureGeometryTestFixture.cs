@@ -59,25 +59,4 @@ internal static class CreatureGeometryTestFixture
             catch (Exception error) { retired.TrySetException(error); throw; }
         }
     }
-    internal sealed class Clock : TimeProvider
-    {
-        private readonly object gate = new(); private readonly List<Timer> timers = []; private long ticks;
-        internal int TimerCount { get { lock (gate) return timers.Count; } }
-        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-        public override long GetTimestamp() { lock (gate) return ticks; }
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        { var timer = new Timer(this, callback, state); lock (gate) { timers.Add(timer); timer.Change(dueTime, period); } return timer; }
-        internal void Advance(TimeSpan amount)
-        {
-            Timer[] ready; lock (gate) { ticks += amount.Ticks; ready = timers.Where(t => t.Due <= ticks).ToArray(); foreach (var timer in ready) timer.Due = long.MaxValue; }
-            foreach (var timer in ready) timer.Callback(timer.State);
-        }
-        private sealed class Timer(Clock clock, TimerCallback callback, object? state) : ITimer
-        {
-            internal readonly TimerCallback Callback = callback; internal readonly object? State = state; internal long Due;
-            public bool Change(TimeSpan dueTime, TimeSpan period) { lock (clock.gate) Due = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : clock.ticks + dueTime.Ticks; return true; }
-            public void Dispose() { lock (clock.gate) Due = long.MaxValue; }
-            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
-        }
-    }
 }

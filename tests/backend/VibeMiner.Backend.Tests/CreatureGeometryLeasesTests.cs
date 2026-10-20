@@ -167,7 +167,7 @@ public sealed class CreatureGeometryLeasesTests
     [Fact]
     public async Task App_owns_one_absolute_timer_and_expiry_closes_without_a_host_sweep()
     {
-        var clock = new Clock(); var lease = new ControlledLease();
+        var clock = new ManualTimerClock(); var lease = new ControlledLease();
         var original = new TaskCompletionSource<ICreatureGeometryReadLease>(TaskCreationOptions.RunContinuationsAsynchronously);
         var store = new Store { Open = (_, _) => original.Task };
         await using var app = new CreatureGeometryService(store, clock);
