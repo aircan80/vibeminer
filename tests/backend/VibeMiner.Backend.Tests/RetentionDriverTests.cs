@@ -241,6 +241,7 @@ public sealed class RetentionDriverTests
         fixture.Shared = new(new OfficialEncodedObjectProducer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Resources, plans));
         using var opening = new DownloadWorkspacePreparer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources);
         var workspace = await opening.PrepareAsync(fixture.Request, _ => Task.CompletedTask, default);
+        await MeasureScope(fixture);
         Assert.DoesNotContain(fixture.Handler.Requests, url => url == InventoryFixture.Url("data", fixture.Data.PayloadA.EncodingKey));
         var target = new RetentionTarget("wow", fixture.Request.BuildIdentity, "us", workspace.Download!.LedgerId);
         var observed = new ObservedCatalog((IRetentionDriverCatalog)fixture.Catalog);
@@ -288,6 +289,7 @@ public sealed class RetentionDriverTests
         fixture.Shared = new(new OfficialEncodedObjectProducer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Resources, plans));
         using var opening = new DownloadWorkspacePreparer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources);
         var workspace = await opening.PrepareAsync(fixture.Request, _ => Task.CompletedTask, default);
+        await MeasureScope(fixture);
         var target = new RetentionTarget("wow", fixture.Request.BuildIdentity, "us", workspace.Download!.LedgerId);
         var entered = Signal(); var release = Signal(); var payload = fixture.Data.PayloadA;
         fixture.Handler.Before = async request =>
@@ -344,6 +346,7 @@ public sealed class RetentionDriverTests
         fixture.Shared = new(new OfficialEncodedObjectProducer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Resources, plans));
         using var opening = new DownloadWorkspacePreparer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources);
         var workspace = await opening.PrepareAsync(fixture.Request, _ => Task.CompletedTask, default);
+        await MeasureScope(fixture);
         var target = new RetentionTarget("wow", fixture.Request.BuildIdentity, "us", workspace.Download!.LedgerId);
         var observed = new ObservedCatalog((IRetentionDriverCatalog)fixture.Catalog);
         var driver = new BuildRetentionDriver(observed, new BuildRetentionDriver.PhysicalSessions(fixture.Catalog,
@@ -409,6 +412,7 @@ public sealed class RetentionDriverTests
         fixture.Shared = new(new OfficialEncodedObjectProducer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Resources, plans));
         using var opening = new DownloadWorkspacePreparer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources);
         var workspace = await opening.PrepareAsync(fixture.Request, _ => Task.CompletedTask, default);
+        await MeasureScope(fixture);
         var target = new RetentionTarget("wow", fixture.Request.BuildIdentity, "us", workspace.Download!.LedgerId);
         var observed = new ObservedCatalog((IRetentionDriverCatalog)fixture.Catalog);
         var driver = new BuildRetentionDriver(observed, new BuildRetentionDriver.PhysicalSessions(fixture.Catalog,
@@ -452,6 +456,7 @@ public sealed class RetentionDriverTests
         fixture.Shared = new(new OfficialEncodedObjectProducer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Resources, plans));
         using var opening = new DownloadWorkspacePreparer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources);
         var workspace = await opening.PrepareAsync(fixture.Request, _ => Task.CompletedTask, default);
+        await MeasureScope(fixture);
         var target = new RetentionTarget("wow", fixture.Request.BuildIdentity, "us", workspace.Download!.LedgerId);
         var observed = new ObservedCatalog((IRetentionDriverCatalog)fixture.Catalog);
         var driver = new BuildRetentionDriver(observed, new BuildRetentionDriver.PhysicalSessions(fixture.Catalog,
@@ -493,6 +498,7 @@ public sealed class RetentionDriverTests
         fixture.Shared = new(new OfficialEncodedObjectProducer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Resources, plans));
         using var opening = new DownloadWorkspacePreparer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources);
         var workspace = await opening.PrepareAsync(fixture.Request, _ => Task.CompletedTask, default);
+        await MeasureScope(fixture);
         var target = new RetentionTarget("wow", fixture.Request.BuildIdentity, "us", workspace.Download!.LedgerId);
         var observed = new ObservedCatalog((IRetentionDriverCatalog)fixture.Catalog);
         var driver = new BuildRetentionDriver(observed, new BuildRetentionDriver.PhysicalSessions(fixture.Catalog,
@@ -530,6 +536,7 @@ public sealed class RetentionDriverTests
             fixture.Objects, fixture.Client, fixture.Resources, plans));
         using var opening = new DownloadWorkspacePreparer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources);
         var workspace = await opening.PrepareAsync(fixture.Request, _ => Task.CompletedTask, default);
+        await MeasureScope(fixture);
         var target = new RetentionTarget("wow", fixture.Request.BuildIdentity, "us", workspace.Download!.LedgerId);
         var observed = new ObservedCatalog((IRetentionDriverCatalog)fixture.Catalog)
             { ClaimAfterCommitFailures = 1, SettlementAfterCommitFailures = 3 };
@@ -568,6 +575,7 @@ public sealed class RetentionDriverTests
             fixture.Objects, fixture.Client, fixture.Resources, plans));
         using var opening = new DownloadWorkspacePreparer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources);
         var workspace = await opening.PrepareAsync(fixture.Request, _ => Task.CompletedTask, default);
+        await MeasureScope(fixture, RootScopeWorker.RootScopeOutcome.ManifestOnly);
         var target = new RetentionTarget("wow", fixture.Request.BuildIdentity, "us", workspace.Download!.LedgerId);
         var observed = new ObservedCatalog((IRetentionDriverCatalog)fixture.Catalog);
         var driver = new BuildRetentionDriver(observed, new BuildRetentionDriver.PhysicalSessions(fixture.Catalog,
@@ -587,6 +595,14 @@ public sealed class RetentionDriverTests
         finally { await service.ShutdownAsync(default); }
     }
 
+    // Open admits the manifest; Download all is claimed once the background worker has measured the file list (D066).
+    // An authored build config without encoding or ROOT has no readable file list, so its scope stays the manifest.
+    private static async Task MeasureScope(SharedAcquisitionIntegrationTests.Fixture fixture,
+        RootScopeWorker.RootScopeOutcome expected = RootScopeWorker.RootScopeOutcome.Measured)
+    {
+        await using var worker = new RootScopeWorker(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources, () => { });
+        Assert.Equal(expected, await worker.MeasureNextAsync(default).WaitAsync(Deadline));
+    }
     private static async Task ExecuteSql(string directory, string sql)
     {
         await using var db = new SqliteConnection($"Data Source={Path.Combine(directory, "discovery-v1.sqlite3")};Pooling=False");
@@ -610,6 +626,7 @@ public sealed class RetentionDriverTests
             fixture.Objects, fixture.Client, fixture.Resources, plans));
         using var opening = new DownloadWorkspacePreparer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources);
         var workspace = await opening.PrepareAsync(fixture.Request, _ => Task.CompletedTask, default);
+        await MeasureScope(fixture, RootScopeWorker.RootScopeOutcome.ManifestOnly);
         var target = new RetentionTarget("wow", fixture.Request.BuildIdentity, "us", workspace.Download!.LedgerId);
         var observed = new ObservedCatalog((IRetentionDriverCatalog)fixture.Catalog);
         var driver = new BuildRetentionDriver(observed, new BuildRetentionDriver.PhysicalSessions(fixture.Catalog,
@@ -914,6 +931,22 @@ public sealed class RetentionDriverTests
         Assert.Equal("CONTENT_SIZE_CONFLICT", (await Assert.ThrowsAsync<DiscoveryException>(() =>
             session.FindAsync(Key(1), 99, default))).Code);
         await Assert.ThrowsAsync<DiscoveryException>(() => session.ReadPageAsync(0, 129, default));
+    }
+
+    [Fact]
+    public async Task Session_cursor_reads_values_across_page_boundaries_in_order()
+    {
+        using var directory = new TempDirectory(); await using var objects = new VerifiedObjectStore(directory.Path);
+        var members = DownloadLedgerReadSession.OrderedPageRows * 2 + 3;
+        var artifact = await Ledger(objects, members);
+        await using var session = await new DownloadLedger(objects).OpenReadSessionAsync(artifact, default);
+        await using var cursor = session.OpenOrderedCursor(); var count = 0;
+        while (await cursor.NextAsync(default))
+        {
+            count++;
+            Assert.Equal(Key(count), cursor.Current.Key); Assert.Equal(count + 9, cursor.Current.Bytes);
+        }
+        Assert.Equal(members, count); Assert.False(await cursor.NextAsync(default));
     }
 
     [Fact]

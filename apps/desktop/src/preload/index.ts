@@ -38,6 +38,7 @@ const bridge: DiscoveryBridge = Object.freeze<DiscoveryBridge>({
   storageMeasure: requestId => ipcRenderer.invoke('discovery:invoke', 'settings.storage.measure', {}, requestId),
   storageCopyPath: () => ipcRenderer.invoke('discovery:invoke', 'desktop.storage.copyPath', {}),
   storageShowFolder: () => ipcRenderer.invoke('discovery:invoke', 'desktop.storage.showFolder', {}),
+  downloadSummaries: params => ipcRenderer.invoke('discovery:invoke', 'download.summaries', params),
   itemsData: params => ipcRenderer.invoke('discovery:invoke', 'items.data', params),
   itemsPrepare: (params, requestId) => ipcRenderer.invoke('discovery:invoke', 'items.prepare', params, requestId),
   itemsPage: params => ipcRenderer.invoke('discovery:invoke', 'items.page', params),

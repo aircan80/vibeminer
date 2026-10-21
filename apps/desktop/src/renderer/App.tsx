@@ -16,7 +16,9 @@ import { exactBytes, exactCount } from '../shared/inventory';
 import { RetentionActivity } from './Retention';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import './discovery.css';
-import type { Build, DiscoveryCatalogPage, Product, ProductDiscoveryStatus, ProductRefreshProblem, EngineProgress, RetentionSnapshot } from '../../../../contracts/generated/discovery';
+import type { Build, BuildDownloadSummary, DiscoveryCatalogPage, Product, ProductDiscoveryStatus, ProductRefreshProblem, EngineProgress } from '../../../../contracts/generated/discovery';
+import { storedPercent, summaryKey } from '../shared/download-summary';
+import { useDownloadSummaries } from './useDownloadSummaries';
 import type { BridgeReply, DiscoveryBridge, DiscoveryFilter, ReadAllParams } from '../shared/bridge';
 import { historyLabels, newerRegionCdnConfigs, newestGroupSize } from '../shared/cdn-config';
 import { TableLoadBanner, useTableLoading } from './useTableLoading';
@@ -41,29 +43,37 @@ function RefusedNotice({ text }: { text: string }) {
     {folder ? <>{folder[1]}<span className="dv-path dv-selectable" data-catalog-path="">{folder[2]}</span>{folder[3]}</> : message}{match && <> <code>({match[2]})</code></>}</div></div>;
 }
 const missing = (value: string | null | undefined) => value === null || value === undefined ? 'Not supplied' : value === '' ? '(empty value)' : value;
-// Share of the build's download manifest present at the last complete presence check; null when no honest percentage exists.
-export function downloadedPercent(r: RetentionSnapshot | undefined): string | null {
-  const c = r?.coverage;
-  if (!r || !c || c.presenceState !== 'assessed' || c.observedObjects !== r.objectCount || r.failedObjects !== '0' || r.unresolvedObjects !== '0') return null;
-  const scope = BigInt(r.totalEncodedBytes), present = BigInt(c.presentBytes);
-  if (scope <= 0n) return null;
-  // 100% means every manifest object is stored, not just enough bytes.
-  if (present >= scope) return c.presentObjects === r.objectCount ? '100%' : '99%';
-  const tenths = Number(present * 1000n / scope);
-  return tenths >= 10 ? `${Math.floor(tenths / 10)}%` : tenths > 0 ? `${(tenths / 10).toFixed(1)}%` : present > 0n ? '<0.1%' : '0%';
+/** What the Downloaded column says when it shows no meter. Null means a current percentage is shown. */
+export function downloadedText(summary: BuildDownloadSummary | undefined): string | null {
+  if (!summary) return null;
+  if (summary.state === 'notOpened') return 'Not opened';
+  const d = summary.download;
+  if (!d) return 'Size unknown';
+  return d.countState === 'counting' ? 'Counting…' : d.countState === 'unavailable' ? 'Unavailable' : storedPercent(d) === null ? 'Size unknown' : null;
 }
-export type BuildDownload = { job: RetentionSnapshot; running: boolean };
-const moving = (job: RetentionSnapshot) => ['queued', 'preparing', 'running'].includes(job.state);
-// One build can have a saved job per source region. Show its newest complete check, and mark it running if any job runs.
-export function buildDownloads(jobs: readonly RetentionSnapshot[]): Map<string, BuildDownload> {
-  const downloads = new Map<string, BuildDownload>();
-  const rank = (job: RetentionSnapshot) => [downloadedPercent(job) === null ? 0 : 1, job.coverage.presenceAssessedAt ?? ''] as const;
-  for (const job of jobs) {
-    const key = `${job.target.productId}:${job.target.buildIdentity}`, old = downloads.get(key);
-    const [complete, at] = rank(job), better = !old || complete > rank(old.job)[0] || complete === rank(old.job)[0] && at > rank(old.job)[1];
-    downloads.set(key, { job: better ? job : old!.job, running: moving(job) || !!old?.running });
-  }
-  return downloads;
+function DownloadedCell({ summary }: { summary: BuildDownloadSummary | undefined }) {
+  const d = summary?.download, percent = storedPercent(d), text = downloadedText(summary);
+  return <span><span className="visually-hidden">Downloaded </span>{!summary ? <span className="dv-dim">—<span className="visually-hidden"> not read yet</span></span> : text !== null ? <span className="dv-dim">{text}</span> : <span className={`dv-meter${percent === '100%' ? ' done' : ''}`}><span className="dv-track" aria-hidden="true"><i style={{ width: percent === '<0.1%' ? '0%' : percent! }}/></span>{percent}</span>}{d?.running && <><span className="dv-pulse" aria-hidden="true"/><span className="visually-hidden">, downloading</span></>}</span>;
+}
+type StoredPresence = NonNullable<BuildDownloadSummary['download']>['presence'];
+const checkedText = (p: StoredPresence) => p.state === 'assessing' ? 'Checking now' : p.state === 'assessed' ? stamp(p.assessedAt) : p.state === 'interrupted' ? 'Last check did not finish' : 'Never';
+/** The inspector's Download section, from the same engine summary as the column. */
+function DownloadSection({ summary }: { summary: BuildDownloadSummary | undefined }) {
+  if (!summary || summary.state === 'notOpened') return null;
+  const d = summary.download;
+  if (!d) return <><div className="dv-label">Download</div><dl><dt>Downloaded</dt><dd>Size unknown. This build has no measured download manifest.</dd></dl></>;
+  const percent = storedPercent(d), p = d.presence;
+  return <><div className="dv-label">Download</div><dl>
+    <dt>Downloaded</dt><dd>{d.countState === 'counting' ? d.scopeState === 'measuring' ? 'Counting… every file the build lists is being measured' : 'Counting content already on this machine…' : d.countState === 'unavailable' ? `Unavailable. ${d.countProblem!.message} (${d.countProblem!.code})` : percent === null ? 'Size unknown' : `${exactBytes(d.storedBytes)} of ${exactBytes(d.totalEncodedBytes)} · ${percent}`}</dd>
+    {d.countState === 'current' && <><dt>Objects</dt><dd>{exactCount(d.storedObjects)} of {exactCount(d.objectCount)}</dd></>}
+    <dt>Scope</dt><dd>{d.scopeState === 'measured' ? 'Every file the build lists, every locale and platform (encoded)' : d.scopeState === 'measuring' ? 'Measuring every file the build lists…' : `Download manifest only, every locale and platform (encoded)${d.scopeProblem ? `. ${d.scopeProblem.message} (${d.scopeProblem.code})` : ''}`}</dd>
+    {d.unresolvableRootContent !== '0' && <><dt>Not resolvable</dt><dd>{exactCount(d.unresolvableRootContent)} listed files have no encoding entry, so they can’t be downloaded and aren’t counted</dd></>}
+    <dt>Checked</dt><dd>{checkedText(p)}</dd>
+    <dt>Source</dt><dd>{regions(d.sourceRegions)}</dd>
+    {p.missingObjects !== '0' && <><dt>Missing</dt><dd>{exactCount(p.missingObjects)} objects missing at the check; not counted as downloaded</dd></>}
+    {p.corruptObjects !== '0' && <><dt>Corrupt</dt><dd>{exactCount(p.corruptObjects)} objects found corrupt at the check; not counted as downloaded</dd></>}
+    {d.running && <><dt>Activity</dt><dd>Download all running</dd></>}
+  </dl></>;
 }
 const routeRegions = (build: Build) => Array.from(new Set(build.sourceReceipts.filter(receipt => receipt.role === 'cdns' && receipt.rowOrdinal !== null && build.sourceReceipts.some(version => version.role === 'versions' && version.region === receipt.region && version.rowOrdinal !== null)).map(receipt => receipt.region))).sort();
 /** The persisted exact selection. Older versions kept one per product under the last chosen product. */
@@ -108,7 +118,8 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
   for(const snapshot of retention.jobs){if(snapshot.mode!=='downloadAll'&&snapshot.state!=='stopping'&&!snapshot.problem)continue;const target=snapshot.target,key=retentionKey(target),task=retentionActivity(snapshot,retention.busy!==null||retention.recovering.includes(key));tasks.push(task);const expected={jobId:snapshot.jobId,revision:snapshot.revision};taskActions.set(task.key,new Map([['pause',()=>{void retention.command(target,'pause',false,expected);}],['resume',()=>{void retention.command(target,'resume',false,expected);}],['onDemand',()=>{void retention.command(target,'onDemand',false,expected);}],['savedPolicy',()=>{void retention.retrySavedPolicy(target,expected);}],['refresh',()=>retention.refresh(target)]]));}
   if(retention.error)tasks.push({key:'retention:status',kind:'buildRetention',title:'Build download status',identity:{productId:'',buildIdentity:'',sourceRegion:''},status:'blocked',stage:'Status unconfirmed',measurement:null,problem:{code:'RETENTION_STATUS_UNCONFIRMED',message:retention.error},actions:[{id:'refresh',label:'Refresh download status'}]});
   if(retention.error)taskActions.set('retention:status',new Map([['refresh',()=>retention.refresh()]]));
-  const downloads=buildDownloads(retention.jobs);
+  // Saved intents changing (Download all, pause, resume, a pass ending) re-reads the stored figures.
+  const downloadNudge=retention.jobs.map(job=>`${retentionKey(job.target)}:${job.mode}:${job.paused}:${job.state}`).join('|');
   const activityContext=workspace?`${workspace.build.productId}:${workspace.build.id}:${workspace.sourceReference.region}:${workspace.sourceReference.generation}`:'discovery';
   const [problem, setProblem] = useState('');
   // Settings replaces the window content. The screen it was opened from stays mounted but hidden and inert,
@@ -152,7 +163,7 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
   }).catch(() => { if (!disposed) setProblem('The local engine is unavailable. Restart VibeMiner to reconnect.'); }); return () => { disposed = true; }; }, [bridge]);
   return <SettingsProvider value={settingsApi}><DownloadActivity tasks={tasks} contextKey={activityContext} onInfoAction={(info,action)=>{if(action==='refreshStatus'&&info.key===activityContext&&info.target&&workspace?.download&&info.target.ledgerId===workspace.download.ledgerId&&matches(info.target))retention.refresh(info.target);}} onAction={(key,action)=>{if(action==='view'&&settingsState.current){returning.current=null;setSettings(null);}/* View research leaves Settings for the task's screen. */taskActions.get(key)?.get(action)?.();}}>
     <div className="discovery-screen" data-app-view="" hidden={flow.view !== 'discovery' || !!settings} inert={flow.view !== 'discovery' || !!settings}><a className="skip" href="#builds">Skip to builds</a>
-      <DiscoveryWorkspace active={flow.view === 'discovery' && !settings} products={products} bridge={bridge} acknowledgedBuild={flow.operation?.result?.build} acknowledgedRegion={flow.operation?.result?.sourceReference.region} downloads={downloads} opening={flow.operation} onShowOpening={() => flow.showActive()} onCancelOpening={() => { void flow.cancel(); }} onOpen={(build, region) => { void flow.open(build, region, products.find(p => p.id === build.productId)?.label || build.productId); }}
+      <DiscoveryWorkspace active={flow.view === 'discovery' && !settings} products={products} bridge={bridge} acknowledgedBuild={flow.operation?.result?.build} acknowledgedRegion={flow.operation?.result?.sourceReference.region} summariesEnabled={retention.features.includes('download-summary-v1')} downloadNudge={downloadNudge} opening={flow.operation} onShowOpening={() => flow.showActive()} onCancelOpening={() => { void flow.cancel(); }} onOpen={(build, region) => { void flow.open(build, region, products.find(p => p.id === build.productId)?.label || build.productId); }}
         fixtureLabel={bridge.fixtureLabel ?? undefined} problem={problem}/>
     </div>
     <div className="app-view" data-app-view="" hidden={flow.view === 'discovery' || !!settings} inert={flow.view === 'discovery' || !!settings}>
@@ -214,8 +225,10 @@ export function checkLine(summary: CheckSummary, refreshed: boolean): string | n
   const count = summary.checked.length === summary.total ? `${summary.total}` : `${summary.checked.length} of ${summary.total}`;
   return [`Checked ${count} products`, ...(summary.failed.length ? [`${productNames(summary.failed)} could not be checked`] : []), ...(summary.notChecked.length ? [`${productNames(summary.notChecked)} not checked`] : [])].join(' · ');
 }
-function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabel, problem, downloads, opening, onShowOpening, onCancelOpening, onOpen, acknowledgedBuild, acknowledgedRegion }: { active: boolean; products: Product[]; bridge: DiscoveryBridge; fixtureLabel?: string; problem: string; downloads: Map<string, BuildDownload>; opening: Opening | null; onShowOpening: () => void; onCancelOpening: () => void; acknowledgedBuild?: Build; acknowledgedRegion?: string; onOpen: (build: Build, sourceRegion: string) => void }) {
+function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabel, problem, summariesEnabled, downloadNudge, opening, onShowOpening, onCancelOpening, onOpen, acknowledgedBuild, acknowledgedRegion }: { active: boolean; products: Product[]; bridge: DiscoveryBridge; fixtureLabel?: string; problem: string; summariesEnabled: boolean; downloadNudge: string; opening: Opening | null; onShowOpening: () => void; onCancelOpening: () => void; acknowledgedBuild?: Build; acknowledgedRegion?: string; onOpen: (build: Build, sourceRegion: string) => void }) {
   const [page, setPage] = useState<DiscoveryCatalogPage | null>(null);
+  const { summaries } = useDownloadSummaries(bridge, page?.builds ?? [], visibleView, summariesEnabled, downloadNudge);
+  const summaryOf = (build: Build) => summaries.get(summaryKey(build.productId, build.id));
   useEffect(() => {
     if (!acknowledgedBuild) return;
     setPage(previous => {
@@ -490,13 +503,13 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
         <div className={`dv-list${notices.props.children.some(Boolean) ? '' : ' flush'}`} aria-busy={reading}>
           {filtered.length > 0 && <>
             <div className="dv-cols dv-thead" aria-hidden="true"><span>Product</span><span>Version</span><span>Build</span><span>Downloaded</span><span>In VibeMiner</span></div>
-            <div role="listbox" id="builds" aria-label="Builds" tabIndex={0} aria-activedescendant={`build-option-${filtered[activeIndex].id}`} onKeyDown={listKey}>{filtered.map(build => { const download = downloads.get(`${build.productId}:${build.id}`), job = download?.job, percent = downloadedPercent(job), running = !!download?.running; return <div role="option" key={build.id} id={`build-option-${build.id}`} data-build-id={build.id} data-product-id={build.productId} className={`dv-cols build-row${filtered[activeIndex].id === build.id ? ' active' : ''}${build.isAdvertised ? ' current' : ''}`} aria-selected={selectedId === build.id} onClick={() => select(build)}>
+            <div role="listbox" id="builds" aria-label="Builds" tabIndex={0} aria-activedescendant={`build-option-${filtered[activeIndex].id}`} onKeyDown={listKey}>{filtered.map(build => <div role="option" key={build.id} id={`build-option-${build.id}`} data-build-id={build.id} data-product-id={build.productId} className={`dv-cols build-row${filtered[activeIndex].id === build.id ? ' active' : ''}${build.isAdvertised ? ' current' : ''}`} aria-selected={selectedId === build.id} onClick={() => select(build)}>
               <span className="dv-product">{build.productId}</span>
               <span className="dv-version">{build.version || 'Version not supplied'}{build.isAdvertised && <span className="dv-pill current">Current</span>}<span className="visually-hidden">, Config {short(build.buildConfig)}, Identity {short(build.id)}</span></span>
               <span className="dv-dim"><span className="visually-hidden">Build </span>{build.buildId || 'not supplied'}</span>
-              <span><span className="visually-hidden">Downloaded </span>{!job && !build.isLocal ? <span className="dv-dim">Not opened</span> : percent === null ? <span className="dv-dim">{job?.coverage.presenceState === 'assessing' ? 'Checking…' : 'Not checked'}</span> : <span className={`dv-meter${percent === '100%' ? ' done' : ''}`}><span className="dv-track" aria-hidden="true"><i style={{ width: percent === '<0.1%' ? '0%' : percent }}/></span>{percent}</span>}{running && <><span className="dv-pulse" aria-hidden="true"/><span className="visually-hidden">, downloading</span></>}</span>
+              <DownloadedCell summary={summaryOf(build)}/>
               <span>{build.isLocal && <span className="dv-pill">Prepared</span>}{build.isNew && <span className="dv-pill gold">New to VibeMiner</span>}{!build.isLocal && !build.isNew && <span className="dv-dim">—</span>}</span>
-            </div>; })}</div>
+            </div>)}</div>
             {page?.nextCursor && <div className="dv-load-more"><button className="dv-btn" disabled={reading || busy || page.builds.length >= 500} onClick={() => void read(filter, productFilter, page.nextCursor!)}>{reading ? 'Loading…' : page.builds.length >= 500 ? '500-build display limit reached' : 'Load more builds'}</button><span>{page.builds.length >= 500 ? 'This view displays the first 500 builds. Search only refines loaded builds; searching beyond this display window is not available.' : 'Filters apply to loaded builds only.'}</span></div>}
           </>}
           {refused && <div className="dv-empty"><div><h2>Saved catalog not opened</h2><p>No builds are shown because the saved catalog was not opened. Follow the steps in the notice above.</p></div></div>}
@@ -506,7 +519,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
       {!refused && !(nothingSaved && !selected) && <aside className="dv-inspector" id="inspector" aria-labelledby="inspector-heading" inert={!!activity_?.expanded}>{selected ? <>
         <div className="dv-insp-head"><div className="dv-label">Selected build</div><h2 id="inspector-heading" className="dv-selectable">{selected.version}</h2><p className="inspector-product">World of Warcraft · {label(selected.productId) || selected.productId} · <code>{selected.productId}</code></p></div>
         <div className="dv-insp-body">
-          {openingHere ? openingBox(openingHere) : <div className="dv-state"><strong>{selected.isLocal ? 'Prepared locally' : 'Not prepared'}</strong>{selected.isLocal ? downloads.get(`${selected.productId}:${selected.id}`)?.job.mode === 'downloadAll' ? 'Local evidence recorded. Download all is on for this build.' : 'Local evidence recorded. Game content downloads on demand.' : 'Opening verifies configs and measures download size.'}</div>}
+          {openingHere ? openingBox(openingHere) : <div className="dv-state"><strong>{selected.isLocal ? 'Prepared locally' : 'Not prepared'}</strong>{selected.isLocal ? summaryOf(selected)?.download?.downloadAll ? 'Local evidence recorded. Download all is on for this build.' : 'Local evidence recorded. Game content downloads on demand.' : 'Opening verifies configs and measures download size.'}</div>}
           <div className="dv-label">Identity</div>
           <dl><dt>Product</dt><dd><code>{selected.productId}</code>{label(selected.productId) ? ` · ${label(selected.productId)}` : ''}</dd>
             <dt>Build</dt><dd className="dv-selectable">{selected.buildId || 'Not supplied'}</dd>
@@ -516,7 +529,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
             <dt>Key ring</dt><dd className="mono dv-selectable">{missing(selected.identityFields.KeyRing)}</dd>
             <dt>Identity</dt><dd className="mono dv-selectable">{selected.id}</dd></dl>
           <CdnConfigHint build={selected} open={acknowledgedBuild?.productId === selected.productId && acknowledgedBuild.id === selected.id && acknowledgedRegion ? { cdnConfig: acknowledgedBuild.cdnConfig, region: acknowledgedRegion } : undefined}/>
-          {(() => { const download = downloads.get(`${selected.productId}:${selected.id}`), job = download?.job, percent = downloadedPercent(job); return job ? <><div className="dv-label">Download</div><dl><dt>Downloaded</dt><dd>{percent === null ? 'Not checked' : `${exactBytes(job.coverage.presentBytes)} of ${exactBytes(job.totalEncodedBytes)} · ${percent}`}</dd><dt>Scope</dt><dd>Download manifest, all variants (encoded)</dd><dt>Checked</dt><dd>{job.coverage.presenceState === 'assessing' ? 'Checking now' : job.coverage.presenceAssessedAt ? stamp(job.coverage.presenceAssessedAt) : 'Never'}</dd><dt>Source</dt><dd>{job.target.sourceRegion.toUpperCase()}</dd>{job.coverage.corruptObjects !== '0' && <><dt>Corrupt</dt><dd>{exactCount(job.coverage.corruptObjects)} objects found corrupt at the check; not counted as downloaded</dd></>}{download!.running && <><dt>Activity</dt><dd>Download all running</dd></>}</dl></> : null; })()}
+          <DownloadSection summary={summaryOf(selected)}/>
           <div className="dv-label">Observation</div>
           <dl><dt>Publication</dt><dd>{selected.isAdvertised ? `Current: advertised at the last completed check (${stamp(selected.lastSeenAt)})` : 'Not advertised at the last completed check'}{selectedStatus && failedNow(selectedStatus) && ' · latest check failed'}</dd>
             <dt>Advertised in</dt><dd>{selected.advertisedRegions.length ? regions(selected.advertisedRegions) : 'None at last check'}</dd>

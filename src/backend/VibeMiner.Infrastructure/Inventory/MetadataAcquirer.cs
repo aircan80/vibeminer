@@ -35,8 +35,10 @@ public sealed class VerifiedMetadata : IAsyncDisposable
 /// Global preparation budgets and source grammar/database publication are separate caller duties.
 /// </summary>
 public sealed class MetadataAcquirer(HttpClient client, VerifiedObjectStore objects, TimeProvider? timeProvider = null,
-    ISharedAcquisition? shared = null, AcquisitionResources? resources = null)
+    ISharedAcquisition? shared = null, AcquisitionResources? resources = null, IAcquisitionWorkContext? work = null)
 {
+    // A null work context is interactive; background measurement passes a background one (D066).
+    private readonly AcquisitionPriority priority = work?.Snapshot.Priority ?? AcquisitionPriority.Interactive;
     public const string SourceRevision = "metadata-blte-source-v1";
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     private readonly SemaphoreSlim active = new(1, 1);
@@ -64,11 +66,11 @@ public sealed class MetadataAcquirer(HttpClient client, VerifiedObjectStore obje
             EncodedReceipt? physical = null;
             if (shared is not null && source is not null)
                 physical = await shared.AcquireAsync(new(expectation.EncodingKey, expectation.EncodedBytes), source,
-                    AcquisitionPriority.Interactive, state => progress(state.Completed is { } done && state.Total is { } total
+                    priority, state => progress(state.Completed is { } done && state.Total is { } total
                         ? InventoryProgress.Format(state.Stage, done, total, state.Unit) : state.Stage), cancellationToken);
             if (resources is not null)
                 staging = await resources.ReserveStagingAsync(expectation.DecodedBytes +
-                    (physical is null && retained is null ? expectation.EncodedBytes : 0), null, cancellationToken);
+                    (physical is null && retained is null ? expectation.EncodedBytes : 0), work, cancellationToken);
             await using (var decoded = await objects.CreateStagingFileAsync(cancellationToken))
             {
                 decodedPath = decoded.Name;
@@ -81,8 +83,8 @@ public sealed class MetadataAcquirer(HttpClient client, VerifiedObjectStore obje
                     await progress($"Verifying {expectation.Role} metadata");
                     await using var encoded = resources is null
                         ? await objects.OpenVerifiedAsync(physical.Sha256, expectation.EncodedBytes, cancellationToken)
-                        : await objects.OpenVerifiedAsync(physical.Sha256, expectation.EncodedBytes, resources, null, cancellationToken);
-                    using var cpu = resources is null ? null : await resources.EnterCpuAsync(null, cancellationToken);
+                        : await objects.OpenVerifiedAsync(physical.Sha256, expectation.EncodedBytes, resources, work, cancellationToken);
+                    using var cpu = resources is null ? null : await resources.EnterCpuAsync(work, cancellationToken);
                     await BlteDecoder.DecodeAsync(encoded, decoded, expectation.EncodingKey, expectation.ContentKey,
                         expectation.EncodedBytes, expectation.DecodedBytes, cancellationToken);
                     sha = physical.Sha256; retrievedAt = physical.RetrievedAt;
@@ -93,8 +95,8 @@ public sealed class MetadataAcquirer(HttpClient client, VerifiedObjectStore obje
                     await progress($"Verifying saved {expectation.Role} metadata");
                     await using var encoded = resources is null
                         ? await objects.OpenVerifiedAsync(retained.Sha256, expectation.EncodedBytes, cancellationToken)
-                        : await objects.OpenVerifiedAsync(retained.Sha256, expectation.EncodedBytes, resources, null, cancellationToken);
-                    using var cpu = resources is null ? null : await resources.EnterCpuAsync(null, cancellationToken);
+                        : await objects.OpenVerifiedAsync(retained.Sha256, expectation.EncodedBytes, resources, work, cancellationToken);
+                    using var cpu = resources is null ? null : await resources.EnterCpuAsync(work, cancellationToken);
                     await BlteDecoder.DecodeAsync(encoded, decoded, expectation.EncodingKey, expectation.ContentKey,
                         expectation.EncodedBytes, expectation.DecodedBytes, cancellationToken);
                     sha = retained.Sha256;
@@ -110,13 +112,13 @@ public sealed class MetadataAcquirer(HttpClient client, VerifiedObjectStore obje
                         retrievedAt = clock.GetUtcNow().ToString("O");
                         encoded.Position = 0;
                         await progress($"Verifying {expectation.Role} metadata");
-                        using var cpu = resources is null ? null : await resources.EnterCpuAsync(null, cancellationToken);
+                        using var cpu = resources is null ? null : await resources.EnterCpuAsync(work, cancellationToken);
                         await BlteDecoder.DecodeAsync(encoded, decoded, expectation.EncodingKey, expectation.ContentKey,
                             expectation.EncodedBytes, expectation.DecodedBytes, cancellationToken);
                     }
                     sha = resources is null
                         ? await objects.PublishFileAsync(encodedPath, expectation.EncodedBytes, cancellationToken)
-                        : await objects.PublishFileAsync(encodedPath, expectation.EncodedBytes, resources, null, cancellationToken);
+                        : await objects.PublishFileAsync(encodedPath, expectation.EncodedBytes, resources, work, cancellationToken);
                     encodedPath = null; // Successful publication consumes the app-owned staging file.
                 }
                 await decoded.FlushAsync(cancellationToken);

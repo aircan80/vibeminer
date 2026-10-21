@@ -88,6 +88,12 @@
     "retentionList": {
       "$ref": "#/definitions/RetentionList"
     },
+    "downloadSummariesParams": {
+      "$ref": "#/definitions/DownloadSummariesParams"
+    },
+    "downloadSummaries": {
+      "$ref": "#/definitions/DownloadSummaries"
+    },
     "itemsSnapshot": {
       "$ref": "#/definitions/ItemsSnapshot"
     },
@@ -999,6 +1005,7 @@
             "shutdown",
             "inventory.read",
             "download.read",
+            "download.summaries",
             "tables.catalog",
             "tables.definition",
             "tables.prepare",
@@ -1050,6 +1057,22 @@
       ],
       "additionalProperties": false,
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "download.summaries"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/DownloadSummariesParams"
+              }
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -3846,7 +3869,10 @@
           ]
         },
         "scope": {
-          "const": "downloadManifestAllVariants"
+          "enum": [
+            "downloadManifestAllVariants",
+            "downloadManifestAndRootAllVariants"
+          ]
         },
         "objectCount": {
           "type": "string",
@@ -3944,6 +3970,261 @@
       },
       "required": [
         "jobs"
+      ],
+      "additionalProperties": false
+    },
+    "BuildKey": {
+      "title": "BuildKey",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity"
+      ],
+      "additionalProperties": false
+    },
+    "DownloadSummariesParams": {
+      "title": "DownloadSummariesParams",
+      "type": "object",
+      "properties": {
+        "builds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/BuildKey"
+          }
+        }
+      },
+      "required": [
+        "builds"
+      ],
+      "additionalProperties": false
+    },
+    "BuildPresenceCheck": {
+      "title": "BuildPresenceCheck",
+      "type": "object",
+      "properties": {
+        "state": {
+          "enum": [
+            "notAssessed",
+            "assessing",
+            "assessed",
+            "interrupted"
+          ]
+        },
+        "assessedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 20,
+              "maxLength": 40
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "missingObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "corruptObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        }
+      },
+      "required": [
+        "state",
+        "assessedAt",
+        "observedObjects",
+        "missingObjects",
+        "corruptObjects"
+      ],
+      "additionalProperties": false
+    },
+    "BuildStoredCoverage": {
+      "title": "BuildStoredCoverage",
+      "type": "object",
+      "properties": {
+        "ledgerId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "scope": {
+          "enum": [
+            "downloadManifestAllVariants",
+            "downloadManifestAndRootAllVariants"
+          ]
+        },
+        "objectCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "totalEncodedBytes": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "storedObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "storedBytes": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "countState": {
+          "enum": [
+            "counting",
+            "current",
+            "unavailable"
+          ]
+        },
+        "countProblem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RetentionProblem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40
+        },
+        "presence": {
+          "$ref": "#/definitions/BuildPresenceCheck"
+        },
+        "downloadAll": {
+          "type": "boolean"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "sourceRegions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2,8}$"
+          }
+        },
+        "unresolvableRootContent": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "scopeState": {
+          "enum": [
+            "measuring",
+            "measured",
+            "manifestOnly"
+          ]
+        },
+        "scopeProblem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RetentionProblem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "changesPending": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ledgerId",
+        "scope",
+        "objectCount",
+        "totalEncodedBytes",
+        "storedObjects",
+        "storedBytes",
+        "countState",
+        "countProblem",
+        "updatedAt",
+        "presence",
+        "downloadAll",
+        "running",
+        "sourceRegions",
+        "unresolvableRootContent",
+        "scopeState",
+        "scopeProblem",
+        "changesPending"
+      ],
+      "additionalProperties": false
+    },
+    "BuildDownloadSummary": {
+      "title": "BuildDownloadSummary",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "state": {
+          "enum": [
+            "notOpened",
+            "notMeasured",
+            "measured"
+          ]
+        },
+        "download": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BuildStoredCoverage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "state",
+        "download"
+      ],
+      "additionalProperties": false
+    },
+    "DownloadSummaries": {
+      "title": "DownloadSummaries",
+      "type": "object",
+      "properties": {
+        "summaries": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/BuildDownloadSummary"
+          }
+        }
+      },
+      "required": [
+        "summaries"
       ],
       "additionalProperties": false
     },

@@ -17,8 +17,8 @@ public sealed partial class BuildRetentionDriver
         public async Task<IRetentionSession> OpenAsync(RetentionDriverJob job, Func<AcquisitionProgress, Task> progress, CancellationToken token)
         {
             RetentionService.Validate(job.Plan.Target);
-            if (job.Plan.Ledger.Revision != DownloadLedger.Revision || job.Plan.Target.LedgerId != job.Plan.Ledger.Sha256 ||
-                job.Plan.Scope != DiscoveryCatalog.DownloadScope || job.Plan.PolicyRevision != "retention-encoded-v1" ||
+            if (job.Plan.Ledger.Revision != DownloadLedger.Revision || job.Plan.Target.LedgerId != job.Plan.Ledger.Sha256 && job.Plan.Scope != DiscoveryCatalog.DownloadRootScope ||
+                !DiscoveryCatalog.KnownDownloadScope(job.Plan.Scope) || job.Plan.PolicyRevision != "retention-encoded-v1" ||
                 job.Plan.Configurations.Count != 2 || job.Plan.Configurations.Count(item => item.Role == "buildConfig") != 1 ||
                 job.Plan.Configurations.Count(item => item.Role == "cdnConfig") != 1 || job.Plan.DownloadSource.Role != "download" ||
                 job.Plan.SourceReference.Region != job.Plan.Target.SourceRegion)

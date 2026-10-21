@@ -21,18 +21,24 @@ public sealed partial class DiscoveryCatalog
             if (reader.GetInt64(3) is < 1 or > 2048 || reader.IsDBNull(4) || reader.GetInt64(4) is < 1 or > 32768)
                 throw RetentionIntegrity("An admitted retention source exceeds its bounds.");
             admission = reader.GetInt64(0);
-            try { reference = Deserialize<OpeningSourceReference>(reader.GetString(1)); metadata = Deserialize<MetadataReceipt[]>(reader.GetString(2)); }
+            try
+            {
+                reference = Deserialize<OpeningSourceReference>(reader.GetString(1)); metadata = Deserialize<MetadataReceipt[]>(reader.GetString(2));
+            }
             catch (JsonException) { throw RetentionIntegrity("An admitted retention source is malformed."); }
         }
-        if (metadata.Length is < 1 or > 2 || metadata.Count(m => m.Role == "download") != 1)
+        if (metadata.Length is < 1 or > 3 || metadata.Count(m => m.Role == "download") != 1)
             throw RetentionIntegrity("A retention admission lacks its exact download source.");
         var configurations = new List<ConfigurationReceipt>();
         using (var command = Command("SELECT role,key,sha256,byte_length,source_url,retrieved_at,verified_at,parsed_field_count FROM workspace_configurations WHERE admission_id=$a", transaction, ("$a", admission)))
         using (var reader = command.ExecuteReader())
             while (reader.Read()) configurations.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetInt32(7)));
-        var artifact = ReadDownloadArtifact(target.LedgerId, transaction) ?? throw RetentionIntegrity("The admitted download ledger is missing.");
+        // The target names the admitted manifest; the plan follows its measured ROOT scope once known (D066).
+        var root = ReadRootScope(target.ProductId, target.BuildIdentity, target.LedgerId, transaction);
+        var artifact = ReadDownloadArtifact(root.Ledger, transaction) ?? throw RetentionIntegrity("The admitted download ledger is missing.");
+        var scope = root.Scope;
         var plan = new RetentionPlan(target, reference, configurations.ToArray(), metadata.Single(m => m.Role == "download"),
-            new(artifact.Sha256, artifact.ByteLength, artifact.ObjectCount, artifact.TotalEncodedBytes, DownloadLedger.Revision), DownloadScope, RetentionPolicyRevision);
+            new(artifact.Sha256, artifact.ByteLength, artifact.ObjectCount, artifact.TotalEncodedBytes, DownloadLedger.Revision), scope, RetentionPolicyRevision);
         ValidateRetentionPlan(plan); ValidateRetentionPlanAssociation(plan, transaction);
         return plan;
     }
@@ -41,13 +47,18 @@ public sealed partial class DiscoveryCatalog
     {
         ValidateRetentionPlan(plan);
         ValidateDownloadSourceAssociation(plan.DownloadSource, transaction);
-        var artifact = ReadDownloadArtifact(plan.Target.LedgerId, transaction);
+        var artifact = ReadDownloadArtifact(plan.Ledger.Sha256, transaction);
+        // A job keeps the ledger it was claimed with: the admitted manifest, or a measured scope of it, which may since have
+        // been reset for measuring again. The source binding below proves the measured ledger came from this manifest.
+        if (plan.Ledger.Sha256 != plan.Target.LedgerId && plan.Scope != DownloadRootScope &&
+            ReadRootScope(plan.Target.ProductId, plan.Target.BuildIdentity, plan.Target.LedgerId, transaction).Ledger != plan.Ledger.Sha256)
+            throw RetentionIntegrity("A pinned retention ledger is neither the admitted manifest nor its measured scope.");
         if (artifact != new DownloadLedgerArtifact(plan.Ledger.Sha256, plan.Ledger.ByteLength, plan.Ledger.ObjectCount, plan.Ledger.TotalEncodedBytes))
             throw RetentionIntegrity("A pinned retention ledger has changed geometry.");
-        using (var command = Command("SELECT receipt,artifact_sha256 FROM download_artifact_sources WHERE source_sha256=$s AND parser_revision=$p AND ledger_revision=$r", transaction,
-            ("$s", plan.DownloadSource.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision)))
+        using (var command = Command("SELECT receipt,artifact_sha256 FROM download_artifact_sources WHERE source_sha256=$s AND parser_revision=$p AND ledger_revision=$r AND artifact_sha256=$a AND scope=$scope", transaction,
+            ("$s", plan.DownloadSource.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision), ("$a", plan.Ledger.Sha256), ("$scope", plan.Scope)))
         using (var reader = command.ExecuteReader())
-            if (!reader.Read() || reader.GetString(1) != plan.Target.LedgerId || !SameDownloadSource(Deserialize<MetadataReceipt>(reader.GetString(0)), plan.DownloadSource))
+            if (!reader.Read() || reader.GetString(1) != plan.Ledger.Sha256 || !SameDownloadSource(Deserialize<MetadataReceipt>(reader.GetString(0)), plan.DownloadSource))
                 throw RetentionIntegrity("A pinned retention ledger differs from its immutable parsed source.");
         var identity = Scalar("SELECT identity_fields FROM builds WHERE id=$b AND product=$p", transaction,
             ("$b", plan.Target.BuildIdentity), ("$p", plan.Target.ProductId)) as string;
@@ -89,6 +100,14 @@ public sealed partial class DiscoveryCatalog
 
     private RetentionSnapshot RetentionSnapshotOf(RetentionJob job, SqliteTransaction? transaction)
     {
+        // A job that is not running shows the scope it will cover when it is next claimed.
+        var waiting = false;
+        if (!job.Active && ReadRootScope(job.Plan.Target.ProductId, job.Plan.Target.BuildIdentity, job.Plan.Target.LedgerId, transaction) is var root)
+        {
+            if (root.Ledger != job.Plan.Ledger.Sha256) job = job with { Plan = ReadRetentionPlan(job.Plan.Target, transaction), Map = null };
+            waiting = root.State == "pending" && job.Mode == RetentionMode.DownloadAll && !job.Paused;
+            if (job.Cursor > job.Plan.Ledger.ObjectCount) job = job with { Cursor = 0, Present = 0, PresentBytes = 0, Missing = 0, Corrupt = 0, Unresolved = 0, Failed = 0 };
+        }
         ValidateRetentionPlanAssociation(job.Plan, transaction);
         var coverage = ReadRetentionCoverage(job.Plan.Ledger, transaction);
         int? position = null;
@@ -102,6 +121,7 @@ public sealed partial class DiscoveryCatalog
             job.Plan.Scope, job.Plan.Ledger.ObjectCount, job.Plan.Ledger.TotalEncodedBytes,
             new(coverage.Count, coverage.Bytes, coverage.At, job.PresenceState, job.AssessedAt,
                 job.Present + job.Missing + job.Corrupt, job.Present, job.PresentBytes, job.Missing, job.Corrupt),
-            job.Progress, job.Pending, job.WireBytes, job.Unresolved, job.Failed, position, job.Problem);
+            waiting && job.State == RetentionState.Queued ? new("Waiting for every file the build lists to be measured", "stage") : job.Progress,
+            job.Pending, job.WireBytes, job.Unresolved, job.Failed, position, job.Problem);
     }
 }

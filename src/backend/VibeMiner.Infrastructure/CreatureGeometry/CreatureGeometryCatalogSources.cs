@@ -93,6 +93,7 @@ public sealed partial class DiscoveryCatalog
             Execute("INSERT INTO content_objects VALUES($e,$c,$h,$n,$d,$r)", transaction,
                 ("$e", candidate.EncodingKey), ("$c", candidate.ContentKey), ("$h", candidate.Sha256),
                 ("$n", expected.EncodedBytes), ("$d", expected.DecodedBytes), ("$r", Encoding.UTF8.GetString(GeometryBytes(candidate, GeometrySourceBytes))));
+            LogStoredChange(candidate.EncodingKey, transaction);
             original = candidate;
         }
         else if (!SameContentBytes(original, candidate) || !insert && !CreatureAuthority(original, candidate)) throw GeometryStale();

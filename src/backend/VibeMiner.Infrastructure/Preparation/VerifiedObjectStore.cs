@@ -7,6 +7,7 @@ namespace VibeMiner.Infrastructure;
 
 internal enum ObjectPresenceKind { Present, Absent, WrongLength, Unknown }
 internal sealed record ObjectPresenceObservation(ObjectPresenceKind Kind, long? ObservedBytes);
+internal sealed record ObjectFileIdentity(long Length, DateTime CreatedUtc, DateTime WrittenUtc);
 
 /// <summary>One lazy app-owned immutable CAS. No decoded or per-build copies.</summary>
 public sealed class VerifiedObjectStore(string dataDirectory,
@@ -135,6 +136,40 @@ public sealed class VerifiedObjectStore(string dataDirectory,
             File.Delete(path);
             throw;
         }
+    }
+
+    /// <summary>The identity of the file behind a verified read lease, so a later open can tell it is the same file.</summary>
+    internal static ObjectFileIdentity IdentityOf(FileStream verified) => new(verified.Length,
+        File.GetCreationTimeUtc(verified.SafeFileHandle), File.GetLastWriteTimeUtc(verified.SafeFileHandle));
+
+    /// <summary>
+    /// Reopens an object whose complete SHA-256 this process already proved through <see cref="OpenVerifiedAsync(string, long, CancellationToken)"/>,
+    /// without hashing it again, only while the file at its CAS path keeps the proven length, creation and write times.
+    /// Returns null when the file changed, so the caller proves it again. Only the stored-coverage worker uses this, to
+    /// read immutable ledgers it already proved (D065); every reader that serves bytes still verifies them.
+    /// </summary>
+    internal async Task<FileStream?> OpenProvenAsync(string sha256, long length, ObjectFileIdentity proven, CancellationToken token)
+    {
+        if (length is < 1 or > MaxObjectBytes || proven.Length != length)
+            throw new DiscoveryException("CATALOG_INTEGRITY", "An object length is invalid.");
+        var path = ObjectPath(sha256);
+        await EnsureInitializedAsync(token);
+        FileStream? input = null;
+        try
+        {
+            // Refuse links and directories, as presence observation does.
+            if ((File.GetAttributes(Path.GetDirectoryName(path)!) & FileAttributes.ReparsePoint) != 0) return null;
+            if ((File.GetAttributes(path) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) return null;
+            input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            if (IdentityOf(input) == proven) return input;
+            await input.DisposeAsync(); return null;
+        }
+        catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException)
+        {
+            if (input is not null) await input.DisposeAsync();
+            throw new DiscoveryException("LOCAL_OBJECT_MISSING", "A previously saved object is missing. No automatic repair was attempted.");
+        }
+        catch { if (input is not null) await input.DisposeAsync(); throw; }
     }
 
     /// <summary>

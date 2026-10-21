@@ -9,6 +9,15 @@ namespace VibeMiner.Infrastructure;
 
 internal sealed record RetainedEncodedObject(string Key, string ContentKey, string Sha256, long EncodedBytes, long DecodedBytes, ContentProjection? Projection = null);
 
+/// <summary>
+/// What a ledger covers beyond its download manifest (D066): the ROOT and ENCODING sources it was built from, or none
+/// when the build's file list could not be read, and the ROOT content keys that cannot be resolved to an encoded object.
+/// </summary>
+internal sealed record DownloadScopeBinding(string RootSha256, string EncodingSha256, string Scope, long UnresolvableRootContent)
+{
+    internal static readonly DownloadScopeBinding ManifestOnly = new("", "", DiscoveryCatalog.DownloadScope, 0);
+}
+
 internal sealed record StoredDownloadAdmission(DownloadLedgerArtifact Artifact,
     IReadOnlyList<string> VerifiedKeys, string AssessedAt, IReadOnlyDictionary<string, long> VerifiedLengths);
 
@@ -16,6 +25,9 @@ public sealed partial class DiscoveryCatalog
 {
     internal const string DownloadProfile = "home-download-v1";
     internal const string DownloadScope = "downloadManifestAllVariants";
+    /// <summary>The manifest plus the encoded object behind every ROOT-listed file it does not cover (D066).</summary>
+    internal const string DownloadRootScope = "downloadManifestAndRootAllVariants";
+    internal static bool KnownDownloadScope(string? scope) => scope is DownloadScope or DownloadRootScope;
     private const string DownloadParserRevision = "download-v1";
     private const int MaxDownloadAssessmentKeys = 10_000;
 
@@ -27,7 +39,8 @@ public sealed partial class DiscoveryCatalog
                 object_count INTEGER NOT NULL,total_encoded_bytes INTEGER NOT NULL,ledger_revision TEXT NOT NULL);
             CREATE TABLE download_artifact_sources(source_sha256 TEXT NOT NULL,parser_revision TEXT NOT NULL,
                 ledger_revision TEXT NOT NULL,artifact_sha256 TEXT NOT NULL,receipt TEXT NOT NULL,
-                PRIMARY KEY(source_sha256,parser_revision,ledger_revision),
+                root_sha256 TEXT NOT NULL,encoding_sha256 TEXT NOT NULL,scope TEXT NOT NULL,root_unresolved INTEGER NOT NULL,
+                PRIMARY KEY(source_sha256,parser_revision,ledger_revision,root_sha256,encoding_sha256),
                 FOREIGN KEY(artifact_sha256) REFERENCES download_artifacts(sha256));
             CREATE TABLE download_admissions(admission_id INTEGER PRIMARY KEY,artifact_sha256 TEXT,
                 verified_keys TEXT NOT NULL,assessed_at TEXT NOT NULL,metadata TEXT,summary TEXT,problem TEXT,
@@ -42,24 +55,41 @@ public sealed partial class DiscoveryCatalog
         transaction.Commit();
     }
 
-    internal Task<DownloadLedgerArtifact?> FindDownloadArtifactAsync(MetadataReceipt source, CancellationToken token) => Schedule(() =>
+    internal async Task<DownloadLedgerArtifact?> FindDownloadArtifactAsync(MetadataReceipt source, CancellationToken token) =>
+        (await FindDownloadScopeAsync(source, "", "", token))?.Artifact;
+
+    /// <summary>The ledger built from exactly this manifest, ROOT and ENCODING (empty identities for manifest only).</summary>
+    internal Task<(DownloadLedgerArtifact Artifact, DownloadScopeBinding Binding)?> FindDownloadScopeAsync(MetadataReceipt source,
+        string rootSha256, string encodingSha256, CancellationToken token) => Schedule<(DownloadLedgerArtifact, DownloadScopeBinding)?>(() =>
     {
         ValidateDownloadSource(source, completed: false);
         using var command = Command("""
-            SELECT s.receipt,a.sha256,a.byte_length,a.object_count,a.total_encoded_bytes,a.ledger_revision
+            SELECT s.receipt,a.sha256,a.byte_length,a.object_count,a.total_encoded_bytes,a.ledger_revision,s.scope,s.root_unresolved
             FROM download_artifact_sources s JOIN download_artifacts a ON a.sha256=s.artifact_sha256
-            WHERE s.source_sha256=$s AND s.parser_revision=$p AND s.ledger_revision=$r
-            """, null, ("$s", source.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision));
+            WHERE s.source_sha256=$s AND s.parser_revision=$p AND s.ledger_revision=$r AND s.root_sha256=$root AND s.encoding_sha256=$en
+            """, null, ("$s", source.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision), ("$root", rootSha256), ("$en", encodingSha256));
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return null;
         var original = Deserialize<MetadataReceipt>(reader.GetString(0));
         ValidateDownloadSource(original, completed: true);
+        var binding = new DownloadScopeBinding(rootSha256, encodingSha256, reader.GetString(6), reader.GetInt64(7));
         if (!SameDownloadSource(original, source) || reader.GetString(5) != DownloadLedger.Revision)
             throw DownloadIntegrity("A saved download ledger differs from its exact source binding.");
+        ValidateScopeBinding(binding);
         var artifact = new DownloadLedgerArtifact(reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4));
         ValidateDownloadArtifact(artifact);
-        return artifact;
+        return (artifact, binding);
     }, token);
+
+    private static void ValidateScopeBinding(DownloadScopeBinding binding)
+    {
+        var withRoot = binding.Scope == DownloadRootScope;
+        if (!KnownDownloadScope(binding.Scope) || binding.UnresolvableRootContent < 0 ||
+            withRoot != (binding.RootSha256.Length != 0) || withRoot != (binding.EncodingSha256.Length != 0) ||
+            withRoot && (!DownloadHash(binding.RootSha256, 64) || !DownloadHash(binding.EncodingSha256, 64)) ||
+            !withRoot && binding.UnresolvableRootContent != 0)
+            throw DownloadIntegrity("A download ledger's file-list binding is inconsistent.");
+    }
 
     internal Task<ResolverArtifact?> FindResolverArtifactAsync(string sourceSha256, string role, string parserRevision,
         CancellationToken token) => Schedule(() =>
@@ -93,10 +123,12 @@ public sealed partial class DiscoveryCatalog
         token.ThrowIfCancellationRequested(); transaction.Commit(); return true;
     }, token);
 
-    internal Task RecordDownloadArtifactAsync(MetadataReceipt source, DownloadLedgerArtifact artifact, CancellationToken token) => Schedule(() =>
+    internal Task RecordDownloadArtifactAsync(MetadataReceipt source, DownloadLedgerArtifact artifact, CancellationToken token,
+        DownloadScopeBinding? scope = null) => Schedule(() =>
     {
+        var binding = scope ?? DownloadScopeBinding.ManifestOnly;
         ValidateDownloadSource(source, completed: true);
-        ValidateDownloadArtifact(artifact);
+        ValidateDownloadArtifact(artifact); ValidateScopeBinding(binding);
         using var transaction = Db.BeginTransaction();
         ValidateDownloadSourceAssociation(source, transaction);
         var previous = ReadDownloadArtifact(artifact.Sha256, transaction);
@@ -105,19 +137,20 @@ public sealed partial class DiscoveryCatalog
         Execute("INSERT OR IGNORE INTO download_artifacts VALUES($h,$b,$n,$t,$r)", transaction,
             ("$h", artifact.Sha256), ("$b", artifact.ByteLength), ("$n", artifact.ObjectCount),
             ("$t", artifact.TotalEncodedBytes), ("$r", DownloadLedger.Revision));
-        var existing = Scalar("SELECT receipt FROM download_artifact_sources WHERE source_sha256=$s AND parser_revision=$p AND ledger_revision=$r", transaction,
-            ("$s", source.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision)) as string;
+        (string, object?)[] key = [("$s", source.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision),
+            ("$root", binding.RootSha256), ("$en", binding.EncodingSha256)];
+        const string where = "source_sha256=$s AND parser_revision=$p AND ledger_revision=$r AND root_sha256=$root AND encoding_sha256=$en";
+        var existing = Scalar("SELECT receipt FROM download_artifact_sources WHERE " + where, transaction, key) as string;
         if (existing is not null)
         {
             var original = Deserialize<MetadataReceipt>(existing);
-            var key = Scalar("SELECT artifact_sha256 FROM download_artifact_sources WHERE source_sha256=$s AND parser_revision=$p AND ledger_revision=$r", transaction,
-                ("$s", source.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision)) as string;
-            if (!SameDownloadSource(original, source) || key != artifact.Sha256)
+            var same = Scalar("SELECT artifact_sha256=$a AND scope=$scope AND root_unresolved=$u FROM download_artifact_sources WHERE " + where, transaction,
+                [.. key, ("$a", artifact.Sha256), ("$scope", binding.Scope), ("$u", binding.UnresolvableRootContent)]);
+            if (!SameDownloadSource(original, source) || Convert.ToInt64(same, CultureInfo.InvariantCulture) != 1)
                 throw DownloadIntegrity("A complete source cannot be reassociated with a different immutable ledger.");
         }
-        else Execute("INSERT INTO download_artifact_sources VALUES($s,$p,$r,$a,$receipt)", transaction,
-            ("$s", source.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision),
-            ("$a", artifact.Sha256), ("$receipt", Serialize(source)));
+        else Execute("INSERT INTO download_artifact_sources VALUES($s,$p,$r,$a,$receipt,$root,$en,$scope,$u)", transaction,
+            [.. key, ("$a", artifact.Sha256), ("$receipt", Serialize(source)), ("$scope", binding.Scope), ("$u", binding.UnresolvableRootContent)]);
         token.ThrowIfCancellationRequested();
         transaction.Commit(); return true;
     }, token);
@@ -127,27 +160,30 @@ public sealed partial class DiscoveryCatalog
     internal Task<WorkspaceSnapshot> CommitDownloadWorkspaceAsync(CapturedOpeningContext context,
         IReadOnlyList<ConfigurationReceipt> configurations, IReadOnlyList<MetadataReceipt> metadata,
         DownloadLedgerArtifact artifact, IReadOnlyList<string> verifiedKeys, long metadataOverhead,
-        CancellationToken token) => Schedule(() =>
+        CancellationToken token, DownloadScopeBinding? scope = null) => Schedule(() =>
     {
-        ValidateDownloadArtifact(artifact);
+        var binding = scope ?? DownloadScopeBinding.ManifestOnly;
+        ValidateDownloadArtifact(artifact); ValidateScopeBinding(binding);
         if (verifiedKeys.Count > MaxDownloadAssessmentKeys || verifiedKeys.Distinct(StringComparer.Ordinal).Count() != verifiedKeys.Count ||
             verifiedKeys.Any(key => !DownloadHash(key, 32)))
             throw DownloadIntegrity("A download coverage assessment exceeds its bound or contains invalid duplicate identities.");
-        if (metadata.Count is < 1 or > 2 || metadata.Count(receipt => receipt.Role == "download") != 1 ||
-            metadata.Any(receipt => receipt.Role is not ("download" or "encoding")) || metadata.Select(receipt => receipt.Role).Distinct().Count() != metadata.Count)
-            throw DownloadIntegrity("A scoped download admission requires its download source and only an optional encoding source.");
+        if (metadata.Count is < 1 or > 3 || metadata.Count(receipt => receipt.Role == "download") != 1 ||
+            metadata.Any(receipt => receipt.Role is not ("download" or "encoding" or "root")) || metadata.Select(receipt => receipt.Role).Distinct().Count() != metadata.Count ||
+            binding.Scope == DownloadRootScope && (metadata.SingleOrDefault(receipt => receipt.Role == "root")?.Sha256 != binding.RootSha256 ||
+                metadata.SingleOrDefault(receipt => receipt.Role == "encoding")?.Sha256 != binding.EncodingSha256))
+            throw DownloadIntegrity("A scoped download admission requires its download source and only optional encoding and file-list sources.");
         var source = metadata.Single(receipt => receipt.Role == "download");
         ValidateDownloadSource(source, completed: true);
         var now = DateTimeOffset.UtcNow.ToString("O");
         using var transaction = Db.BeginTransaction();
         ValidateDownloadConfigurations(context, configurations, transaction);
         foreach (var receipt in metadata) ValidateDownloadSourceAssociation(receipt, transaction);
-        if (ReadDownloadArtifact(artifact.Sha256, transaction) != artifact ||
-            Scalar("SELECT artifact_sha256 FROM download_artifact_sources WHERE source_sha256=$s AND parser_revision=$p AND ledger_revision=$r", transaction,
-                ("$s", source.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision)) as string != artifact.Sha256)
+        const string bound = "FROM download_artifact_sources WHERE source_sha256=$s AND parser_revision=$p AND ledger_revision=$r AND root_sha256=$root AND encoding_sha256=$en AND artifact_sha256=$a AND scope=$scope AND root_unresolved=$u";
+        (string, object?)[] boundKey = [("$s", source.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision), ("$root", binding.RootSha256),
+            ("$en", binding.EncodingSha256), ("$a", artifact.Sha256), ("$scope", binding.Scope), ("$u", binding.UnresolvableRootContent)];
+        if (ReadDownloadArtifact(artifact.Sha256, transaction) != artifact || Scalar("SELECT receipt " + bound, transaction, boundKey) is not string boundReceipt)
             throw DownloadIntegrity("The download ledger was not durably associated with its exact parsed source.");
-        var boundSource = Deserialize<MetadataReceipt>((string)Scalar("SELECT receipt FROM download_artifact_sources WHERE source_sha256=$s AND parser_revision=$p AND ledger_revision=$r", transaction,
-            ("$s", source.Sha256), ("$p", DownloadParserRevision), ("$r", DownloadLedger.Revision))!);
+        var boundSource = Deserialize<MetadataReceipt>(boundReceipt);
         if (!SameDownloadSource(boundSource, source)) throw DownloadIntegrity("Download source receipts changed before admission.");
         var verifiedBytes = DownloadAssessment(verifiedKeys, transaction, token).Bytes;
         if (verifiedKeys.Count > artifact.ObjectCount || verifiedBytes > artifact.TotalEncodedBytes)
@@ -160,12 +196,15 @@ public sealed partial class DiscoveryCatalog
                 return group.First().Bytes;
             });
         if (metadataOverhead != overhead) throw DownloadIntegrity("The encoded metadata overhead differs from its verified source objects.");
-        var summary = new DownloadSummary(artifact.Sha256, DownloadScope, N(artifact.ObjectCount), N(artifact.TotalEncodedBytes),
+        var summary = new DownloadSummary(artifact.Sha256, binding.Scope, N(artifact.ObjectCount), N(artifact.TotalEncodedBytes),
             N(verifiedBytes), N(checked(artifact.TotalEncodedBytes - verifiedBytes)), now, N(overhead));
         var admission = InsertDownloadWorkspace(context, configurations, now, transaction);
         Execute("INSERT INTO download_admissions VALUES($id,$a,$v,$t,$m,$s,NULL)", transaction,
             ("$id", admission), ("$a", artifact.Sha256), ("$v", Serialize(verifiedKeys.Order(StringComparer.Ordinal).ToArray())),
             ("$t", now), ("$m", Serialize(metadata)), ("$s", Serialize(summary)));
+        // Open admits the manifest; every file ROOT lists outside it is measured afterwards, in the background.
+        if (binding.Scope == DownloadScope) EnsureRootScope(context.Build.ProductId, context.Build.Id, artifact, now, transaction);
+        else EnsureStoredCoverage(artifact, now, transaction);
         token.ThrowIfCancellationRequested(); transaction.Commit();
         return new WorkspaceSnapshot(DownloadBuild(context, isLocal: true), now, DownloadProfile, "partial", "verified", "notPrepared", "measured",
             "onDemand", null, null, context.Reference, configurations, null, metadata, summary, null);
@@ -211,7 +250,7 @@ public sealed partial class DiscoveryCatalog
         var keys = Deserialize<string[]>(keysJson); var summary = Deserialize<DownloadSummary>(summaryJson);
         if (keys.Length > MaxDownloadAssessmentKeys || keys.Length > artifact.ObjectCount ||
             keys.Distinct(StringComparer.Ordinal).Count() != keys.Length || keys.Any(key => !DownloadHash(key, 32)) || !DownloadUtc(assessedAt) ||
-            summary.LedgerId != artifact.Sha256 || summary.Scope != DownloadScope || summary.AssessedAt != assessedAt ||
+            summary.LedgerId != artifact.Sha256 || !KnownDownloadScope(summary.Scope) || summary.AssessedAt != assessedAt ||
             summary.ObjectCount != N(artifact.ObjectCount) || summary.TotalEncodedBytes != N(artifact.TotalEncodedBytes) ||
             checked(DownloadNumber(summary.VerifiedEncodedBytes) + DownloadNumber(summary.RemainingEncodedBytes)) != artifact.TotalEncodedBytes)
             throw DownloadIntegrity("An admitted download assessment is inconsistent.");

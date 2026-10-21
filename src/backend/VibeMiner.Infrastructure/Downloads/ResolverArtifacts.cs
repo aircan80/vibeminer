@@ -1,3 +1,4 @@
+using VibeMiner.Application;
 using System.Security.Cryptography;
 using VibeMiner.Domain;
 using VibeMiner.Protocols.Tact;
@@ -19,10 +20,13 @@ public sealed class EncodingLookupLease : IAsyncDisposable
     private Task? disposal;
 
     internal EncodingLookupLease(MetadataReceipt receipt, EncodingFileLookup lookup,
-        FileStream input, Action release)
-    { Receipt = receipt; Lookup = lookup; this.input = input; this.release = release; }
+        FileStream input, Action release, string decodedSha256 = "", long decodedBytes = 0)
+    { Receipt = receipt; Lookup = lookup; this.input = input; this.release = release; DecodedSha256 = decodedSha256; DecodedBytes = decodedBytes; }
 
     public MetadataReceipt Receipt { get; }
+    /// <summary>The verified decoded artifact behind the lookup, for a separate complete pass over it.</summary>
+    internal string DecodedSha256 { get; }
+    internal long DecodedBytes { get; }
     public EncodingFileLookup Lookup { get; }
 
     public ValueTask DisposeAsync()
@@ -45,7 +49,7 @@ public sealed class EncodingLookupLease : IAsyncDisposable
 /// File publication and the small catalog association remain separate recoverable operations.
 /// </summary>
 public sealed class ResolverArtifacts(DiscoveryCatalog catalog, VerifiedObjectStore objects,
-    MetadataAcquirer acquirer, AcquisitionResources? resources = null)
+    MetadataAcquirer acquirer, AcquisitionResources? resources = null, IAcquisitionWorkContext? work = null)
 {
     public const string EncodingRevision = "encoding-native-file-v1";
     private int active;
@@ -90,7 +94,7 @@ public sealed class ResolverArtifacts(DiscoveryCatalog catalog, VerifiedObjectSt
                 {
                     await progress("Validating native encoding lookup");
                     string stagedPath;
-                    using (resources is null ? null : await resources.EnterCpuAsync(null, cancellationToken))
+                    using (resources is null ? null : await resources.EnterCpuAsync(work, cancellationToken))
                     await using (var decoded = acquired.OpenDecoded())
                     {
                         stagedPath = decoded.Name;
@@ -101,7 +105,7 @@ public sealed class ResolverArtifacts(DiscoveryCatalog catalog, VerifiedObjectSt
                     await progress("Saving verified encoding lookup");
                     var sha = resources is null
                         ? await objects.PublishFileAsync(stagedPath, expected.DecodedBytes, cancellationToken)
-                        : await objects.PublishFileAsync(stagedPath, expected.DecodedBytes, resources, null, cancellationToken);
+                        : await objects.PublishFileAsync(stagedPath, expected.DecodedBytes, resources, work, cancellationToken);
                     artifact = new(association, EncodingRevision, sha, expected.DecodedBytes);
                     await catalog.RecordResolverArtifactAsync(artifact, cancellationToken);
                 }
@@ -113,8 +117,8 @@ public sealed class ResolverArtifacts(DiscoveryCatalog catalog, VerifiedObjectSt
             EncodingFileLookup lookup;
             input = resources is null
                 ? await objects.OpenVerifiedAsync(artifact.DecodedSha256, artifact.DecodedBytes, cancellationToken)
-                : await objects.OpenVerifiedAsync(artifact.DecodedSha256, artifact.DecodedBytes, resources, null, cancellationToken);
-            using (resources is null ? null : await resources.EnterCpuAsync(null, cancellationToken))
+                : await objects.OpenVerifiedAsync(artifact.DecodedSha256, artifact.DecodedBytes, resources, work, cancellationToken);
+            using (resources is null ? null : await resources.EnterCpuAsync(work, cancellationToken))
             {
             // A valid local SHA alone proves the selected artifact bytes, not that a damaged
             // association still selects this source's decoded content. Bind them to the CKey
@@ -127,7 +131,7 @@ public sealed class ResolverArtifacts(DiscoveryCatalog catalog, VerifiedObjectSt
             cancellationToken.ThrowIfCancellationRequested();
             // Fresh acquisition proves the bytes above; the lease keeps the artifact's original
             // immutable retrieval history rather than mixing it with a later physical receipt.
-            var lease = new EncodingLookupLease(artifact.Source, lookup, input, () => Volatile.Write(ref active, 0));
+            var lease = new EncodingLookupLease(artifact.Source, lookup, input, () => Volatile.Write(ref active, 0), artifact.DecodedSha256, artifact.DecodedBytes);
             transferred = true;
             return lease;
         }

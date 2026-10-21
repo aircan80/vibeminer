@@ -13,7 +13,7 @@ import type { ItemsContext, ItemsSnapshot, ItemsReadiness, ItemsPage, ItemInspec
 import type { ItemsPageParams, ItemInspectParams } from './items';
 import type { RetentionSet } from './retention';
 import type { SettingsSnapshot, SettingsSetParams, StorageMeasurement } from './settings';
-import type { RetentionTarget, RetentionSnapshot, RetentionList } from '../../../../contracts/generated/discovery';
+import type { RetentionTarget, RetentionSnapshot, RetentionList, DownloadSummaries, DownloadSummariesParams } from '../../../../contracts/generated/discovery';
 import type { TableDataParams, TableRowsParams } from './table-data';
 import type { Product, DiscoveryPage, DiscoveryCatalogPage, EngineProgress, WorkspaceSnapshot, InventoryPage, DownloadPage, TableCatalogPage, TableDefinitionSnapshot, TableDataSnapshot, TableDataReadiness, TableDataPage } from '../../../../contracts/generated/discovery';
 import type { TablesCatalogParams, TableDefinitionParams } from './tables';
@@ -24,7 +24,7 @@ export type ReadParams = { productId: string; filter?: DiscoveryFilter; limit?: 
 /** Cross-product read. Without productId it reads every registered product. */
 export type ReadAllParams = { productId?: string; filter?: DiscoveryFilter; limit?: number; cursor?: string };
 export type OpenParams = { productId: string; buildIdentity: string; sourceRegion: string };
-export type RequestMethod = 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'workspace.open' | 'inventory.read' | 'download.read' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'settings.read' | 'settings.set' | 'settings.storage.measure' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
+export type RequestMethod = 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'workspace.open' | 'inventory.read' | 'download.read' | 'download.summaries' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'settings.read' | 'settings.set' | 'settings.storage.measure' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
 export type BridgeReply<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; retryable: boolean } };
 export interface DiscoveryBridge {
   onGeometryRetirement?(listener:(notice:GeometryViewRetirement)=>void):()=>void;
@@ -62,6 +62,8 @@ export interface DiscoveryBridge {
   /** Main copies the engine data folder path; the renderer never handles paths itself. */
   storageCopyPath?(): Promise<BridgeReply<{ copied: true }>>;
   storageShowFolder?(): Promise<BridgeReply<{ shown: true }>>;
+  /** Stored figures for up to 100 listed builds; present only when the engine has download-summary-v1. */
+  downloadSummaries?(params: DownloadSummariesParams): Promise<BridgeReply<DownloadSummaries>>;
   itemsData(params: ItemsContext): Promise<BridgeReply<ItemsReadiness>>;
   itemsPrepare(params: ItemsContext, requestId: string): Promise<BridgeReply<ItemsSnapshot>>;
   itemsPage(params: ItemsPageParams): Promise<BridgeReply<ItemsPage>>;

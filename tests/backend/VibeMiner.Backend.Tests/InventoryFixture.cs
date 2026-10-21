@@ -25,6 +25,10 @@ internal sealed class InventoryFixture
     public Dictionary<string, FixtureObject> Metadata { get; } = new(StringComparer.Ordinal);
     public FixtureObject PayloadA { get; private init; } = null!;
     public FixtureObject PayloadB { get; private init; } = null!;
+    /// <summary>With a ROOT gap: a file ROOT lists and ENCODING maps, but the download manifest leaves out (D066).</summary>
+    public FixtureObject? RootOnly { get; private init; }
+    /// <summary>With a ROOT gap: a ROOT content key ENCODING does not map, so it cannot be resolved to an encoded object.</summary>
+    public string? Unresolvable { get; private init; }
     public long ExpectedEncodedBytes => PayloadA.Encoded.LongLength + PayloadB.Encoded.LongLength;
     public int ExpectedDownloadObjectCount => 2;
     public int ExpectedLogicalContentCount => 2;
@@ -50,15 +54,18 @@ internal sealed class InventoryFixture
             System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    public static InventoryFixture Create()
+    public static InventoryFixture Create(bool rootGap = false, bool legacyRoot = false)
     {
         var a = Object("payloadA", "authored inventory payload A\n"u8.ToArray());
         var b = Object("payloadB", "authored inventory payload B has different bytes\n"u8.ToArray());
-        var root = Object("root", Root(a, b));
+        var c = rootGap ? Object("payloadC", "authored file outside the download manifest\n"u8.ToArray()) : null;
+        var unresolvable = rootGap ? Convert.ToHexStringLower(MD5.HashData("authored file without an encoding entry"u8)) : null;
+        // A pre-TSFM layout ENCODING still maps, but VibeMiner does not read it.
+        var root = Object("root", legacyRoot ? "authored legacy file list layout"u8.ToArray() : Root(a, b, c, unresolvable));
         var install = Object("install", Install(a));
         var download = Object("download", Download(a, b));
         var size = Object("size", DownloadSize(a, b));
-        var encoding = Object("encoding", EncodingManifest([a, b, root, install, download, size]));
+        var encoding = Object("encoding", EncodingManifest(c is null ? [a, b, root, install, download, size] : [a, b, c, root, install, download, size]));
         var config = new StringBuilder("# authored complete inventory configuration\n");
         config.Append("root = ").Append(root.ContentKey).Append('\n');
         foreach (var item in new[] { encoding, install, download, size })
@@ -82,7 +89,7 @@ internal sealed class InventoryFixture
             Convert.ToHexStringLower(SHA256.HashData(bytes)), bytes);
         var fixture = new InventoryFixture
         {
-            PayloadA = a, PayloadB = b, BuildConfig = buildConfig, CdnConfig = cdnConfig,
+            PayloadA = a, PayloadB = b, RootOnly = c, Unresolvable = unresolvable, BuildConfig = buildConfig, CdnConfig = cdnConfig,
             BuildKey = buildKey, CdnKey = cdnKey, BuildIdentity = identity.Id,
             Discovery = new([Document("versions", versions), Document("cdns", cdns)],
                 [new(identity, "us", versionRow.Ordinal, cdnRow.Ordinal, versionRow.Fields, cdnRow.Fields)],
@@ -97,6 +104,7 @@ internal sealed class InventoryFixture
         }
         fixture.Payloads.Add(a.EncodingKey, a.Encoded);
         fixture.Payloads.Add(b.EncodingKey, b.Encoded);
+        if (c is not null) fixture.Payloads.Add(c.EncodingKey, c.Encoded);
         return fixture;
     }
 
@@ -111,11 +119,11 @@ internal sealed class InventoryFixture
         return new(role, Hash(decoded), Hash(encoded), decoded, encoded);
     }
 
-    private static byte[] Root(FixtureObject a, FixtureObject b)
+    private static byte[] Root(FixtureObject a, FixtureObject b, FixtureObject? c = null, string? unresolvable = null)
     {
         using var output = new MemoryStream();
         using var writer = new BinaryWriter(output, Encoding.UTF8, leaveOpen: true);
-        writer.Write("TSFM"u8); writer.Write(24u); writer.Write(2u); writer.Write(3u); writer.Write(2u); writer.Write(0u);
+        writer.Write("TSFM"u8); writer.Write(24u); writer.Write(2u); writer.Write(c is null ? 3u : 5u); writer.Write(2u); writer.Write(0u);
         // Named locale1 source block: FDIDs1001 and1002. Delta encoding increments after each ID.
         writer.Write(2u); writer.Write(1u); writer.Write(0u); writer.Write(0u); writer.Write((byte)0);
         writer.Write(1001u); writer.Write(0u);
@@ -124,6 +132,13 @@ internal sealed class InventoryFixture
         // Another locale's unnamed membership for the same FDID/content remains a separate origin.
         writer.Write(1u); writer.Write(2u); writer.Write(0x10000000u); writer.Write(0u); writer.Write((byte)0);
         writer.Write(1001u); writer.Write(Convert.FromHexString(a.ContentKey));
+        if (c is not null)
+        {
+            // An unnamed block for FDIDs 2001 and 2002: one file outside the manifest, one with no encoding entry.
+            writer.Write(2u); writer.Write(1u); writer.Write(0x10000000u); writer.Write(0u); writer.Write((byte)0);
+            writer.Write(2001u); writer.Write(0u);
+            writer.Write(Convert.FromHexString(c.ContentKey)); writer.Write(Convert.FromHexString(unresolvable!));
+        }
         return output.ToArray();
     }
 

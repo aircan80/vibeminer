@@ -1,0 +1,121 @@
+{
+  "summaries": [
+    {
+      "productId": "wow",
+      "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "state": "measured",
+      "download": {
+        "ledgerId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "scope": "downloadManifestAndRootAllVariants",
+        "objectCount": "10",
+        "totalEncodedBytes": "1000",
+        "storedObjects": "4",
+        "storedBytes": "410",
+        "countState": "current",
+        "countProblem": null,
+        "updatedAt": "2026-10-19T00:00:00.0000000+00:00",
+        "presence": {
+          "state": "assessed",
+          "assessedAt": "2026-10-18T00:00:00.0000000+00:00",
+          "observedObjects": "10",
+          "missingObjects": "4",
+          "corruptObjects": "2"
+        },
+        "downloadAll": true,
+        "running": true,
+        "sourceRegions": [
+          "eu",
+          "us"
+        ],
+        "unresolvableRootContent": "10",
+        "scopeState": "measured",
+        "scopeProblem": null,
+        "changesPending": false
+      }
+    },
+    {
+      "productId": "wow",
+      "buildIdentity": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "state": "measured",
+      "download": {
+        "ledgerId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "scope": "downloadManifestAllVariants",
+        "objectCount": "20",
+        "totalEncodedBytes": "2000",
+        "storedObjects": "0",
+        "storedBytes": "0",
+        "countState": "counting",
+        "countProblem": null,
+        "updatedAt": "2026-10-19T00:00:00.0000000+00:00",
+        "presence": {
+          "state": "notAssessed",
+          "assessedAt": null,
+          "observedObjects": "0",
+          "missingObjects": "0",
+          "corruptObjects": "0"
+        },
+        "downloadAll": false,
+        "running": false,
+        "sourceRegions": [
+          "us"
+        ],
+        "unresolvableRootContent": "0",
+        "scopeState": "measuring",
+        "scopeProblem": null,
+        "changesPending": true
+      }
+    },
+    {
+      "productId": "wowt",
+      "buildIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "state": "measured",
+      "download": {
+        "ledgerId": "abababababababababababababababababababababababababababababababab",
+        "scope": "downloadManifestAllVariants",
+        "objectCount": "5",
+        "totalEncodedBytes": "500",
+        "storedObjects": "0",
+        "storedBytes": "0",
+        "countState": "unavailable",
+        "countProblem": {
+          "code": "LOCAL_OBJECT_MISSING",
+          "message": "The saved download ledger could not be read, so this build's stored figure is not kept up to date. Open the build again to count it.",
+          "retryable": true
+        },
+        "updatedAt": "2026-10-19T00:00:00.0000000+00:00",
+        "presence": {
+          "state": "notAssessed",
+          "assessedAt": null,
+          "observedObjects": "0",
+          "missingObjects": "0",
+          "corruptObjects": "0"
+        },
+        "downloadAll": false,
+        "running": false,
+        "sourceRegions": [
+          "us"
+        ],
+        "unresolvableRootContent": "0",
+        "scopeState": "manifestOnly",
+        "scopeProblem": {
+          "code": "ROOT_UNSUPPORTED",
+          "message": "This build's file list could not be read, so the figure covers its download manifest only.",
+          "retryable": false
+        },
+        "changesPending": false
+      }
+    },
+    {
+      "productId": "wow",
+      "buildIdentity": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      "state": "notMeasured",
+      "download": null
+    },
+    {
+      "productId": "wow",
+      "buildIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": "notOpened",
+      "download": null
+    }
+  ]
+}

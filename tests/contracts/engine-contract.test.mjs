@@ -204,6 +204,22 @@ test('Settings keep unreadable values apart from saved ones and take only a know
   assert.equal(validator('EngineRequest')(request('settings.storage.measure', { root: '/' })), false);
 });
 
+test('Download summaries keep exact counts, the three build states and a bounded request', async () => {
+  const value = JSON.parse(await readFile(path.join(root, 'contracts/examples/download-summaries.json'), 'utf8'));
+  validate('DownloadSummaries', value);
+  const measured = value.summaries[0];
+  for (const patch of [{ state: 'downloaded' }, { download: { ...measured.download, storedBytes: 410 } }, { download: { ...measured.download, countState: 'checked' } },
+    { download: { ...measured.download, scope: 'enUS' } }, { download: { ...measured.download, sourceRegions: [] } },
+    { download: { ...measured.download, presence: { ...measured.download.presence, state: 'verified' } } }, { download: { ...measured.download, percent: '41%' } },
+    { download: { ...measured.download, unresolvableRootContent: undefined } }, { download: { ...measured.download, unresolvableRootContent: 10 } }])
+    assert.equal(validator('BuildDownloadSummary')({ ...measured, ...patch }), false);
+  assert.equal(validator('DownloadSummaries')({ summaries: Array(101).fill(value.summaries[4]) }), false);
+  const builds = value.summaries.map(({ productId, buildIdentity }) => ({ productId, buildIdentity }));
+  validate('EngineRequest', { protocolVersion: 1, id: 'summaries', method: 'download.summaries', params: { builds } });
+  for (const params of [{ builds: [] }, { builds: Array(101).fill(builds[0]) }, { builds: [{ ...builds[0], sourceRegion: 'us' }] }, { builds: [{ ...builds[0], buildIdentity: 'A'.repeat(64) }] }, {}])
+    assert.equal(validator('EngineRequest')({ protocolVersion: 1, id: 'summaries', method: 'download.summaries', params }), false);
+});
+
 test('Items pages preserve all name states and literal bounded query shapes', async () => {
   const page=JSON.parse(await readFile(path.join(root,'contracts/examples/items-page.json'),'utf8'));
   validate('ItemsPage',page);
@@ -466,6 +482,11 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.ok(!hello.error, diagnostics);
   validate('HelloResult', hello.result);
   assert.ok(hello.result.capabilities.includes('retention-v1'));
+  assert.ok(hello.result.capabilities.includes('download-summary-v1'));
+  const summaries = await request('download.summaries', { builds: [{ productId: 'wow', buildIdentity: 'a'.repeat(64) }] });
+  assert.ok(!summaries.error, JSON.stringify(summaries.error));
+  validate('DownloadSummaries', summaries.result);
+  assert.deepEqual(summaries.result.summaries, [{ productId: 'wow', buildIdentity: 'a'.repeat(64), state: 'notOpened', download: null }]);
   assert.ok(hello.result.capabilities.includes('items-v1'));
   assert.ok(hello.result.capabilities.includes('item-icons-v1'));
   assert.ok(hello.result.capabilities.includes('item-classifications-v1'));

@@ -28,7 +28,7 @@ App-wide settings live in `settings-v1.json` in the engine data directory, next 
 
 The catalog is `discovery-v1.sqlite3` in the engine data directory. It opens with `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=FULL`, `busy_timeout=5000` and file-backed temp storage. One worker runs all SQLite work with at most 64 queued operations. The engine refuses a catalog with a newer `user_version` than it knows (`CATALOG_VERSION`).
 
-The schema is at `user_version` 15, the first with build identity v2 ([D061](DECISIONS.md)). There is no migration from older catalogs: a fresh catalog writes `catalog_lineage` = `build-identity-v2`, and any catalog without it is refused with `CATALOG_RESET_REQUIRED`. The version and lineage are read on a read-only connection before any read-write open, so a refused catalog, including a pending `-wal` an older engine left behind, stays byte-for-byte unchanged (a read-write close would checkpoint it). The host exits with code 3 (code 4 for a newer catalog) and the code on stderr; the desktop shows it as a typed notice that names the catalog folder and the user's step (close VibeMiner, move or rename the folder, start again). It offers no delete, retry or refresh. Starting over means a fresh data directory; never erase the owner's profile without their OK.
+The schema is at `user_version` 16, the first with per-ledger stored coverage ([D065](DECISIONS.md)); version 15 was the first with build identity v2 ([D061](DECISIONS.md)). There is no migration from older catalogs: a fresh catalog writes `catalog_lineage` = `stored-coverage-v1`, and any catalog without it, including a complete version 15 `build-identity-v2` catalog, is refused with `CATALOG_RESET_REQUIRED`. The version and lineage are read on a read-only connection before any read-write open, so a refused catalog, including a pending `-wal` an older engine left behind, stays byte-for-byte unchanged (a read-write close would checkpoint it). The host exits with code 3 (code 4 for a newer catalog) and the code on stderr; the desktop shows it as a typed notice that names the catalog folder and the user's step (close VibeMiner, move or rename the folder, start again). It offers no delete, retry or refresh. Starting over means a fresh data directory; never erase the owner's profile without their OK.
 
 Fresh creation still runs the steps below in order, each committing its own `user_version`, so a creation interrupted between steps resumes. Each lives with its feature:
 
@@ -46,7 +46,8 @@ Fresh creation still runs the steps below in order, each committing its own `use
 | 12 | `creatures_artifacts`, `creatures_admissions` |
 | 13 | `item_effects_bridge_artifacts`, `item_effects_bridge_admissions` |
 | 14 | `geometry_artifacts`, `geometry_source_locators` |
-| 15 | Marks creation complete |
+| 15 | Stored coverage: `stored_changes`, `object_absence`, `stored_coverage`, `stored_pages`, `root_scopes`; SHA indexes on `encoded_objects` and `content_objects` |
+| 16 | Marks creation complete |
 
 The catalog stores observed builds and raw source references; per-region observations; first-seen/baseline/Open acknowledgements; verified object aliases and build memberships; artifact generations and source bindings; admitted inventories; retention policy and job checkpoints; and bounded query indexes.
 
@@ -79,6 +80,7 @@ Only a real Open writes an acknowledgement (clears "new"). Selecting a build or 
 [VerifiedObjectStore](../src/backend/VibeMiner.Infrastructure/Preparation/VerifiedObjectStore.cs) holds immutable objects keyed by SHA-256, up to 512 MiB each.
 
 - `OpenVerifiedAsync` hashes the whole object on every open. A row reader (`TableRowArtifacts`) verifies on cold open and reuses that handle for the same artifact; switching artifacts reopens and rehashes.
+- The one exception is the stored coverage worker's `OpenProvenAsync`: it reopens a download ledger it already proved in this process without hashing it again, only while the file at its CAS path keeps the proven length, creation and write times. It only decides which ledger ordinals count as stored; nothing it reads is served.
 - `ReadAsync` and `PublishAsync(byte[])` are for small configuration bytes only: at most 1 MiB.
 - Corruption found on open is journaled centrally while holding the SHA stripe. Repair can replace a bad encoded object only after independent complete verification of the incoming bytes. A durable epoch stops an older proof from clearing a newer corruption record.
 
@@ -134,11 +136,17 @@ Historical `home-configurations-v1` and legacy `home-inventory-v1` keep their me
 
 Unknown required families, missing mappings, ambiguous DS prefixes and conflicting required lengths block a complete inventory/accounting claim. Metadata archive locators are required only to acquire those source objects; payload locations/availability may stay unassessed. Keep separate unique logical CKey and exact encoded EKey ledgers. Exact advertised representations stay distinct even when decoded content matches. Verified current shared objects reduce remaining encoded demand once; metadata/database overhead is separate. Reuse assessment considers a bounded set of metadata receipts (at most 10,000 retained-object candidates per assessment). See [the inventory contract](../contracts/inventory-v1.md).
 
-Download all follows the complete supported published-manifest inventory and dependency closure, preserving variants. It is not every EN record, the IN executable list alone, or a small research subset. Initial scope avoids unproven locale/platform filtering. Missing or ambiguous mappings stay unresolved, never an empty success.
+Download all follows the ledger standing for the admitted one: the published download manifest plus the encoded object of every ROOT-listed file it does not cover ([D066](DECISIONS.md)), preserving variants. Open admits the manifest; `root_scopes` holds each build's measurement of the rest (pending, measured with the extended ledger, manifest-only with the reason, or failed after three attempts) with a generation that fences late results. ROOT content keys ENCODING cannot resolve are reported, not retained. The extended ledger's binding records the exact DL, ROOT and ENCODING sources, the scope and that count. It is not every EN record, the IN executable list alone, or a small research subset. Initial scope avoids unproven locale/platform filtering. Missing or ambiguous mappings stay unresolved, never an empty success.
 
 Encoded payload retention can succeed without decoding every asset. Resolver metadata must still be interpretable enough to establish the inventory. Retaining one representative build/table proves nothing universal.
 
 On demand changes future bulk intent and leaves retained bytes intact. Shared consumers and references stay valid. Full coverage is checked against current physical evidence; queued jobs and past success are not enough.
+
+### Stored figure per ledger
+
+The Downloaded figure ([D065](DECISIONS.md), [D066](DECISIONS.md)) is how much of a build's scope is stored here (its admitted DL ledger, then the extended one once ROOT is measured), kept current as objects arrive, with no presence check needed. A member counts when a verified receipt of its exact EKey and length exists in `encoded_objects`, `content_objects` or `metadata_objects`, no `object_invalidity` row covers those bytes, and no `object_absence` row says a later presence check found it missing. `stored_coverage` holds one row per ledger (counts, the last applied change, the first-count cursor, a problem) and `stored_pages` one 512-byte bitmap per 4096 members, only for pages with a stored member.
+
+Every transaction that can change the rule above appends the EKey to `stored_changes`: a new receipt row, a re-verified receipt that clears an absence, corruption recorded or cleared (all EKeys of those bytes), and a presence check that finds a member missing or present again. The [stored coverage worker](ASYNC-AND-JOBS.md#stored-coverage-worker) applies each change to every admitted ledger by exact key lookup, so one download moves every build that shares the object. Admission registers the ledger with a fence at the newest change; a first count walks retained EKeys in key order against the ledger, and later changes replay on top, so the result does not depend on ordering. Applied changes are pruned below the oldest maintained fence. Recounting is idempotent per bit. Receipt credit (`retention_bits`) and the dated presence pass keep their meanings; this figure is neither. Metadata counts only when it is itself a build file: ROOT is a manifest member on retail, so a build is at "<0.1%" once its file list has been read.
 
 ## Accounting and cleanup
 

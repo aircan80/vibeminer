@@ -122,7 +122,7 @@ function settingsSnapshot() {
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[])] });
   if(creaturesEnabled&&method.startsWith('creatures.')){
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
     if(!opened.has(key))return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
@@ -267,6 +267,31 @@ async function dispatch(request) {
     }
     Object.assign(value, { productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion, buildVersion: openedSnapshot.build.version });
     return reply(id, value);
+  }
+  if (method === 'download.summaries') {
+    // Authored running figures (D065): one per build across its opened regions. A fresh open is at 0%; an authored
+    // Download all job's present objects stand in for stored ones. stored-summary.json overrides the measured fields.
+    const scripted = existsSync(path.join(directory, 'stored-summary.json')) ? JSON.parse(readFileSync(path.join(directory, 'stored-summary.json'), 'utf8')) : {};
+    return reply(id, { summaries: params.builds.map(({ productId, buildIdentity }) => {
+      const opens = [...opened.values()].filter(snapshot => snapshot.build.productId === productId && snapshot.build.id === buildIdentity);
+      // A persisted relaunch keeps a prepared build without this session's opens: it was measured, nothing stored yet.
+      if (!opens.length && saved.get(productId)?.builds.some(build => build.id === buildIdentity && build.isLocal)) {
+        const workspace = JSON.parse(readFileSync(path.join(root, 'tests/desktop/fixtures/download-workspace.json'), 'utf8'));
+        opens.push({ ...workspace, build: { productId, id: buildIdentity }, sourceReference: { ...workspace.sourceReference, region: 'us' } });
+      }
+      if (!opens.length) return { productId, buildIdentity, state: 'notOpened', download: null };
+      const measured = opens.find(snapshot => snapshot.download);
+      if (!measured) return { productId, buildIdentity, state: 'notMeasured', download: null };
+      const d = measured.download, regions = [...new Set(opens.filter(snapshot => snapshot.download?.ledgerId === d.ledgerId).map(snapshot => snapshot.sourceReference.region))].sort();
+      const jobs = retentionEnabled ? [...retentionJobs.values()].map(job => retentionSnapshot(job.target)).filter(job => job.target.productId === productId && job.target.buildIdentity === buildIdentity && job.jobId) : [];
+      const best = jobs.reduce((top, job) => !top || BigInt(job.coverage.presentBytes) > BigInt(top.coverage.presentBytes) ? job : top, null);
+      const check = jobs.find(job => job.coverage.presenceState === 'assessing') ?? jobs.find(job => job.coverage.presenceState === 'assessed') ?? jobs.find(job => job.coverage.presenceState === 'interrupted');
+      return { productId, buildIdentity, state: 'measured', download: { ledgerId: d.ledgerId, scope: d.scope, objectCount: d.objectCount, totalEncodedBytes: d.totalEncodedBytes,
+        storedObjects: best?.coverage.presentObjects ?? '0', storedBytes: best?.coverage.presentBytes ?? '0', countState: 'current', countProblem: null, updatedAt: d.assessedAt, unresolvableRootContent: '0', scopeState: 'manifestOnly', scopeProblem: null, changesPending: false,
+        presence: check ? { state: check.coverage.presenceState, assessedAt: check.coverage.presenceAssessedAt, observedObjects: check.coverage.observedObjects, missingObjects: check.coverage.missingObjects, corruptObjects: check.coverage.corruptObjects }
+          : { state: 'notAssessed', assessedAt: null, observedObjects: '0', missingObjects: '0', corruptObjects: '0' },
+        downloadAll: jobs.some(job => job.mode === 'downloadAll' && !job.paused), running: jobs.some(job => ['preparing', 'running'].includes(job.state)), sourceRegions: regions, ...scripted } };
+    }) });
   }
   if (method === 'download.read') {
     const key = `${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;

@@ -198,6 +198,8 @@ export interface DiscoveryContract {
   retentionTarget: RetentionTarget;
   retentionSnapshot: RetentionSnapshot;
   retentionList: RetentionList;
+  downloadSummariesParams?: DownloadSummariesParams;
+  downloadSummaries?: DownloadSummaries;
   itemsSnapshot: ItemsSnapshot;
   itemsReadiness: ItemsReadiness;
   itemsPage: ItemsPage;
@@ -436,6 +438,7 @@ export interface EngineRequest1 {
     | 'shutdown'
     | 'inventory.read'
     | 'download.read'
+    | 'download.summaries'
     | 'tables.catalog'
     | 'tables.definition'
     | 'tables.prepare'
@@ -1009,7 +1012,7 @@ export interface RetentionSnapshot {
   mode: 'onDemand' | 'downloadAll';
   paused: boolean;
   state: 'onDemand' | 'queued' | 'preparing' | 'running' | 'waiting' | 'stopping' | 'paused' | 'completed' | 'failed';
-  scope: 'downloadManifestAllVariants';
+  scope: 'downloadManifestAllVariants' | 'downloadManifestAndRootAllVariants';
   objectCount: string;
   totalEncodedBytes: string;
   coverage: RetentionCoverage;
@@ -1086,6 +1089,59 @@ export interface RetentionList {
         RetentionSnapshot,
         RetentionSnapshot
       ];
+}
+export interface DownloadSummariesParams {
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  builds: [BuildKey, ...BuildKey[]];
+}
+export interface BuildKey {
+  productId: string;
+  buildIdentity: string;
+}
+export interface DownloadSummaries {
+  /**
+   * @maxItems 100
+   */
+  summaries: BuildDownloadSummary[];
+}
+export interface BuildDownloadSummary {
+  productId: string;
+  buildIdentity: string;
+  state: 'notOpened' | 'notMeasured' | 'measured';
+  download: BuildStoredCoverage | null;
+}
+export interface BuildStoredCoverage {
+  ledgerId: string;
+  scope: 'downloadManifestAllVariants' | 'downloadManifestAndRootAllVariants';
+  objectCount: string;
+  totalEncodedBytes: string;
+  storedObjects: string;
+  storedBytes: string;
+  countState: 'counting' | 'current' | 'unavailable';
+  countProblem: RetentionProblem | null;
+  updatedAt: string;
+  presence: BuildPresenceCheck;
+  downloadAll: boolean;
+  running: boolean;
+  /**
+   * @minItems 1
+   * @maxItems 64
+   */
+  sourceRegions: [string, ...string[]];
+  unresolvableRootContent: string;
+  scopeState: 'measuring' | 'measured' | 'manifestOnly';
+  scopeProblem: RetentionProblem | null;
+  changesPending: boolean;
+}
+export interface BuildPresenceCheck {
+  state: 'notAssessed' | 'assessing' | 'assessed' | 'interrupted';
+  assessedAt: string | null;
+  observedObjects: string;
+  missingObjects: string;
+  corruptObjects: string;
 }
 export interface ItemsSnapshot {
   context: ItemsContext;

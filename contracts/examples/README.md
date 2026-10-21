@@ -4,7 +4,7 @@ These JSON documents are synthetic contract fixtures, not acquired Blizzard meta
 
 `discovery-page.json` contains one observed build without any locally prepared payload. `empty-page.json` represents a fresh catalog before an explicit remote check. `discovery-catalog-page.json` is a cross-product page: builds of two products, every registered product's saved status (checked, partial, offline and never checked) and one product whose refresh did not complete.
 
-`download-workspace.json` is measured DL-scope Home; `download-unavailable-workspace.json` preserves unknown size when no DL is declared. `download-page.json` contains authored exact-EKey object rows, independent of legacy research memberships.
+`download-workspace.json` is measured DL-scope Home; `download-unavailable-workspace.json` preserves unknown size when no DL is declared. `download-page.json` contains authored exact-EKey object rows, independent of legacy research memberships. `download-summaries.json` covers every `download.summaries` state, including a measured file-list scope with unresolvable ROOT files, one still measuring after Open and one limited to its manifest with the reason: a measured build with a current running figure and a dated check, one still counting content already on disk, one whose ledger could not be read, an opened build with no measured manifest and a never-opened build.
 
 `table-catalog-page.json` and `table-definition.json` model provider definition metadata with unchecked selected-build source and unavailable rows. The pinned community structure facts are attributed WoWDBDefs data; no game records are included.
 

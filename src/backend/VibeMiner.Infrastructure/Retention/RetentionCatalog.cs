@@ -169,8 +169,8 @@ public sealed partial class DiscoveryCatalog : IRetentionStore, IRetentionDriver
         if (plan is null) throw RetentionIntegrity("A pinned retention plan is missing.");
         RetentionService.Validate(plan.Target);
         var ledger = plan.Ledger;
-        if (ledger is null || ledger.Revision != DownloadLedger.Revision || ledger.Sha256 != plan.Target.LedgerId ||
-            plan.Scope != DownloadScope || plan.PolicyRevision != RetentionPolicyRevision)
+        if (ledger is null || ledger.Revision != DownloadLedger.Revision || ledger.Sha256 != plan.Target.LedgerId && plan.Scope != DownloadRootScope ||
+            !KnownDownloadScope(plan.Scope) || plan.PolicyRevision != RetentionPolicyRevision)
             throw RetentionIntegrity("A retention plan has unsupported scope, ledger or policy.");
         ValidateDownloadArtifact(new(ledger.Sha256, ledger.ByteLength, ledger.ObjectCount, ledger.TotalEncodedBytes));
         ValidateDownloadSource(plan.DownloadSource, true);

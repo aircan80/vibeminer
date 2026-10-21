@@ -47,8 +47,9 @@ public sealed partial class DiscoveryCatalog
         using var transaction = Db.BeginTransaction(); RequireInvalidityAlias(encodingKey, encodedBytes, sha256, transaction, token);
         if (verifiedThroughEpoch < 0 || verifiedThroughEpoch > CurrentObjectIntegrityEpoch(transaction))
             throw RetentionIntegrity("A current verification cannot clear an unknown future corruption epoch.");
-        Execute("DELETE FROM object_invalidity WHERE sha256=$h AND byte_length=$n AND revision<=$v", transaction,
-            ("$h", sha256), ("$n", encodedBytes), ("$v", verifiedThroughEpoch));
+        if (Changed("DELETE FROM object_invalidity WHERE sha256=$h AND byte_length=$n AND revision<=$v", transaction,
+            ("$h", sha256), ("$n", encodedBytes), ("$v", verifiedThroughEpoch)) > 0)
+            LogStoredChangesForObject(sha256, transaction);
         token.ThrowIfCancellationRequested(); transaction.Commit(); return true;
     }, token);
 
@@ -86,6 +87,7 @@ public sealed partial class DiscoveryCatalog
             INSERT INTO object_invalidity VALUES($h,$n,$r,$t,$v)
             ON CONFLICT(sha256,byte_length) DO UPDATE SET reason=$r,observed_at=$t,revision=$v
             """, transaction, ("$h", sha256), ("$n", byteLength), ("$r", reason), ("$t", DateTimeOffset.UtcNow.ToString("O")), ("$v", revision));
+        LogStoredChangesForObject(sha256, transaction);
     }
     private static void ValidateObjectInvalidity(string sha256, long byteLength, string reason)
     {

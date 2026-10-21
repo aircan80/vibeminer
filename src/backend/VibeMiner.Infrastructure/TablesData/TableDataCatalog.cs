@@ -81,9 +81,11 @@ public sealed partial class DiscoveryCatalog
                 var original = Deserialize<ContentReceipt>(reader.GetString(0)); ValidateContentReceipt(original);
                 if (!SameContentBytes(original, receipt)) throw TableIntegrity("One exact encoded identity cannot be associated with conflicting verified bytes.");
             }
-        Execute("INSERT OR IGNORE INTO content_objects VALUES($e,$c,$h,$n,$d,$r)", transaction,
+        if (Changed("INSERT OR IGNORE INTO content_objects VALUES($e,$c,$h,$n,$d,$r)", transaction,
             ("$e", receipt.EncodingKey), ("$c", receipt.ContentKey), ("$h", receipt.Sha256),
-            ("$n", DownloadNumber(receipt.EncodedBytes)), ("$d", DownloadNumber(receipt.DecodedBytes)), ("$r", Serialize(receipt)));
+            ("$n", DownloadNumber(receipt.EncodedBytes)), ("$d", DownloadNumber(receipt.DecodedBytes)), ("$r", Serialize(receipt))) > 0)
+            LogStoredChange(receipt.EncodingKey, transaction);
+        ClearObjectAbsence(receipt.EncodingKey, transaction);
         token.ThrowIfCancellationRequested(); transaction.Commit(); return true;
     }, token);
 

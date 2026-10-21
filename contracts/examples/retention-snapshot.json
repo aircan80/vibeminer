@@ -10,7 +10,7 @@
   "mode": "downloadAll",
   "paused": false,
   "state": "running",
-  "scope": "downloadManifestAllVariants",
+  "scope": "downloadManifestAndRootAllVariants",
   "objectCount": "3",
   "totalEncodedBytes": "90",
   "coverage": {

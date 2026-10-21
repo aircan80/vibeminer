@@ -52,12 +52,17 @@ try
     await using var workspace = new WorkspaceService(preparation);
     await using var tableStore = new TableDataStore(catalog, objects, client, acquisition, resources);
     await using var tables = new TableDataService(tableStore);
-    var retention = new RetentionService(catalog, new BuildRetentionDriver(catalog, objects, acquisition, sourcePlans, client, resources));
+    var retentionDriver = new BuildRetentionDriver(catalog, objects, acquisition, sourcePlans, client, resources);
+    var retention = new RetentionService(catalog, retentionDriver);
+    await using var storedCoverage = new StoredCoverageWorker(catalog, objects, resources);
+    await using var rootScopes = new RootScopeWorker(catalog, objects, client, acquisition, resources, retentionDriver.NotifyIntentChanged);
     try
     {
         await retention.RestoreAsync();
+        storedCoverage.Start(); rootScopes.Start();
         var host = new ProtocolHost(discovery, workspace, new InventoryService(catalog),
-            new DownloadService(new DownloadQuery(catalog, objects)), new TablesService(new TablesCatalog(catalog)), tables, retention);
+            new DownloadService(new DownloadQuery(catalog, objects)), new TablesService(new TablesCatalog(catalog)), tables, retention,
+            downloadSummaries: new DownloadSummaryService(catalog));
         await host.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
     }
     finally { await retention.ShutdownAsync(); }

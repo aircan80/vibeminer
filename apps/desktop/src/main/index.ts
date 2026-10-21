@@ -24,6 +24,7 @@ import { EngineClient, EngineFailure } from './engine-client';
 import { validProduct, validRead, validReadAll, validRequestId, validOpen } from '../shared/bridge';
 import { validTablesCatalog, validTableDefinition } from '../shared/tables';
 import { validDownloadRead } from '../shared/download';
+import { validSummariesParams } from '../shared/download-summary';
 import { validInventoryRead } from '../shared/inventory';
 import type { BridgeReply } from '../shared/bridge';
 protocol.registerSchemesAsPrivileged([{scheme:'vibeminer-image',privileges:{standard:true,secure:true}},{scheme:'vibeminer-geometry',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true}}]);
@@ -116,6 +117,7 @@ function registerBridge(): void {
       else if (method === 'tables.catalog') { if (!validTablesCatalog(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded definition catalogue query.'); }
       else if (method === 'tables.definition') { if (!validTableDefinition(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact provider table identity.'); }
       else if (method === 'download.read') { if (!validDownloadRead(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded download-object query.'); }
+      else if (method === 'download.summaries') { if (!validSummariesParams(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one to 100 distinct exact builds.'); }
       else if (method === 'inventory.read') { if (!validInventoryRead(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded inventory query.'); }
       else if (method === 'workspace.open') { if (!validOpen(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Choose an exact saved build and source region.'); }
       else if (method === 'request.cancel') { if (!validRequestId((params as { requestId?: unknown })?.requestId) || Object.keys(params as object).length !== 1) throw new EngineFailure('INVALID_REQUEST', 'Invalid cancellation request.'); }

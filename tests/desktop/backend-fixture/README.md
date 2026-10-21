@@ -1,6 +1,6 @@
 # Real C# authored retention fixture
 
-This test-only console composes the real `ProtocolHost`, discovery parser/catalog, configuration/DL preparation, CAS, shared acquisition/resources/source plans and durable retention driver. Its injected `HttpMessageHandler` has no network-backed inner handler. Metadata, configuration, DL and both encoded payloads come from the repository's authored `InventoryFixture`; it contains no downloaded game bytes. Official-looking URLs are dictionary keys only.
+This test-only console composes the real `ProtocolHost`, discovery parser/catalog, configuration/DL preparation, CAS, shared acquisition/resources/source plans, durable retention driver and the stored-coverage worker behind `download.summaries`. Its injected `HttpMessageHandler` has no network-backed inner handler. Metadata, configuration, DL and both encoded payloads come from the repository's authored `InventoryFixture`; it contains no downloaded game bytes. Official-looking URLs are dictionary keys only.
 
 The versions source is cloned with the visible version `1.2.3.12345+AUTHORED-RETENTION-FIXTURE`, then interpreted and committed through the real discovery service. Original fixture helpers and production files are unchanged. Tables use the real services; this small synthetic cohort is not a claim of supported game table data or Items/icons.
 

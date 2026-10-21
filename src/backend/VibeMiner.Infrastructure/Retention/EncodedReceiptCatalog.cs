@@ -43,8 +43,11 @@ public sealed partial class DiscoveryCatalog
             { [receipt.EncodingKey] = receipt.EncodedBytes }, transaction, token).GetValueOrDefault(receipt.EncodingKey);
         if (previous is not null && (previous.Sha256 != receipt.Sha256 || previous.EncodedBytes != receipt.EncodedBytes))
             throw EncodedIntegrity("An exact encoded identity cannot be associated with different verified bytes.");
-        Execute("INSERT OR IGNORE INTO encoded_objects VALUES($k,$h,$n,$r)", transaction,
-            ("$k", receipt.EncodingKey), ("$h", receipt.Sha256), ("$n", receipt.EncodedBytes), ("$r", Serialize(receipt)));
+        if (Changed("INSERT OR IGNORE INTO encoded_objects VALUES($k,$h,$n,$r)", transaction,
+            ("$k", receipt.EncodingKey), ("$h", receipt.Sha256), ("$n", receipt.EncodedBytes), ("$r", Serialize(receipt))) > 0)
+            LogStoredChange(receipt.EncodingKey, transaction);
+        // Every caller verified the current bytes just before this commit.
+        ClearObjectAbsence(receipt.EncodingKey, transaction);
         token.ThrowIfCancellationRequested(); transaction.Commit(); return true;
     }, token);
 

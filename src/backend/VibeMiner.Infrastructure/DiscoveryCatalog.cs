@@ -35,10 +35,13 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         try { await catalog.Schedule(() => { catalog.Initialize(dataDirectory); return true; }, token); return catalog; }
         catch { await catalog.DisposeAsync(); throw; }
     }
-    /// <summary>Catalog schema version. Version 15 is the first with build identity v2 (CDNConfig outside the identity).</summary>
-    internal const int CatalogVersion = 15;
-    /// <summary>Written once when a fresh catalog is created. Older catalogs never have it and are refused, never migrated.</summary>
-    internal const string CatalogLineage = "build-identity-v2";
+    /// <summary>Catalog schema version. Version 16 is the first with per-ledger stored coverage (D065).</summary>
+    internal const int CatalogVersion = 16;
+    /// <summary>
+    /// Written once when a fresh catalog is created. Older catalogs (build-identity-v2 at version 15, or none at all)
+    /// never have it and are refused, never migrated.
+    /// </summary>
+    internal const string CatalogLineage = "stored-coverage-v1";
     private void Initialize(string dataDirectory)
     {
         Directory.CreateDirectory(dataDirectory);
@@ -62,7 +65,7 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         // Each step commits its own user_version. A fresh catalog interrupted between steps resumes here.
         Action[] steps = [UpgradeWorkspace, UpgradeInventory, UpgradeInventoryCheckpoints, UpgradeDownloads, UpgradeTablesData,
             UpgradeEncodedReceipts, UpgradeRetention, UpgradeItemIcons, UpgradeItemClassifications, UpgradeCreatures,
-            UpgradeItemEffects, UpgradeCreatureGeometry, CompleteCatalog];
+            UpgradeItemEffects, UpgradeCreatureGeometry, UpgradeStoredCoverage, CompleteCatalog];
         for (var current = Math.Max(version, 2); current < CatalogVersion; current++) steps[current - 2]();
     }
     /// <summary>Read-only recognition: returns the version, or refuses a catalog this engine must not read or change.</summary>
@@ -77,7 +80,7 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
             Read("SELECT CASE WHEN typeof(revision)='text' AND length(revision)<=64 THEN revision END FROM catalog_lineage WHERE id=1") as string == CatalogLineage;
         if (!lineage)
             throw new DiscoveryException("CATALOG_RESET_REQUIRED",
-                "This catalog was written by an older engine that grouped builds by CDN configuration. It was not read or changed. Start VibeMiner with a fresh catalog.");
+                "This catalog was written by an older engine. It was not read or changed. Start VibeMiner with a fresh catalog.");
         return version;
     }
     private void CompleteCatalog()

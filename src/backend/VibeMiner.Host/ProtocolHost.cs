@@ -13,7 +13,8 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
     ItemClassificationsService? itemClassifications = null, CreaturesService? creatures = null,
     CreatureDisplayMetadataService? creatureDisplays = null, ItemEffectsService? itemEffects = null,
     CreatureGeometryService? creatureGeometry = null, CreatureGeometryLeases? geometryLeases = null,
-    SettingsService? settings = null)
+    SettingsService? settings = null,
+    DownloadSummaryService? downloadSummaries = null)
 {
     public const int MaxFrameBytes = 1024 * 1024;
     public const int MaxClassificationFrameBytes = 512 * 1024;
@@ -166,6 +167,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     var capabilities = new List<string> { "discovery-v1", "discovery-all-products-v1", "local-history", "cancellation", "home-download-v1", "download-v1", "inventory-v1", "tables-definitions-v1", "tables-data-v1" };
                     if (retention is not null) capabilities.Add("retention-v1");
                     if (settings is not null) capabilities.Add("settings-v1");
+                    if (downloadSummaries is not null) capabilities.Add("download-summary-v1");
                     if (items is not null) capabilities.Add("items-v1");
                     if (itemIcons is not null && iconLeases is not null) capabilities.Add("item-icons-v1");
                     if (itemClassifications is not null) capabilities.Add("item-classifications-v1");
@@ -276,6 +278,20 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                         throw new DiscoveryException("INVALID_REQUEST", "The page size must be an integer.");
                     result = await downloads.ReadAsync(new(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"), RequiredString(parameters, "sourceRegion"),
                         RequiredString(parameters, "ledgerId"), downloadLimit, OptionalString(parameters, "after")), request.Cancellation.Token);
+                    break;
+                case "download.summaries":
+                    RequireOnly(parameters, "builds");
+                    if (downloadSummaries is null) throw new DiscoveryException("DOWNLOAD_SUMMARY_UNAVAILABLE", "Stored download figures are unavailable.");
+                    if (!parameters.TryGetProperty("builds", out var summaryBuilds) || summaryBuilds.ValueKind != JsonValueKind.Array ||
+                        summaryBuilds.GetArrayLength() is < 1 or > DownloadSummaryService.MaxBuilds)
+                        throw new DiscoveryException("INVALID_REQUEST", "Choose one to 100 distinct exact builds.");
+                    var summaryKeys = summaryBuilds.EnumerateArray().Select(item =>
+                    {
+                        if (item.ValueKind != JsonValueKind.Object) throw new DiscoveryException("INVALID_REQUEST", "Each build is an exact product and identity.");
+                        RequireOnly(item, "productId", "buildIdentity");
+                        return new BuildKey(RequiredString(item, "productId"), RequiredString(item, "buildIdentity"));
+                    }).ToArray();
+                    result = new { summaries = (await downloadSummaries.ReadAsync(summaryKeys, request.Cancellation.Token)).Select(DownloadSummaryWire.Summary).ToArray() };
                     break;
                 case "items.classifications":
                     RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "researchLocale", "artifactId", "itemIds", "includeSubclass", "policyRevision");

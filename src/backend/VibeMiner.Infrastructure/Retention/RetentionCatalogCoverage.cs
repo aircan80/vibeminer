@@ -107,6 +107,9 @@ public sealed partial class DiscoveryCatalog
             var presence = observation.Presence;
             if (receipt is not null && HasObjectInvalidity(receipt.Sha256, receipt.EncodedBytes, transaction)) presence = RetentionPresence.Corrupt;
             if (presence == RetentionPresence.Present && receipt is null) presence = RetentionPresence.Unknown;
+            // The dated check corrects the running stored figure of every ledger sharing this object (D065).
+            if (receipt is not null && presence == RetentionPresence.Missing) RecordObjectAbsence(receipt.EncodingKey, receipt.Sha256, receipt.EncodedBytes, now, transaction);
+            else if (receipt is not null && presence == RetentionPresence.Present && HasObjectAbsence(receipt.EncodingKey, transaction)) ClearObjectAbsence(receipt.EncodingKey, transaction);
             job = presence switch
             {
                 RetentionPresence.Present => job with { Present = job.Present + 1, PresentBytes = checked(job.PresentBytes + observation.EncodedBytes) },

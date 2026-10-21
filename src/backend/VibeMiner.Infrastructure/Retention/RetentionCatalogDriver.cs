@@ -24,8 +24,12 @@ public sealed partial class DiscoveryCatalog
         using var transaction = Db.BeginTransaction();
         var jobs = ReadOccupiedRetentionJobs(transaction);
         if (jobs.Any(j => j.Active)) return null;
-        var job = jobs.FirstOrDefault(j => j.Mode == RetentionMode.DownloadAll && !j.Paused && j.State == RetentionState.Queued);
+        // Download all waits until every file the build lists is measured, then covers that scope (D066).
+        var job = jobs.FirstOrDefault(j => j.Mode == RetentionMode.DownloadAll && !j.Paused && j.State == RetentionState.Queued &&
+            ReadRootScope(j.Plan.Target.ProductId, j.Plan.Target.BuildIdentity, j.Plan.Target.LedgerId, transaction).State != "pending");
         if (job is null) return null;
+        var plan = ReadRetentionPlan(job.Plan.Target, transaction);
+        if (plan.Ledger != job.Plan.Ledger) { job = job with { Plan = plan, Map = null }; EnsureRetentionCoverage(plan.Ledger, transaction); }
         ValidateRetentionPlanAssociation(job.Plan, transaction);
         job = job with { Active = true, State = RetentionState.Preparing, Generation = checked(job.Generation + 1),
             Cursor = 0, Present = 0, PresentBytes = 0, Missing = 0, Corrupt = 0, Unresolved = 0, Failed = 0,

@@ -27,6 +27,8 @@ These are the engine's current bounds. Code is the source of truth: [Acquisition
 | Progress observer callbacks | 32 in flight, engine-wide |
 | SQLite bulk batches | At most 64 rows/members per write batch (for example retention credit batches) |
 | Database worker queue | One worker, at most 64 queued operations |
+| ROOT scope worker | One build at a time after Open, at background priority; fixed-size arrays of 16 bytes per ROOT entry (at most 8,000,000) and per distinct file (refused above 6,000,000), 8 per uncovered file and 24 per EKey of multi-object files (at most 1,000,000): at most about 300 MiB, 94 MiB on retail 12.1.5; engine peak about 306 MB RSS there, see below; 3 attempts, 30 s apart |
+| Stored coverage worker | One loop; one slice of 1024 keys for each of up to 64 ledgers per round, round robin; rounds start at most once a second; 8 ledgers held open (closed after 30 s idle, proofs kept); a ledger given up after 3 failed rounds in a row; 8192 applied changes pruned per step |
 | Engine requests (host) | 32 active; the 33rd gets `BUSY` |
 | Storage measurement | One data-folder walk at a time, 512 entries per batch between yields and cancellation checks, 32 levels, 4096 queued folders, 5-minute budget (`STORAGE_MEASURE_TIMEOUT`). No acquisition permits |
 | Desktop `EngineClient` | 32 pending total. Ordinary requests are capped at 26, so 6 slots always remain for `request.cancel`, `shutdown`, `items.icon.close` and `creatures.geometry.close`. |
@@ -175,6 +177,25 @@ Each context owns at most one EN lookup lease and uses the global staging budget
 - The parked overlay changes only reported state/progress/problem. It never changes durable mode, pause, intent revision, scope, coverage or evidence.
 - A generic retry never sends Resume. A paused user retries with Pause, an On demand user with On demand. Resume stays the explicit unpause.
 - Shutdown uses the same 3-attempt policy, admits no new claims, and returns a typed recoverable failure if settlement still fails. A later shutdown call retries settlement only.
+
+## Stored coverage worker
+
+[StoredCoverageWorker](../src/backend/VibeMiner.Infrastructure/Retention/StoredCoverageWorker.cs) keeps the running Downloaded figure of every admitted ledger ([D065](DECISIONS.md), [storage](STORAGE.md#stored-figure-per-ledger)). It never transfers, stats files or runs a presence check. Catalog commits that change what is stored wake it through a one-slot signal. Each round takes one bounded slice for each of up to 64 ledgers with work, continuing after the last ledger of the previous round, so every ledger is reached and the slowest one cannot pin pruning. Each slice is two short operations on the shared catalog worker, so interactive SQL interleaves, and rounds start at most once a second even while work remains. Ledger reads use binary searches of 24-byte records outside the stream buffer. The first open of a ledger proves it under background CPU permits; later opens, including after the 30 s idle close or with more than eight ledgers in turn, only check its header while the CAS file keeps the proven length, creation and write times.
+
+- **First count.** Admission registers the ledger as `counting`. Retained EKeys are read 1024 at a time in key order and matched against an ordered ledger page cache; the cursor is durable, so a restart resumes it.
+- **Changes.** Up to 1024 logged changes per round, applied by exact key lookup. Each slice is fenced by the ledger's expected cursor, so a reset or failure in between writes nothing.
+- **Faults.** A fault stays with its ledger. One that is missing or fails verification, has an inconsistent saved row, or fails three rounds in a row becomes `unavailable` (`STORED_COVERAGE_FAILED` for the last) and is no longer maintained or held back from pruning; the next admission of that ledger counts it again. Only a catalog that cannot be used at all (busy, full, failing) stops the round; the loop then retries after 1 s and 4 s and waits for the next change. The loop never ends on a fault.
+- **Shutdown.** Disposal cancels the loop, awaits the running operation and closes the held ledgers.
+
+## ROOT scope worker
+
+[RootScopeWorker](../src/backend/VibeMiner.Infrastructure/Retention/RootScopeWorker.cs) measures every file a build's ROOT lists outside its download manifest after Open ([D066](DECISIONS.md)), so Open stays as fast as before. It takes the oldest pending build, reads its configurations, ENCODING and ROOT through the shared acquisition pipeline at background priority, and does its one ROOT and one ENCODING pass under a background CPU permit. Every CAS proof (the manifest ledger session, the decoded ENCODING) is opened before that permit is taken. Both passes stream: neither ROOT nor ENCODING is held in memory, and the manifest is merged as 24-byte values rather than rows. It then publishes the manifest ledger extended with the uncovered files' encoded objects and records the scope in one fenced transaction.
+
+- **Memory.** On 12.1.5.70448 the engine is at 140 MB RSS when Open returns and peaks at about 306 MB during the measurement. About 100 MiB of that is the idle runtime, 94 MiB the two key arrays (3,261,808 ROOT entries and 2,881,684 distinct files), and the rest short-lived per-entry key strings from the ROOT and ENCODING readers, which the GC reclaims.
+- **Outcome.** `measured`; `manifestOnly` when the file list cannot be read (terminal, with the reason); otherwise, for a fault of any kind, a retry 30 s later, and `failed` after three attempts, which the next Open of that build resets to pending. A pending row whose saved inputs cannot be read is settled `failed` at once. Reopening a measured build resets an unavailable figure, and sets the scope pending again only when the measured ledger itself could not be read; a running Download all keeps the ledger it was claimed with.
+- **Cancellation and shutdown.** The measurement stays pending; the next run resumes it from the start. Nothing partial is recorded.
+- **Stale results.** A result commits only while its row is still pending with the same generation and attempt count.
+- **Download all.** A queued job is not claimed while its build is pending; the retention driver is woken on every terminal outcome.
 
 ## Preparation and navigation
 

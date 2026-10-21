@@ -85,10 +85,17 @@ public sealed partial class DiscoveryCatalog : IInventoryCatalog
             ValidateDownloadReceiptFacts(previous);
             if (previous.ContentKey != receipt.ContentKey || previous.Sha256 != receipt.Sha256 || previous.EncodedBytes != receipt.EncodedBytes || previous.DecodedBytes != receipt.DecodedBytes)
                 throw new DiscoveryException("METADATA_IDENTITY_CONFLICT", "Saved metadata conflicts with its exact encoded identity.");
-            return true;
         }
-        Execute("INSERT INTO metadata_objects VALUES($e,$c,$n,$r)", null, ("$e", receipt.EncodingKey), ("$c", receipt.ContentKey),
-            ("$n", long.Parse(receipt.EncodedBytes, CultureInfo.InvariantCulture)), ("$r", Serialize(receipt)));
+        // Callers record metadata only after verifying its current bytes. ROOT, for example, is a DL member.
+        using var transaction = Db.BeginTransaction();
+        if (saved is null)
+        {
+            Execute("INSERT INTO metadata_objects VALUES($e,$c,$n,$r)", transaction, ("$e", receipt.EncodingKey), ("$c", receipt.ContentKey),
+                ("$n", long.Parse(receipt.EncodedBytes, CultureInfo.InvariantCulture)), ("$r", Serialize(receipt)));
+            LogStoredChange(receipt.EncodingKey, transaction);
+        }
+        ClearObjectAbsence(receipt.EncodingKey, transaction);
+        transaction.Commit();
         return true;
     }, token);
     internal Task AddEncodingAsync(long generation, IReadOnlyList<EncodingContentRow> content,

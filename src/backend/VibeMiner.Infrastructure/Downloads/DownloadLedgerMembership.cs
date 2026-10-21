@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using VibeMiner.Application;
 using VibeMiner.Domain;
 
@@ -13,6 +14,22 @@ internal sealed partial class DownloadLedger
     internal async Task<DownloadLedgerReadSession> OpenReadSessionAsync(DownloadLedgerArtifact artifact, CancellationToken token,
         AcquisitionResources? resources = null, IAcquisitionWorkContext? context = null)
         => new(await OpenValidatedLedgerAsync(artifact, token, resources, context), artifact);
+
+    /// <summary>
+    /// A read session over a ledger file this process already proved complete (SHA-256 and order) and that is unchanged
+    /// since; only its header is checked again. Returns null when the header differs.
+    /// </summary>
+    internal static async Task<DownloadLedgerReadSession?> OpenProvenReadSessionAsync(FileStream input, DownloadLedgerArtifact artifact, CancellationToken token)
+    {
+        var header = new byte[HeaderBytes];
+        if (input.Length != artifact.ByteLength || await RandomAccess.ReadAsync(input.SafeFileHandle, header, 0, token) != HeaderBytes ||
+            !header.AsSpan(0, 8).SequenceEqual(Magic) || BinaryPrimitives.ReadInt32BigEndian(header.AsSpan(8)) != 1 ||
+            BinaryPrimitives.ReadInt32BigEndian(header.AsSpan(12)) != RecordBytes || BinaryPrimitives.ReadInt64BigEndian(header.AsSpan(16)) != artifact.ObjectCount ||
+            BinaryPrimitives.ReadInt64BigEndian(header.AsSpan(24)) != artifact.TotalEncodedBytes)
+            return null;
+        input.Position = HeaderBytes;
+        return new(input, artifact);
+    }
 
     private async Task<FileStream> OpenValidatedLedgerAsync(DownloadLedgerArtifact artifact, CancellationToken token,
         AcquisitionResources? resources, IAcquisitionWorkContext? context)
@@ -56,8 +73,9 @@ internal sealed class DownloadLedgerOrderedCursor : IAsyncDisposable
 {
     private readonly LedgerRunReader? reader;
     private readonly DownloadLedgerReadSession? session;
-    private IReadOnlyList<DownloadLedgerRow> page = [];
-    private int position;
+    // Values, not rows: a full traversal allocates no per-member objects or key strings.
+    private LedgerValue[]? page;
+    private int position, filled;
     private long after;
     internal DownloadLedgerArtifact Artifact { get; }
     internal DownloadLedgerOrderedCursor(LedgerRunReader reader, DownloadLedgerArtifact artifact) { this.reader = reader; Artifact = artifact; }
@@ -70,13 +88,14 @@ internal sealed class DownloadLedgerOrderedCursor : IAsyncDisposable
             if (!await reader.NextAsync(token)) return false;
             Current = reader.Current; return true;
         }
-        if (position == page.Count)
+        if (position == filled)
         {
-            page = await session!.ReadOrderedPageAsync(after, token); position = 0;
-            if (page.Count == 0) return false;
+            page ??= new LedgerValue[DownloadLedgerReadSession.OrderedPageRows];
+            filled = await session!.ReadOrderedValuesAsync(after, page, token); position = 0;
+            if (filled == 0) return false;
+            after += filled;
         }
-        var row = page[position++]; after = row.Id;
-        Current = LedgerValue.Parse(row.EncodingKey, row.EncodedBytes); return true;
+        Current = page![position++]; return true;
     }
     public ValueTask DisposeAsync() => reader?.DisposeAsync() ?? ValueTask.CompletedTask;
 }
@@ -84,6 +103,8 @@ internal sealed class DownloadLedgerOrderedCursor : IAsyncDisposable
 /// <summary>One validated immutable DL handle, shared by ordered traversal and bounded exact lookups.</summary>
 internal sealed class DownloadLedgerReadSession(FileStream input, DownloadLedgerArtifact artifact) : IAsyncDisposable
 {
+    /// <summary>The identity of the proven file behind this session.</summary>
+    internal ObjectFileIdentity FileIdentity { get; } = VerifiedObjectStore.IdentityOf(input);
     private readonly SemaphoreSlim gate = new(1, 1);
     private bool disposed;
     internal DownloadLedgerOrderedCursor OpenOrderedCursor() => new(this, artifact);
@@ -92,8 +113,30 @@ internal sealed class DownloadLedgerReadSession(FileStream input, DownloadLedger
         if (limit is < 1 or > 128) throw new DiscoveryException("INVALID_REQUEST", "Read at most 128 ledger members.");
         return ReadAsync(after, limit, token);
     }
-    internal Task<IReadOnlyList<DownloadLedgerRow>> ReadOrderedPageAsync(long after, CancellationToken token)
-        => ReadAsync(after, 4096, token);
+    internal const int OrderedPageRows = 4096;
+    /// <summary>Fills <paramref name="into"/> with the members after ordinal <paramref name="after"/>; returns how many.</summary>
+    internal async Task<int> ReadOrderedValuesAsync(long after, LedgerValue[] into, CancellationToken token)
+    {
+        if (after < 0 || after > artifact.ObjectCount) throw new DiscoveryException("INVALID_REQUEST", "Choose a valid ledger ordinal.");
+        await gate.WaitAsync(token);
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            var count = (int)Math.Min(into.Length, artifact.ObjectCount - after);
+            if (count == 0) return 0;
+            var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(checked(count * DownloadLedger.RecordBytes));
+            try
+            {
+                input.Position = checked(DownloadLedger.HeaderBytes + after * DownloadLedger.RecordBytes);
+                await input.ReadExactlyAsync(buffer.AsMemory(0, count * DownloadLedger.RecordBytes), token);
+                for (var i = 0; i < count; i++)
+                    into[i] = LedgerValue.Read(buffer.AsSpan(i * DownloadLedger.RecordBytes, DownloadLedger.RecordBytes));
+            }
+            finally { System.Buffers.ArrayPool<byte>.Shared.Return(buffer); }
+            return count;
+        }
+        finally { gate.Release(); }
+    }
     private async Task<IReadOnlyList<DownloadLedgerRow>> ReadAsync(long after, int limit, CancellationToken token)
     {
         if (after < 0 || after > artifact.ObjectCount) throw new DiscoveryException("INVALID_REQUEST", "Choose a valid ledger ordinal.");
@@ -146,6 +189,46 @@ internal sealed class DownloadLedgerReadSession(FileStream input, DownloadLedger
         }
         finally { gate.Release(); }
     }
+    /// <summary>
+    /// Zero-based index of the first member at or after <paramref name="from"/> whose key is greater than
+    /// (<paramref name="after"/>) or at least the given key. Probes read 24 bytes each, outside the stream buffer.
+    /// </summary>
+    internal async Task<long> SearchAsync(string encodingKey, long from, bool after, CancellationToken token)
+    {
+        if (encodingKey is null || encodingKey.Length != 32 || encodingKey.Any(ch => ch is not (>= '0' and <= '9' or >= 'a' and <= 'f')) ||
+            from < 0 || from > artifact.ObjectCount)
+            throw new DiscoveryException("INVALID_REQUEST", "Choose a canonical full encoded identity and a valid ledger ordinal.");
+        var key = LedgerValue.Parse(encodingKey, 0);
+        await gate.WaitAsync(token);
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            var buffer = new byte[DownloadLedger.RecordBytes]; long lower = from, upper = artifact.ObjectCount;
+            while (lower < upper)
+            {
+                token.ThrowIfCancellationRequested();
+                var middle = lower + (upper - lower) / 2;
+                var offset = checked(DownloadLedger.HeaderBytes + middle * DownloadLedger.RecordBytes);
+                if (await RandomAccess.ReadAsync(input.SafeFileHandle, buffer, offset, token) != buffer.Length)
+                    throw new DiscoveryException("DOWNLOAD_LEDGER_INTEGRITY", "A download ledger record ended unexpectedly.");
+                var compared = LedgerValue.Read(buffer).CompareKey(key);
+                if (compared < 0 || after && compared == 0) lower = middle + 1; else upper = middle;
+            }
+            return lower;
+        }
+        finally { gate.Release(); }
+    }
+    /// <summary>The member with this exact key, whatever its length, or null.</summary>
+    internal async Task<DownloadLedgerRow?> FindKeyAsync(string encodingKey, long from, CancellationToken token)
+    {
+        var index = await SearchAsync(encodingKey, from, false, token);
+        if (index == artifact.ObjectCount) return null;
+        var row = (await ReadAsync(index, 1, token))[0];
+        return row.EncodingKey == encodingKey ? row : null;
+    }
+    /// <summary>Up to 4096 members starting at zero-based <paramref name="index"/>.</summary>
+    internal Task<IReadOnlyList<DownloadLedgerRow>> ReadFromAsync(long index, CancellationToken token) => ReadAsync(index, 4096, token);
+    internal long Count => artifact.ObjectCount;
     public async ValueTask DisposeAsync()
     {
         await gate.WaitAsync();

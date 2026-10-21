@@ -1,13 +1,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App, buildDownloads, checkLine, checkSummary, downloadedPercent, productProblems, retainedEvidence } from '../src/renderer/App';
+import { App, checkLine, checkSummary, downloadedText, productProblems, retainedEvidence } from '../src/renderer/App';
+import { storedPercent, summariesMatch, validSummariesParams } from '../src/shared/download-summary';
 import { ActivityTrigger, DownloadActivity } from '../src/renderer/DownloadActivity';
+import { SUMMARY_RETRY_MS } from '../src/renderer/useDownloadSummaries';
 import { summaryLine, type ActivityTask } from '../src/renderer/download-activity-state';
 import type { BridgeReply, DiscoveryBridge } from '../src/shared/bridge';
-import type { DiscoveryCatalogPage, DiscoveryPage, EngineProgress, RetentionSnapshot, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
+import type { BuildDownloadSummary, BuildStoredCoverage, DiscoveryCatalogPage, DiscoveryPage, DownloadSummaries, DownloadSummariesParams, EngineProgress, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
 import fixture from '../../../contracts/examples/discovery-page.json';
-import retained from '../../../contracts/examples/retention-snapshot.json';
+import authoredSummaries from '../../../contracts/examples/download-summaries.json';
 import { catalog, notChecked, statusOf, testProducts } from './catalog-page';
 const original = fixture as DiscoveryPage;
 // A saved build that was not advertised at the last check.
@@ -34,66 +36,202 @@ function bridgeMock(read: DiscoveryPage = page, extra: DiscoveryCatalogPage['bui
 beforeEach(() => { localStorage.clear(); });
 afterEach(cleanup);
 async function ready(bridge = bridgeMock()) { render(<App bridge={bridge}/>); await screen.findByRole('listbox', { name: 'Builds' }); return bridge; }
-function snapshot(patch: Partial<RetentionSnapshot['coverage']>, top: Partial<RetentionSnapshot> = {}): RetentionSnapshot {
-  const s = structuredClone(retained) as RetentionSnapshot;
-  // Internally consistent: observed = present + missing + corrupt, and an assessed check carries its time.
-  return { ...s, jobId: 'job-1', mode: 'downloadAll', paused: false, state: 'waiting', progress: null, pendingObjects: 0, objectCount: '10', totalEncodedBytes: '1000', failedObjects: '0', unresolvedObjects: '0', ...top, coverage: { ...s.coverage, receiptObjects: '10', receiptBytes: '1000', receiptedAt: '2026-10-01T00:00:00Z', presenceState: 'assessed', presenceAssessedAt: '2026-10-01T00:00:00Z', observedObjects: '10', presentObjects: '4', presentBytes: '410', missingObjects: '6', corruptObjects: '0', ...patch } };
+const authored = authoredSummaries as DownloadSummaries;
+/** A current running figure: 4 of 10 objects, 410 of 1000 bytes. */
+function stored(patch: Partial<BuildStoredCoverage> = {}): BuildStoredCoverage {
+  return { ...structuredClone(authored.summaries[0].download!), objectCount: '10', totalEncodedBytes: '1000', storedObjects: '4', storedBytes: '410', countState: 'current', countProblem: null, running: false, ...patch };
 }
+const measured = (build: { productId: string; id: string }, download: BuildStoredCoverage): BuildDownloadSummary => ({ productId: build.productId, buildIdentity: build.id, state: 'measured', download });
+const summaryBridge = (bridge: DiscoveryBridge, answer: (key: { productId: string; buildIdentity: string }) => BuildDownloadSummary) => ({
+  ...bridge, capabilities: vi.fn(async () => success(['retention-v1', 'download-summary-v1'])), retentionList: vi.fn(async () => success({ jobs: [] })), retentionRead: vi.fn(unavailable), retentionSet: vi.fn(unavailable),
+  downloadSummaries: vi.fn(async (params: DownloadSummariesParams) => success({ summaries: params.builds.map(answer) } as DownloadSummaries))
+}) as DiscoveryBridge;
 
 describe('Downloaded percentage', () => {
-  it('shows a percentage only after a complete presence check of the whole download manifest', () => {
-    expect(downloadedPercent(undefined)).toBeNull();
-    expect(downloadedPercent(snapshot({ presenceState: 'notAssessed' }))).toBeNull();
-    expect(downloadedPercent(snapshot({ presenceState: 'assessing' }))).toBeNull();
-    expect(downloadedPercent(snapshot({ presenceState: 'interrupted' }))).toBeNull();
-    expect(downloadedPercent(snapshot({ observedObjects: '9' }))).toBeNull();
-    expect(downloadedPercent(snapshot({}, { failedObjects: '1' }))).toBeNull();
-    expect(downloadedPercent(snapshot({}, { unresolvedObjects: '1' }))).toBeNull();
-    expect(downloadedPercent(snapshot({}, { totalEncodedBytes: '0' }))).toBeNull();
+  it('shows the running figure without a presence check, and nothing while it is not current', () => {
+    expect(storedPercent(undefined)).toBeNull();
+    expect(storedPercent(stored({ countState: 'counting' }))).toBeNull();
+    expect(storedPercent(stored({ countState: 'unavailable', countProblem: { code: 'LOCAL_OBJECT_MISSING', message: 'Ledger missing.', retryable: true } }))).toBeNull();
+    expect(storedPercent(stored({ totalEncodedBytes: '0', storedBytes: '0', storedObjects: '0' }))).toBeNull();
+    expect(storedPercent(stored({ presence: { state: 'notAssessed', assessedAt: null, observedObjects: '0', missingObjects: '0', corruptObjects: '0' } }))).toBe('41%');
   });
   it('never rounds up to 100% and keeps known zero distinct from tiny shares', () => {
-    expect(downloadedPercent(snapshot({ presentBytes: '410' }))).toBe('41%');
-    expect(downloadedPercent(snapshot({ presentBytes: '1000', presentObjects: '10' }))).toBe('100%');
-    expect(downloadedPercent(snapshot({ presentBytes: '1000', presentObjects: '9' }))).toBe('99%');
-    expect(downloadedPercent(snapshot({ presentBytes: '9999' }, { totalEncodedBytes: '10000' }))).toBe('99%');
-    expect(downloadedPercent(snapshot({ presentBytes: '4' }))).toBe('0.4%');
-    expect(downloadedPercent(snapshot({ presentBytes: '1' }, { totalEncodedBytes: '100000' }))).toBe('<0.1%');
-    expect(downloadedPercent(snapshot({ presentBytes: '0' }))).toBe('0%');
-    expect(downloadedPercent(snapshot({ presentBytes: '18446744073709551615' }, { totalEncodedBytes: '36893488147419103230' }))).toBe('50%');
+    expect(storedPercent(stored({ storedBytes: '410' }))).toBe('41%');
+    expect(storedPercent(stored({ storedBytes: '1000', storedObjects: '10' }))).toBe('100%');
+    expect(storedPercent(stored({ storedBytes: '1000', storedObjects: '9' }))).toBe('99%');
+    expect(storedPercent(stored({ storedBytes: '9999', totalEncodedBytes: '10000' }))).toBe('99%');
+    expect(storedPercent(stored({ storedBytes: '4' }))).toBe('0.4%');
+    expect(storedPercent(stored({ storedBytes: '1', totalEncodedBytes: '100000' }))).toBe('<0.1%');
+    expect(storedPercent(stored({ storedBytes: '0', storedObjects: '0' }))).toBe('0%');
+    expect(storedPercent(stored({ storedBytes: '4611686018427387903', totalEncodedBytes: '9223372036854775806', objectCount: '9223372036854775806' }))).toBe('50%');
+  });
+  it('accepts only consistent figures for exactly the requested builds', () => {
+    const params = { builds: authored.summaries.map(({ productId, buildIdentity }) => ({ productId, buildIdentity })) } as DownloadSummariesParams;
+    expect(validSummariesParams(params)).toBe(true);
+    expect(summariesMatch(authored, params)).toBe(true);
+    expect(summariesMatch({ summaries: [...authored.summaries].reverse() }, params)).toBe(false);
+    const first = authored.summaries[0];
+    for (const download of [stored({ storedObjects: '11' }), stored({ storedBytes: '1001' }), stored({ storedObjects: '10', storedBytes: '999' }), stored({ storedObjects: '0' }),
+      stored({ countState: 'unavailable' }), stored({ countProblem: { code: 'X', message: 'Y', retryable: true } }), stored({ sourceRegions: ['us', 'us'] }), stored({ running: true, downloadAll: false }),
+      stored({ scope: 'downloadManifestAllVariants', unresolvableRootContent: '1' }), stored({ unresolvableRootContent: '-1' }),
+      stored({ scopeState: 'measuring' }), stored({ scope: 'downloadManifestAllVariants', unresolvableRootContent: '0', scopeState: 'measuring', scopeProblem: null }),
+      stored({ scopeProblem: { code: 'X', message: 'Y', retryable: true } })])
+      expect(summariesMatch({ summaries: [{ ...first, download }, ...authored.summaries.slice(1)] }, params)).toBe(false);
+    expect(summariesMatch({ summaries: [{ ...first, state: 'notOpened' }, ...authored.summaries.slice(1)] }, params)).toBe(false);
+    for (const bad of [{ builds: [] }, { builds: [params.builds[0], params.builds[0]] }, { builds: Array.from({ length: 101 }, (_, i) => ({ productId: 'wow', buildIdentity: i.toString(16).padStart(64, '0') })) },
+      { builds: [{ ...params.builds[0], sourceRegion: 'us' }] }, { builds: [params.builds[0]], extra: true }])
+      expect(validSummariesParams(bad)).toBe(false);
+  });
+  it('names every state that has no meter', () => {
+    const build = { productId: 'wow', id: 'a'.repeat(64) };
+    expect(downloadedText(undefined)).toBeNull();
+    expect(downloadedText({ productId: 'wow', buildIdentity: build.id, state: 'notOpened', download: null })).toBe('Not opened');
+    expect(downloadedText({ productId: 'wow', buildIdentity: build.id, state: 'notMeasured', download: null })).toBe('Size unknown');
+    expect(downloadedText(measured(build, stored({ countState: 'counting' })))).toBe('Counting…');
+    expect(downloadedText(measured(build, stored({ countState: 'unavailable', countProblem: { code: 'LOCAL_OBJECT_MISSING', message: 'Ledger missing.', retryable: true } })))).toBe('Unavailable');
+    expect(downloadedText(measured(build, stored()))).toBeNull();
   });
 });
 
-describe('saved download jobs per build', () => {
-  const target = (region: string) => ({ productId: 'wow', buildIdentity: original.builds[0].id, sourceRegion: region, ledgerId: 'e'.repeat(64) });
-  it('shows the newest complete check and stays running while any of its jobs runs', () => {
-    const older = snapshot({ presenceAssessedAt: '2026-10-01T00:00:00Z', presentBytes: '100' }, { target: target('us') });
-    const newer = snapshot({ presenceAssessedAt: '2026-10-02T00:00:00Z', presentBytes: '500' }, { target: target('eu') });
-    const running = snapshot({ presenceState: 'notAssessed', presenceAssessedAt: null }, { target: target('kr'), state: 'running' });
-    const download = buildDownloads([older, running, newer]).get(`wow:${original.builds[0].id}`)!;
-    expect(download.job).toBe(newer);
-    expect(download.running).toBe(true);
-    expect(buildDownloads([running]).get(`wow:${original.builds[0].id}`)!.job).toBe(running);
-  });
-  it('renders Not opened, a percentage with a live marker, corrupt objects and Not checked in the list and inspector', async () => {
+describe('stored figures per build', () => {
+  it('renders Not opened, a percentage with a live marker, corrupt and missing objects and Size unknown in the list and inspector', async () => {
     const prepared = { ...second, isLocal: true };
-    const jobs = [snapshot({ presentBytes: '410', missingObjects: '4', corruptObjects: '2' }, { target: target('us'), state: 'running' })];
-    const bridge = { ...bridgeMock({ ...page, builds: [{ ...original.builds[0], isLocal: true }, prepared] }), capabilities: vi.fn(async () => success(['retention-v1'])), retentionList: vi.fn(async () => success({ jobs })), retentionRead: vi.fn(async () => success(jobs[0])), retentionSet: vi.fn(unavailable) } as DiscoveryBridge;
+    const running = stored({ running: true, downloadAll: true, presence: { state: 'assessed', assessedAt: '2026-10-18T00:00:00Z', observedObjects: '10', missingObjects: '4', corruptObjects: '2' }, sourceRegions: ['eu', 'us'] });
+    const bridge = summaryBridge(bridgeMock({ ...page, builds: [{ ...original.builds[0], isLocal: true }, prepared] }, [ptr]), key =>
+      key.buildIdentity === original.builds[0].id ? measured(original.builds[0], running)
+        : key.buildIdentity === prepared.id ? { ...key, state: 'notMeasured', download: null } : { ...key, state: 'notOpened', download: null });
     await ready(bridge);
     const list = screen.getByRole('listbox', { name: 'Builds' });
     await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('41%'));
     expect(within(list).getAllByRole('option')[0]).toHaveTextContent(/downloading/);
-    expect(within(list).getByRole('option', { name: /70011/ })).toHaveTextContent('Not checked');
+    expect(within(list).getByRole('option', { name: /70011/ })).toHaveTextContent('Size unknown');
+    expect(within(list).getByRole('option', { name: /70631/ })).toHaveTextContent('Not opened');
+    // One read covers the whole loaded window; nothing else is asked of the engine.
+    expect(bridge.downloadSummaries).toHaveBeenCalledWith({ builds: [original.builds[0], prepared, ptr].map(b => ({ productId: b.productId, buildIdentity: b.id })) });
+    expect(bridge.open).not.toHaveBeenCalled(); expect(bridge.download).not.toHaveBeenCalled();
     fireEvent.click(within(list).getAllByRole('option')[0]);
     expect(screen.getByText(/Download all is on for this build/)).toBeVisible();
-    expect(screen.getByText('Downloaded', { selector: 'dt' }).nextElementSibling).toHaveTextContent('41%');
+    expect(screen.getByText('Downloaded', { selector: 'dt' }).nextElementSibling).toHaveTextContent('410 bytes of 1,000 bytes · 41%');
+    expect(screen.getByText('Objects', { selector: 'dt' }).nextElementSibling).toHaveTextContent('4 of 10');
+    expect(screen.getByText('Scope', { selector: 'dt' }).nextElementSibling).toHaveTextContent('Every file the build lists, every locale and platform');
+    // ROOT content keys ENCODING cannot resolve are named apart, never as missing (D066).
+    expect(screen.getByText('Not resolvable', { selector: 'dt' }).nextElementSibling).toHaveTextContent('10 listed files have no encoding entry');
+    expect(screen.getByText('Source', { selector: 'dt' }).nextElementSibling).toHaveTextContent('EU, US');
+    expect(screen.getByText('Missing', { selector: 'dt' }).nextElementSibling).toHaveTextContent('4 objects missing at the check');
     expect(screen.getByText('Corrupt', { selector: 'dt' }).nextElementSibling).toHaveTextContent('2 objects found corrupt');
     expect(screen.getByText('Activity', { selector: 'dt' }).nextElementSibling).toHaveTextContent('Download all running');
     fireEvent.click(within(list).getByRole('option', { name: /70011/ }));
     expect(screen.getByText(/Game content downloads on demand/)).toBeVisible();
+    expect(screen.getByText('Downloaded', { selector: 'dt' }).nextElementSibling).toHaveTextContent('Size unknown. This build has no measured download manifest.');
   });
-  it('says Not opened for a build with no job that was never prepared', async () => {
-    await ready();
-    expect(within(screen.getByRole('listbox', { name: 'Builds' })).getAllByRole('option')[0]).toHaveTextContent('Not opened');
+  it('says Counting while content on disk is first counted, then shows the figure, and Unavailable with its cause', async () => {
+    let calls = 0;
+    const bridge = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id
+      ? measured(original.builds[0], ++calls === 1 ? stored({ countState: 'counting', storedObjects: '0', storedBytes: '0' }) : stored({ storedBytes: '1000', storedObjects: '10' }))
+      : measured(second, stored({ countState: 'unavailable', countProblem: { code: 'LOCAL_OBJECT_MISSING', message: 'The saved download ledger could not be read.', retryable: true }, storedObjects: '0', storedBytes: '0' })));
+    await ready(bridge);
+    const list = screen.getByRole('listbox', { name: 'Builds' });
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('Counting…'));
+    expect(within(list).getByRole('option', { name: /70011/ })).toHaveTextContent('Unavailable');
+    // A moving figure is read again about a second later, and the read stops once nothing moves.
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('100%'), { timeout: 4000 });
+    expect(bridge.downloadSummaries).toHaveBeenCalledTimes(2);
+    fireEvent.click(within(list).getByRole('option', { name: /70011/ }));
+    expect(screen.getByText('Downloaded', { selector: 'dt' }).nextElementSibling).toHaveTextContent('Unavailable. The saved download ledger could not be read. (LOCAL_OBJECT_MISSING)');
+  });
+  it('drops a reply that arrives after the window changed, and starts the next read only after it', async () => {
+    const late = deferred<BridgeReply<DownloadSummaries>>(), current = deferred<BridgeReply<DownloadSummaries>>();
+    const calls: DownloadSummariesParams[] = []; let inFlight = 0, most = 0;
+    const answer = (params: DownloadSummariesParams, download: BuildStoredCoverage) => success({ summaries: params.builds.map(k => measured({ productId: k.productId, id: k.buildIdentity }, download)) } as DownloadSummaries);
+    const bridge = { ...summaryBridge(bridgeMock(page, [ptr]), key => ({ ...key, state: 'notOpened', download: null })),
+      downloadSummaries: vi.fn(async (params: DownloadSummariesParams) => {
+        calls.push(params); most = Math.max(most, ++inFlight);
+        try { return await (calls.length === 1 ? late.promise : current.promise); } finally { inFlight--; }
+      }) } as DiscoveryBridge;
+    await ready(bridge);
+    await waitFor(() => expect(calls).toHaveLength(1));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Product' }), { target: { value: 'wowt' } });
+    const list = screen.getByRole('listbox', { name: 'Builds' });
+    await waitFor(() => expect(within(list).getAllByRole('option')).toHaveLength(1));
+    // The engine window itself changes once its product read is accepted (the list filters at once on its own).
+    await waitFor(() => expect(bridge.readAll).toHaveBeenCalledWith(expect.objectContaining({ productId: 'wowt' })));
+    await act(async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); });
+    expect(calls).toHaveLength(1);
+    // The old window's reply claims 100%; it is dropped and the new window is read.
+    late.resolve(answer(calls[0], stored({ storedObjects: '10', storedBytes: '1000' })));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(within(list).getAllByRole('option')[0]).not.toHaveTextContent('100%');
+    expect(calls[1]).toEqual({ builds: [{ productId: 'wowt', buildIdentity: ptr.id }] });
+    current.resolve(answer(calls[1], stored()));
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('41%'));
+    expect(most).toBe(1);
+  });
+  it('reads a window larger than 100 builds in requests of at most 100, one at a time', async () => {
+    const extra = Array.from({ length: 148 }, (_, i) => ({ ...second, id: (i + 1).toString(16).padStart(64, '0'), buildId: String(60000 + i), version: `12.0.0.${60000 + i}` }));
+    const calls: number[] = []; let inFlight = 0, most = 0;
+    const base = summaryBridge(bridgeMock(page, extra), key => ({ ...key, state: 'notOpened', download: null }));
+    const bridge = { ...base, downloadSummaries: vi.fn(async (params: DownloadSummariesParams) => {
+      calls.push(params.builds.length); most = Math.max(most, ++inFlight);
+      try { await new Promise(done => setTimeout(done, 20)); return base.downloadSummaries!(params); } finally { inFlight--; }
+    }) } as DiscoveryBridge;
+    await ready(bridge);
+    const list = screen.getByRole('listbox', { name: 'Builds' });
+    await waitFor(() => expect(within(list).getAllByRole('option').at(-1)).toHaveTextContent('Not opened'));
+    expect(calls).toEqual([100, 50]); expect(most).toBe(1);
+  });
+  it('keeps reading while recorded changes are not applied yet, so a finished pass reaches 100%', async () => {
+    let calls = 0;
+    const bridge = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id
+      ? measured(original.builds[0], ++calls === 1 ? stored({ storedObjects: '9', storedBytes: '990', changesPending: true }) : stored({ storedObjects: '10', storedBytes: '1000' }))
+      : { ...key, state: 'notOpened', download: null });
+    await ready(bridge);
+    const list = screen.getByRole('listbox', { name: 'Builds' });
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('99%'));
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('100%'), { timeout: 4000 });
+    expect(bridge.downloadSummaries).toHaveBeenCalledTimes(2);
+  });
+  it('tries a failed read again and then shows the figure', async () => {
+    let calls = 0;
+    const base = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id ? measured(original.builds[0], stored()) : { ...key, state: 'notOpened', download: null });
+    const bridge = { ...base, downloadSummaries: vi.fn(async (params: DownloadSummariesParams) => ++calls === 1 ? unavailable() : base.downloadSummaries!(params)) } as DiscoveryBridge;
+    await ready(bridge);
+    const list = screen.getByRole('listbox', { name: 'Builds' });
+    await waitFor(() => expect(calls).toBe(1));
+    expect(within(list).getAllByRole('option')[0]).not.toHaveTextContent('41%');
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('41%'), { timeout: SUMMARY_RETRY_MS + 3000 });
+    expect(calls).toBe(2);
+  }, SUMMARY_RETRY_MS + 6000);
+  it('repeats a moving figure about once a second and never overlaps reads', async () => {
+    const starts: number[] = []; let inFlight = 0, most = 0;
+    const base = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id ? measured(original.builds[0], stored({ running: true, downloadAll: true })) : { ...key, state: 'notOpened', download: null });
+    const bridge = { ...base, downloadSummaries: vi.fn(async (params: DownloadSummariesParams) => {
+      starts.push(Date.now()); most = Math.max(most, ++inFlight);
+      try { await new Promise(done => setTimeout(done, 300)); return base.downloadSummaries!(params); } finally { inFlight--; }
+    }) } as DiscoveryBridge;
+    await ready(bridge);
+    await waitFor(() => expect(starts.length).toBeGreaterThanOrEqual(3), { timeout: 5000 });
+    expect(most).toBe(1);
+    for (let i = 1; i < starts.length; i++) expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(990);
+  });
+  it('says Counting while every listed file is measured after Open, and names a manifest-only scope with its reason', async () => {
+    const measuring = stored({ scope: 'downloadManifestAllVariants', unresolvableRootContent: '0', scopeState: 'measuring', scopeProblem: null, countState: 'counting', storedObjects: '0', storedBytes: '0' });
+    const manifestOnly = stored({ scope: 'downloadManifestAllVariants', unresolvableRootContent: '0', scopeState: 'manifestOnly',
+      scopeProblem: { code: 'ROOT_UNSUPPORTED', message: 'This build’s file list could not be read, so the figure covers its download manifest only.', retryable: false } });
+    const bridge = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id ? measured(original.builds[0], measuring) : measured(second, manifestOnly));
+    await ready(bridge);
+    const list = screen.getByRole('listbox', { name: 'Builds' });
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('Counting…'));
+    expect(within(list).getByRole('option', { name: /70011/ })).toHaveTextContent('41%');
+    fireEvent.click(within(list).getAllByRole('option')[0]);
+    expect(screen.getByText('Scope', { selector: 'dt' }).nextElementSibling).toHaveTextContent('Measuring every file the build lists…');
+    expect(screen.getByText('Downloaded', { selector: 'dt' }).nextElementSibling).toHaveTextContent('every file the build lists is being measured');
+    fireEvent.click(within(list).getByRole('option', { name: /70011/ }));
+    expect(screen.getByText('Scope', { selector: 'dt' }).nextElementSibling).toHaveTextContent('Download manifest only, every locale and platform (encoded). This build’s file list could not be read, so the figure covers its download manifest only. (ROOT_UNSUPPORTED)');
+    expect(screen.queryByText('Not resolvable', { selector: 'dt' })).toBeNull();
+  });
+  it('says Not opened for a build the engine never opened', async () => {
+    await ready(summaryBridge(bridgeMock(), key => ({ ...key, state: 'notOpened', download: null })));
+    await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Builds' })).getAllByRole('option')[0]).toHaveTextContent('Not opened'));
   });
 });
 

@@ -187,7 +187,9 @@ public sealed class CatalogTests
     [InlineData("DROP TABLE catalog_lineage; PRAGMA user_version=1;", "CATALOG_RESET_REQUIRED", 1L)]
     [InlineData("DROP TABLE catalog_lineage; PRAGMA user_version=2;", "CATALOG_RESET_REQUIRED", 2L)]
     [InlineData("DROP TABLE catalog_lineage; PRAGMA user_version=14;", "CATALOG_RESET_REQUIRED", 14L)]
-    [InlineData("PRAGMA user_version=16;", "CATALOG_VERSION", 16L)]
+    // The complete build-identity-v2 catalog of the previous engine, before per-ledger stored coverage (D065).
+    [InlineData("UPDATE catalog_lineage SET revision='build-identity-v2'; PRAGMA user_version=15;", "CATALOG_RESET_REQUIRED", 15L)]
+    [InlineData("PRAGMA user_version=17;", "CATALOG_VERSION", 17L)]
     public async Task RefusedCatalogWithAPendingWalIsLeftByteForByteUnchanged(string sql, string code, long version)
     {
         using var directory = new TempDirectory();
@@ -222,9 +224,9 @@ public sealed class CatalogTests
         await using (var catalog = await DiscoveryCatalog.OpenAsync(directory.Path)) { }
         await using (var reopened = await DiscoveryCatalog.OpenAsync(directory.Path)) { }
         using var db = OpenDb(directory.Path);
-        Assert.Equal(15L, Scalar(db, "PRAGMA user_version"));
+        Assert.Equal(16L, Scalar(db, "PRAGMA user_version"));
         using var command = db.CreateCommand(); command.CommandText = "SELECT revision FROM catalog_lineage WHERE id=1";
-        Assert.Equal("build-identity-v2", command.ExecuteScalar());
+        Assert.Equal("stored-coverage-v1", command.ExecuteScalar());
     }
     private const string CdnOld = "dddddddddddddddddddddddddddddddd";
     private const string CdnNew = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";

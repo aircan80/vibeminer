@@ -40,14 +40,19 @@ try
     await using var itemIcons = new ItemIconsService(iconStore);
     await using var iconLeases = new ItemIconLeases(itemIcons);
     var retentionDriver = new BuildRetentionDriver(catalog, objects, acquisition, sourcePlans, client, resources);
+    await using var storedCoverage = new StoredCoverageWorker(catalog, objects, resources);
+    // Every file ROOT lists is measured after Open, in the background; Download all waits for it (D066).
+    await using var rootScopes = new RootScopeWorker(catalog, objects, client, acquisition, resources, retentionDriver.NotifyIntentChanged);
     var retention = new RetentionService(catalog, retentionDriver);
     var settings = new SettingsService(new JsonSettingsStore(dataDirectory), new DataDirectoryMeasurer(dataDirectory),
         new VibeMiner.Domain.DownloadLimitSettings(resources.MaximumHttp, resources.MaximumBackgroundHttp, null, false));
     try
     {
         await retention.RestoreAsync();
+        storedCoverage.Start(); rootScopes.Start();
         var host = new ProtocolHost(new DiscoveryService(source, catalog), workspace, new InventoryService(catalog),
-            new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects, settings: settings);
+            new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects, settings: settings,
+            downloadSummaries: new DownloadSummaryService(catalog));
         await host.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
     }
     finally { await retention.ShutdownAsync(); }
