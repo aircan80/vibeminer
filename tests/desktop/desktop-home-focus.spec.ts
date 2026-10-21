@@ -4,11 +4,17 @@ import path from 'node:path';
 import { launch } from './helpers';
 
 // Desktop Home review regressions: pane scroll returns, inert coverage, enlarged-text Tables focus and pinned records chrome.
-async function size(app: ElectronApplication, width: number, height: number) { await app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s.width, s.height), { width, height }); }
+// A resize reaches the renderer before the frame that lays it out, and the notice clamp re-fits from a ResizeObserver in that frame.
+// So wait for the new viewport, then two frames: the second starts only after the first frame's observers have run.
+async function size({ app, page }: { app: ElectronApplication; page: Page }, width: number, height: number) {
+  await app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s.width, s.height), { width, height });
+  await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([width, height]);
+  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+}
 async function text(page: Page, scale: number) { await page.evaluate(font => { document.documentElement.style.fontSize = `${font}px`; }, 15 * scale); }
 async function opened(...options: Parameters<typeof launch>) {
   const session = await launch(...options);
-  await size(session.app, 1280, 800);
+  await size(session, 1280, 800);
   await session.page.locator('.build-row').first().click();
   await session.page.getByRole('button', { name: 'Open build', exact: true }).click();
   await writeFile(path.join(session.data, 'release-open'), 'release');
@@ -100,17 +106,19 @@ test('at 200% an Items source record keeps the records head, notices and Return 
     await expect(page.locator('.dh-records .dh-idfilter label')).toBeVisible(); await expect(page.locator('.dh-records .dh-idfilter label')).toHaveText('Record ID');
     await expect(page.locator('.dh-records .dh-foot-count')).toBeVisible(); await expect(page.locator('.dh-records .dh-foot-count')).toContainText('admitted');
     await expect(page.getByRole('button', { name: 'Next page of records' })).toBeVisible();
-    await size(session.app, 1440, 1100);
+    // The records pane never scrolls as a whole, not even for a frame while a resize re-fits the notices.
+    await page.evaluate(() => { const records = document.querySelector<HTMLElement>('.dh-records')!; (window as any).__recordsScrolled = records.scrollTop; records.addEventListener('scroll', () => { (window as any).__recordsScrolled = Math.max((window as any).__recordsScrolled, records.scrollTop); }); });
+    await size(session, 1440, 1100);
     expect(await page.evaluate(() => document.querySelector<HTMLElement>('.dh-records')!.scrollTop)).toBe(0);
     await expect(partial).toContainText('Declared physical records'); await expect(page.locator('.dh-records .dh-return-link')).toBeVisible();
     // The notice takes the space it needs when the window fits it; when it can't, it is clamped to whole lines and named for its scroll box.
     await expect(page.getByRole('region', { name: 'Readable rows available · Partial' })).toBeVisible();
     expect(await partial.evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);
-    await size(session.app, 1280, 800);
+    await size(session, 1280, 800);
     const measure = () => partial.evaluate(el => { const style = getComputedStyle(el), line = parseFloat(getComputedStyle(el.querySelector('.dh-text')!).lineHeight), pad = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth), lines = (el.getBoundingClientRect().height - pad) / line; return { clamped: el.scrollHeight > el.clientHeight + 1, whole: Math.abs(lines - Math.round(lines)) < .05, lines: Math.round(lines) }; });
     // 1280x800 at 200% cannot fit the whole Partial notice above one record row, so it is always clamped here.
-    // The clamp re-fits from a ResizeObserver after the window resize, so wait for it to settle.
-    await expect.poll(measure).toMatchObject({ clamped: true, whole: true }); expect((await measure()).lines).toBeGreaterThanOrEqual(1);
+    const clamp = await measure(); expect(clamp).toMatchObject({ clamped: true, whole: true }); expect(clamp.lines).toBeGreaterThanOrEqual(1);
+    expect(await page.evaluate(() => [(window as any).__recordsScrolled, document.querySelector<HTMLElement>('.dh-records')!.scrollTop])).toEqual([0, 0]);
     // 100%: the pager is one line with the buttons on the right and single spaces.
     await text(page, 1);
     const pager = await page.evaluate(() => { const foot = document.querySelector('.dh-records>.dh-pane-foot')!, buttons = [...foot.querySelectorAll<HTMLButtonElement>('.dh-pages button')], r = foot.getBoundingClientRect(), last = buttons.at(-1)!.getBoundingClientRect(); return { labels: buttons.map(b => b.innerText), oneLine: buttons.every(b => Math.abs(b.getBoundingClientRect().top - buttons[0].getBoundingClientRect().top) < 1) && r.height < 50, right: r.right - last.right < 20 }; });
