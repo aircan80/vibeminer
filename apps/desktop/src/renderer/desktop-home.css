@@ -155,6 +155,25 @@
 .desktop-home .dh-records-grid td{padding:0 .7rem;height:2.146667rem;border-bottom:1px solid var(--line-soft);white-space:nowrap}
 .desktop-home .dh-records-grid tbody tr{cursor:default}
 .desktop-home .dh-records-grid tbody tr:hover{background:var(--hover)}
+.desktop-home .dh-ref{color:var(--teal);font-weight:600;text-decoration:underline dotted;text-underline-offset:3px}
+.desktop-home .dh-rt{color:var(--muted);font-weight:400;user-select:none;display:inline-block;max-width:18rem;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+.desktop-home .dh-rt.dh-pending{letter-spacing:.08em}
+.desktop-home .dh-data>.dh-notice.dh-keep{overflow:visible;flex:none}
+.desktop-home .dh-data>.dh-notice.dh-yield{display:none}
+.desktop-home .text-load-reason{font-size:var(--fs-s)}
+/* The code opens the detail line at normal weight, as the reference does; the heading stays plain words. */
+.desktop-home .reference-code{font-weight:400;margin-right:.28rem}
+.desktop-home.dh-compact .dh-data>.dh-notice.dh-keep{padding-top:.28rem;padding-bottom:.28rem}
+.desktop-home.dh-compact .dh-data>.dh-notice.dh-keep .dh-text{display:flex;flex-wrap:wrap;align-items:center;gap:.28rem .746667rem}
+.desktop-home.dh-compact .dh-data>.dh-notice.dh-keep .dh-row{margin-top:0}
+.desktop-home .dh-data>.dh-notice.dh-keep.dh-tight{margin-top:.186667rem;padding-top:0;padding-bottom:0}
+.desktop-home .dh-data>.dh-notice.dh-keep.dh-tight .dh-btn{min-height:0;height:auto;padding-top:.093333rem;padding-bottom:.093333rem}
+/* One line: heading, detail and reason shrink with an ellipsis (full text in their title); the code and the button never shrink. */
+.desktop-home .dh-data>.dh-notice.dh-keep.dh-tight .dh-text{display:flex;flex-wrap:nowrap;align-items:center;gap:.56rem;min-width:0}
+.desktop-home .dh-data>.dh-notice.dh-keep.dh-tight .dh-text>strong,.desktop-home .dh-data>.dh-notice.dh-keep.dh-tight .dh-detail,.desktop-home .dh-data>.dh-notice.dh-keep.dh-tight .text-load-reason{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.desktop-home .dh-data>.dh-notice.dh-keep.dh-tight .dh-compact-hide{display:none}
+.desktop-home .dh-data>.dh-notice.dh-keep.dh-tight .dh-row{display:contents}
+.desktop-home .dh-data>.dh-notice.dh-keep.dh-tight .reference-code,.desktop-home .dh-data>.dh-notice.dh-keep.dh-tight .dh-row .dh-btn{flex:none;white-space:nowrap}
 .desktop-home .dh-records-grid tbody tr[aria-selected="true"]{background:var(--mint)}
 .desktop-home .dh-records-grid tbody tr[aria-selected="true"] td:first-child{box-shadow:inset 3px 0 0 var(--teal)}
 .desktop-home .dh-records-grid .dh-rowsel{border:0;background:none;padding:0;font-weight:600;cursor:pointer}

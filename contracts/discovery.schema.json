@@ -91,6 +91,9 @@
     "tableDataPage": {
       "$ref": "#/definitions/TableDataPage"
     },
+    "tableReferenceTextPage": {
+      "$ref": "#/definitions/TableReferenceTextPage"
+    },
     "retentionTarget": {
       "$ref": "#/definitions/RetentionTarget"
     },
@@ -1037,6 +1040,7 @@
             "tables.prepare",
             "tables.data",
             "tables.rows",
+            "tables.referenceText",
             "retention.read",
             "retention.list",
             "retention.set",
@@ -4138,6 +4142,340 @@
         "rows",
         "totalCount",
         "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "TableReferenceTextSource": {
+      "title": "TableReferenceTextSource",
+      "type": "object",
+      "properties": {
+        "tableId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}$",
+          "maxLength": 8
+        },
+        "table": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "textColumn": {
+          "type": "string",
+          "maxLength": 144
+        },
+        "matchColumn": {
+          "type": "string",
+          "maxLength": 144
+        },
+        "artifactId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "enum": [
+                "complete",
+                "unencryptedSections"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "measuredEncodedBytes": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$",
+          "maxLength": 19
+        },
+        "loadPolicy": {
+          "enum": [
+            "automatic",
+            "onRequest"
+          ]
+        }
+      },
+      "required": [
+        "tableId",
+        "table",
+        "textColumn",
+        "matchColumn",
+        "artifactId",
+        "scope",
+        "measuredEncodedBytes",
+        "loadPolicy"
+      ],
+      "additionalProperties": false
+    },
+    "TableReferenceTextProblem": {
+      "title": "TableReferenceTextProblem",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+          "maxLength": 64
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 400
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "TableReferenceTextColumn": {
+      "title": "TableReferenceTextColumn",
+      "type": "object",
+      "properties": {
+        "columnIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 511
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 144
+        },
+        "reference": {
+          "$ref": "#/definitions/TableReference"
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "notPrepared",
+            "noTextRule",
+            "noDefinition",
+            "unsupported",
+            "unindexed",
+            "unreadable"
+          ]
+        },
+        "textSource": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TableReferenceTextSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TableReferenceTextProblem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "columnIndex",
+        "name",
+        "reference",
+        "state",
+        "textSource",
+        "problem"
+      ],
+      "additionalProperties": false
+    },
+    "TableReferenceTextRow": {
+      "title": "TableReferenceTextRow",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$",
+          "maxLength": 19
+        },
+        "isCopy": {
+          "type": "boolean"
+        },
+        "copySourceId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$",
+              "maxLength": 19
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "isCopy",
+        "copySourceId"
+      ],
+      "additionalProperties": false
+    },
+    "TableReferenceTextValue": {
+      "title": "TableReferenceTextValue",
+      "type": "object",
+      "properties": {
+        "columnIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 511
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^(0|-?[1-9][0-9]{0,19})$",
+          "maxLength": 21
+        },
+        "state": {
+          "enum": [
+            "resolved",
+            "empty",
+            "notFound",
+            "keyOutOfRange",
+            "multiple",
+            "unreadable",
+            "textTooLong"
+          ]
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "matchCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$",
+          "maxLength": 19
+        },
+        "row": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TableReferenceTextRow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "columnIndex",
+        "value",
+        "state",
+        "text",
+        "matchCount",
+        "row"
+      ],
+      "additionalProperties": false
+    },
+    "TableReferenceTextPage": {
+      "title": "TableReferenceTextPage",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sourceRegion": {
+          "type": "string",
+          "maxLength": 8,
+          "pattern": "^[a-z]{2,8}$"
+        },
+        "tableId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}$",
+          "maxLength": 8
+        },
+        "researchLocale": {
+          "const": "enUS"
+        },
+        "artifactId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "maxLength": 64
+        },
+        "after": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$",
+          "maxLength": 19
+        },
+        "recordId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$",
+              "maxLength": 19
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policyRevision": {
+          "const": "table-reference-text-v1"
+        },
+        "rowIds": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "maxLength": 19
+          }
+        },
+        "columns": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/definitions/TableReferenceTextColumn"
+          }
+        },
+        "values": {
+          "type": "array",
+          "maxItems": 25600,
+          "items": {
+            "$ref": "#/definitions/TableReferenceTextValue"
+          }
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "sourceRegion",
+        "tableId",
+        "researchLocale",
+        "artifactId",
+        "after",
+        "recordId",
+        "policyRevision",
+        "rowIds",
+        "columns",
+        "values"
       ],
       "additionalProperties": false
     },

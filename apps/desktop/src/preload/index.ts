@@ -52,6 +52,7 @@ const bridge: DiscoveryBridge = Object.freeze<DiscoveryBridge>({
   tablePrepare: (params, requestId) => ipcRenderer.invoke('discovery:invoke', 'tables.prepare', params, requestId),
   tableData: params => ipcRenderer.invoke('discovery:invoke', 'tables.data', params),
   tableRows: params => ipcRenderer.invoke('discovery:invoke', 'tables.rows', params),
+  tableReferenceText: params => ipcRenderer.invoke('discovery:invoke', 'tables.referenceText', params),
   tablesCatalog: params => ipcRenderer.invoke('discovery:invoke', 'tables.catalog', params),
   tableDefinition: params => ipcRenderer.invoke('discovery:invoke', 'tables.definition', params),
   download: params => ipcRenderer.invoke('discovery:invoke', 'download.read', params),

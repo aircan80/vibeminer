@@ -374,6 +374,52 @@ public sealed class HostTests
             return Task.FromException<TableDataSnapshot>(new DiscoveryException("TABLE_DATA_BUSY", "Authored competing ownership.", true));
         }
     }
+    [Fact]
+    public async Task Reference_text_is_advertised_only_when_composed_and_validates_the_exact_page_query()
+    {
+        using var directory = new TempDirectory(); await using var catalog = await DiscoveryCatalog.OpenAsync(directory.Path);
+        await using var data = new TableDataService(new GatedTableStore());
+        var store = new AuthoredReferenceText();
+        var query = new { productId = "wow", buildIdentity = new string('a', 64), sourceRegion = "us", tableId = "50238ec2", researchLocale = "enUS", artifactId = new string('b', 64) };
+        await using (var plain = await Session.Start(new DiscoveryService(new NeverSource(), catalog), data))
+        {
+            await plain.Send("hello", "hello");
+            Assert.DoesNotContain("tables-reference-text-v1", (await plain.Receive()).GetProperty("result").GetProperty("capabilities").EnumerateArray().Select(c => c.GetString()));
+            await plain.Send("unavailable", "tables.referenceText", query);
+            Assert.Equal("TABLE_REFERENCE_TEXT_UNAVAILABLE", (await plain.Receive()).GetProperty("error").GetProperty("code").GetString());
+        }
+        await using var session = await Session.Start(new DiscoveryService(new NeverSource(), catalog), data, new TableReferenceTextService(store));
+        await session.Send("hello", "hello");
+        Assert.Contains("tables-reference-text-v1", (await session.Receive()).GetProperty("result").GetProperty("capabilities").EnumerateArray().Select(c => c.GetString()));
+        foreach (var (id, parameters) in new (string, object)[] { ("extra", new { query.productId, query.buildIdentity, query.sourceRegion, query.tableId, query.researchLocale, query.artifactId, values = new[] { "9" } }),
+            ("limit", new { query.productId, query.buildIdentity, query.sourceRegion, query.tableId, query.researchLocale, query.artifactId, limit = 51 }),
+            ("locale", new { query.productId, query.buildIdentity, query.sourceRegion, query.tableId, researchLocale = "deDE", query.artifactId }),
+            ("after", new { query.productId, query.buildIdentity, query.sourceRegion, query.tableId, query.researchLocale, query.artifactId, after = "01" }) })
+        {
+            await session.Send(id, "tables.referenceText", parameters);
+            Assert.Equal("INVALID_REQUEST", (await session.Receive()).GetProperty("error").GetProperty("code").GetString());
+        }
+        Assert.Equal(0, store.Calls);
+        await session.Send("page", "tables.referenceText", new { query.productId, query.buildIdentity, query.sourceRegion, query.tableId, query.researchLocale, query.artifactId, after = "50", recordId = "7", limit = 10 });
+        var result = (await session.Receive()).GetProperty("result");
+        Assert.Equal(("50", "7", "table-reference-text-v1"), (result.GetProperty("after").GetString(), result.GetProperty("recordId").GetString(), result.GetProperty("policyRevision").GetString()));
+        var column = result.GetProperty("columns")[0]; Assert.Equal("notPrepared", column.GetProperty("state").GetString());
+        Assert.Equal(JsonValueKind.Null, column.GetProperty("problem").ValueKind); Assert.Equal(JsonValueKind.Null, column.GetProperty("textSource").GetProperty("artifactId").ValueKind);
+        var value = result.GetProperty("values")[0]; Assert.Equal(("9", "resolved", "Recipe", "1"), (value.GetProperty("value").GetString(), value.GetProperty("state").GetString(), value.GetProperty("text").GetString(), value.GetProperty("matchCount").GetString()));
+        Assert.Equal(new TableRowsRequest("wow", query.buildIdentity, "us", "50238ec2", "enUS", query.artifactId, 10, "50", "7"), store.Last);
+    }
+    private sealed class AuthoredReferenceText : ITableReferenceTextStore
+    {
+        internal int Calls; internal TableRowsRequest? Last;
+        public Task<TableReferenceTextPage> ReadReferenceTextAsync(TableRowsRequest request, CancellationToken token)
+        {
+            Calls++; Last = request;
+            return Task.FromResult(new TableReferenceTextPage(request.ProductId, request.BuildIdentity, request.SourceRegion, request.TableId, request.ResearchLocale,
+                request.ArtifactId, request.After ?? "0", request.RecordId, TableReferenceTextRules.PolicyRevision, ["7"],
+                [new(1, "ClassID", new("ItemClass", "ClassID"), "notPrepared", new("b977271e", "ItemClass", "ClassName_lang", "ClassID", null, null, "453", "automatic"), null)],
+                [new(1, "9", "resolved", "Recipe", "1", new("301", false, null))]));
+        }
+    }
     private sealed class GatedTableStore : ITableDataStore
     {
         internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -413,18 +459,18 @@ public sealed class HostTests
         private readonly StreamWriter writer;
         private readonly StreamReader reader;
         public Task Completion { get; }
-        private Session(TcpClient client, TcpClient server, DiscoveryService service, TableDataService? tableData = null)
+        private Session(TcpClient client, TcpClient server, DiscoveryService service, TableDataService? tableData = null, TableReferenceTextService? referenceText = null)
         {
             this.client = client; this.server = server;
             writer = new StreamWriter(client.GetStream(), new UTF8Encoding(false), leaveOpen: true);
             reader = new StreamReader(client.GetStream(), Encoding.UTF8, leaveOpen: true);
-            Completion = new ProtocolHost(service, tableData: tableData).RunAsync(server.GetStream(), server.GetStream());
+            Completion = new ProtocolHost(service, tableData: tableData, referenceText: referenceText).RunAsync(server.GetStream(), server.GetStream());
         }
-        public static async Task<Session> Start(DiscoveryService service, TableDataService? tableData = null)
+        public static async Task<Session> Start(DiscoveryService service, TableDataService? tableData = null, TableReferenceTextService? referenceText = null)
         {
             using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
             var client = new TcpClient(); await client.ConnectAsync((IPEndPoint)listener.LocalEndpoint);
-            var server = await listener.AcceptTcpClientAsync(); return new(client, server, service, tableData);
+            var server = await listener.AcceptTcpClientAsync(); return new(client, server, service, tableData, referenceText);
         }
         public Task Send(string id, string method, object? parameters = null) => SendRaw(JsonSerializer.Serialize(new { protocolVersion = 1, id, method, @params = parameters ?? new { } }));
         public async Task SendRaw(string value) { await writer.WriteLineAsync(value); await writer.FlushAsync(); }

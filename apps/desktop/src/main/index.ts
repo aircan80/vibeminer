@@ -113,7 +113,7 @@ function registerBridge(): void {
       else if (method === 'discovery.refreshAll') { if (!params || typeof params !== 'object' || Object.keys(params).length || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery request.'); }
       else if (method === 'discovery.refresh') { if (!validProduct((params as { productId?: unknown })?.productId) || !validRequestId(requestId) || Object.keys(params as object).length !== 1) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery request.'); }
       else if (method === 'tables.prepare' || method === 'tables.data') { if (!validTableData(params) || method === 'tables.prepare' && !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact table and research locale enUS.'); }
-      else if (method === 'tables.rows') { if (!validTableRows(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded table record query.'); }
+      else if (method === 'tables.rows' || method === 'tables.referenceText') { if (!validTableRows(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded table record query.'); }
       else if (method === 'tables.catalog') { if (!validTablesCatalog(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded definition catalogue query.'); }
       else if (method === 'tables.definition') { if (!validTableDefinition(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact provider table identity.'); }
       else if (method === 'download.read') { if (!validDownloadRead(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded download-object query.'); }

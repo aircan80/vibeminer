@@ -253,6 +253,31 @@ test('Table data pages preserve exact values and bound rows, cells and explicit 
     validate('EngineRequest', { protocolVersion: 1, id: method, method, params: {} });
 });
 
+test('Reference text keeps exact keys, closed states, the actual text source and bound page shape', async () => {
+  const page = JSON.parse(await readFile(path.join(root, 'contracts/examples/table-reference-text.json'), 'utf8'));
+  validate('TableReferenceTextPage', page);
+  validate('EngineRequest', { protocolVersion: 1, id: 'text', method: 'tables.referenceText', params: {} });
+  const invalid = change => { const value = structuredClone(page); change(value); assert.equal(validator('TableReferenceTextPage')(value), false, JSON.stringify(value).slice(0, 80)); };
+  invalid(value => { value.policyRevision = 'table-reference-text-v2'; });
+  invalid(value => { value.values[0].value = 12; });
+  invalid(value => { value.values[0].value = '012'; });
+  invalid(value => { value.values[0].value = '-0'; });
+  invalid(value => { value.values[0].matchCount = 1; });
+  invalid(value => { value.values[0].state = 'guessed'; });
+  invalid(value => { value.columns[0].state = 'inferred'; });
+  invalid(value => { value.values[0].text = 'x'.repeat(4097); });
+  invalid(value => { value.columns[0].textSource.scope = 'partial'; });
+  invalid(value => { value.columns[0].textSource.tableId = 'ItemClass'; });
+  invalid(value => { value.columns[0].textSource.loadPolicy = 'background'; });
+  invalid(value => { delete value.columns[0].textSource.measuredEncodedBytes; });
+  invalid(value => { value.rowIds = Array(51).fill('1'); });
+  invalid(value => { value.researchLocale = 'deDE'; });
+  invalid(value => { delete value.values[0].row; });
+  invalid(value => { value.columns[0].extra = true; });
+  validate('TableReferenceTextValue', { ...page.values[0], value: '-128' });
+  validate('TableReferenceTextValue', { ...page.values[0], value: '18446744073709551615' });
+});
+
 test('Typed text evidence preserves authored invalid bytes and bounds the wire shape', async () => {
   const fixture = JSON.parse(await readFile(path.join(root, 'tests/desktop/fixtures/table-text-issues.json'), 'utf8'));
   const row = fixture.rows[0], issue = row.textIssues[0];
@@ -593,6 +618,12 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.ok(hello.result.capabilities.includes('item-subclass-labels-v1'));
   assert.ok(hello.result.capabilities.includes('creatures-v1'));
   assert.ok(hello.result.capabilities.includes('creature-display-metadata-v1'));
+  assert.ok(hello.result.capabilities.includes('tables-reference-text-v1'));
+  const textQuery={productId:'wow',buildIdentity:'a'.repeat(64),sourceRegion:'us',tableId:'50238ec2',researchLocale:'enUS',artifactId:'b'.repeat(64)};
+  const text=await request('tables.referenceText',textQuery);
+  assert.ok(text.error,'A fresh catalog cannot fabricate reference text.');
+  assert.ok(!['INVALID_REQUEST','UNKNOWN_METHOD','TABLE_REFERENCE_TEXT_UNAVAILABLE'].includes(text.error.code));
+  assert.equal((await request('tables.referenceText',{...textQuery,values:['9']})).error?.code,'INVALID_REQUEST');
   for(const capability of ['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1'])assert.ok(hello.result.capabilities.includes(capability),'The qualified production Effects adapter must expose all three phases together.');
   const creatureContext={productId:'wow',buildIdentity:'a'.repeat(64),sourceRegion:'us',researchLocale:'enUS'};
   const effects=await request('items.effects.data',{...creatureContext,itemsArtifactId:'b'.repeat(64),itemId:'7'});

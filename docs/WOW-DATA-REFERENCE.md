@@ -145,6 +145,27 @@ Table relationship rules (Tables explorer):
 - A non-primary-key lookup can return several rows; show them, don't pick one. One readable row in a partial table does not prove uniqueness.
 - The Back/Forward definition trail keeps the most recent 64 entries ([TablesExplorer.tsx](../apps/desktop/src/renderer/TablesExplorer.tsx)).
 
+## Reference text columns
+
+The Tables grid shows `value · text` for a declared reference only when its target is on this reviewed allowlist ([#17](https://github.com/aircan80/vibeminer/issues/17), [TableReferenceTextService.cs](../src/backend/VibeMiner.Application/TableReferenceTextService.cs)). Every other reference shows the number only. Nothing is inferred from column names or matching numbers.
+
+| Declared target | Text from | Matched on | Key domain | Encoded size | Loads |
+| --- | --- | --- | --- | ---: | --- |
+| `ItemClass::ClassID` | `ItemClass.ClassName_lang` | `ItemClass.ClassID`, not `ItemClass.ID` | signed8, -128 to 127 | 453 B | automatically |
+| `Creature::ID` | `Creature.Name_lang` | record ID | uint32 | 340,038 B | automatically |
+| `Spell::ID` | `SpellName.Name_lang` (Spell isn't bundled; same ID) | record ID | uint32 | 2,754,982 B | on Load text |
+| `Item::ID` | `ItemSparse.Display_lang` (same ID) | record ID | uint32 | 7,988,612 B | on Load text |
+
+Encoded sizes are the text tables' encoded objects on Retail `12.1.5.70448`, measured on 2026-10-21. A text table of at most 1 MiB (1,048,576 bytes) encoded loads automatically when a page needs it; a larger one shows the number plus **Load text (≈N MB)**, which loads it at interactive priority through the normal table preparation. Other builds can differ a little, hence the ≈.
+
+- Exact values only. A source value outside the key domain is a miss (`keyOutOfRange`), never wrapped: Item.ClassID 300 or -129 matches nothing, a negative ID never becomes 4294967295. Zero is a real lookup.
+- `Item.SubclassID` declares no reference, so it gets no ItemSubClass text.
+- A non-ID match column and copy rows can match several rows. Show the count and pick none.
+- An empty `_lang` is "empty". No fallback to Description, NameAlt, Display1–3 or another locale.
+- Unbundled targets (Map, Faction, AreaTable, SkillLine, CurrencyTypes, ContentTuning…) are "no definition"; bundled targets without a rule (Material, ItemGroupSounds) are "no text column". Both show the number only.
+- A miss in a partial or keyed text table is scoped to its readable rows, never "absent". `Item::ID` with no ItemSparse row is its own miss and names ItemSparse.
+- Text follows the build's research locale (enUS today).
+
 ## Discovery
 
 The engine fetches two documents per product from a fixed origin:

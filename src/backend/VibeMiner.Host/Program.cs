@@ -52,7 +52,8 @@ try
         storedCoverage.Start(); rootScopes.Start();
         var host = new ProtocolHost(new DiscoveryService(source, catalog), workspace, new InventoryService(catalog),
             new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects, settings: settings,
-            downloadSummaries: new DownloadSummaryService(catalog));
+            downloadSummaries: new DownloadSummaryService(catalog),
+            referenceText: new TableReferenceTextService(tableStore));
         await host.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
     }
     finally { await retention.ShutdownAsync(); }

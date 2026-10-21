@@ -199,6 +199,7 @@ export interface DiscoveryContract {
   tableDataSnapshot: TableDataSnapshot;
   tableDataReadiness: TableDataReadiness;
   tableDataPage: TableDataPage;
+  tableReferenceTextPage?: TableReferenceTextPage;
   retentionTarget: RetentionTarget;
   retentionSnapshot: RetentionSnapshot;
   retentionList: RetentionList;
@@ -457,6 +458,7 @@ export interface EngineRequest1 {
     | 'tables.prepare'
     | 'tables.data'
     | 'tables.rows'
+    | 'tables.referenceText'
     | 'retention.read'
     | 'retention.list'
     | 'retention.set'
@@ -1148,6 +1150,64 @@ export interface TableTextIssue {
   columnIndex: number;
   code: 'DB2_TEXT_ENCODING_INVALID';
   rawBytesHex: string;
+}
+export interface TableReferenceTextPage {
+  productId: string;
+  buildIdentity: string;
+  sourceRegion: string;
+  tableId: string;
+  researchLocale: 'enUS';
+  artifactId: string;
+  after: string;
+  recordId: string | null;
+  policyRevision: 'table-reference-text-v1';
+  /**
+   * @maxItems 50
+   */
+  rowIds: string[];
+  /**
+   * @maxItems 512
+   */
+  columns: TableReferenceTextColumn[];
+  /**
+   * @maxItems 25600
+   */
+  values: TableReferenceTextValue[];
+}
+export interface TableReferenceTextColumn {
+  columnIndex: number;
+  name: string;
+  reference: TableReference;
+  state: 'ready' | 'notPrepared' | 'noTextRule' | 'noDefinition' | 'unsupported' | 'unindexed' | 'unreadable';
+  textSource: TableReferenceTextSource | null;
+  problem: TableReferenceTextProblem | null;
+}
+export interface TableReferenceTextSource {
+  tableId: string;
+  table: string;
+  textColumn: string;
+  matchColumn: string;
+  artifactId: string | null;
+  scope: ('complete' | 'unencryptedSections') | null;
+  measuredEncodedBytes: string;
+  loadPolicy: 'automatic' | 'onRequest';
+}
+export interface TableReferenceTextProblem {
+  code: string;
+  message: string;
+}
+export interface TableReferenceTextValue {
+  columnIndex: number;
+  value: string;
+  state: 'resolved' | 'empty' | 'notFound' | 'keyOutOfRange' | 'multiple' | 'unreadable' | 'textTooLong';
+  text: string | null;
+  matchCount: string;
+  row: TableReferenceTextRow | null;
+}
+export interface TableReferenceTextRow {
+  id: string;
+  isCopy: boolean;
+  copySourceId: string | null;
 }
 export interface RetentionTarget {
   productId: string;

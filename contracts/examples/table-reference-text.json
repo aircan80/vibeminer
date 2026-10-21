@@ -1,0 +1,55 @@
+{
+  "productId": "wow",
+  "buildIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sourceRegion": "us",
+  "tableId": "50238ec2",
+  "researchLocale": "enUS",
+  "artifactId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "after": "0",
+  "recordId": null,
+  "policyRevision": "table-reference-text-v1",
+  "rowIds": ["900001", "900002", "900003", "900004", "900005", "900006"],
+  "columns": [
+    {
+      "columnIndex": 1,
+      "name": "ClassID",
+      "reference": { "table": "ItemClass", "column": "ClassID" },
+      "state": "ready",
+      "textSource": {
+        "tableId": "b977271e",
+        "table": "ItemClass",
+        "textColumn": "ClassName_lang",
+        "matchColumn": "ClassID",
+        "artifactId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope": "complete",
+        "measuredEncodedBytes": "453",
+        "loadPolicy": "automatic"
+      },
+      "problem": null
+    },
+    {
+      "columnIndex": 3,
+      "name": "Material",
+      "reference": { "table": "Material", "column": "ID" },
+      "state": "noTextRule",
+      "textSource": null,
+      "problem": null
+    },
+    {
+      "columnIndex": 9,
+      "name": "ContentTuningID",
+      "reference": { "table": "ContentTuning", "column": "ID" },
+      "state": "noDefinition",
+      "textSource": null,
+      "problem": null
+    }
+  ],
+  "values": [
+    { "columnIndex": 1, "value": "12", "state": "resolved", "text": "Authored class A", "matchCount": "1", "row": { "id": "301", "isCopy": false, "copySourceId": null } },
+    { "columnIndex": 1, "value": "4", "state": "empty", "text": "", "matchCount": "1", "row": { "id": "302", "isCopy": false, "copySourceId": null } },
+    { "columnIndex": 1, "value": "7", "state": "multiple", "text": null, "matchCount": "2", "row": null },
+    { "columnIndex": 1, "value": "5", "state": "notFound", "text": null, "matchCount": "0", "row": null },
+    { "columnIndex": 1, "value": "300", "state": "keyOutOfRange", "text": null, "matchCount": "0", "row": null },
+    { "columnIndex": 1, "value": "6", "state": "unreadable", "text": null, "matchCount": "1", "row": { "id": "305", "isCopy": true, "copySourceId": "304" } }
+  ]
+}

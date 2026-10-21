@@ -5,6 +5,7 @@ import retentionFixture from '../../../contracts/examples/retention-snapshot.jso
 import summariesFixture from '../../../contracts/examples/download-summaries.json';
 import partialTableFixture from '../../../tests/desktop/fixtures/table-data-partial.json';
 import tableDataFixture from '../../../tests/desktop/fixtures/table-data.json';
+import referenceTextExample from '../../../contracts/examples/table-reference-text.json';
 // @vitest-environment node
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
@@ -445,4 +446,12 @@ describe('refused catalog exit', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(await hello).toMatchObject({ code: 'ENGINE_EXITED', retryable: true }); expect(child.kill).toHaveBeenCalled();
   });
+});
+it('gates reference text by capability and rejects a reply bound to another page or rule',async()=>{const{child,client}=setup(),r=referenceTextExample,query={productId:r.productId,buildIdentity:r.buildIdentity,sourceRegion:r.sourceRegion,tableId:r.tableId,researchLocale:'enUS' as const,artifactId:r.artifactId};
+ await expect(client.request('tables.referenceText',query,'no-cap')).rejects.toMatchObject({code:'UNSUPPORTED'});expect(child.requests).toHaveLength(0);
+ const hello=client.hello();child.reply(child.requests[0].id,{protocolVersion:1,engineVersion:'authored',capabilities:['tables-reference-text-v1']});await hello;
+ await expect(client.request('tables.referenceText',{...query,limit:51})).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(child.requests).toHaveLength(1);
+ const good=client.request('tables.referenceText',query,'text');child.reply('text',r);await expect(good).resolves.toEqual(r);
+ const later=client.request('tables.referenceText',{...query,after:'50'},'later').catch(e=>e.code);child.reply('later',r);expect(await later).toBe('PROTOCOL_ERROR');
+ const rule=client.request('tables.referenceText',query,'rule').catch(e=>e.code),forged=structuredClone(r);forged.columns[0].textSource!.textColumn='VerboseName_lang';child.reply('rule',forged);expect(await rule).toBe('PROTOCOL_ERROR');
 });

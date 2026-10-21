@@ -14,7 +14,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
     CreatureDisplayMetadataService? creatureDisplays = null, ItemEffectsService? itemEffects = null,
     CreatureGeometryService? creatureGeometry = null, CreatureGeometryLeases? geometryLeases = null,
     SettingsService? settings = null,
-    DownloadSummaryService? downloadSummaries = null)
+    DownloadSummaryService? downloadSummaries = null, TableReferenceTextService? referenceText = null)
 {
     public const int MaxFrameBytes = 1024 * 1024;
     public const int MaxClassificationFrameBytes = 512 * 1024;
@@ -165,6 +165,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                 case "hello":
                     RequireOnly(parameters);
                     var capabilities = new List<string> { "discovery-v1", "discovery-all-products-v1", "local-history", "cancellation", "home-download-v1", "download-v1", "inventory-v1", "inventory-files-v1", "tables-definitions-v1", "tables-data-v1" };
+                    if (tableData is not null && referenceText is not null) capabilities.Add("tables-reference-text-v1");
                     if (retention is not null) capabilities.Add("retention-v1");
                     if (settings is not null) capabilities.Add("settings-v1");
                     if (downloadSummaries is not null) capabilities.Add("download-summary-v1");
@@ -260,6 +261,16 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     result = await tableData.ReadRowsAsync(new(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"),
                         RequiredString(parameters, "sourceRegion"), RequiredString(parameters, "tableId"), RequiredString(parameters, "researchLocale"),
                         RequiredString(parameters, "artifactId"), rowLimit, OptionalString(parameters, "after"), OptionalString(parameters, "recordId")), request.Cancellation.Token);
+                    break;
+                case "tables.referenceText":
+                    RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "tableId", "researchLocale", "artifactId", "limit", "after", "recordId");
+                    if (tableData is null || referenceText is null) throw new DiscoveryException("TABLE_REFERENCE_TEXT_UNAVAILABLE", "Reference text is unavailable.");
+                    var textLimit = 50;
+                    if (parameters.TryGetProperty("limit", out var textPageSize) && (textPageSize.ValueKind != JsonValueKind.Number || !textPageSize.TryGetInt32(out textLimit)))
+                        throw new DiscoveryException("INVALID_REQUEST", "The table row page size must be an integer.");
+                    result = await referenceText.ReadAsync(new(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"),
+                        RequiredString(parameters, "sourceRegion"), RequiredString(parameters, "tableId"), RequiredString(parameters, "researchLocale"),
+                        RequiredString(parameters, "artifactId"), textLimit, OptionalString(parameters, "after"), OptionalString(parameters, "recordId")), request.Cancellation.Token);
                     break;
                 case "inventory.read":
                     RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "generation", "limit", "after");

@@ -45,6 +45,9 @@ const creaturesEnabled=process.env.VIBEMINER_FIXTURE_CREATURES==='1',creatureAdm
 const effectsEnabled=!!process.env.VIBEMINER_FIXTURE_EFFECTS,effectsAdmissions=new Set(),effectsTargets=new Map();
 const effectsMode=()=>existsSync(path.join(directory,'effects-scenario.json'))?JSON.parse(readFileSync(path.join(directory,'effects-scenario.json'),'utf8')).scenario:'ready';
 const itemsEnabled=process.env.VIBEMINER_FIXTURE_ITEMS==='1', itemsAdmissions=new Map();
+const referenceTextEnabled=process.env.VIBEMINER_FIXTURE_REFERENCE_TEXT==='1';
+// The authored generic rows every prepared fixture table returns (tables.rows default branch).
+function genericRows(snapshot){const all=Array.from({length:60},(_,index)=>({id:String(index),isCopy:false,copySourceId:null,values:snapshot.columns.map((column,i)=>column.interpretation?'3011920367':column.isId?String(index):column.family==='string'?`Authored clear value ${index}`:column.family==='float'?'1.25':String(index+i+1))}));if(snapshot.textIssueCount==='1'){const columnIndex=snapshot.columns.findIndex(column=>column.family==='string'&&!column.isId);all[7].values[columnIndex]='';all[7].textIssues=[{columnIndex,code:'DB2_TEXT_ENCODING_INVALID',rawBytesHex:existsSync(path.join(directory,'table-long-text-issue'))?'ff'.repeat(65535):'c328'}];}return all;}
 const retentionEnabled=process.env.VIBEMINER_FIXTURE_RETENTION==='1';
 const retentionJobs=new Map();
 const retentionSeed=JSON.parse(readFileSync(path.join(root,'contracts/examples/retention-snapshot.json'),'utf8'));
@@ -131,7 +134,7 @@ function settingsSnapshot() {
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1', 'inventory-files-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1', 'inventory-files-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[])] });
   if(creaturesEnabled&&method.startsWith('creatures.')){
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
     if(!opened.has(key))return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
@@ -206,6 +209,31 @@ async function dispatch(request) {
     for (const controller of active.values()) controller.abort();
     reply(id, { stopping: true }); process.stdin.destroy(); return;
   }
+  if (method === 'tables.referenceText') {
+    // Authored Item.ClassID -> ItemClass.ClassName_lang over the generic rows; every other reference is number only.
+    const contextKey=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`, snapshot=tableData.get(`${contextKey}|${params.tableId}|${params.researchLocale}`);
+    if (!opened.has(contextKey)) return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
+    if (!snapshot||snapshot.artifactId!==params.artifactId) return fail(id,'TABLE_ARTIFACT_STALE','This exact admitted artifact is unavailable.');
+    if (existsSync(path.join(directory,'reference-text-error'))) return fail(id,'LOCAL_READ_FAILED','Authored reference text read failed.');
+    const all=genericRows(snapshot),filtered=params.recordId===undefined?all:all.filter(row=>row.id===params.recordId),after=Number(params.after??0),rows=filtered.slice(after,after+(params.limit??50));
+    const target=tableData.get(`${contextKey}|b977271e|enUS`),targetRows=target?genericRows(target):[],classColumn=target?.columns.findIndex(c=>c.name==='ClassID'),textColumn=target?.columns.findIndex(c=>c.name==='ClassName_lang');
+    const columns=[],values=[];
+    snapshot.columns.forEach((column,columnIndex)=>{
+      if(!column.reference)return;
+      if(column.reference.table!=='ItemClass'||column.reference.column!=='ClassID'){const bundled=tableEntries.some(entry=>entry.name===column.reference.table&&entry.definitionState==='bundled');columns.push({columnIndex,name:column.name,reference:column.reference,state:bundled?'noTextRule':'noDefinition',textSource:null,problem:null});return;}
+      columns.push({columnIndex,name:column.name,reference:column.reference,state:target?'ready':'notPrepared',textSource:{tableId:'b977271e',table:'ItemClass',textColumn:'ClassName_lang',matchColumn:'ClassID',artifactId:target?.artifactId??null,scope:target?.coverage.scope??null,...(existsSync(path.join(directory,'reftext-large'))?{measuredEncodedBytes:'7988612',loadPolicy:'onRequest'}:{measuredEncodedBytes:'453',loadPolicy:'automatic'})},problem:null});
+      if(!target)return;
+      for(const value of new Set(rows.map(row=>row.values[columnIndex]))){
+        const number=Number(value);
+        if(number<-128||number>127){values.push({columnIndex,value,state:'keyOutOfRange',text:null,matchCount:'0',row:null});continue;}
+        const matches=targetRows.filter(row=>row.values[classColumn]===value);
+        if(matches.length===0)values.push({columnIndex,value,state:'notFound',text:null,matchCount:'0',row:null});
+        else if(matches.length>1)values.push({columnIndex,value,state:'multiple',text:null,matchCount:String(matches.length),row:null});
+        else{const match=matches[0],text=match.values[textColumn];values.push({columnIndex,value,state:text===''?'empty':'resolved',text,matchCount:'1',row:{id:match.id,isCopy:false,copySourceId:null}});}
+      }
+    });
+    return reply(id,{productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,tableId:params.tableId,researchLocale:params.researchLocale,artifactId:params.artifactId,after:params.after??'0',recordId:params.recordId??null,policyRevision:'table-reference-text-v1',rowIds:rows.map(row=>row.id),columns,values});
+  }
   if (['tables.prepare','tables.data','tables.rows'].includes(method)) {
     const contextKey=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`, key=`${contextKey}|${params.tableId}|${params.researchLocale}`;
     if (!opened.has(contextKey)) return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
@@ -215,6 +243,7 @@ async function dispatch(request) {
       send({type:'progress',requestId:id,sequence:1,stage:'Locating selected table content',region:params.sourceRegion,completed:existsSync(path.join(directory,'known-table-progress'))?25:null,total:existsSync(path.join(directory,'known-table-progress'))?100:null,unit:existsSync(path.join(directory,'known-table-progress'))?'bytes':null});
       writeFileSync(path.join(directory,'waiting-table'),id);
       try {
+        if (existsSync(path.join(directory,`hold-table-${params.tableId}`))) await waitForRelease(`release-table-${params.tableId}`,controller.signal);
         await waitForRelease('release-table',controller.signal);
         if (existsSync(path.join(directory,'table-offline'))) return fail(id,'NETWORK_UNAVAILABLE','Authored table dependency is unavailable offline; retained data and definitions remain usable.');
         if (existsSync(path.join(directory,'table-load-error'))) return fail(id,'BLTE_ENCRYPTED','Authored required metadata is encrypted; no readable table admission was published.');
@@ -243,8 +272,7 @@ async function dispatch(request) {
       const filtered=params.recordId===undefined?all:all.filter(row=>row.id===params.recordId),after=Number(params.after??0),rows=filtered.slice(after,after+(params.limit??50)),end=after+rows.length;
       return reply(id,{productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,tableId:params.tableId,researchLocale:params.researchLocale,artifactId:params.artifactId,rows,totalCount:String(filtered.length),nextCursor:end<filtered.length?String(end):null});
     }
-    const all=Array.from({length:60},(_,index)=>({id:String(index),isCopy:false,copySourceId:null,values:snapshot.columns.map((column,i)=>column.interpretation?'3011920367':column.isId?String(index):column.family==='string'?`Authored clear value ${index}`:column.family==='float'?'1.25':String(index+i+1))}));
-    if(snapshot.textIssueCount==='1'){const columnIndex=snapshot.columns.findIndex(column=>column.family==='string'&&!column.isId);all[7].values[columnIndex]='';all[7].textIssues=[{columnIndex,code:'DB2_TEXT_ENCODING_INVALID',rawBytesHex:existsSync(path.join(directory,'table-long-text-issue'))?'ff'.repeat(65535):'c328'}];}
+    const all=genericRows(snapshot);
     const filtered=params.recordId===undefined?all:all.filter(row=>row.id===params.recordId),after=Number(params.after??0),rows=filtered.slice(after,after+(params.limit??50)),end=after+rows.length;
     return reply(id,{productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,tableId:params.tableId,researchLocale:params.researchLocale,artifactId:params.artifactId,rows,totalCount:String(filtered.length),nextCursor:end<filtered.length?String(end):null});
   }

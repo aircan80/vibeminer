@@ -8,6 +8,8 @@ These JSON documents are synthetic contract fixtures, not acquired Blizzard meta
 
 `table-catalog-page.json` and `table-definition.json` model provider definition metadata with unchecked selected-build source and unavailable rows. The pinned community structure facts are attributed WoWDBDefs data; no game records are included.
 
+`table-reference-text.json` is one authored Item page of reference text: a resolved, empty, several-match, not-found, out-of-range and unreadable ClassID value, plus a bundled target with no reviewed text column and an unbundled target. Its IDs and labels are synthetic.
+
 `creatures-snapshot.json` is the shared authored C1 Host/schema fixture: one partial Creature source, three emitted rows, name/slot counts and exact field references. It contains no acquired Creature rows or names and establishes protocol shape only.
 
 `creature-display-metadata.json` is the authored C2 metadata-only wire fixture. It preserves an original partial Creature scope, a copy-target Display edge and a separate complete Model edge. IDs, values and receipts are synthetic; positive file metadata with `appearance: notEvaluated` establishes no acquired model, image or renderability.

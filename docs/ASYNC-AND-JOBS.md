@@ -80,6 +80,7 @@ Journal callbacks and catalog work never recurse into CAS or take CPU while a SQ
 
 - **Bulk archive map.** One process-wide builder (`BulkArchiveLocator.Building`). A second build fails with `BULK_LOCATOR_BUSY`. This is intentional: it bounds native index I/O and working memory (4096 archives, 512 MiB aggregate native indexes, 10 million locations, 32 open files, 32 MiB working set).
 - **Table data.** One table producer engine-wide. A different table request gets `TABLE_DATA_BUSY`. Callers wait on the availability signal (`WaitForAvailabilityAsync`), which observes producer retirement without becoming a consumer, and retry at most 8 times. No polling.
+- **Reference text.** One `tables.referenceText` batch at a time, waiting cancellation-aware. Text tables use at most 4 dedicated row readers (least recently used is closed first); non-ID value indexes cover at most 4,096 rows and keep keys and ordinals only. Never hold CPU while calling a row reader.
 
 ## Operation contract
 

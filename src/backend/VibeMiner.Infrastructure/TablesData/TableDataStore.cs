@@ -8,12 +8,13 @@ using VibeMiner.Protocols.Tact;
 namespace VibeMiner.Infrastructure;
 
 /// <summary>Demand-only table admission. Large sources and rows stay immutable outside SQLite.</summary>
-public sealed class TableDataStore : ITableDataStore, IAsyncDisposable
+public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTextStore, IAsyncDisposable
 {
     private readonly DiscoveryCatalog catalog;
     private readonly VerifiedObjectStore objects;
     private readonly SelectedFileAcquirer acquisition;
     private readonly TableRowArtifacts rows;
+    private readonly AcquisitionResources? resources;
     internal const string DecoderRevision = Wdc5TableReader.Revision + "+table-admission-v3";
     internal const string ProjectionDecoderRevision = Wdc5TableReader.Revision + "+table-admission-projection-v3";
     internal const string ItemEffectDecoderRevision = Wdc5TableReader.Revision + "+table-admission-v4";
@@ -31,7 +32,7 @@ public sealed class TableDataStore : ITableDataStore, IAsyncDisposable
             : projected ? ProjectionDecoderRevision : DecoderRevision;
     public TableDataStore(DiscoveryCatalog catalog, VerifiedObjectStore objects, HttpClient client,
         ISharedAcquisition? shared = null, AcquisitionResources? resources = null)
-    { this.catalog = catalog; this.objects = objects; acquisition = new(catalog, objects, client, shared, resources);
+    { this.catalog = catalog; this.objects = objects; this.resources = resources; acquisition = new(catalog, objects, client, shared, resources);
         rows = resources is null ? new(objects) : new(objects, resources, null); }
 
     // Each observed candidate-width inconsistency is evidence-only. The parser
@@ -155,14 +156,16 @@ public sealed class TableDataStore : ITableDataStore, IAsyncDisposable
             throw new DiscoveryException("SCHEMA_BUILD_NOT_LISTED", "The pinned definition does not list this exact build.");
         return (context, provider, entry, definition);
     }
-    private async Task ValidateSourceAsync(CapturedOpeningContext context, SelectedFileAssociation association, CancellationToken token)
+    private async Task ValidateSourceAsync(CapturedOpeningContext context, SelectedFileAssociation association, CancellationToken token) =>
+        ValidateSourceAssociation(await ReadBuildConfigurationAsync(context, token), association);
+    private async Task<TactConfiguration> ReadBuildConfigurationAsync(CapturedOpeningContext context, CancellationToken token)
     {
         var configuration = await catalog.FindConfigurationAsync(context.Build.BuildConfig, token)
             ?? throw new DiscoveryException("LOCAL_CONFIGURATION_MISSING", "This table's exact build configuration proof is missing.");
         var bytes = await objects.ReadAsync(configuration.Sha256, configuration.ByteLength, token);
         if (Convert.ToHexStringLower(MD5.HashData(bytes)) != context.Build.BuildConfig)
             throw new DiscoveryException("CONFIG_INTEGRITY", "Retained configuration bytes do not match this exact build.");
-        ValidateSourceAssociation(TactConfigurationParser.Parse(bytes, token), association);
+        return TactConfigurationParser.Parse(bytes, token);
     }
     internal static void ValidateSourceAssociation(TactConfiguration configuration, SelectedFileAssociation association)
     {
@@ -216,5 +219,5 @@ public sealed class TableDataStore : ITableDataStore, IAsyncDisposable
     }
 
     private static string N(long value) => value.ToString(CultureInfo.InvariantCulture);
-    public async ValueTask DisposeAsync() { await rows.DisposeAsync(); acquisition.Dispose(); }
+    public async ValueTask DisposeAsync() { await DisposeReferenceReadersAsync(); await rows.DisposeAsync(); acquisition.Dispose(); }
 }
