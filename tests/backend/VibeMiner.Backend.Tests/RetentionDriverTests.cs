@@ -381,6 +381,68 @@ public sealed class RetentionDriverTests
     }
 
     [Fact]
+    public async Task Real_member_listed_only_by_a_bad_earlier_cdn_config_stays_waiting_then_retains_from_it()
+    {
+        var clock = new ManualClock();
+        await using var fixture = await SharedAcquisitionIntegrationTests.Fixture.CreateAsync();
+        (string Key, string Url) Archive(InventoryFixture.FixtureObject item)
+        {
+            var body = new byte[19 + item.Encoded.Length + 7]; item.Encoded.CopyTo(body, 19);
+            var index = AuthoredArchiveIndex.Build([(item.EncodingKey, (uint)item.Encoded.Length, 19u)]);
+            var url = InventoryFixture.Url("data", index.Identity);
+            fixture.Data.Responses[url] = body; fixture.Data.Responses[url + ".index"] = index.Bytes;
+            fixture.Data.Payloads.Remove(item.EncodingKey);
+            return (index.Identity, url);
+        }
+        // Payload A's archive is listed only by an earlier CDN config, which the CDN now serves altered.
+        var item = fixture.Data.PayloadA;
+        var dropped = Archive(item); var kept = Archive(fixture.Data.PayloadB);
+        var earlierBytes = Encoding.UTF8.GetBytes($"archives = {kept.Key} {dropped.Key}\n");
+        var earlierKey = Convert.ToHexStringLower(MD5.HashData(earlierBytes));
+        await fixture.PrepareAlternateSourceAsync(earlierBytes, prepare: false, at: "2026-10-19T00:30:00.0000000Z");
+        var earlierUrl = InventoryFixture.Url("config", earlierKey);
+        fixture.Data.Responses[earlierUrl] = "archives =\n"u8.ToArray();
+        var current = await fixture.PrepareAlternateSourceAsync(Encoding.UTF8.GetBytes($"archives = {kept.Key}\n"));
+        fixture.Request = new("wow", current.BuildIdentity, "us"); fixture.Source = current;
+        await using var plans = new EncodedSourcePlans(fixture.Catalog, fixture.Objects, fixture.Resources);
+        await fixture.Shared.DisposeAsync();
+        fixture.Shared = new(new OfficialEncodedObjectProducer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Resources, plans));
+        using var opening = new DownloadWorkspacePreparer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Shared, fixture.Resources);
+        var workspace = await opening.PrepareAsync(fixture.Request, _ => Task.CompletedTask, default);
+        var target = new RetentionTarget("wow", fixture.Request.BuildIdentity, "us", workspace.Download!.LedgerId);
+        var observed = new ObservedCatalog((IRetentionDriverCatalog)fixture.Catalog);
+        var driver = new BuildRetentionDriver(observed, new BuildRetentionDriver.PhysicalSessions(fixture.Catalog,
+            fixture.Objects, fixture.Shared, plans, fixture.Client, fixture.Resources, clock), clock);
+        var service = new RetentionService((IRetentionStore)fixture.Catalog, driver); await service.RestoreAsync(default);
+        try
+        {
+            await service.SetAsync(new(target, RetentionAction.DownloadAll));
+            // The progress loop and A's first retry each arm a 1 s timer; the second retry waits 4 s.
+            await clock.NextTimer(TimeSpan.FromSeconds(1)); await clock.NextTimer(TimeSpan.FromSeconds(1));
+            clock.Advance(TimeSpan.FromSeconds(1));
+            await clock.NextTimer(TimeSpan.FromSeconds(4)); clock.Advance(TimeSpan.FromSeconds(4));
+            var waiting = await observed.NextSettlement();
+            Assert.Equal(RetentionPassOutcome.Waiting, waiting.Outcome);
+            Assert.Equal("CONTENT_LOCATOR_INCOMPLETE", waiting.Problem!.Code);
+            Assert.True(waiting.Problem.Retryable);
+            Assert.Equal(3, fixture.Handler.Requests.Count(url => url == earlierUrl));
+            Assert.Equal(1, (await service.ReadAsync(target)).Coverage.ReceiptObjects);
+            Assert.Null(await fixture.Catalog.FindConfigurationAsync(earlierKey, default));
+            Assert.Empty(await fixture.Catalog.ReadKnownCorruptAsync([(item.EncodingKey, item.Encoded.Length)], default));
+
+            // Once the CDN serves the earlier config intact, Resume retains A from the archive only it lists.
+            fixture.Data.Responses[earlierUrl] = earlierBytes;
+            await service.SetAsync(new(target, RetentionAction.Resume));
+            Assert.Equal(RetentionPassOutcome.Completed, (await observed.NextSettlement()).Outcome);
+            var receipt = await fixture.Catalog.FindEncodedReceiptAsync(item.EncodingKey, item.Encoded.Length, default);
+            Assert.Equal(dropped.Key, receipt!.Location.ArchiveKey);
+            Assert.Equal(earlierKey, receipt.CdnConfig);
+            Assert.Equal(2, (await service.ReadAsync(target)).Coverage.ReceiptObjects);
+        }
+        finally { await service.ShutdownAsync(default); }
+    }
+
+    [Fact]
     public async Task Real_known_corruption_overrides_same_length_stat_and_only_verified_repair_clears_it()
     {
         await using var fixture = await SharedAcquisitionIntegrationTests.Fixture.CreateAsync();

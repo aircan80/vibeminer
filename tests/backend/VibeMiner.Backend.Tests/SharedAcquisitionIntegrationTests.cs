@@ -388,7 +388,9 @@ public sealed class SharedAcquisitionIntegrationTests
             fixture.Shared = new(new OfficialEncodedObjectProducer(fixture.Catalog, fixture.Objects, fixture.Client, fixture.Resources));
             return fixture;
         }
-        internal async Task<EncodedSourceContext> PrepareAlternateSourceAsync(byte[] cdnBytes)
+        /// <summary>Advertise the build with another CDN configuration; prepare=false leaves it unretained locally.</summary>
+        internal async Task<EncodedSourceContext> PrepareAlternateSourceAsync(byte[] cdnBytes, bool prepare = true,
+            string at = "2026-10-19T01:00:00.0000000Z")
         {
             var cdnKey = Convert.ToHexStringLower(MD5.HashData(cdnBytes));
             Data.Responses.Add(InventoryFixture.Url("config", cdnKey), cdnBytes);
@@ -402,9 +404,12 @@ public sealed class SharedAcquisitionIntegrationTests
                 Observations = [original.Observations.Single() with { Identity = build, OriginalFields = fields }]
             };
             var generation = await Catalog.BeginRefreshAsync("wow", default);
-            await Catalog.CommitAsync("wow", generation, discovery, "2026-10-19T01:00:00.0000000Z", default);
-            using var configurations = new ConfigurationWorkspacePreparer(Catalog, Objects, Client, resources: Resources);
-            await configurations.PrepareAsync(new("wow", build.Id, "us"), _ => Task.CompletedTask, default);
+            await Catalog.CommitAsync("wow", generation, discovery, at, default);
+            if (prepare)
+            {
+                using var configurations = new ConfigurationWorkspacePreparer(Catalog, Objects, Client, resources: Resources);
+                await configurations.PrepareAsync(new("wow", build.Id, "us"), _ => Task.CompletedTask, default);
+            }
             return new("wow", build.Id, "us", Convert.ToHexStringLower(SHA256.HashData(cdnBytes)));
         }
 

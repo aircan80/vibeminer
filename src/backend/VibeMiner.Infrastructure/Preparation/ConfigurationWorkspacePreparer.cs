@@ -170,7 +170,7 @@ public sealed class ConfigurationWorkspacePreparer(IWorkspaceCatalog catalog, Ve
     }
     private static bool SupportedHost(string host) => host is "level3.blizzard.com" or "level3.ssl.blizzard.com" ||
         Regex.IsMatch(host, "^[a-z]{2,8}\\.cdn\\.blizzard\\.com$", RegexOptions.CultureInvariant);
-    private static void ValidateReceipt(StoredConfiguration saved)
+    internal static void ValidateReceipt(StoredConfiguration saved)
     {
         if (!Uri.TryCreate(saved.SourceUrl, UriKind.Absolute, out var uri) || uri.Scheme != "https" || !SupportedHost(uri.Host) ||
             !uri.IsDefaultPort || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 ||

@@ -130,6 +130,7 @@ This is the priority contract. Each scenario needs deterministic scheduler tests
 - 32 MiB and 4096 entries total; 32 pending loads, of which at most 24 background.
 - Only `CONTENT_SOURCE_MISSING` is negative-cached, for 30 s. Other failures are not cached.
 - Capacity stays charged until both the producer and its cancellation notification have retired. An expired negative entry can be removed only after both retire.
+- It also holds the parsed archive lists of earlier CDN configurations that a lookup fell back to ([D069](DECISIONS.md)), so concurrent fallbacks share one fetch at the highest remaining priority.
 
 ## Shared asset contexts
 

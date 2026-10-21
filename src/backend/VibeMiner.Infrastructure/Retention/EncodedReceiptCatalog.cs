@@ -140,7 +140,8 @@ public sealed partial class DiscoveryCatalog
             receipt.SourceUrl is null || receipt.SourceUrl.Length > 2048 || !Uri.TryCreate(receipt.SourceUrl, UriKind.Absolute, out var uri) ||
             uri.Scheme != "https" || !uri.IsDefaultPort || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
             !(uri.Host is "level3.blizzard.com" or "level3.ssl.blizzard.com" || Regex.IsMatch(uri.Host, "^[a-z]{2,8}\\.cdn\\.blizzard\\.com$", RegexOptions.CultureInvariant)) ||
-            receipt.Location is null || receipt.Location.Kind is not ("loose" or "archive"))
+            receipt.Location is null || receipt.Location.Kind is not ("loose" or "archive") ||
+            receipt.CdnConfig is not null && (receipt.Location.Kind != "archive" || !DownloadHash(receipt.CdnConfig, 32)))
             throw EncodedIntegrity("An encoded-object receipt has incomplete original verification facts.");
         var location = receipt.Location;
         var offset = EncodedOrdinal(location.Offset); var sourceBytes = EncodedOrdinal(location.SourceBytes);

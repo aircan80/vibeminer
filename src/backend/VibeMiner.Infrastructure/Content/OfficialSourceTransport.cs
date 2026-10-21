@@ -89,6 +89,52 @@ internal sealed class OfficialSourceTransport(HttpClient client, AcquisitionReso
         catch (HttpRequestException) { throw Error("NETWORK_UNAVAILABLE", "The official range source could not be reached.", true); }
     }
 
+    /// <summary>
+    /// One exact official configuration document, at most 1 MiB, under this transport's priority. A 404 is
+    /// CONTENT_SOURCE_MISSING (unavailable); the caller verifies raw MD5 and grammar before using any byte.
+    /// </summary>
+    internal async Task<byte[]> ReadConfigurationAsync(Uri url, CancellationToken token)
+    {
+        ValidateConfigurationUri(url);
+        const int maximum = 1024 * 1024;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            using var permit = resources is null ? null : await resources.EnterHttpAsync(context, timeout.Token);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            ValidateSource(response, url);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                throw Error("CONTENT_SOURCE_MISSING", "An earlier CDN configuration is unavailable on the official source.", true);
+            if (response.StatusCode != HttpStatusCode.OK)
+                throw Error("CONTENT_UNAVAILABLE", $"The official configuration source returned HTTP {(int)response.StatusCode}.", true);
+            if (response.Content.Headers.ContentRange is not null || response.Content.Headers.ContentEncoding.Count != 0)
+                throw Error("CONFIG_RESPONSE", "Wrapped or ranged configuration responses are unsupported.");
+            if (response.Content.Headers.ContentLength is > maximum or < 1)
+                throw Error("CONFIG_LIMIT", "The configuration exceeds its transfer limit.");
+            ValidateMedia(response, "CONFIG");
+            await using var input = await response.Content.ReadAsStreamAsync(timeout.Token);
+            using var body = new MemoryStream();
+            var buffer = new byte[65_536];
+            while (true)
+            {
+                int count;
+                try { count = await input.ReadAsync(buffer, timeout.Token); }
+                catch (IOException) { throw Error("NETWORK_IO", "The official configuration response could not be read.", true); }
+                if (count == 0) break;
+                if (body.Length + count > maximum) throw Error("CONFIG_LIMIT", "The configuration exceeds its transfer limit.");
+                await body.WriteAsync(buffer.AsMemory(0, count), timeout.Token);
+            }
+            if (body.Length == 0 || response.Content.Headers.ContentLength is { } declared && declared != body.Length)
+                throw Error("CONFIG_INTEGRITY", "The configuration response length is invalid.");
+            return body.ToArray();
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        { throw Error("CONTENT_TIMEOUT", "The official configuration request timed out.", true); }
+        catch (HttpRequestException) { throw Error("NETWORK_UNAVAILABLE", "The official configuration source could not be reached.", true); }
+    }
+
     private static async Task CopyExactAsync(HttpResponseMessage response, Stream destination, long expected,
         string stage, string prefix, Func<string, Task> progress, CancellationToken token, Func<long, Task>? transferred)
     {
@@ -121,6 +167,15 @@ internal sealed class OfficialSourceTransport(HttpClient client, AcquisitionReso
                 Regex.IsMatch(uri.Host, "^[a-z]{2,8}\\.cdn\\.blizzard\\.com$", RegexOptions.CultureInvariant)) ||
             !Regex.IsMatch(uri.AbsolutePath, "^/tpr/[A-Za-z0-9_-]{1,64}/data/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{32}(?:\\.index)?$", RegexOptions.CultureInvariant))
             throw Error("SOURCE_UNSUPPORTED", "Only an exact admitted official CDN object source can be requested.");
+    }
+    internal static void ValidateConfigurationUri(Uri uri)
+    {
+        if (!uri.IsAbsoluteUri || uri.Scheme != "https" || !uri.IsDefaultPort || uri.UserInfo.Length != 0 ||
+            uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
+            !(uri.Host is "level3.blizzard.com" or "level3.ssl.blizzard.com" ||
+                Regex.IsMatch(uri.Host, "^[a-z]{2,8}\\.cdn\\.blizzard\\.com$", RegexOptions.CultureInvariant)) ||
+            !Regex.IsMatch(uri.AbsolutePath, "^/tpr/[A-Za-z0-9_-]{1,64}/config/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{32}$", RegexOptions.CultureInvariant))
+            throw Error("SOURCE_UNSUPPORTED", "Only an exact admitted official CDN configuration source can be requested.");
     }
     private static void ValidateSource(HttpResponseMessage response, Uri expected)
     {

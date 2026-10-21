@@ -311,7 +311,7 @@ At most four routes per object: the selected route first, then up to three from 
 
 ### When to search archives
 
-Per key and per route: only an exact loose **404** authorizes an archive search on that route. When the build has a sealed bulk map that lists the key, the mapped archive locations are tried first and then loose; a listed DL member found in neither is `CONTENT_NOT_LOCATED`.
+Per key and per route: only an exact loose **404** authorizes an archive search on that route. When the build has a sealed bulk map that lists the key, the mapped archive locations are tried first and then loose; a listed DL member found in neither goes straight to the earlier-config fallback below (the map already covered the current archives) and is `CONTENT_NOT_LOCATED` (retryable) if that finds nothing.
 
 ### Per-key archive locator
 
@@ -323,6 +323,17 @@ Per key and per route: only an exact loose **404** authorizes an archive search 
 - An authenticated entry whose size differs from EN is `CONTENT_SIZE_CONFLICT`.
 - Unavailable indexes make the result `CONTENT_LOCATOR_INCOMPLETE`, not "not present".
 - A found location is saved as a proof (footer, TOC, page; at most 8 MiB) in CAS, bound to the **EKey and the CDN config SHA-256**. Reuse re-hashes the proof and replays every check, including the expected size.
+
+### Earlier CDN configurations
+
+A republished CDN config can drop an archive the build still needs ([D069](../DECISIONS.md)). In the shared producer, when the source's own CDN config does not locate a key, the locator also searches archives listed only by the build's earlier CDN configs:
+
+- Earlier means after the source's CDN config in the build's newest-first history (last seen, first seen, key), at most 15 of them, so 16 with the source's own. A newer config is never used. Only the build's own discovery history authorizes them.
+- Newest first. Each config's archives minus every archive already searched; at most 4,096 extra archives per lookup.
+- An earlier config is fetched only when a lookup reaches it: `{route}config/xx/yy/key`, at most 1 MiB, 20 s, through the same HTTP permits and priority as the object. Raw MD5 and grammar are checked, then the bytes go to CAS and `configuration_objects` like any configuration; a saved copy is re-hashed and re-checked on every load. The parsed archive list is shared through the proof cache.
+- The fallback shares the lookup's 16,384-request and 128 MiB budgets and gets its own 5-minute limit. Its indexes use the same proof cache and checks as current ones; a found proof is saved under the earlier config's SHA-256.
+- An earlier config the CDN does not serve intact (404, other HTTP or network failure, wrong MD5, bad grammar, over a limit, no supported archive list) counts as unavailable, and the lookup moves on to the next one. A broken saved copy (`LOCAL_CONFIGURATION_CORRUPT` or `LOCAL_CONFIGURATION_MISSING`, including saved bytes that no longer pass MD5 or grammar), a catalog or store failure (`CATALOG_*`, `CONTENT_STORE_*`), cancellation, the lookup budget and proof-cache capacity are not: they fail the lookup and are reported, and the saved copy is never silently replaced from the CDN. That, or a 404 for an earlier index, makes the result `CONTENT_LOCATOR_INCOMPLETE`; for a sealed-map DL member it stays retryable, so a retention pass waits instead of failing. A located archive that then 404s is `CONTENT_SOURCE_MISSING`. Neither is ever recorded as corrupt. An object no searched config lists is `CONTENT_NOT_LOCATED` (absent).
+- The encoded receipt's `cdnConfig` names the CDN config whose archive list authorized an archive location (the source's own or the earlier one); it is null for loose objects and older receipts.
 
 Shared proof cache ([`ArchiveProofCache`](../../src/backend/VibeMiner.Infrastructure/Acquisition/ArchiveProofCache.cs)): 32 MiB / 4,096 retained entries, 32 pending fetches (24 for background work). Only `CONTENT_SOURCE_MISSING` is cached as a negative, for 30 seconds. Corruption, timeouts, cancellation and capacity refusals are never cached as absence.
 

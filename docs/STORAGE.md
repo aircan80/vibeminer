@@ -64,7 +64,7 @@ The port does not open Java catalogs in place. The Java schema and serialized pr
 
 ### CDN configuration per admission
 
-A build's CDN config can be republished without a new build ([D061](DECISIONS.md)). Each observation keeps the CDN config of its own versions row, and every admission records its `cdnConfig` receipt. A context resolved for an open build uses the CDN config of the latest workspace admission for that build and region; a new open uses the newest one the region advertised. Retention plans and pinned downloads resolve their pinned observation, so they keep theirs. Commit and admission checks compare against the CDN config captured with the context, never the build's newest one.
+A build's CDN config can be republished without a new build ([D061](DECISIONS.md)). Each observation keeps the CDN config of its own versions row, and every admission records its `cdnConfig` receipt. A context resolved for an open build uses the CDN config of the latest workspace admission for that build and region; a new open uses the newest one the region advertised. Retention plans and pinned downloads resolve their pinned observation, so they keep theirs. Commit and admission checks compare against the CDN config captured with the context, never the build's newest one. An object that config does not locate may still come from an archive listed only by an earlier CDN config of the same build; its encoded receipt names that config in `cdnConfig` ([D069](DECISIONS.md), [details](formats/tact.md#earlier-cdn-configurations)).
 
 ### Open acknowledgement
 

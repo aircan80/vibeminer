@@ -90,15 +90,17 @@ public sealed class OfficialEncodedObjectProducer(DiscoveryCatalog catalog, Veri
         {
             var transport = new OfficialSourceTransport(client, resources, context);
             var archives = new ArchivedContentLocator(catalog, objects, transport, plans.ArchiveCache, plan.Source.ToString(), resources);
-            Uri? url = null; ContentLocation? location = null;
+            var earlier = new EarlierArchiveScope(plan.Opening.Build.Id, plan.Opening.Build.CdnConfig);
+            Uri? url = null; ContentLocation? location = null; string? servedBy = null;
             await using (var encoded = await objects.CreateStagingFileAsync(token))
             {
                 path = encoded.Name;
                 for (var index = 0; index < plan.Routes.Count; index++)
                 {
                     var route = plan.Routes[index]; url = ArchivedContentLocator.Url(route, expected.EncodingKey);
-                    encoded.SetLength(0); encoded.Position = 0;
+                    encoded.SetLength(0); encoded.Position = 0; servedBy = null;
                     Task Progress(string stage) => context.ReportAsync(new(stage, "bytes"));
+                    var mappedUnavailable = false;
                     try
                     {
                         if (mapped is { IsMember: true })
@@ -112,9 +114,10 @@ public sealed class OfficialEncodedObjectProducer(DiscoveryCatalog catalog, Veri
                                     var sourceBytes = await DownloadSpansAsync(transport, url, encoded, null, candidate.Offset,
                                         candidate.EncodedBytes, context, wire, token);
                                     location = new("archive", N(candidate.Offset), N(sourceBytes), candidate.ArchiveKey);
+                                    servedBy = plan.Opening.Build.CdnConfig;
                                     break;
                                 }
-                                catch (DiscoveryException failure) when (Retry(failure)) { }
+                                catch (DiscoveryException failure) when (Retry(failure)) { mappedUnavailable = true; }
                             }
                             if (location is not null) break;
                             encoded.SetLength(0); encoded.Position = 0;
@@ -132,14 +135,29 @@ public sealed class OfficialEncodedObjectProducer(DiscoveryCatalog catalog, Veri
                         catch (DiscoveryException failure) when (failure.Code is "CONTENT_LOOSE_MISSING" or "CONTENT_SOURCE_MISSING")
                         {
                             encoded.SetLength(0); encoded.Position = 0;
-                            if (mapped is { IsMember: true })
-                                throw Error("CONTENT_NOT_LOCATED", "This exact DL member was not supplied by its sealed archive map or loose route.", true);
-                            var located = await archives.LocateAsync(route, plan.Cdn, plan.Sha256, expected.EncodingKey,
-                                expected.EncodedBytes, Progress, token);
+                            // A sealed map already covered this source's own archives; only earlier CDN
+                            // configurations of the build remain to be searched for its DL members.
+                            ContentArchiveLocation located;
+                            try
+                            {
+                                located = await archives.LocateAsync(route, plan.Cdn, plan.Sha256, expected.EncodingKey,
+                                    expected.EncodedBytes, Progress, token, mapped is { IsMember: true }
+                                        ? earlier with { CurrentSearched = true, CurrentIncomplete = mappedUnavailable } : earlier);
+                            }
+                            // DL members kept their retryable not-located outcome before the fallback existed.
+                            catch (DiscoveryException absent) when (mapped is { IsMember: true } && !absent.Retryable &&
+                                absent.Code is "CONTENT_NOT_LOCATED" or "CONTENT_LOCATOR_INCOMPLETE")
+                            {
+                                throw Error(absent.Code, absent.Code == "CONTENT_NOT_LOCATED"
+                                    ? "This exact DL member was not supplied by its sealed archive map, loose route or an earlier CDN configuration's archives."
+                                    : absent.Message, true);
+                            }
                             url = ArchivedContentLocator.Url(route, located.ArchiveKey);
+                            // A missing archive stays CONTENT_SOURCE_MISSING (unavailable), never an integrity failure.
                             var sourceBytes = await DownloadSpansAsync(transport, url, encoded, null, located.Offset,
                                 located.EncodedBytes, context, wire, token);
                             location = new("archive", N(located.Offset), N(sourceBytes), located.ArchiveKey);
+                            servedBy = located.CdnConfig ?? plan.Opening.Build.CdnConfig;
                         }
                         break;
                     }
@@ -157,7 +175,7 @@ public sealed class OfficialEncodedObjectProducer(DiscoveryCatalog catalog, Veri
             path = null;
             var now = DateTimeOffset.UtcNow.ToString("O");
             var receipt = new EncodedReceipt(expected.EncodingKey, sha, expected.EncodedBytes,
-                url!.AbsoluteUri, now, now, VerifierRevision, location!);
+                url!.AbsoluteUri, now, now, VerifierRevision, location!, servedBy);
             // CAS publication precedes SQL. A failed commit gives no durable receipt credit.
             await catalog.RecordEncodedReceiptAsync(receipt, token);
             await catalog.ClearKnownCorruptAsync(receipt.EncodingKey, receipt.EncodedBytes, receipt.Sha256, verifiedThrough, token);
