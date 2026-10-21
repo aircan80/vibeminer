@@ -81,6 +81,10 @@ Run `npm run smoke:package` after packaging for a fresh launch and proxy-blocked
 
 `npm start` loads built files and has no hot reload. After changing frontend sources, run `npm run build:desktop`, close the application and start it again. After backend changes, also run `npm run build:backend`.
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push to a `ci/**` branch and from **Actions > CI > Run workflow**. On ubuntu-latest, windows-latest and macos-latest (arm64) it checks the pinned toolchain, then runs `npm ci`, the locked NuGet restore, `npm run build`, then each part of `npm test` (`contracts:check`, `test:backend`, `test:desktop`, `test:contracts`) as its own step, so a failing suite doesn't hide the others; Linux also runs `npm run test:e2e` (headless Electron, no xvfb). Jobs don't fail fast. Each job uploads `test-logs-<os>` with the step logs and the Playwright report. It has `contents: read`, uses no secrets and pins the same action SHAs as release.yml; `tests/contracts/workflows.test.mjs` checks that. Candidates are pushed once each to `ci/issue-N-<short sha>`; see [workflow](.agents/rules/workflow.md).
+
 ## Release
 
 `.github/workflows/release.yml` runs only from **Actions > Release > Run workflow** with a version such as `0.2.0`. It never runs on push or pull request.

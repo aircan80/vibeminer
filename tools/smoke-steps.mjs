@@ -19,8 +19,10 @@ export async function launchApp({ executablePath, appPath, directory, env, offli
     args: [...(appPath ? [appPath] : []), '--ozone-platform=headless', `--user-data-dir=${path.join(directory, 'electron profile')}`],
     env: { ...env, ...(offline ? blockedProxy : {}) },
   });
+  // Wait for the window first: right after launch the main process may not have created it yet.
+  const page = await application.firstWindow();
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 800));
-  return { application, page: await application.firstWindow() };
+  return { application, page };
 }
 
 /** Discovery on an empty catalog: the full product filter, no saved builds and no implicit remote check. */

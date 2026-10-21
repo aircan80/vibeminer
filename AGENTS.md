@@ -50,6 +50,7 @@ QA, the reviewer and the three experts must not review work written in the same 
 - Always pass `--title` and `--body` to `gh issue create`.
 - Commit identity: `aircan80 <329744803+aircan80@users.noreply.github.com>`. Don't change git config.
 - `git push` to `main`, releases and repo settings need the owner's explicit OK. Never force-push.
+- Pushing a candidate commit once to its own `ci/issue-N-<short sha>` ref for CI is pre-approved; see [workflow](.agents/rules/workflow.md).
 
 ## Engineering rules
 Area details load automatically in Claude Code. Other tools should read them before editing:

@@ -1,0 +1,109 @@
+# CI for candidate commits. Each candidate is pushed once to its own ref, ci/issue-N-<short sha>,
+# which is never rewritten (see .agents/rules/workflow.md). Same toolchain checks and action pins as release.yml.
+name: CI
+
+on:
+  push:
+    branches:
+      - 'ci/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Test ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      LOGS: artifacts/ci-logs
+    steps:
+      # .gitattributes uses text=auto; keep LF on Windows so hashed fixtures and generated contracts match.
+      - name: Keep LF line endings
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Check pinned toolchain
+        run: |
+          set -euo pipefail
+          expected_npm="$(node -p "require('./package.json').packageManager.split('@')[1]")"
+          echo "node $(node --version), npm $(npm --version), dotnet $(dotnet --version), runner $RUNNER_OS $RUNNER_ARCH"
+          [[ "$(node --version)" == "v$(cat .nvmrc)" ]] || { echo "::error::Node does not match .nvmrc"; exit 1; }
+          [[ "$(npm --version)" == "$expected_npm" ]] || { echo "::error::npm is not $expected_npm"; exit 1; }
+      - name: Install dependencies
+        run: |
+          mkdir -p "$LOGS"
+          npm ci 2>&1 | tee "$LOGS/install.log"
+          node tools/dotnet.mjs restore VibeMiner.slnx --locked-mode 2>&1 | tee -a "$LOGS/install.log"
+      - name: Build
+        id: build
+        run: npm run build 2>&1 | tee "$LOGS/build.log"
+      # The steps of `npm test`, run separately so one failing suite doesn't hide the others' results.
+      - name: Check generated contracts
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: npm run contracts:check 2>&1 | tee "$LOGS/contracts-check.log"
+      - name: Backend tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          VIBEMINER_DATA_DIR: ${{ runner.temp }}/vibeminer-test-data
+        run: npm run test:backend 2>&1 | tee "$LOGS/test-backend.log"
+      - name: Desktop tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          VIBEMINER_DATA_DIR: ${{ runner.temp }}/vibeminer-test-data
+        run: npm run test:desktop 2>&1 | tee "$LOGS/test-desktop.log"
+      - name: Contract and engine process tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          VIBEMINER_DATA_DIR: ${{ runner.temp }}/vibeminer-test-data
+        run: npm run test:contracts 2>&1 | tee "$LOGS/test-contracts.log"
+      - name: Allow Chromium sandbox in CI
+        if: runner.os == 'Linux' && !cancelled() && steps.build.outcome == 'success'
+        run: |
+          # Ubuntu 24.04 and later block unprivileged user namespaces, which Chromium's sandbox needs.
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      # Electron runs with --ozone-platform=headless, so no X server or xvfb is needed.
+      - name: Electron end-to-end tests
+        if: runner.os == 'Linux' && !cancelled() && steps.build.outcome == 'success'
+        env:
+          VIBEMINER_DATA_DIR: ${{ runner.temp }}/vibeminer-e2e-data
+        run: npm run test:e2e 2>&1 | tee "$LOGS/e2e.log"
+      # Logs and Playwright reports only. Tests use authored fixtures; no CDN or game content is fetched.
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-logs-${{ matrix.os }}
+          path: |
+            artifacts/ci-logs/
+            artifacts/electron-report/
+            artifacts/electron-tests/
+          if-no-files-found: ignore
+          retention-days: 14
