@@ -446,3 +446,5 @@
 /* The corner header stays above the sticky Record ID cells of scrolled rows. */
 .desktop-home .dh-records-grid thead th:first-child{z-index:3}
 .desktop-home .dh-records-grid tbody th:first-child{z-index:1}
+/* Settings entry (docs/design/desktop-settings): a plain toolbar button with a sliders icon, after Choose build. */
+.desktop-home .settings-entry svg{width:.933333rem;height:.933333rem;flex:none;color:var(--muted)}

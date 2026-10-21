@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeMiner · Desktop Settings</title>
+<link rel="icon" type="image/svg+xml" href="../../../branding/vibeminer.svg">
+<style>
+/* Tokens, type scale and chrome come from ../desktop-home/ and ../desktop-discovery/. Type scale: 11 / 13 / 14 / 19px at 100%. */
+:root{--bg:#f5f3ed;--paper:#fffefa;--ink:#243b3a;--muted:#586a64;--line:#dce2d9;--line-soft:#e9ece5;--teal:#176e66;--mint:#e4f1e9;--hover:#eef4ef;--pill:#b9d5c8;--gold-ink:#7d561b;--gold-line:#e4cfa5;--gold-bg:#fbf5e8;--warn-bg:#fbf3e4;--warn-line:#e7c98f;--err-bg:#fbeeea;--err-line:#e3b5a8;--focus:#e6ad46;--toolbar:#fbfaf6;--status:#eceae2;--side:#f9f8f3;
+  --fs-s:.786rem;--fs-m:.929rem;--fs-l:1.357rem;--pane-head:3.43rem;--thead:2rem;--side-w:clamp(18rem,26.5rem,40%);--disc-insp-w:clamp(18rem,26.5rem,44%);--panel-w:var(--side-w);font-size:14px}
+#disc{--panel-w:var(--disc-insp-w)}
+:root[data-text="200"]{font-size:28px}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:1rem/1.45 system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.mono{font-family:ui-monospace,monospace}
+.selectable{user-select:text;-webkit-user-select:text;cursor:text}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip{position:absolute;left:.5rem;top:-3rem;z-index:20;background:var(--paper);padding:.3rem .6rem;border-radius:6px}
+.skip:focus{top:.5rem}
+.dim{color:var(--muted)}
+.spacer{flex:1}
+
+/* Window: fixed chrome, only panes scroll. One screen is shown at a time; the others stay mounted with their state. */
+.app{height:100vh;container:window/inline-size;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+.app[hidden]{display:none}
+
+/* Toolbars. .build is the Home build header; .plain is the Discovery and Settings toolbar. */
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.43rem .86rem;padding:.43rem .86rem 0;background:var(--toolbar);border-bottom:1px solid var(--line)}
+.toolbar.plain{flex-wrap:nowrap;gap:.86rem;min-height:3.15rem;padding:.43rem .86rem}
+.brand{display:flex;align-items:center;gap:.6rem;font-weight:700;font-size:1.214rem;letter-spacing:-.01em;white-space:nowrap;flex:none}
+.brand img{width:2rem;height:2rem;display:block;flex:none}
+.brand .word span{color:var(--teal)}
+.divider{width:1px;align-self:stretch;background:var(--line);margin:.15rem 0;flex:none}
+.idfields{display:flex;align-items:center;gap:.4rem 1.15rem;margin:0;min-width:0;flex-wrap:wrap}
+.idf{display:flex;flex-direction:column;min-width:0}
+.idf dt{font-size:var(--fs-s);color:var(--muted);font-weight:600;line-height:1.25;white-space:nowrap}
+.idf dd{margin:0;font-weight:600;line-height:1.35;white-space:nowrap;height:1.4rem;display:flex;align-items:center}
+.idf .pid{font-family:ui-monospace,monospace;font-size:var(--fs-m);color:var(--muted);font-weight:400;margin-left:.3rem}
+.hgroup{display:flex;align-items:center;gap:.86rem;margin-left:auto;flex:none;min-height:2.3rem}
+.btn{height:2.15rem;display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .8rem;cursor:pointer;white-space:nowrap;flex:none}
+.btn:hover:not(:disabled){background:var(--hover);border-color:#c5d3cb}
+.btn.primary{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+.btn.primary:hover:not(:disabled){background:#125b54}
+.btn.small{height:1.9rem;font-size:var(--fs-m);padding:0 .65rem}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.55;cursor:default}
+/* Settings entry: a plain toolbar button, always the last item, at the top-right corner on every screen. */
+.btn.settings-btn svg{width:1rem;height:1rem;flex:none;color:var(--muted)}
+.activity-chip{display:inline-flex;align-items:center;gap:.5rem;height:2.15rem;padding:0 .75rem;border:1px solid var(--pill);border-radius:6px;background:var(--mint);color:var(--teal);font-weight:600;cursor:pointer;white-space:nowrap;flex:none}
+.chip-short{display:none}
+.activity-chip .count{min-width:1.3rem;height:1.3rem;border-radius:999px;background:var(--teal);color:#fff;font-size:var(--fs-s);display:grid;place-items:center;padding:0 .3rem}
+.activity-chip[aria-expanded="true"]{box-shadow:inset 0 0 0 1px currentColor}
+.pulse{width:.5rem;height:.5rem;border-radius:50%;background:currentColor;animation:pulse 1.6s ease-in-out infinite;flex:none}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+.areas{order:9;flex:1 1 100%;display:flex;align-items:stretch;gap:.2rem;height:2.45rem;margin:0 -.86rem;padding:0 .5rem;border-top:1px solid var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.area-group{display:flex;align-items:stretch;gap:.2rem}
+.area-sep{align-self:center;width:1px;height:1.3rem;background:var(--line);margin:0 .45rem;flex:none}
+.areas button{border:0;background:none;padding:0 .75rem;font-size:var(--fs-m);font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;box-shadow:inset 0 -3px 0 transparent}
+.areas button:hover{color:var(--ink);background:var(--hover)}
+.areas button[aria-current="page"]{color:var(--teal);font-weight:700;box-shadow:inset 0 -3px 0 var(--teal)}
+.areas button:focus-visible{outline-offset:-3px}
+
+/* Shared pane parts */
+.pane{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--paper)}
+.pane-head{display:flex;align-items:center;gap:.6rem;min-height:var(--pane-head);padding:.43rem .86rem;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--bg)}
+.pane-head h1{font-size:1rem;margin:0 .3rem 0 0;font-weight:700;white-space:nowrap}
+.pane-head h1:focus{outline:none}
+.pane-head h1:focus-visible{outline:3px solid var(--focus)}
+.pane-head .n{color:var(--muted);font-weight:400;margin-left:.3rem}
+.pane-head .sub{font-size:var(--fs-m);color:var(--muted);min-width:0}
+.label{font-size:var(--fs-s);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.control{height:2.15rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .65rem;min-width:0}
+.segmented{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper);flex:none}
+.segmented button{border:0;background:none;height:2.05rem;padding:0 .75rem;cursor:pointer;white-space:nowrap}
+.segmented button+button{border-left:1px solid var(--line)}
+.segmented button[aria-pressed="true"]{background:var(--mint);color:var(--teal);font-weight:600}
+.pill{display:inline-block;padding:0 .4rem;border-radius:4px;border:1px solid var(--pill);background:var(--paper);color:var(--teal);font-size:var(--fs-s);font-weight:600;line-height:1.5;white-space:nowrap}
+.pill.gold{border-color:var(--gold-line);background:var(--gold-bg);color:var(--gold-ink)}
+.pill.community{border-color:#c9cfdc;background:#f3f4f8;color:#4a5670}
+.pill.plain{border-color:var(--line);background:var(--bg);color:var(--muted)}
+/* Fixture label: authored sample values carry it, here and in the status bar. */
+.pill.sample{border-color:var(--line);border-style:dashed;background:var(--paper);color:var(--muted);font-weight:600;margin-left:.35rem;vertical-align:baseline}
+.notice{padding:.55rem .75rem;border-radius:6px;border:1px solid var(--warn-line);background:var(--warn-bg);font-size:var(--fs-m);display:flex;gap:.8rem;align-items:flex-start}
+.notice.error{border-color:var(--err-line);background:var(--err-bg)}
+.notice .text{flex:1;min-width:0}
+.notice strong{display:block}
+.notice code{font-size:var(--fs-s)}
+.notice .btn{height:1.9rem}
+.state-box{border:1px solid #cfe2d6;background:var(--mint);border-radius:6px;padding:.55rem .7rem;font-size:var(--fs-m)}
+.state-box.warn{border-color:var(--warn-line);background:var(--warn-bg)}
+.state-box.plain{border-color:var(--line);background:var(--bg)}
+.state-box strong{display:block}
+.state-box p{margin:.15rem 0 0}
+.state-box code{font-size:var(--fs-s)}
+dl.facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.35rem .9rem;margin:0;font-size:var(--fs-m)}
+dl.facts dt{color:var(--muted);white-space:nowrap}
+dl.facts dd{margin:0;overflow-wrap:anywhere}
+dl.facts dd.mono{font-size:var(--fs-s);line-height:1.7}
+.ok{color:var(--teal);font-weight:600}
+.reason{margin:0;font-size:var(--fs-s);color:var(--muted)}
+.tiny{font-size:var(--fs-s);color:var(--muted);margin:.6rem 0 0}
+.loading-line{display:flex;align-items:center;gap:.5rem;color:var(--teal);font-weight:600;font-size:var(--fs-m)}
+.statusbar{display:flex;align-items:center;gap:1.1rem;height:1.75rem;padding:0 .86rem;background:var(--status);border-top:1px solid var(--line);font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden}
+.statusbar strong{color:var(--ink);font-weight:600}
+.statusbar .busy{display:inline-flex;align-items:center;gap:.4rem;color:var(--teal);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.statusbar .pill.sample{margin-left:0}
+
+/* ---------- Discovery (simplified copy of ../desktop-discovery/all-products.html) ---------- */
+.disc-body{display:grid;grid-template-columns:minmax(0,1fr) var(--disc-insp-w);min-height:0}
+#d-search{width:15rem;max-width:100%}
+#d-product{width:14rem;max-width:100%}
+.pane-head .refresh{margin-left:auto;background:var(--mint);border-color:var(--teal);color:var(--teal);font-weight:600}
+.d-notice{margin:.6rem .86rem 0}
+.list-scroll{position:relative;flex:1;overflow:auto;min-height:0;background:var(--paper);scroll-padding-top:var(--thead)}
+.cols{display:grid;grid-template-columns:minmax(7.5rem,1fr) minmax(9rem,1.3fr) minmax(4rem,.6fr) minmax(8rem,1fr) minmax(8.5rem,1.15fr);align-items:center;column-gap:.86rem;padding:0 .86rem}
+.thead{position:sticky;top:0;z-index:1;height:var(--thead);background:var(--toolbar);border-bottom:1px solid var(--line);font-size:var(--fs-s);font-weight:600;color:var(--muted);letter-spacing:.02em;white-space:nowrap}
+[role="listbox"]:focus-visible{outline:none}
+[role="option"]{position:relative;min-height:2.6rem;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m);white-space:nowrap;cursor:default}
+[role="option"]>span{overflow:hidden;text-overflow:ellipsis}
+[role="option"]:hover{background:var(--hover)}
+[role="option"].current{background:#fbf7ec}
+[role="option"][aria-selected="true"]{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+[role="listbox"]:focus-visible [role="option"].active{outline:3px solid var(--focus);outline-offset:-3px}
+.version{font-weight:600}
+.version .pill{margin-left:.4rem}
+.product{font-family:ui-monospace,monospace;font-size:var(--fs-s);color:var(--muted)}
+.meter{display:inline-flex;align-items:center;gap:.5rem}
+.meter .track{width:3.6rem;height:.36rem;border-radius:999px;background:var(--line-soft);overflow:hidden;flex:none}
+.meter .track i{display:block;height:100%;background:var(--teal)}
+.d-insp{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;border-left:1px solid var(--line);background:var(--side)}
+.d-insp .insp-head{min-height:calc(var(--pane-head) + var(--thead) + 1px);padding:.55rem 1rem;border-bottom:1px solid var(--line);display:flex;flex-direction:column;justify-content:center}
+.insp-head h2{margin:0;font-size:var(--fs-l);font-weight:700;line-height:1.25}
+.insp-head p{margin:0;color:var(--muted);font-size:var(--fs-m)}
+.insp-body{overflow:auto;padding:.8rem 1rem;min-height:0}
+.insp-body .label{margin:1rem 0 .4rem}
+.insp-foot{padding:.75rem 1rem;border-top:1px solid var(--line);background:var(--paper);display:flex;flex-wrap:wrap;gap:.55rem;align-items:center}
+.insp-foot .field{flex:1 1 100%;display:flex;align-items:center;gap:.5rem}
+.insp-foot .field label{font-size:var(--fs-m);color:var(--muted);white-space:nowrap}
+.insp-foot .field select{flex:1}
+.insp-foot .primary{flex:1;justify-content:center}
+.insp-foot .reason{flex:1 1 100%}
+
+/* ---------- Home (simplified copy of ../desktop-home/index.html) ---------- */
+.home{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0}
+.home-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) var(--side-w);grid-template-rows:auto minmax(0,1fr);gap:1px;background:var(--line);min-height:0}
+.panel{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;min-width:0;background:var(--paper)}
+.panel.side{grid-column:3;grid-row:1/3;background:var(--side)}
+.panel.wide{grid-column:1/3}
+.panel-head{display:flex;align-items:baseline;gap:.6rem;padding:.6rem 1rem .45rem;flex-wrap:wrap}
+.panel-head h2{margin:0;font-size:1rem;font-weight:700;white-space:nowrap}
+.panel-head .scope{margin-left:auto;font-size:var(--fs-s);color:var(--muted)}
+.panel-body{overflow:auto;padding:.15rem 1rem .8rem;min-height:0}
+.panel-foot{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;padding:.55rem 1rem;border-top:1px solid var(--line-soft)}
+.metric{display:flex;flex-direction:column;margin-bottom:.7rem}
+.metric .mlabel{font-size:var(--fs-m);color:var(--muted)}
+.metric strong{font-size:var(--fs-l);line-height:1.3;font-variant-numeric:tabular-nums}
+.metric .exact{font-size:var(--fs-s);color:var(--muted)}
+.stand-in{display:grid;place-items:center;text-align:center;color:var(--muted);padding:2rem;background:var(--paper);min-height:0;overflow:auto}
+.stand-in>div{border:1px dashed var(--line);border-radius:6px;padding:1.2rem 1.6rem;max-width:30rem}
+.stand-in h1{font-size:1rem;color:var(--ink);margin:0 0 .3rem}
+.stand-in h1:focus{outline:none}
+.stand-in p{margin:0 0 .7rem;font-size:var(--fs-m)}
+
+/* ---------- Settings: one grouped list, plus an About column at the Home side-column width ---------- */
+.settings{display:grid;grid-template-columns:minmax(0,1fr) var(--side-w);grid-template-rows:auto minmax(0,1fr);min-height:0}
+.settings>.pane-head{grid-column:1/-1}
+.set-list{overflow:auto;min-height:0;background:var(--paper);padding-bottom:1.5rem}
+.set-side{overflow:auto;min-height:0;background:var(--side);border-left:1px solid var(--line)}
+.group-h{margin:0;padding:1.1rem 1rem .45rem;border-bottom:1px solid var(--line)}
+/* Text keeps a readable measure and the control sits right after it, not at the far edge of a wide window. */
+.setting{display:grid;grid-template-columns:minmax(0,46rem) 16rem;justify-content:start;column-gap:1.8rem;padding:.9rem 1rem 1rem;border-bottom:1px solid var(--line-soft)}
+.setting .text{min-width:0}
+.setting h3{margin:0;font-size:1rem;font-weight:700;line-height:1.35}
+.setting h3 .opt{font-weight:400;color:var(--muted)}
+.setting .text>p{margin:.2rem 0 0;font-size:var(--fs-m)}
+/* What changes: a short label over the effect, per position of the control. */
+.effects{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.35rem .9rem;margin:.6rem 0 0;font-size:var(--fs-m)}
+.effects dt{color:var(--muted);font-weight:600;white-space:nowrap}
+.effects dd{margin:0;min-width:0}
+.setting dl.facts{margin-top:.6rem}
+.setting dl.facts dd.mono{font-size:var(--fs-s)}
+.ctl{display:flex;flex-direction:column;align-items:flex-start;gap:.35rem;min-width:0}
+.ctl .btn{height:2.15rem}
+.ctl-row{display:flex;flex-wrap:wrap;gap:.45rem}
+.ctl .field{display:flex;flex-direction:column;gap:.2rem;width:100%}
+.ctl .field label{font-size:var(--fs-m);color:var(--muted);font-weight:600}
+.ctl .field select{width:100%}
+/* The setting switch: Home's Download mode switch inside a control-sized frame. */
+.switch{display:inline-flex;align-items:center;gap:.5rem;height:2.15rem;padding:0 .8rem 0 .6rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);font-weight:600;cursor:pointer;white-space:nowrap}
+.switch:hover:not([aria-disabled="true"]){background:var(--hover);border-color:#c5d3cb}
+.switch .track{position:relative;width:1.85rem;height:1.05rem;border-radius:999px;background:#c9d2cc;flex:none}
+.switch .track::after{content:"";position:absolute;top:.15rem;left:.15rem;width:.75rem;height:.75rem;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch[aria-checked="true"] .track{background:var(--teal)}
+.switch[aria-checked="true"] .track::after{left:auto;right:.15rem}
+.switch[aria-disabled="true"]{cursor:progress;color:var(--muted)}
+.switch[aria-disabled="true"] .track{opacity:.6}
+.dflt{font-size:var(--fs-s);color:var(--muted)}
+/* Reserved line for the save outcome, so the row never jumps when it changes. */
+.save-line{min-height:1.15rem;font-size:var(--fs-s);color:var(--muted);line-height:1.15rem}
+.save-line .busy{color:var(--teal);font-weight:600;display:inline-flex;align-items:center;gap:.4rem}
+.save-line .ok{font-size:var(--fs-s)}
+.setting>.notice,.setting>.state-box{grid-column:1/-1;margin-top:.8rem;max-width:46rem}
+.path{display:block;font-family:ui-monospace,monospace;font-size:var(--fs-s);line-height:1.7;overflow-wrap:anywhere}
+.set-side .panel-head{padding-top:.8rem}
+.set-side .side-body{padding:.15rem 1rem 1rem}
+.set-side .state-box{margin-bottom:.8rem}
+
+/* Activity panel: nonmodal, follows the chip in DOM order, covers the side column (Settings, Home) or inspector (Discovery). */
+.activity-panel{position:fixed;right:0;width:var(--panel-w);background:var(--paper);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(36,59,58,.08);display:flex;flex-direction:column;z-index:3;white-space:normal;font-weight:400;color:var(--ink);text-align:left}
+.activity-panel header{display:flex;align-items:center;justify-content:space-between;padding:.6rem 1rem;border-bottom:1px solid var(--line)}
+.activity-panel h2{margin:0;font-size:1rem}
+.activity-panel h2:focus{outline:none}
+.activity-panel .rows{overflow:auto;padding:.4rem 1rem .8rem;flex:1}
+.activity-panel .label{margin:.6rem 0 .4rem}
+.task{border:1px solid var(--line);border-radius:6px;padding:.6rem .7rem;margin-bottom:.6rem;font-size:var(--fs-m)}
+.task .t{font-weight:600}
+.task .s{color:var(--muted)}
+.bar{height:.36rem;background:var(--line-soft);border-radius:999px;margin:.45rem 0 .3rem;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--teal);border-radius:999px}
+
+/* Medium window: the activity entry uses its short label. */
+@container window (max-width:84rem){
+  .chip-long{display:none}
+  .chip-short{display:inline}
+}
+/* Enlarged text or narrow window (like .dv-compact): toolbars wrap or shrink, panes stack, the window still never scrolls. */
+@container window (max-width:70rem){
+  .brand .word,.toolbar .divider{display:none}
+  .toolbar.plain{gap:.6rem}
+  /* Home header: two rows, as in desktop-home. Settings joins row 2, after Choose build. */
+  .toolbar.build{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"brand ids ids" "areas areas actions";column-gap:.7rem}
+  .toolbar.build .brand{grid-area:brand}
+  .toolbar.build .idfields{grid-area:ids;gap:.3rem .9rem}
+  .toolbar.build .idf{flex-direction:row;align-items:center;gap:.35rem}
+  .toolbar.build .idf dt{font-size:var(--fs-m)}
+  .toolbar.build .idf.named dt{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .toolbar.build .idf.moved{display:none}
+  .toolbar.build .areas{grid-area:areas;align-self:stretch;min-width:0;margin:0 -.7rem 0 -.86rem;height:auto;min-height:2.45rem}
+  .toolbar.build .hgroup{grid-area:actions;align-self:stretch;margin:0 -.86rem 0 0;padding:.3rem .86rem .3rem .7rem;border-top:1px solid var(--line);gap:.6rem}
+  .home-grid{display:block;overflow:auto;background:var(--paper)}
+  .panel{display:block;border-bottom:1px solid var(--line)}
+  .panel-body{overflow:visible}
+  .pane-head .sub{display:none}
+  /* Discovery: inspector below the list, Build column dropped. */
+  .disc-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1.2fr) minmax(0,1fr)}
+  .d-insp{border-left:0;border-top:1px solid var(--line)}
+  .d-insp .insp-head{min-height:0;padding:.35rem 1rem}
+  .d-insp .insp-head .label,.d-insp .insp-head p{display:none}
+  .insp-foot .reason{display:none}
+  .cols{grid-template-columns:minmax(5.5rem,1fr) minmax(7rem,1.3fr) minmax(5.5rem,1fr) minmax(6rem,1.1fr)}
+  .cols>:nth-child(3){display:none}
+  .list-scroll{overflow-x:hidden}
+  /* Settings: one scrolling pane. Each control moves below its text; About follows the list. */
+  .settings{display:block;overflow:auto;background:var(--paper)}
+  .settings .pane-head .sub{display:block;flex:1 1 100%}
+  .set-list{overflow:visible}
+  .set-side{overflow:visible;border-left:0;border-top:1px solid var(--line)}
+  .setting{grid-template-columns:minmax(0,1fr)}
+  .ctl{margin-top:.7rem}
+  .activity-panel{width:100%}
+  .statusbar .secondary{display:none}
+}
+
+/* Mockup-only: state control and focus-order badges. Not part of the design. */
+.mock{position:fixed;left:.6rem;bottom:2.3rem;z-index:10;max-width:calc(100vw - 1.2rem);background:#243b3a;color:#fff;border-radius:6px;padding:.35rem .5rem;font:12px/1.6 system-ui,sans-serif;display:flex;flex-wrap:wrap;gap:.2rem;align-items:center;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.mock a{color:#cde7dc;text-decoration:none;padding:0 .35rem;border-radius:4px}
+.mock a[aria-current="true"]{background:#176e66;color:#fff}
+.mock .sep{opacity:.5}
+.mock .note{opacity:.75;padding:0 .35rem}
+.fo{position:fixed;z-index:9;pointer-events:none;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#243b3a;color:#fff;font:700 11px/18px system-ui,sans-serif;text-align:center;box-shadow:0 0 0 2px #fff}
+</style></head>
+<body>
+
+<!-- ======================= Discovery ======================= -->
+<div class="app" id="disc">
+  <a class="skip" href="#d-builds">Skip to builds</a>
+  <header class="toolbar plain" id="disc-toolbar">
+    <div class="brand"><img src="../../../branding/vibeminer.svg" alt="VibeMiner"><span class="word" aria-hidden="true">Vibe<span>Miner</span></span></div>
+    <div class="spacer"></div>
+    <span class="act-slot" data-screen="disc"></span>
+    <button class="btn settings-btn" id="disc-settings" aria-keyshortcuts="Control+Comma"></button>
+  </header>
+  <main class="disc-body" id="disc-main">
+    <section class="pane" aria-labelledby="d-title">
+      <div class="pane-head">
+        <h1 id="d-title" tabindex="-1">Builds<span class="n" id="d-count"></span></h1>
+        <input id="d-search" class="control" type="search" placeholder="Filter version or build" aria-label="Filter version or build number" aria-keyshortcuts="Control+F">
+        <select id="d-product" class="control" aria-label="Product"><option value="all">All products</option><option value="wow">wow · Retail</option><option value="wowt">wowt · PTR</option><option value="wow_classic">wow_classic · Classic Progression</option><option value="wow_classic_era">wow_classic_era · Classic Era</option><option value="wow_anniversary">wow_anniversary · Anniversary</option></select>
+        <div class="segmented" role="group" aria-label="Build visibility" id="d-vis"><button aria-pressed="true" data-vis="all">All</button><button aria-pressed="false" data-vis="prepared">Prepared</button><button aria-pressed="false" data-vis="current">Current</button></div>
+        <button class="btn refresh" aria-keyshortcuts="F5"><span aria-hidden="true">↻</span> Refresh builds</button>
+      </div>
+      <div id="d-notice"></div>
+      <div class="list-scroll" id="d-list"></div>
+    </section>
+    <aside class="d-insp" id="d-insp" aria-labelledby="d-insp-title"></aside>
+  </main>
+  <footer class="statusbar" id="disc-status"></footer>
+</div>
+
+<!-- ======================= Home ======================= -->
+<div class="app" id="home" hidden>
+  <a class="skip" href="#home-area">Skip to content</a>
+  <header class="toolbar build" id="home-toolbar">
+    <div class="brand"><img src="../../../branding/vibeminer.svg" alt="VibeMiner"><span class="word" aria-hidden="true">Vibe<span>Miner</span></span></div>
+    <div class="divider"></div>
+    <dl class="idfields" aria-label="Open build">
+      <div class="idf named"><dt>Product</dt><dd>Retail<span class="pid">wow</span></dd></div>
+      <div class="idf named"><dt>Build</dt><dd class="selectable">12.1.5.70448</dd></div>
+      <div class="idf moved"><dt>Source</dt><dd>US</dd></div>
+      <div class="idf moved"><dt>Locale</dt><dd>English · enUS</dd></div>
+      <div class="idf"><dt>Status</dt><dd>Partial</dd></div>
+      <div class="idf"><dt>Download mode</dt><dd id="h-mode">On demand</dd></div>
+    </dl>
+    <div class="hgroup"><span class="act-slot" data-screen="home"></span><button class="btn primary" id="choose">← Choose build</button><button class="btn settings-btn" id="home-settings" aria-keyshortcuts="Control+Comma"></button></div>
+    <nav class="areas" id="h-areas" aria-label="Build areas"></nav>
+  </header>
+  <main id="home-area" tabindex="-1" style="display:grid;min-height:0;outline:none"></main>
+  <footer class="statusbar" id="home-status"></footer>
+</div>
+
+<!-- ======================= Settings ======================= -->
+<div class="app" id="set" hidden>
+  <a class="skip" href="#s-list">Skip to settings</a>
+  <header class="toolbar plain" id="set-toolbar">
+    <div class="brand"><img src="../../../branding/vibeminer.svg" alt="VibeMiner"><span class="word" aria-hidden="true">Vibe<span>Miner</span></span></div>
+    <div class="divider"></div>
+    <button class="btn" id="s-back"></button>
+    <div class="spacer"></div>
+    <span class="act-slot" data-screen="set"></span>
+  </header>
+  <main class="settings" id="set-main" aria-labelledby="s-title">
+    <div class="pane-head"><h1 id="s-title" tabindex="-1">Settings</h1><span class="sub">For every product and build. A change saves as soon as you make it.</span></div>
+    <div class="set-list" id="s-list" tabindex="-1" style="outline:none"></div>
+    <aside class="set-side" id="s-side" aria-labelledby="s-about"></aside>
+  </main>
+  <footer class="statusbar" id="set-status"></footer>
+</div>
+
+<div id="focus-layer" aria-hidden="true"></div>
+<nav class="mock" aria-label="Mockup state (not part of the design)" id="mock"></nav>
+
+<script>
+const p=new URLSearchParams(location.search);
+let screen=p.get('screen')==='home'?'home':'disc';       // the screen Settings was opened from
+let view=p.get('view')==='settings'?'set':screen;        // what is showing now
+const state=p.get('state')||'idle';                      // reading idle saving saved failed unreadable
+const limits=p.get('limits')==='adjustable'?'adjustable':'fixed';
+const activity=p.get('activity')==='1';
+const showFocus=p.get('focus')==='1';
+let area=['home','tables','files','items','creatures'].includes(p.get('area'))?p.get('area'):'home';
+let panelOpen=false;
+if(p.get('text')==='200')document.documentElement.dataset.text='200';
+if(p.get('chrome')==='0')document.getElementById('mock').remove();
+
+const $=id=>document.getElementById(id);
+const hex=seed=>{let h='',x=(seed*2654435761)>>>0;for(let i=0;i<32;i++){x=(x*1103515245+12345)>>>0;h+='0123456789abcdef'[x>>>28];}return h;};
+const SAMPLE='<span class="pill sample">Sample</span>';
+const gear='<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h8M13 12h1"/><circle cx="10.5" cy="4" r="1.5"/><circle cx="5.5" cy="8" r="1.5"/><circle cx="11.5" cy="12" r="1.5"/></svg>';
+document.querySelectorAll('.settings-btn').forEach(b=>b.innerHTML=gear+'Settings');
+
+/* ---------- Activity entry and panel (same component on every screen) ---------- */
+const sideOf={disc:'d-insp',home:null,set:'s-side'};
+function renderActivity(){
+  document.querySelectorAll('.act-slot').forEach(slot=>{
+    const s=slot.dataset.screen;
+    if(!activity){slot.innerHTML='';return;}
+    const open=panelOpen&&view===s;
+    slot.innerHTML=`<button class="activity-chip" id="chip-${s}" aria-expanded="${open}" aria-controls="panel-${s}"><span class="pulse" aria-hidden="true"></span><span class="chip-long">Downloads &amp; activity</span><span class="chip-short">Activity</span><span class="count" aria-label="1 saved Download all intent">1</span></button>${open?`<section class="activity-panel" id="panel-${s}" aria-labelledby="act-title-${s}"><header><h2 id="act-title-${s}" tabindex="-1">Downloads &amp; activity</h2><button class="btn small" id="act-close-${s}">Close</button></header><div class="rows"><div class="label">Build downloads</div><div class="task"><div class="t">wow 12.1.5.70448 · Download all</div><div class="s"><span aria-hidden="true">[2/3] </span>Downloading encoded content · US<span class="visually-hidden">Stage 2 of 3.</span></div><div class="bar" aria-hidden="true"><i style="width:25%"></i></div><div class="s">28.6 of 114.2 GiB · 25% of current stage</div></div><p class="tiny">Settings never pause or cancel downloads.</p></div></section>`:''}`;
+    $('chip-'+s).onclick=()=>{panelOpen=!panelOpen;renderActivity();if(panelOpen)$('act-title-'+s).focus();};
+    const c=$('act-close-'+s);if(c)c.onclick=closePanel;
+  });
+  placePanel();setInert();marks();
+}
+function closePanel(){if(!panelOpen)return;panelOpen=false;renderActivity();$('chip-'+view)?.focus();}
+function placePanel(){
+  const panel=document.querySelector('.activity-panel');if(!panel)return;
+  const app=$(view),top=app.querySelector('.toolbar').getBoundingClientRect().bottom,bottom=app.querySelector('.statusbar').offsetHeight;
+  panel.style.top=top+'px';panel.style.bottom=bottom+'px';
+}
+// What the panel covers is inert: the side column or inspector, or the whole content when the panel is full width.
+function setInert(){
+  ['disc-main','home-area','set-main','d-insp','s-side'].forEach(id=>{if($(id))$(id).inert=false;});
+  document.querySelectorAll('.panel.side').forEach(e=>e.inert=false);
+  const panel=document.querySelector('.activity-panel');if(!panel)return;
+  const full=panel.offsetWidth>=document.documentElement.clientWidth-1;
+  const main={disc:'disc-main',home:'home-area',set:'set-main'}[view];
+  if(full){$(main).inert=true;return;}
+  const side=view==='home'?document.querySelector('#home-area .panel.side'):$(sideOf[view]);
+  if(side)side.inert=true;
+}
+
+/* ---------- Discovery (simplified) ---------- */
+// Authored sample rows, as in all-products.html.
+const B=[['wow','Retail','12.1.5.70448','70448',['US','EU','KR'],{isNew:1}],['wow','Retail','12.1.5.70402','70402',[],{prepared:1,pct:3}],['wow','Retail','12.1.0.70011','70011',[],{prepared:1,pct:100}],['wow','Retail','12.0.7.69810','69810',[],{prepared:1,pct:41}],['wow','Retail','12.0.5.69402','69402',[],{}],['wowt','PTR','12.2.0.70631','70631',['US','EU'],{isNew:1}],['wow_classic','Classic Progression','5.5.3.70391','70391',['US','EU','KR','TW'],{prepared:1,pct:12}],['wow_classic_era','Classic Era','1.15.8.70402','70402',['US','EU'],{}],['wow_anniversary','Anniversary','2.5.5.70475','70475',['US','EU'],{}]]
+  .map(([product,label,v,b,adv,o],i)=>({i,product,label,v,b,adv,prepared:!!o.prepared,isNew:!!o.isNew,pct:o.pct??null,cfg:hex(i+1),cdn:hex(i+101)}));
+let dSel=0,dActive=0,dVis='all';
+const dRows=()=>{const q=$('d-search').value.trim().toLowerCase(),pr=$('d-product').value;
+  return B.filter(x=>(pr==='all'||x.product===pr)&&(!q||x.v.includes(q)||x.b.includes(q))&&(dVis==='all'||(dVis==='prepared'?x.prepared:x.adv.length)));};
+function renderDiscList(keepFocus){
+  const rows=dRows(),el=$('d-list'),sc=el.scrollTop;
+  $('d-count').textContent=String(rows.length);
+  const hidden=!rows.some(x=>x.i===dSel);
+  $('d-notice').innerHTML=hidden?`<div class="notice d-notice"><div class="text"><strong>Selected build is hidden by these filters</strong>${B[dSel].product} ${B[dSel].v} is still selected. Clear filters to see it in the list.</div></div>`:'';
+  if(!rows.some(x=>x.i===dActive))dActive=rows.length?rows[0].i:dSel;
+  const dl=x=>x.pct===null?`<span class="dim">${x.prepared?'Not checked':'Not opened'}</span>`:`<span class="meter"><span class="track" aria-hidden="true"><i style="width:${x.pct}%"></i></span>${x.pct}%</span>`;
+  const here=x=>[x.prepared?'<span class="pill">Prepared</span>':'',x.isNew?'<span class="pill gold">New to VibeMiner</span>':''].join(' ')||'<span class="dim">—</span>';
+  el.innerHTML=rows.length?`<div class="cols thead" aria-hidden="true"><span>Product</span><span>Version</span><span>Build</span><span>Downloaded</span><span>In VibeMiner</span></div>
+    <div role="listbox" id="d-builds" aria-label="Builds" tabindex="0" aria-activedescendant="d-opt-${dActive}">${rows.map(x=>`<div role="option" id="d-opt-${x.i}" data-i="${x.i}" class="cols${x.i===dActive?' active':''}${x.adv.length?' current':''}" aria-selected="${x.i===dSel}"><span class="product">${x.product}</span><span class="version">${x.v}${x.adv.length?'<span class="pill gold">Current</span>':''}</span><span class="dim"><span class="visually-hidden">Build </span>${x.b}</span><span><span class="visually-hidden">Downloaded </span>${dl(x)}</span><span>${here(x)}</span></div>`).join('')}</div>`
+    :`<div class="stand-in"><div><h1>No loaded build matches “${$('d-search').value}”</h1><p>The filter applies to loaded builds only.</p></div></div>`;
+  el.scrollTop=sc;
+  const lb=$('d-builds');if(!lb)return;
+  const move=i=>{const r=dRows(),k=r.findIndex(x=>x.i===dActive),n=Math.max(0,Math.min(r.length-1,i(k,r.length)));dActive=dSel=r[n].i;renderDiscList(true);renderDiscInsp();$('d-builds').focus();$('d-opt-'+dActive).scrollIntoView({block:'nearest'});};
+  lb.querySelectorAll('[role=option]').forEach(o=>o.onclick=()=>{const t=+o.dataset.i;move((k,n)=>dRows().findIndex(x=>x.i===t));});
+  lb.onkeydown=e=>{const f={ArrowDown:k=>k+1,ArrowUp:k=>k-1,Home:()=>0,End:(k,n)=>n-1,PageDown:k=>k+10,PageUp:k=>k-10}[e.key];if(f){e.preventDefault();move(f);}};
+  if(keepFocus)lb.focus({preventScroll:true});
+  marks();
+}
+function renderDiscInsp(){
+  const x=B[dSel];
+  $('d-insp').innerHTML=`<div class="insp-head"><div class="label">Selected build</div><h2 id="d-insp-title" class="selectable">${x.v}</h2><p>World of Warcraft · ${x.label} · <span class="mono">${x.product}</span></p></div>
+  <div class="insp-body" id="d-insp-body">${x.prepared?'<div class="state-box"><strong>Prepared locally</strong>Local evidence recorded. Game content downloads on demand.</div>':'<div class="state-box"><strong>Not prepared</strong>Opening verifies configs and measures download size.</div>'}
+    <div class="label">Identity</div><dl class="facts"><dt>Product</dt><dd><span class="mono">${x.product}</span> · ${x.label}</dd><dt>Build</dt><dd class="selectable">${x.b}</dd><dt>Build config</dt><dd class="mono selectable">${x.cfg}</dd><dt>CDN config</dt><dd class="mono selectable">${x.cdn}</dd></dl>
+    <div class="label">Observation</div><dl class="facts"><dt>Publication</dt><dd>${x.adv.length?'Current: advertised at last check':'Not advertised at last check'}</dd><dt>Advertised in</dt><dd>${x.adv.length?x.adv.join(', '):'None at last check'}</dd></dl></div>
+  <div class="insp-foot"><div class="field"><label for="d-source">Download source</label><select id="d-source" class="control"><option>US</option><option>EU</option></select></div><button class="btn primary" id="d-open">Open build</button><p class="reason">Browsing never downloads game content.</p></div>`;
+  $('d-open').onclick=()=>switchScreen('home');
+  marks();
+}
+$('d-search').oninput=()=>renderDiscList();
+$('d-product').onchange=()=>renderDiscList();
+document.querySelectorAll('#d-vis button').forEach(b=>b.onclick=()=>{dVis=b.dataset.vis;document.querySelectorAll('#d-vis button').forEach(x=>x.setAttribute('aria-pressed',x===b));renderDiscList();});
+
+/* ---------- Home (simplified) ---------- */
+const AREA_NAME={home:'Home',tables:'Tables',files:'Files',items:'Items',creatures:'Creatures'};
+function renderAreas(){
+  const btn=id=>`<button data-area="${id}"${area===id?' aria-current="page"':''}>${AREA_NAME[id]}</button>`;
+  $('h-areas').innerHTML=btn('home')+`<span class="area-group" role="group" aria-label="Source data">${btn('tables')+btn('files')}</span><span class="area-sep" aria-hidden="true"></span><span class="area-group" role="group" aria-label="Game data">${btn('items')+btn('creatures')}</span>`;
+  $('h-areas').querySelectorAll('button').forEach(b=>b.onclick=()=>setArea(b.dataset.area));
+}
+let filesQuery='841626';
+function renderHomeArea(){
+  const el=$('home-area');
+  if(area==='home'){
+    el.innerHTML=`<section class="home" aria-labelledby="h-title"><div class="pane-head"><h1 id="h-title" tabindex="-1">Build overview</h1><span class="sub">US download source · advertised in US, EU, KR · measurements cover every published variant</span></div>
+    <div class="home-grid" id="h-grid">
+      <section class="panel" aria-labelledby="p-sizes"><div class="panel-head"><h2 id="p-sizes">Download sizes</h2><span class="scope">Encoded bytes</span></div><div class="panel-body"><div class="metric"><span class="mlabel">Published download content</span><strong>118.4 GiB</strong><span class="exact mono">127,131,034,112 bytes</span></div><dl class="facts"><dt>Unique encoded objects</dt><dd>1,312,577</dd><dt>Decoded / installed size</dt><dd class="dim">Unknown</dd></dl></div></section>
+      <section class="panel" aria-labelledby="p-cat"><div class="panel-head"><h2 id="p-cat">File catalog</h2><span class="scope">ROOT and install manifests</span></div><div class="panel-body"><div class="metric"><span class="mlabel">Catalog memberships</span><strong>1,284,630</strong><span class="exact">All published variants</span></div></div><div class="panel-foot"><button class="btn small" id="h-browse">Browse in Files</button></div></section>
+      <section class="panel wide" aria-labelledby="p-storage"><div class="panel-head"><h2 id="p-storage">Local content &amp; shared storage</h2><span class="scope">Download manifest scope · exact build</span></div><div class="panel-body"><dl class="facts"><dt>Verified locally at assessment</dt><dd>4.2 GiB · 3.55%</dd><dt>Additional encoded content required</dt><dd>114.2 GiB</dd><dt>Assessed</dt><dd>Oct 18, 2026, 8:00 AM</dd></dl></div></section>
+      <aside class="panel side" aria-labelledby="p-ready"><div class="panel-head"><h2 id="p-ready">Build readiness</h2><span class="scope">All published variants</span></div><div class="panel-body"><div class="state-box" style="margin-bottom:.8rem"><strong>Partial</strong><p>Metadata and the download manifest are verified. Content stays on demand.</p></div><dl class="facts"><dt>Build and CDN configs</dt><dd class="ok">Verified</dd><dt>Download manifest</dt><dd class="ok">Verified</dd><dt>Research file catalog</dt><dd class="ok">Ready</dd></dl></div></aside>
+    </div></section>`;
+    $('h-browse').onclick=()=>setArea('files');
+  }else{
+    el.innerHTML=`<section class="stand-in" aria-labelledby="h-title"><div><h1 id="h-title" tabindex="-1">${AREA_NAME[area]}</h1><p>Simplified here. The approved layout is in desktop-home/index.html?area=${area}.</p>${area==='files'?`<input class="control" id="h-fsearch" type="search" aria-label="Search by FileDataID or content key" value="${filesQuery}">`:''}</div></section>`;
+    const f=$('h-fsearch');if(f)f.oninput=()=>{filesQuery=f.value;};
+  }
+  marks();
+}
+function setArea(a){area=a;renderAreas();renderHomeArea();renderStatus();syncUrl();$('h-title').focus({preventScroll:true});}
+$('choose').onclick=()=>switchScreen('disc');
+
+/* ---------- Switching screens: the left screen stays mounted, so its state is kept ---------- */
+function switchScreen(s){
+  panelOpen=false;screen=s;view=s;
+  ['disc','home','set'].forEach(id=>$(id).hidden=id!==view);
+  renderActivity();renderStatus();syncUrl();renderMock();
+  (s==='home'?$('h-title'):$('d-title')).focus({preventScroll:true});
+}
+let origin=null;   // {focus, scroll}: where Settings was opened from
+const scrollers=()=>[...$(screen).querySelectorAll('.list-scroll,.insp-body,.home-grid,.panel-body,.stand-in')];
+function openSettings(){
+  if(view==='set')return;
+  origin={focus:document.activeElement?.id&&$(screen).contains(document.activeElement)?document.activeElement.id:null,trigger:screen+'-settings',scroll:scrollers().map(e=>e.scrollTop)};
+  panelOpen=false;view='set';
+  $(screen).hidden=true;$('set').hidden=false;
+  renderSettings();renderActivity();renderStatus();syncUrl();renderMock();
+  $('s-title').focus({preventScroll:true});
+}
+// Escape or Back: the same screen, area, filters, selection and scroll; focus returns to the Settings entry.
+function closeSettings(){
+  if(view!=='set')return;
+  panelOpen=false;view=screen;
+  $('set').hidden=true;$(screen).hidden=false;
+  if(origin)scrollers().forEach((e,i)=>{e.scrollTop=origin.scroll[i]??0;});
+  renderActivity();renderStatus();syncUrl();renderMock();
+  $((origin&&origin.trigger)||screen+'-settings').focus({preventScroll:true});
+}
+$('disc-settings').onclick=openSettings;
+$('home-settings').onclick=openSettings;
+$('s-back').onclick=closeSettings;
+
+/* ---------- Settings ---------- */
+const T_SAVED='Oct 20, 2026, 9:14 AM';
+const S={
+  community:{value:state==='saved',phase:{reading:'reading',saving:'saving',saved:'saved',failed:'failed',unreadable:'unreadable'}[state]||'idle',target:true},
+  parallel:{value:'4',phase:state==='reading'?'reading':'idle'},
+  cap:{value:'none',phase:state==='reading'?'reading':'idle'},
+  storage:{phase:state==='reading'?'reading':'idle',note:''}};
+let lastChange=state==='saved'?T_SAVED:'Oct 18, 2026, 8:02 AM';
+
+function communityHtml(){
+  const c=S.community,on=c.value;
+  let control,line='',extra='';
+  if(c.phase==='reading'){
+    control='<span class="loading-line" role="status"><span class="pulse" aria-hidden="true"></span>Reading saved value…</span><span class="dflt">No switch until the saved value is known.</span>';
+  }else{
+    const busy=c.phase==='saving';
+    control=`<button class="switch" role="switch" id="community-switch" aria-checked="${on}"${busy?' aria-disabled="true"':''} aria-labelledby="community-name" aria-describedby="community-desc community-save"><span class="track" aria-hidden="true"></span><span>${busy?(c.target?'Turning on…':'Turning off…'):on?'On':'Off'}</span></button><span class="dflt">Default: Off${c.phase==='unreadable'?' · in use now':''}</span>`;
+    line=busy?'<span class="busy"><span class="pulse" aria-hidden="true"></span>Saving…</span>'
+      :c.phase==='saved'?`<span class="ok">Saved</span> · ${T_SAVED}`:'';
+    if(c.phase==='failed')extra=`<div class="notice error" role="alert"><div class="text"><strong>Couldn’t save Community build history. It’s still Off.</strong>The engine couldn’t write the settings file. Nothing else changed. <code>(SETTINGS_WRITE_FAILED)</code></div><button class="btn" id="community-retry">Retry turning on</button></div>`;
+    if(c.phase==='unreadable')extra=`<div class="state-box warn" role="note"><strong>Saved value couldn’t be read. Using the default, Off.</strong><p>The settings file has a value for this setting that VibeMiner doesn’t understand, so it is ignored and nothing is fetched from the community source. Switching saves a new value. <code>(SETTING_UNREADABLE)</code></p></div>`;
+  }
+  return `<div class="setting" id="row-community">
+    <div class="text">
+      <h3 id="community-name">Community build history <span class="opt">(optional)</span></h3>
+      <p id="community-desc">Blizzard’s version service only lists current builds. This adds older builds from one community-kept build list, so you can open builds VibeMiner never saw itself.</p>
+      <dl class="effects">
+        <dt>When on</dt><dd>At each <strong>Refresh builds</strong>, Discovery also reads the build list from <strong>Sample build history</strong> (<span class="mono">build-history.example</span>)${SAMPLE}. Only the list comes from there: product, version, build number and config hashes. All data still comes from Blizzard’s CDN and is checked against its hash, so a wrong entry can only fail to open. These builds get a <span class="pill community">Community</span> badge.</dd>
+        <dt>When off</dt><dd>Discovery lists only builds seen on Blizzard’s version service, and VibeMiner doesn’t contact the community source. Community builds you haven’t opened are hidden; ones you opened stay, with their badge.</dd>
+        <dt>Takes effect</dt><dd>At the next Refresh builds. Nothing is fetched when you switch.</dd>
+      </dl>
+    </div>
+    <div class="ctl">${control}<span class="save-line" id="community-save" role="status">${line}</span></div>
+    ${extra}
+  </div>`;
+}
+function storageHtml(){
+  const reading=S.storage.phase==='reading';
+  return `<div class="setting" id="row-storage">
+    <div class="text">
+      <h3 id="storage-name">Storage location</h3>
+      <p>Where VibeMiner keeps everything it downloads, its build database and these settings.</p>
+      <dl class="facts">
+        <dt>Folder</dt><dd><span class="path selectable" id="storage-path">/home/sample-user/.config/VibeMiner/engine-v1</span>${SAMPLE}</dd>
+        <dt>Size on disk</dt><dd>${reading?'<span class="loading-line"><span class="pulse" aria-hidden="true"></span>Measuring…</span>':`48.2 GiB <span class="dim mono">· 51,749,982,208 bytes</span>${SAMPLE}`}</dd>
+        <dt>Measured</dt><dd>${reading?'<span class="dim">Not measured yet</span>':'Oct 20, 2026, 9:12 AM · when Settings opened'}</dd>
+      </dl>
+      <dl class="effects">
+        <dt>Changes</dt><dd>Read-only for now. The size is the whole folder, every build together, not a build’s download size from Home.</dd>
+      </dl>
+    </div>
+    <div class="ctl"><div class="ctl-row"><button class="btn" id="storage-copy" aria-describedby="storage-name">Copy path</button><button class="btn" id="storage-show">Show in folder</button></div><span class="save-line" id="storage-line" role="status">${S.storage.note}</span></div>
+  </div>`;
+}
+function limitsHtml(){
+  if(limits==='fixed')return `<div class="setting" id="row-limits">
+    <div class="text">
+      <h3 id="limits-name">Download limits</h3>
+      <p>How much VibeMiner downloads from Blizzard’s CDN at once. What you’re looking at always goes first; Download all uses what’s left.</p>
+      <dl class="facts"><dt>Parallel downloads</dt><dd>Up to 4 at once, at most 2 of them for background downloads</dd><dt>Bandwidth cap</dt><dd>None</dd></dl>
+      <dl class="effects"><dt>Changes</dt><dd>Fixed in this version.</dd></dl>
+    </div>
+    <div class="ctl"><span class="pill plain">Fixed for now</span></div>
+  </div>`;
+  const sel=(k,id,opts)=>{const s=S[k],busy=s.phase==='saving';return `<select class="control" id="${id}"${busy?' aria-disabled="true"':''} aria-describedby="${id}-save">${opts.map(([v,l])=>`<option value="${v}"${s.value===v?' selected':''}>${l}</option>`).join('')}</select><span class="save-line" id="${id}-save" role="status">${s.phase==='reading'?'Reading saved value…':busy?'<span class="busy"><span class="pulse" aria-hidden="true"></span>Saving…</span>':s.phase==='saved'?`<span class="ok">Saved</span> · ${T_SAVED}`:''}</span>`;};
+  return `<div class="setting" id="row-limits">
+    <div class="text">
+      <h3 id="limits-name">Download limits</h3>
+      <p>How much VibeMiner downloads from Blizzard’s CDN at once. What you’re looking at always goes first; Download all uses what’s left.</p>
+      <dl class="effects">
+        <dt>Parallel downloads</dt><dd>Fewer is gentler on your connection and makes Download all slower. Research still goes first, and background downloads use at most half.</dd>
+        <dt>Bandwidth cap</dt><dd>An upper limit for all downloads together, research included. It isn’t a promised speed.</dd>
+        <dt>Takes effect</dt><dd>For new downloads. Running ones finish the piece they’re on.</dd>
+      </dl>
+    </div>
+    <div class="ctl">
+      <div class="field"><label for="limits-parallel">Parallel downloads</label>${sel('parallel','limits-parallel',[['1','1'],['2','2'],['3','3'],['4','4 (default)'],['6','6'],['8','8']])}</div>
+      <div class="field"><label for="limits-cap">Bandwidth cap</label>${sel('cap','limits-cap',[['none','No cap (default)'],['2','2 MiB/s'],['5','5 MiB/s'],['10','10 MiB/s'],['25','25 MiB/s'],['50','50 MiB/s'],['100','100 MiB/s']])}</div>
+    </div>
+  </div>`;
+}
+function sideHtml(){
+  const c=S.community;
+  const box=c.phase==='reading'?'<div class="state-box plain" role="status"><strong>Reading settings…</strong><p>Values show once the engine has read them. Defaults are not shown as if they were saved.</p></div>'
+    :c.phase==='unreadable'?'<div class="state-box warn"><strong>1 setting is using its default</strong><p>Community build history’s saved value couldn’t be read. The other settings were read normally.</p></div>':'';
+  return `<div class="panel-head"><h2 id="s-about">About settings</h2></div><div class="side-body">${box}
+    <dl class="facts"><dt>Saved by</dt><dd>The VibeMiner engine</dd><dt>Applies to</dt><dd>Every product and build</dd><dt>Saved in</dt><dd>The storage folder, settings version 1</dd><dt>Last change</dt><dd>${c.phase==='reading'?'<span class="dim">Not read yet</span>':lastChange+SAMPLE}</dd></dl>
+    <p class="tiny">Changing a setting never deletes builds or downloaded files, and never pauses or cancels work in Downloads &amp; activity.</p>
+    <p class="tiny">Escape or <strong>${backLabel()}</strong> returns to ${screen==='disc'?'Discovery':AREA_NAME[area]} as you left it.</p></div>`;
+}
+const backLabel=()=>'← Back to '+(screen==='disc'?'Discovery':AREA_NAME[area]);
+function renderSettings(){
+  // Rerendering keeps focus on the same control when it still exists; otherwise on the nearest stable control.
+  const list=$('s-list'),had=document.activeElement,id=had&&$('set').contains(had)?had.id:null,sc=$('set-main').scrollTop,lsc=list.scrollTop;
+  $('s-back').textContent=backLabel();
+  list.innerHTML=`<section aria-labelledby="g-builds"><h2 class="label group-h" id="g-builds">Builds</h2>${communityHtml()}</section>
+    <section aria-labelledby="g-storage"><h2 class="label group-h" id="g-storage">Storage</h2>${storageHtml()}</section>
+    <section aria-labelledby="g-downloads"><h2 class="label group-h" id="g-downloads">Downloads</h2>${limitsHtml()}</section>`;
+  $('s-side').innerHTML=sideHtml();
+  $('set-main').scrollTop=sc;list.scrollTop=lsc;
+  if(id){const back=$(id)||(id==='community-retry'?$('community-switch'):null);if(back)back.focus({preventScroll:true});}
+  wireSettings();marks();
+}
+// Mockup only: a save settles after a short delay. The real control waits for the engine's committed value.
+function save(key,apply){
+  const s=S[key];s.phase='saving';renderSettings();
+  setTimeout(()=>{apply();s.phase='saved';lastChange=T_SAVED;renderSettings();},900);
+}
+function wireSettings(){
+  const sw=$('community-switch');
+  if(sw)sw.onclick=()=>{const c=S.community;if(c.phase==='saving')return;c.target=!c.value;save('community',()=>{c.value=c.target;});};
+  const r=$('community-retry');if(r)r.onclick=()=>{const c=S.community;c.target=true;save('community',()=>{c.value=true;});};
+  $('storage-copy').onclick=()=>{try{navigator.clipboard?.writeText($('storage-path').textContent);}catch(e){}S.storage.note='Path copied';renderSettings();};
+  $('storage-show').onclick=()=>{S.storage.note='Mockup: opens the folder in the file manager';renderSettings();};
+  [['limits-parallel','parallel'],['limits-cap','cap']].forEach(([id,k])=>{const el=$(id);if(!el)return;
+    el.onchange=()=>{if(S[k].phase==='saving'){el.value=S[k].value;return;}const v=el.value;save(k,()=>{S[k].value=v;});};});
+}
+
+/* ---------- Status bars ---------- */
+function renderStatus(){
+  const busy=activity&&!panelOpen?'<span class="busy"><span class="pulse" aria-hidden="true"></span>wow 12.1.5.70448 · Downloading encoded content · 25% of current stage</span>':'';
+  const fixture='<span class="pill sample">Sample data</span>';
+  $('disc-status').innerHTML=`<span class="secondary">Checked <strong>13 products</strong></span><span>Last check <strong>Oct 19, 2026, 9:40 AM</strong></span>${fixture}<span class="spacer"></span>${busy}`;
+  $('home-status').innerHTML=`<span><strong>wow 12.1.5.70448</strong> · US · enUS</span><span class="secondary">Assessed <strong>Oct 18, 2026, 8:00 AM</strong></span>${fixture}<span class="spacer"></span>${busy}`;
+  $('set-status').innerHTML=`<span><strong>Settings</strong> · saved by the engine</span><span class="secondary">${screen==='home'?`Open build kept: <strong>wow 12.1.5.70448</strong> · US · enUS`:'Discovery kept as you left it'}</span>${fixture}<span class="spacer"></span>${busy}`;
+}
+
+/* ---------- Keyboard ---------- */
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    if(e.defaultPrevented)return;
+    // One step at a time: the activity panel first, then Settings itself.
+    if(panelOpen){closePanel();return;}
+    if(view==='set'){e.preventDefault();closeSettings();}
+    return;
+  }
+  if((e.ctrlKey||e.metaKey)&&e.key===','){e.preventDefault();openSettings();return;}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&view==='disc'){e.preventDefault();$('d-search').focus();}
+});
+addEventListener('resize',()=>{placePanel();setInert();marks();});
+
+/* ---------- Mockup-only: URL sync, state control, focus-order badges ---------- */
+function syncUrl(){const q=new URLSearchParams(location.search);q.set('screen',screen==='home'?'home':'discovery');if(view==='set')q.set('view','settings');else q.delete('view');if(screen==='home')q.set('area',area);else q.delete('area');history.replaceState(null,'','?'+q);}
+function renderMock(){
+  const mock=$('mock');if(!mock)return;
+  const cur=new URLSearchParams(location.search);
+  const link=(changes,label,on)=>{const q=new URLSearchParams(cur);for(const[k,v]of Object.entries(changes)){if(v===null)q.delete(k);else q.set(k,v);}return `<a href="?${q}" aria-current="${on}">${label}</a>`;};
+  const sep='<span class="sep">|</span>';
+  const isSet=view==='set';
+  mock.innerHTML='<strong style="margin-right:.2rem">Mockup</strong>'
+    +link({screen:'discovery',view:null,area:null},'Discovery',!isSet&&screen==='disc')+link({screen:'home',view:null},'Home',!isSet&&screen==='home')
+    +link({screen:'discovery',view:'settings',area:null},'Settings from Discovery',isSet&&screen==='disc')+link({screen:'home',view:'settings'},'Settings from Home',isSet&&screen==='home')
+    +sep+[['reading','Reading'],['idle','Idle'],['saving','Saving'],['saved','Saved'],['failed','Save failed'],['unreadable','Unreadable']].map(([v,l])=>link({state:v,view:'settings'},l,isSet&&state===v)).join('')
+    +sep+link({limits:null,view:'settings'},'Limits fixed',limits==='fixed')+link({limits:'adjustable',view:'settings'},'Limits adjustable',limits==='adjustable')
+    +sep+link({activity:activity?null:'1'},'Activity',activity)+link({focus:showFocus?null:'1'},'Focus order',showFocus)
+    +sep+link({text:null},'100%',p.get('text')!=='200')+link({text:'200'},'200%',p.get('text')==='200')
+    +'<span class="note">Discovery and Home are simplified copies; only Settings is new.</span>';
+}
+// Numbers each Tab stop of the visible screen in DOM order (the skip link, first, is not numbered).
+function marks(){
+  const layer=$('focus-layer');if(!showFocus){layer.innerHTML='';return;}
+  const app=$(view);
+  const els=[...app.querySelectorAll('button,input,select,[tabindex="0"]')].filter(e=>!e.disabled&&e.tabIndex>=0&&!e.closest('[inert]')&&e.getClientRects().length);
+  layer.innerHTML=els.map((e,i)=>{const r=e.getBoundingClientRect();if(r.bottom<0||r.top>innerHeight)return '';return `<span class="fo" style="left:${Math.max(2,r.left-6)}px;top:${Math.max(2,r.top-8)}px">${i+1}</span>`;}).join('');
+}
+document.addEventListener('scroll',()=>marks(),true);
+
+/* ---------- Start ---------- */
+['disc','home','set'].forEach(id=>$(id).hidden=id!==view);
+renderDiscList();renderDiscInsp();renderAreas();renderHomeArea();
+if(view==='set'){origin={focus:null,trigger:screen+'-settings',scroll:[]};renderSettings();}
+renderActivity();renderStatus();renderMock();syncUrl();
+</script>
+</body></html>

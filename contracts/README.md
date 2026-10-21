@@ -41,3 +41,5 @@ Production build opening and bounded object pages use [download-size Home](downl
 [Tables definitions](tables-v1.md) provide local pinned provider catalogue and exact-build candidate structures, with source/row readiness explicitly separate.
 
 [Table data](table-data-v1.md) adds explicit demand preparation, verified local readiness and bounded exact artifact row pages with enUS scope, source receipts and coverage.
+
+[Settings](settings-v1.md) are app-wide values the engine saves in its data folder, plus a cancellable measurement of that folder's size.

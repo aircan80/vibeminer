@@ -170,3 +170,5 @@
 .discovery-screen .dv-compact .dv-pane{overflow-y:auto}
 .discovery-screen .dv-compact .dv-list{flex:1 1 0;min-height:6.4rem}
 
+/* Settings entry (docs/design/desktop-settings): a plain toolbar button with a sliders icon, always the last toolbar item. */
+.discovery-screen .settings-entry svg{width:.933333rem;height:.933333rem;flex:none;color:var(--dv-muted)}

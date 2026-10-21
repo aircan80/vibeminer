@@ -111,10 +111,16 @@ function waitForRelease(name, signal) {
     if (signal.aborted) abort(); else if (existsSync(target)) finish();
   });
 }
+function settingsSnapshot() {
+  const file = path.join(directory, 'settings.json'), stored = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
+  return { formatVersion: 1, file: stored ? 'read' : 'absent', problem: null, lastChangedAt: stored?.changedAt ?? null,
+    communityBuildHistory: { value: stored?.value ?? false, defaultValue: false, source: stored ? 'saved' : 'default', problem: null },
+    storage: { dataDirectory: path.join(directory, 'catalog') }, downloadLimits: { parallelDownloads: 4, backgroundDownloads: 2, bandwidthCapBytesPerSecond: null, adjustable: false } };
+}
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[])] });
   if(creaturesEnabled&&method.startsWith('creatures.')){
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
     if(!opened.has(key))return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
@@ -169,6 +175,14 @@ async function dispatch(request) {
       Object.assign(s,{revision:String(BigInt(s.revision)+1n),jobId:s.jobId??'authored-retention-job',mode:action==='onDemand'?'onDemand':'downloadAll',paused:action==='pause',state:action==='pause'||action==='onDemand'?'stopping':'queued',pendingObjects:0});retentionJobs.set(key,s);return reply(id,s);
     }
   }
+  // Authored settings: kept in the control directory; a settings-write-fail file makes the next write fail.
+  if (method === 'settings.read') return reply(id, settingsSnapshot());
+  if (method === 'settings.set') {
+    if (existsSync(path.join(directory, 'settings-write-fail'))) return fail(id, 'SETTINGS_WRITE_FAILED', 'The engine couldn’t write the settings file. Nothing else changed.', true);
+    writeFileSync(path.join(directory, 'settings.json'), JSON.stringify({ value: params.value, changedAt: new Date().toISOString() }));
+    return reply(id, settingsSnapshot());
+  }
+  if (method === 'settings.storage.measure') { const now = new Date().toISOString(); return reply(id, { bytes: '51749982208', files: '1204', skipped: '0', startedAt: now, measuredAt: now }); }
   if (method === 'products.list') return reply(id, { products: fixtureProducts });
   if (method === 'discovery.readAll') return reply(id, catalogFor(params.productId ?? null, params.filter ?? 'all', params.limit ?? 50));
   if (method === 'discovery.read') return reply(id, pageFor(params.productId, params.filter, params.limit));

@@ -14,8 +14,9 @@ import {authorizedIconImage} from './icon-provenance';
 import {validIconBatch,validIconView} from '../shared/item-icons';
 import { validItemsContext, validItemsPage, validItemInspect } from '../shared/items';
 import { validRetentionTarget, validRetentionSet } from '../shared/retention';
+import { validSettingsSet, validEmpty } from '../shared/settings';
 import { validTableData, validTableRows } from '../shared/table-data';
-import { app, BrowserWindow, ipcMain, nativeImage, protocol, session } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, nativeImage, protocol, session, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -80,7 +81,18 @@ function registerBridge(): void {
       }
       if(method==='desktop.icons'){const p=params as{params?:unknown;viewId?:unknown};if(!p||typeof p!=='object'||Object.keys(p).length!==2||!validIconBatch(p.params,12)||!validIconView(p.viewId)||!validRequestId(requestId))throw new EngineFailure('INVALID_REQUEST','Choose at most twelve exact visible icons.');const document=icons.documentToken;await ready;if(document!==icons.documentToken||!window||event.senderFrame!==window.webContents.mainFrame)throw new EngineFailure('ICON_VIEW_RETIRED','The image document was left.');return{ok:true,value:await icons.batch(p.params,requestId,p.viewId)};}
       if(method==='desktop.iconsRelease'){const p=params as{viewId?:unknown};if(!p||typeof p!=='object'||Object.keys(p).length!==1||!validIconView(p.viewId))throw new EngineFailure('INVALID_REQUEST','Invalid icon view.');return{ok:true,value:await icons.release(p.viewId)};}
-      if (method === 'desktop.capabilities' || method === 'retention.list' || method === 'products.list') { if (!params || typeof params !== 'object' || Object.keys(params).length) throw new EngineFailure('INVALID_REQUEST', 'Invalid product query.'); }
+      // Main owns the data folder path: the renderer can only ask for these two fixed actions on it.
+      if (method === 'desktop.storage.copyPath' || method === 'desktop.storage.showFolder') {
+        if (!validEmpty(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid storage folder action.');
+        const folder = engineDataDirectory();
+        if (method === 'desktop.storage.copyPath') { clipboard.writeText(folder); return { ok: true, value: { copied: true } }; }
+        if (await shell.openPath(folder)) throw new EngineFailure('STORAGE_FOLDER_UNAVAILABLE', 'The storage folder could not be opened in the file manager.', true);
+        return { ok: true, value: { shown: true } };
+      }
+      if (method === 'settings.read') { if (!validEmpty(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid settings query.'); }
+      else if (method === 'settings.set') { if (!validSettingsSet(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one known setting value.'); }
+      else if (method === 'settings.storage.measure') { if (!validEmpty(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Invalid storage measurement request.'); }
+      else if (method === 'desktop.capabilities' || method === 'retention.list' || method === 'products.list') { if (!params || typeof params !== 'object' || Object.keys(params).length) throw new EngineFailure('INVALID_REQUEST', 'Invalid product query.'); }
       else if(method==='items.effects.data'||method==='items.effects.prepare'){if(!validItemEffectsSelection(params)||method==='items.effects.prepare'&&!validRequestId(requestId))throw new EngineFailure('INVALID_REQUEST','Choose one exact admitted Item.');}
       else if(method==='items.effects.page'){if(!validItemEffectsPage(params))throw new EngineFailure('INVALID_REQUEST','Choose one bounded exact effects page.');}
       else if(method==='items.effects.details'||method==='items.effects.details.prepare'){if(!validItemEffectDetails(params)||method.endsWith('.prepare')&&!validRequestId(requestId))throw new EngineFailure('INVALID_REQUEST','Choose bounded ordered effects edge keys.');}

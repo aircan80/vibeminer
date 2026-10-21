@@ -20,6 +20,10 @@ Source authority checks are stricter: they compare original `RetrievedAt`, URLs,
 
 A legacy metadata receipt with a null `Location` means a loose object at offset 0, source length equal to the encoded length, and no archive key, under the validated official exact-EKey URL (see `DownloadCatalog.MetadataSourceLocation`). This is a historical representation, not permission to treat any missing asset evidence as a loose locator.
 
+## Settings
+
+App-wide settings live in `settings-v1.json` in the engine data directory, next to the catalog, not in it. The engine writes a temporary file, flushes it and then replaces the file, so a failed write leaves the old one. A missing file means defaults; a malformed, oversized or newer-version file, or a single value it doesn't understand, is reported and that value uses its default. A newer file, or one whose bytes could not be read (too large, changed while read, locked or not permitted), is never overwritten. See [settings-v1](../contracts/settings-v1.md).
+
 ## Catalog
 
 The catalog is `discovery-v1.sqlite3` in the engine data directory. It opens with `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=FULL`, `busy_timeout=5000` and file-backed temp storage. One worker runs all SQLite work with at most 64 queued operations. The engine refuses a catalog with a newer `user_version` than it knows (`CATALOG_VERSION`).

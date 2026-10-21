@@ -1,0 +1,25 @@
+{
+  "formatVersion": 1,
+  "file": "read",
+  "problem": null,
+  "lastChangedAt": "2026-10-18T12:02:00.0000000+00:00",
+  "communityBuildHistory": {
+    "value": false,
+    "defaultValue": false,
+    "source": "unreadable",
+    "problem": {
+      "code": "SETTING_UNREADABLE",
+      "message": "The saved value for Community build history isn’t one VibeMiner understands.",
+      "retryable": false
+    }
+  },
+  "storage": {
+    "dataDirectory": "/home/example/.config/VibeMiner/engine-v1"
+  },
+  "downloadLimits": {
+    "parallelDownloads": 4,
+    "backgroundDownloads": 2,
+    "bandwidthCapBytesPerSecond": null,
+    "adjustable": false
+  }
+}

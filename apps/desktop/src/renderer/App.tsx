@@ -14,7 +14,7 @@ import {useItemsLoading,ItemsLoadBanner} from './useItemsLoading';
 import { useRetention } from './useRetention';
 import { exactBytes, exactCount } from '../shared/inventory';
 import { RetentionActivity } from './Retention';
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import './discovery.css';
 import type { Build, DiscoveryCatalogPage, Product, ProductDiscoveryStatus, ProductRefreshProblem, EngineProgress, RetentionSnapshot } from '../../../../contracts/generated/discovery';
 import type { BridgeReply, DiscoveryBridge, DiscoveryFilter, ReadAllParams } from '../shared/bridge';
@@ -23,6 +23,7 @@ import { TableLoadBanner, useTableLoading } from './useTableLoading';
 import { useWorkspaceFlow, type Opening } from './useWorkspaceFlow';
 import { PreparationView, HomeView } from './WorkspaceViews';
 import brand from '../../../../branding/vibeminer.svg';
+import { SettingsButton, SettingsProvider, SettingsView, type SettingsOrigin } from './Settings';
 const stamp = (value: string | null) => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Not checked yet';
 const regions = (values: string[]) => values.length ? values.map(x => x.toUpperCase()).join(', ') : 'None recorded';
 const short = (value: string) => `${value.slice(0, 10)}…${value.slice(-4)}`;
@@ -110,19 +111,56 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
   const downloads=buildDownloads(retention.jobs);
   const activityContext=workspace?`${workspace.build.productId}:${workspace.build.id}:${workspace.sourceReference.region}:${workspace.sourceReference.generation}`:'discovery';
   const [problem, setProblem] = useState('');
+  // Settings replaces the window content. The screen it was opened from stays mounted but hidden and inert,
+  // so its search, filters, selection, area and trails come back; pane scroll positions are restored on return.
+  const [settings, setSettings] = useState<{ origin: SettingsOrigin; trigger: HTMLElement | null; scroll: [HTMLElement, number, number][] } | null>(null);
+  const settingsState = useRef(settings); settingsState.current = settings;
+  const settingsEntries = useRef(new Map<HTMLElement, () => SettingsOrigin>()), returning = useRef<NonNullable<typeof settings> | null>(null);
+  const settingsApi = useMemo(() => ({
+    register: (element: HTMLElement, origin: () => SettingsOrigin) => { settingsEntries.current.set(element, origin); return () => { settingsEntries.current.delete(element); }; },
+    open: (origin: SettingsOrigin, trigger: HTMLElement | null) => {
+      if (settingsState.current) return;
+      const view = document.querySelector<HTMLElement>('[data-app-view]:not([hidden])');
+      const scroll = view ? [...view.querySelectorAll<HTMLElement>('*')].filter(el => el.scrollTop || el.scrollLeft).map((el): [HTMLElement, number, number] => [el, el.scrollTop, el.scrollLeft]) : [];
+      setSettings({ origin, trigger, scroll });
+    },
+  }), []);
+  const closeSettings = useCallback(() => { returning.current = settingsState.current; setSettings(null); }, []);
+  useLayoutEffect(() => {
+    const back = returning.current; if (settings || !back) return; returning.current = null;
+    for (const [el, top, left] of back.scroll) if (el.isConnected) { el.scrollTop = top; el.scrollLeft = left; }
+    const visible = (el: HTMLElement | null) => !!el?.isConnected && !el.closest('[hidden],[inert]');
+    const target = visible(back.trigger) ? back.trigger : [...document.querySelectorAll<HTMLElement>('[data-app-view]:not([hidden]) .settings-entry, [data-app-view]:not([hidden]) h1')].find(visible);
+    target?.focus({ preventScroll: true });
+  }, [settings]);
+  useEffect(() => {
+    // Ctrl+, opens Settings from any screen, through its visible entry when there is one.
+    const keys = (event: globalThis.KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key !== ',') return;
+      event.preventDefault();
+      if (settingsState.current || document.querySelector('dialog[open]')) return;
+      const entry = [...settingsEntries.current].find(([el]) => el.isConnected && !el.closest('[hidden],[inert]'));
+      settingsApi.open(entry?.[1]() ?? { backLabel: 'Back to build preparation', returnsTo: 'build preparation', kept: 'Build preparation kept as you left it' }, entry?.[0] ?? null);
+    };
+    window.addEventListener('keydown', keys);
+    return () => window.removeEventListener('keydown', keys);
+  }, [settingsApi]);
   useEffect(() => { let disposed = false; void bridge.products().then(reply => {
     if (disposed) return;
     if (reply.ok) setProducts(reply.value.products);
     else setProblem(`${reply.error.message} (${reply.error.code})`);
   }).catch(() => { if (!disposed) setProblem('The local engine is unavailable. Restart VibeMiner to reconnect.'); }); return () => { disposed = true; }; }, [bridge]);
-  return <DownloadActivity tasks={tasks} contextKey={activityContext} onInfoAction={(info,action)=>{if(action==='refreshStatus'&&info.key===activityContext&&info.target&&workspace?.download&&info.target.ledgerId===workspace.download.ledgerId&&matches(info.target))retention.refresh(info.target);}} onAction={(key,action)=>taskActions.get(key)?.get(action)?.()}>
-    <div className="discovery-screen" hidden={flow.view !== 'discovery'} inert={flow.view !== 'discovery'}><a className="skip" href="#builds">Skip to builds</a>
-      <DiscoveryWorkspace active={flow.view === 'discovery'} products={products} bridge={bridge} acknowledgedBuild={flow.operation?.result?.build} acknowledgedRegion={flow.operation?.result?.sourceReference.region} downloads={downloads} opening={flow.operation} onShowOpening={() => flow.showActive()} onCancelOpening={() => { void flow.cancel(); }} onOpen={(build, region) => { void flow.open(build, region, products.find(p => p.id === build.productId)?.label || build.productId); }}
+  return <SettingsProvider value={settingsApi}><DownloadActivity tasks={tasks} contextKey={activityContext} onInfoAction={(info,action)=>{if(action==='refreshStatus'&&info.key===activityContext&&info.target&&workspace?.download&&info.target.ledgerId===workspace.download.ledgerId&&matches(info.target))retention.refresh(info.target);}} onAction={(key,action)=>{if(action==='view'&&settingsState.current){returning.current=null;setSettings(null);}/* View research leaves Settings for the task's screen. */taskActions.get(key)?.get(action)?.();}}>
+    <div className="discovery-screen" data-app-view="" hidden={flow.view !== 'discovery' || !!settings} inert={flow.view !== 'discovery' || !!settings}><a className="skip" href="#builds">Skip to builds</a>
+      <DiscoveryWorkspace active={flow.view === 'discovery' && !settings} products={products} bridge={bridge} acknowledgedBuild={flow.operation?.result?.build} acknowledgedRegion={flow.operation?.result?.sourceReference.region} downloads={downloads} opening={flow.operation} onShowOpening={() => flow.showActive()} onCancelOpening={() => { void flow.cancel(); }} onOpen={(build, region) => { void flow.open(build, region, products.find(p => p.id === build.productId)?.label || build.productId); }}
         fixtureLabel={bridge.fixtureLabel ?? undefined} problem={problem}/>
     </div>
+    <div className="app-view" data-app-view="" hidden={flow.view === 'discovery' || !!settings} inert={flow.view === 'discovery' || !!settings}>
     {flow.view === 'preparation' && flow.operation && <PreparationView tableActivity={null} operation={flow.operation} notice={flow.notice} fixtureLabel={bridge.fixtureLabel} onBack={flow.detach} onCancel={() => { void flow.cancel(); }} onRetry={() => { const op = flow.operation!; void flow.open(op.build, op.sourceRegion, op.label); }} onEnter={flow.enterVerified}/>}
     {flow.view === 'home' && flow.operation?.result && <HomeView activityNavigation={activityNavigation} effectsLoading={effectsLoading} effectsAvailable={['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1'].every(cap=>retention.features.includes(cap))&&!!bridge.itemEffectsRead&&!!bridge.itemEffectsPrepareLinks&&!!bridge.itemEffectsPage&&!!bridge.itemEffectDetails&&!!bridge.itemEffectPrepareDetails&&!!bridge.itemEffectNames&&!!bridge.itemEffectPrepareNames} creatureDisplays={creatureDisplays} creatureDisplayAvailable={retention.features.includes('creature-display-metadata-v1')&&!!bridge.creatureDisplayRead&&!!bridge.creatureDisplayPrepare} creaturesLoading={creaturesLoading} creaturesAvailable={retention.features.includes('creatures-v1')&&!!bridge.creaturesData&&!!bridge.creaturesPrepare&&!!bridge.creaturesPage&&!!bridge.creatureInspect} classificationsLoading={classificationsLoading} classificationsAvailable={retention.features.includes('item-classifications-v1')} subclassAvailable={retention.features.includes('item-subclass-labels-v1')} iconsLoading={iconsLoading} iconsAvailable={retention.features.includes('item-icons-v1')} itemsLoading={itemsLoading} itemsAvailable={retention.features.includes('items-v1')} retention={retention} tableLoading={tableLoading} operation={{ ...flow.operation, result: flow.operation.result }} fixtureLabel={bridge.fixtureLabel} onChoose={flow.detach} bridge={bridge} onReopen={() => { const op = flow.operation!; void flow.open(op.build, op.sourceRegion, op.label); }}/>}
-  </DownloadActivity>;
+    </div>
+    {settings && <SettingsView bridge={bridge} origin={settings.origin} fixtureLabel={bridge.fixtureLabel} onBack={closeSettings}/>}
+  </DownloadActivity></SettingsProvider>;
 }
 
 type ProductFilter = 'all' | string;
@@ -437,6 +475,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
       {fixtureLabel && <span className="dv-fixture"><strong>{fixtureLabel}</strong><span> · Synthetic identities and receipts.</span></span>}
       <div className="dv-spacer"/>
       <ActivityTrigger compact/>
+      <SettingsButton className="dv-btn" origin={discoveryOrigin}/>
     </header>
     <main className={`dv-body${refused || nothingSaved && !selected ? ' no-inspector' : ''}`} id="discovery">
       <section className="dv-pane" aria-labelledby="builds-heading">
@@ -500,6 +539,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
     </footer>
   </div>;
 }
+const discoveryOrigin: SettingsOrigin = { backLabel: 'Back to Discovery', returnsTo: 'Discovery', kept: 'Discovery kept as you left it' };
 function BuildOpenAction({ build, onOpen, onSource }: { build: Build; onOpen: (build: Build, sourceRegion: string) => void; onSource: () => void }) {
   const eligible = routeRegions(build);
   const [source, setSource] = useState(() => eligible.includes('us') ? 'us' : eligible[0] || '');

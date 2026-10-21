@@ -41,11 +41,13 @@ try
     await using var iconLeases = new ItemIconLeases(itemIcons);
     var retentionDriver = new BuildRetentionDriver(catalog, objects, acquisition, sourcePlans, client, resources);
     var retention = new RetentionService(catalog, retentionDriver);
+    var settings = new SettingsService(new JsonSettingsStore(dataDirectory), new DataDirectoryMeasurer(dataDirectory),
+        new VibeMiner.Domain.DownloadLimitSettings(resources.MaximumHttp, resources.MaximumBackgroundHttp, null, false));
     try
     {
         await retention.RestoreAsync();
         var host = new ProtocolHost(new DiscoveryService(source, catalog), workspace, new InventoryService(catalog),
-            new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects);
+            new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects, settings: settings);
         await host.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
     }
     finally { await retention.ShutdownAsync(); }

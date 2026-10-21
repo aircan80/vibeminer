@@ -28,6 +28,7 @@ These are the engine's current bounds. Code is the source of truth: [Acquisition
 | SQLite bulk batches | At most 64 rows/members per write batch (for example retention credit batches) |
 | Database worker queue | One worker, at most 64 queued operations |
 | Engine requests (host) | 32 active; the 33rd gets `BUSY` |
+| Storage measurement | One data-folder walk at a time, 512 entries per batch between yields and cancellation checks, 32 levels, 4096 queued folders, 5-minute budget (`STORAGE_MEASURE_TIMEOUT`). No acquisition permits |
 | Desktop `EngineClient` | 32 pending total. Ordinary requests are capped at 26, so 6 slots always remain for `request.cancel`, `shutdown`, `items.icon.close` and `creatures.geometry.close`. |
 
 A grant is never revoked. If an interactive request is demoted to background, its HTTP and CPU permits run to the end of their current bounded unit; the next request boundary applies the new priority.

@@ -12,7 +12,8 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
     ItemIconsService? itemIcons = null, ItemIconLeases? iconLeases = null,
     ItemClassificationsService? itemClassifications = null, CreaturesService? creatures = null,
     CreatureDisplayMetadataService? creatureDisplays = null, ItemEffectsService? itemEffects = null,
-    CreatureGeometryService? creatureGeometry = null, CreatureGeometryLeases? geometryLeases = null)
+    CreatureGeometryService? creatureGeometry = null, CreatureGeometryLeases? geometryLeases = null,
+    SettingsService? settings = null)
 {
     public const int MaxFrameBytes = 1024 * 1024;
     public const int MaxClassificationFrameBytes = 512 * 1024;
@@ -164,6 +165,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     RequireOnly(parameters);
                     var capabilities = new List<string> { "discovery-v1", "discovery-all-products-v1", "local-history", "cancellation", "home-download-v1", "download-v1", "inventory-v1", "tables-definitions-v1", "tables-data-v1" };
                     if (retention is not null) capabilities.Add("retention-v1");
+                    if (settings is not null) capabilities.Add("settings-v1");
                     if (items is not null) capabilities.Add("items-v1");
                     if (itemIcons is not null && iconLeases is not null) capabilities.Add("item-icons-v1");
                     if (itemClassifications is not null) capabilities.Add("item-classifications-v1");
@@ -541,6 +543,24 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                         ? await retention.ReadAsync(retentionTarget, request.Cancellation.Token)
                         : await retention.SetAsync(new(retentionTarget, RetentionWire.Action(RequiredString(parameters, "action")),
                             expectedRevision is null ? null : RetentionWire.Revision(expectedRevision)), request.Cancellation.Token));
+                    break;
+                case "settings.read":
+                    RequireOnly(parameters);
+                    if (settings is null) throw new DiscoveryException("SETTINGS_UNAVAILABLE", "Settings are unavailable.");
+                    result = SettingsWire.Snapshot(await settings.ReadAsync(request.Cancellation.Token));
+                    break;
+                case "settings.set":
+                    RequireOnly(parameters, "name", "value");
+                    if (settings is null) throw new DiscoveryException("SETTINGS_UNAVAILABLE", "Settings are unavailable.");
+                    var settingName = RequiredString(parameters, "name");
+                    if (!parameters.TryGetProperty("value", out var settingValue) || settingValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        throw new DiscoveryException("INVALID_REQUEST", "A setting value must be true or false.");
+                    result = SettingsWire.Snapshot(await settings.SetAsync(settingName, settingValue.GetBoolean(), request.Cancellation.Token));
+                    break;
+                case "settings.storage.measure":
+                    RequireOnly(parameters);
+                    if (settings is null) throw new DiscoveryException("SETTINGS_UNAVAILABLE", "Settings are unavailable.");
+                    result = SettingsWire.Measurement(await settings.MeasureAsync(request.Cancellation.Token));
                     break;
                 case "workspace.open":
                     RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion");

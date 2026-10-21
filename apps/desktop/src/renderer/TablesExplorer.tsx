@@ -36,7 +36,7 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
   const alive = useRef(true), activeNow = useRef(active), catalogSequence = useRef(0), definitionSequence = useRef(0);
   const provider = useRef<TableDefinitionProvider | null>(null), latestCursor = useRef(cursor); latestCursor.current = cursor; activeNow.current = active;
   const compactNow = useRef(compact), tablePaneNow = useRef(tablePane); compactNow.current = compact; tablePaneNow.current = tablePane;
-  useEffect(() => { if (!active) return; const key = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') { event.preventDefault(); setTablePane('catalog'); requestAnimationFrame(() => search.current?.focus()); } }; document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key); }, [active]);
+  useEffect(() => { if (!active) return; const key = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f' && !search.current?.closest('[inert]')) { event.preventDefault(); setTablePane('catalog'); requestAnimationFrame(() => search.current?.focus()); } }; document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key); }, [active]);
   type Movement = 'fresh' | 'next' | 'previous' | 'first';
   const lastCatalog = useRef<{ params: TablesCatalogParams; movement: Movement }>({ params: { ...context, query: '', limit: 50 }, movement: 'fresh' });
   const focusIntent = useRef<{ kind: 'heading' | 'trail'; field?: string | null; relation?: boolean } | null>(null);

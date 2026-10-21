@@ -36,7 +36,7 @@ export function HomeShell({snapshot,label,retention,onChoose,area,areas,status,f
  return <ShellContext.Provider value={{compact:size.compact,statusSlot}}><div ref={host} className={`desktop-home${size.compact?' dh-compact dh-medium':size.medium?' dh-medium':''}`} data-area={area}>
   <a className="dh-skip" href="#dh-area">Skip to content</a>
   <div className="dh-app">
-   <BuildHeader ref={toolbar} snapshot={snapshot} label={label} retention={retention} onChoose={onChoose} areas={areas}/>
+   <BuildHeader ref={toolbar} snapshot={snapshot} label={label} retention={retention} onChoose={onChoose} areas={areas} area={area}/>
    <main id="dh-area" className="dh-area" tabIndex={-1} inert={!!ui?.expanded&&(size.compact||area==='items'||area==='creatures')}>{children}</main>
    <footer className="dh-statusbar" ref={statusBar}>
     <span><strong>{snapshot.build.productId} {snapshot.build.version}</strong> · {snapshot.sourceReference.region.toUpperCase()} · enUS</span>

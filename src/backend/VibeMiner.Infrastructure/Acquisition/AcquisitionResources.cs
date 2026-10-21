@@ -13,10 +13,14 @@ public sealed class AcquisitionResources
         int maximumCpu = 2, int maximumBackgroundCpu = 1,
         long maximumStagingBytes = 2L << 30, long maximumBackgroundStagingBytes = 512L << 20)
     {
+        MaximumHttp = maximumHttp; MaximumBackgroundHttp = maximumBackgroundHttp;
         http = new(maximumHttp, maximumBackgroundHttp);
         cpu = new(maximumCpu, maximumBackgroundCpu);
         staging = new(maximumStagingBytes, maximumBackgroundStagingBytes);
     }
+    /// <summary>HTTP permits: downloads at once in total, and how many of them background work may hold.</summary>
+    public int MaximumHttp { get; }
+    public int MaximumBackgroundHttp { get; }
     public Task<IDisposable> EnterHttpAsync(IAcquisitionWorkContext? context, CancellationToken token) => http.EnterAsync(1, context, token);
     public Task<IDisposable> EnterCpuAsync(IAcquisitionWorkContext? context, CancellationToken token) => cpu.EnterAsync(1, context, token);
     public Task<IDisposable> ReserveStagingAsync(long bytes, IAcquisitionWorkContext? context, CancellationToken token) => staging.EnterAsync(bytes, context, token, reportStagingWait: true);

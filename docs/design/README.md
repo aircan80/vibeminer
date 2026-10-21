@@ -1,6 +1,6 @@
 # VibeMiner UI design references
 
-The first screen follows **[desktop discovery](desktop-discovery/index.html)** ([D059](../DECISIONS.md)), with every product in one grid as in [all-products.html](desktop-discovery/all-products.html) ([D062](../DECISIONS.md)). It replaced the layout of **guided build discovery** ([`build-discovery/index.html?concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow)), whose meaning it keeps. The repository keeps that exact HTML and its local navigation dependencies. The other concepts in its selector are historical alternatives. The older standalone `mockups/atlas` prototype is superseded and is not a reference. Home, Tables and Files follow **[desktop home](desktop-home/index.html)** ([D063](../DECISIONS.md)).
+The first screen follows **[desktop discovery](desktop-discovery/index.html)** ([D059](../DECISIONS.md)), with every product in one grid as in [all-products.html](desktop-discovery/all-products.html) ([D062](../DECISIONS.md)). It replaced the layout of **guided build discovery** ([`build-discovery/index.html?concept=guided&state=ready&product=wow`](build-discovery/index.html?concept=guided&state=ready&product=wow)), whose meaning it keeps. The repository keeps that exact HTML and its local navigation dependencies. The other concepts in its selector are historical alternatives. The older standalone `mockups/atlas` prototype is superseded and is not a reference. Home, Tables and Files follow **[desktop home](desktop-home/index.html)** ([D063](../DECISIONS.md)). Settings follows **[desktop settings](desktop-settings/index.html)** ([D070](../DECISIONS.md)).
 
 Cross-screen rules (tokens, states, progress, focus, verification) are in [UI guidelines](../UI-GUIDELINES.md).
 
@@ -14,6 +14,7 @@ Cross-screen rules (tokens, states, progress, focus, verification) are in [UI gu
 | Desktop home | [`desktop-home/index.html`](desktop-home/index.html) (areas via `?area=home\|tables\|files`, states via `?state=`; see its [README](desktop-home/README.md)) | Selected Home, Tables and Files |
 | C build overview (Home) | [`concept=archive&state=ready`](build-mining-home/index.html?concept=archive&state=ready) | Superseded layout; its Home facts and wording still apply |
 | Home and Tables with area navigation | [Home](top-navigation/home.html), [Tables](top-navigation/tables.html) | Superseded layout; its Tables meaning still applies |
+| Desktop settings | [`desktop-settings/index.html?view=settings`](desktop-settings/index.html?view=settings) (states via `?state=`; see its [README](desktop-settings/README.md)) | Selected Settings view and its top-bar entry |
 | Downloads and activity | [Option A: side panel](download-activity/index.html?concept=drawer&state=active&panel=open) | Option A selected as the default; B kept for comparison |
 
 The HTML files can contain older alternatives. Only the views above guide the app. Their selectors, demo controls, counters, product aliases and quantities are authored examples, not production controls or facts.

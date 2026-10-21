@@ -294,6 +294,15 @@
     },
     "creatureGeometryCloseResult": {
       "$ref": "#/definitions/CreatureGeometryCloseResult"
+    },
+    "settingsSnapshot": {
+      "$ref": "#/definitions/SettingsSnapshot"
+    },
+    "settingsSetParams": {
+      "$ref": "#/definitions/SettingsSetParams"
+    },
+    "storageMeasurement": {
+      "$ref": "#/definitions/StorageMeasurement"
     }
   },
   "required": [
@@ -1022,7 +1031,10 @@
             "creatures.geometry.read",
             "creatures.geometry.prepare",
             "creatures.geometry.open",
-            "creatures.geometry.close"
+            "creatures.geometry.close",
+            "settings.read",
+            "settings.set",
+            "settings.storage.measure"
           ]
         },
         "params": {
@@ -1354,6 +1366,54 @@
             "properties": {
               "params": {
                 "$ref": "#/definitions/CreatureGeometryCloseParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "settings.read"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/SettingsEmptyParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "settings.set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/SettingsSetParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "settings.storage.measure"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/SettingsEmptyParams"
               }
             }
           }
@@ -14282,6 +14342,223 @@
       "required": [
         "closed"
       ],
+      "additionalProperties": false
+    },
+    "SettingsProblem": {
+      "title": "SettingsProblem",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "additionalProperties": false
+    },
+    "SettingsTimestamp": {
+      "title": "SettingsTimestamp",
+      "type": "string",
+      "maxLength": 40,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,7})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "SettingsSnapshot": {
+      "title": "SettingsSnapshot",
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "file": {
+          "enum": [
+            "absent",
+            "read",
+            "unreadable",
+            "newer"
+          ]
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SettingsProblem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastChangedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SettingsTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "communityBuildHistory": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean"
+            },
+            "defaultValue": {
+              "const": false
+            },
+            "source": {
+              "enum": [
+                "default",
+                "saved",
+                "unreadable"
+              ]
+            },
+            "problem": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SettingsProblem"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "defaultValue",
+            "source",
+            "problem"
+          ],
+          "additionalProperties": false
+        },
+        "storage": {
+          "type": "object",
+          "properties": {
+            "dataDirectory": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "dataDirectory"
+          ],
+          "additionalProperties": false
+        },
+        "downloadLimits": {
+          "type": "object",
+          "properties": {
+            "parallelDownloads": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "backgroundDownloads": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            "bandwidthCapBytesPerSecond": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,18})$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "adjustable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "parallelDownloads",
+            "backgroundDownloads",
+            "bandwidthCapBytesPerSecond",
+            "adjustable"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "formatVersion",
+        "file",
+        "problem",
+        "lastChangedAt",
+        "communityBuildHistory",
+        "storage",
+        "downloadLimits"
+      ],
+      "additionalProperties": false
+    },
+    "StorageMeasurement": {
+      "title": "StorageMeasurement",
+      "type": "object",
+      "properties": {
+        "bytes": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "files": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "skipped": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "startedAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        },
+        "measuredAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        }
+      },
+      "required": [
+        "bytes",
+        "files",
+        "skipped",
+        "startedAt",
+        "measuredAt"
+      ],
+      "additionalProperties": false
+    },
+    "SettingsSetParams": {
+      "title": "SettingsSetParams",
+      "type": "object",
+      "properties": {
+        "name": {
+          "const": "communityBuildHistory"
+        },
+        "value": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "SettingsEmptyParams": {
+      "title": "SettingsEmptyParams",
+      "type": "object",
+      "properties": {},
       "additionalProperties": false
     }
   }

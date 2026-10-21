@@ -1,0 +1,143 @@
+/* Desktop Settings: docs/design/desktop-settings. Converted from the reference at a 15px root (rem = reference rem x .933333); type scale 11 / 13 / 14 / 19px.
+   SettingsView sets .st-medium below 78.4rem and .st-compact below 65.333333rem of window width, measured against the current root text size. */
+.settings-screen{--bg:#f5f3ed;--paper:#fffefa;--ink:#243b3a;--muted:#586a64;--line:#dce2d9;--line-soft:#e9ece5;--teal:#176e66;--mint:#e4f1e9;--hover:#eef4ef;--pill:#b9d5c8;--gold-ink:#7d561b;--gold-line:#e4cfa5;--gold-bg:#fbf5e8;--warn-bg:#fbf3e4;--warn-line:#e7c98f;--err-bg:#fbeeea;--err-line:#e3b5a8;--focus:#e6ad46;--toolbar:#fbfaf6;--status:#eceae2;--side:#f9f8f3;
+  --fs-s:.733333rem;--fs-m:.866667rem;--fs-l:1.266667rem;--pane-head:3.2rem;--side-w:clamp(16.8rem,24.733333rem,40%);
+  height:100vh;background:var(--bg);color:var(--ink);font:.933333rem/1.45 system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none}
+.settings-screen button,.settings-screen select,.settings-screen input{font:inherit;color:inherit}
+.settings-screen :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.settings-screen .st-mono,.settings-screen code{font-family:ui-monospace,monospace}
+.settings-screen .st-selectable{user-select:text;-webkit-user-select:text;cursor:text}
+.settings-screen .st-skip{position:absolute;left:.466667rem;top:-2.8rem;z-index:20;background:var(--paper);padding:.28rem .56rem;border-radius:6px}
+.settings-screen .st-skip:focus{top:.466667rem}
+.settings-screen .st-dim{color:var(--muted)}
+.settings-screen .st-spacer{flex:1}
+.settings-screen .st-window{height:100%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto}
+
+/* Toolbar: Discovery's plain toolbar, with Back instead of a Settings entry. */
+.settings-screen .st-toolbar{display:flex;flex-wrap:nowrap;align-items:center;gap:.8rem;min-height:2.933333rem;padding:.4rem .8rem;background:var(--toolbar);border-bottom:1px solid var(--line)}
+.settings-screen .st-brand{display:flex;align-items:center;gap:.56rem;font-weight:700;font-size:1.133333rem;letter-spacing:-.01em;white-space:nowrap;flex:none}
+.settings-screen .st-brand img{width:1.866667rem;height:1.866667rem;display:block;flex:none}
+.settings-screen .st-word span{color:var(--teal)}
+.settings-screen .st-divider{width:1px;align-self:stretch;background:var(--line);margin:.14rem 0;flex:none}
+.settings-screen .st-btn{height:2rem;display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);padding:0 .733333rem;white-space:nowrap;flex:none;font-size:inherit;cursor:pointer}
+.settings-screen .st-btn:hover:not(:disabled):not([aria-disabled="true"]){background:var(--hover);border-color:#c5d3cb}
+.settings-screen .st-btn:disabled,.settings-screen .st-btn[aria-disabled="true"]{opacity:.55;cursor:default}
+.settings-screen .st-btn.small{height:1.773333rem;font-size:var(--fs-m);padding:0 .606667rem}
+.settings-screen .dv-chip{display:inline-flex;align-items:center;gap:.466667rem;height:2rem;padding:0 .7rem;border:1px solid var(--pill);border-radius:6px;background:var(--mint);color:var(--teal);font-weight:600;font-size:inherit;white-space:nowrap;flex:none;cursor:pointer}
+.settings-screen .dv-chip:hover{background:#d9ece1;border-color:var(--teal)}
+.settings-screen .dv-chip.attention{border-color:var(--warn-line);background:var(--warn-bg);color:var(--gold-ink)}
+.settings-screen .dv-chip[aria-expanded="true"]{box-shadow:inset 0 0 0 1px currentColor}
+.settings-screen .dv-chip-short{display:none}
+.settings-screen.st-medium .dv-chip-long{display:none}
+.settings-screen.st-medium .dv-chip-short{display:inline}
+.settings-screen .dv-count{min-width:1.213333rem;height:1.213333rem;border-radius:999px;display:grid;place-items:center;padding:0 .28rem;font-size:var(--fs-s);color:#fff;background:var(--teal)}
+.settings-screen .dv-chip.attention .dv-count{background:var(--gold-ink)}
+.settings-screen .dv-pulse,.settings-screen .st-pulse{display:inline-block;width:.466667rem;height:.466667rem;border-radius:50%;background:currentColor;animation:st-pulse 1.6s ease-in-out infinite;flex:none}
+@keyframes st-pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.settings-screen .dv-pulse,.settings-screen .st-pulse{animation:none}}
+.settings-screen .dv-panel-slot{display:contents}
+.settings-screen aside.download-activity-panel{top:var(--st-panel-top,2.933333rem);bottom:var(--st-panel-bottom,1.633333rem);right:0;left:auto;width:var(--side-w);border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:-8px 0 24px rgba(36,59,58,.08);font-size:var(--fs-m);z-index:3}
+.settings-screen.st-compact aside.download-activity-panel{width:100%}
+.settings-screen aside.download-activity-panel .download-panel-heading{padding:.56rem .933333rem;align-items:center}
+.settings-screen aside.download-activity-panel .download-panel-heading h2{font-size:.933333rem;margin:0 0 .4rem}
+.settings-screen aside.download-activity-panel .download-task{border:1px solid var(--line);border-radius:6px;padding:.56rem .653333rem;margin:.56rem .933333rem}
+.settings-screen aside.download-activity-panel .download-task button,.settings-screen aside.download-activity-panel .download-panel-heading>button{height:1.773333rem;padding:0 .606667rem;border-radius:6px;font-size:var(--fs-m);border:1px solid var(--line);background:var(--paper);color:var(--ink)}
+
+/* Shared parts */
+.settings-screen .st-pane-head{display:flex;align-items:center;gap:.56rem;min-height:var(--pane-head);padding:.401333rem .802667rem;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--bg)}
+.settings-screen .st-pane-head h1{font-size:.933333rem;letter-spacing:0;line-height:1.45;margin:0 .28rem 0 0;font-weight:700;white-space:nowrap}
+.settings-screen .st-pane-head h1:focus{outline:none}
+.settings-screen .st-pane-head h1:focus-visible{outline:3px solid var(--focus)}
+.settings-screen .st-sub{font-size:var(--fs-m);color:var(--muted);min-width:0}
+.settings-screen .st-label{font-size:var(--fs-s);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.settings-screen .st-pill{display:inline-block;padding:0 .373333rem;border-radius:4px;border:1px solid var(--pill);background:var(--paper);color:var(--teal);font-size:var(--fs-s);font-weight:600;line-height:1.5;white-space:nowrap}
+.settings-screen .st-pill.community{border-color:#c9cfdc;background:#f3f4f8;color:#4a5670}
+.settings-screen .st-pill.plain{border-color:var(--line);background:var(--bg);color:var(--muted)}
+.settings-screen .st-notice{padding:.513333rem .7rem;border-radius:6px;border:1px solid var(--warn-line);background:var(--warn-bg);color:var(--ink);font-size:var(--fs-m);display:flex;gap:.746667rem;align-items:flex-start}
+.settings-screen .st-notice.error{border-color:var(--err-line);background:var(--err-bg)}
+.settings-screen .st-notice .st-text{flex:1;min-width:0}
+.settings-screen .st-notice strong{display:block}
+.settings-screen .st-notice code{font-size:var(--fs-s)}
+.settings-screen .st-notice .st-btn{height:1.773333rem}
+.settings-screen .st-state{border:1px solid #cfe2d6;background:var(--mint);border-radius:6px;padding:.513333rem .653333rem;font-size:var(--fs-m)}
+.settings-screen .st-state.warn{border-color:var(--warn-line);background:var(--warn-bg)}
+.settings-screen .st-state.plain{border-color:var(--line);background:var(--bg)}
+.settings-screen .st-state strong{display:block}
+.settings-screen .st-state p{margin:.14rem 0 0}
+.settings-screen .st-state code{font-size:var(--fs-s)}
+.settings-screen dl.st-facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.326667rem .84rem;margin:0;font-size:var(--fs-m)}
+.settings-screen dl.st-facts dt{color:var(--muted);white-space:nowrap}
+.settings-screen dl.st-facts dd{margin:0;overflow-wrap:anywhere}
+.settings-screen .st-ok{color:var(--teal);font-weight:600}
+.settings-screen .st-tiny{font-size:var(--fs-s);color:var(--muted);margin:.56rem 0 0}
+.settings-screen .st-loading{display:inline-flex;align-items:center;gap:.466667rem;color:var(--teal);font-weight:600;font-size:var(--fs-m)}
+.settings-screen .st-statusbar{display:flex;align-items:center;gap:1.026667rem;height:1.633333rem;padding:0 .802667rem;background:var(--status);border-top:1px solid var(--line);font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden}
+.settings-screen .st-statusbar strong{color:var(--ink);font-weight:600}
+.settings-screen .st-statusbar>span{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+.settings-screen .st-statusbar>span:first-child{flex-shrink:0}
+.settings-screen .st-statusbar .st-secondary{flex-shrink:1000}
+.settings-screen .st-statusbar>.st-spacer{flex:1 1 0}
+.settings-screen .st-statusbar .st-busy{display:inline-flex;align-items:center;gap:.373333rem;color:var(--teal);font-weight:600}
+.settings-screen .st-statusbar .st-warn{color:var(--gold-ink);font-weight:600}
+.settings-screen .st-fixture{font-size:var(--fs-s);color:#76632e;background:#f5efd9;border:1px solid #e7dfc3;border-radius:5px;padding:0 .373333rem;line-height:1.4;white-space:nowrap;flex-shrink:100}
+
+/* Settings: one grouped list, plus an About column at the Home side-column width. */
+.settings-screen .st-main{display:grid;grid-template-columns:minmax(0,1fr) var(--side-w);grid-template-rows:auto minmax(0,1fr);min-height:0}
+.settings-screen .st-main>.st-pane-head{grid-column:1/-1}
+.settings-screen .st-list{overflow:auto;min-height:0;background:var(--paper);padding-bottom:1.4rem;outline:none}
+.settings-screen .st-side{overflow:auto;min-height:0;background:var(--side);border-left:1px solid var(--line)}
+.settings-screen .st-group-h{margin:0;padding:1.026667rem .933333rem .42rem;border-bottom:1px solid var(--line)}
+/* Text keeps a readable measure and the control sits right after it, not at the far edge of a wide window. */
+.settings-screen .st-setting{display:grid;grid-template-columns:minmax(0,42.933333rem) 14.933333rem;justify-content:start;column-gap:1.68rem;padding:.84rem .933333rem .933333rem;border-bottom:1px solid var(--line-soft)}
+.settings-screen .st-setting .st-text{min-width:0}
+.settings-screen .st-setting h3{margin:0;font-size:.933333rem;font-weight:700;line-height:1.35;letter-spacing:0}
+.settings-screen .st-setting h3 .st-opt{font-weight:400;color:var(--muted)}
+.settings-screen .st-setting .st-text>p{margin:.186667rem 0 0;font-size:var(--fs-m)}
+.settings-screen .st-effects{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.326667rem .84rem;margin:.56rem 0 0;font-size:var(--fs-m)}
+.settings-screen .st-effects dt{color:var(--muted);font-weight:600;white-space:nowrap}
+.settings-screen .st-effects dd{margin:0;min-width:0}
+.settings-screen .st-setting dl.st-facts{margin-top:.56rem}
+.settings-screen .st-ctl{display:flex;flex-direction:column;align-items:flex-start;gap:.326667rem;min-width:0}
+.settings-screen .st-ctl .st-btn{height:2.006667rem}
+.settings-screen .st-ctl-row{display:flex;flex-wrap:wrap;gap:.42rem}
+/* The setting switch: Home's Download mode switch inside a control-sized frame. */
+.settings-screen .st-switch{display:inline-flex;align-items:center;gap:.466667rem;height:2.006667rem;padding:0 .746667rem 0 .56rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);font-weight:600;cursor:pointer;white-space:nowrap}
+.settings-screen .st-switch:hover:not([aria-disabled="true"]){background:var(--hover);border-color:#c5d3cb}
+.settings-screen .st-switch .st-track{position:relative;width:1.726667rem;height:.98rem;border-radius:999px;background:#c9d2cc;flex:none}
+.settings-screen .st-switch .st-track::after{content:"";position:absolute;top:.14rem;left:.14rem;width:.7rem;height:.7rem;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.settings-screen .st-switch[aria-checked="true"] .st-track{background:var(--teal)}
+.settings-screen .st-switch[aria-checked="true"] .st-track::after{left:auto;right:.14rem}
+/* The global button[aria-disabled] fade does not apply: the switch keeps full opacity with muted text and only the track fades. */
+.settings-screen .st-switch[aria-disabled="true"],.settings-screen .st-switch[aria-disabled="true"]:hover{opacity:1;cursor:default;color:var(--muted);border-color:var(--line);background:var(--paper)}
+.settings-screen .st-switch.st-saving{cursor:progress}
+.settings-screen .st-switch[aria-disabled="true"] .st-track{opacity:.6}
+.settings-screen .st-dflt{font-size:var(--fs-s);color:var(--muted)}
+/* Reserved line for the save outcome, so the row never jumps when it changes. */
+.settings-screen .st-save-line{min-height:1.073333rem;font-size:var(--fs-s);color:var(--muted);line-height:1.073333rem}
+.settings-screen .st-save-line .st-busy{color:var(--teal);font-weight:600;display:inline-flex;align-items:center;gap:.373333rem}
+.settings-screen .st-setting>.st-notice,.settings-screen .st-setting>.st-state{grid-column:1/-1;margin-top:.746667rem;max-width:42.933333rem}
+.settings-screen .st-path{display:block;font-family:ui-monospace,monospace;font-size:var(--fs-s);line-height:1.7;overflow-wrap:anywhere}
+.settings-screen .st-skipped{display:block;font-size:var(--fs-s);color:var(--gold-ink)}
+.settings-screen .st-measure-failed code{font-size:var(--fs-s)}
+.settings-screen .st-measure-failed .st-btn{margin-left:.28rem;vertical-align:middle}
+.settings-screen .st-panel-head{display:flex;align-items:baseline;gap:.56rem;padding:.746667rem .933333rem .42rem;flex-wrap:wrap}
+.settings-screen .st-panel-head h2{margin:0;font-size:.933333rem;font-weight:700;letter-spacing:0;white-space:nowrap}
+.settings-screen .st-side-body{padding:.14rem .933333rem .933333rem}
+.settings-screen .st-side .st-state{margin-bottom:.746667rem}
+/* An action inside a state box: the reference button height, with a gap above it. */
+.settings-screen .st-state .st-note-action{height:1.773333rem;margin-top:.533333rem;font-size:var(--fs-m);padding:0 .606667rem}
+
+/* Enlarged text or narrow window: one scrolling pane, each control below its text, About after the list. */
+.settings-screen.st-compact .st-word,.settings-screen.st-compact .st-divider{display:none}
+.settings-screen.st-compact .st-toolbar{gap:.56rem}
+.settings-screen.st-compact .st-main{display:block;overflow:auto;background:var(--paper)}
+.settings-screen.st-compact .st-pane-head .st-sub{display:block;flex:1 1 100%}
+.settings-screen.st-compact .st-list{overflow:visible}
+.settings-screen.st-compact .st-side{overflow:visible;border-left:0;border-top:1px solid var(--line)}
+.settings-screen.st-compact .st-setting{grid-template-columns:minmax(0,1fr)}
+.settings-screen.st-compact .st-ctl{margin-top:.653333rem}
+.settings-screen.st-compact .st-statusbar .st-secondary{display:none}
+
+/* App level: Preparation and Home sit in a box-less wrapper so their own layout is unchanged; it hides while Settings shows. */
+.app-view{display:contents}
+.app-view[hidden]{display:none}

@@ -167,6 +167,7 @@ export type CreatureGeometryState =
   | 'resourceLimit';
 export type CreatureGeometrySourceRole = 'model' | 'skin';
 export type CreatureGeometryResult = CreatureGeometryResult1;
+export type SettingsTimestamp = string;
 
 export interface DiscoveryContract {
   product: Product;
@@ -266,6 +267,9 @@ export interface DiscoveryContract {
   creatureGeometryOpenParams?: CreatureGeometryOpenParams;
   creatureGeometryCloseParams?: CreatureGeometryCloseParams;
   creatureGeometryCloseResult?: CreatureGeometryCloseResult;
+  settingsSnapshot?: SettingsSnapshot;
+  settingsSetParams?: SettingsSetParams;
+  storageMeasurement?: StorageMeasurement;
 }
 export interface Product {
   id: string;
@@ -464,7 +468,10 @@ export interface EngineRequest1 {
     | 'creatures.geometry.read'
     | 'creatures.geometry.prepare'
     | 'creatures.geometry.open'
-    | 'creatures.geometry.close';
+    | 'creatures.geometry.close'
+    | 'settings.read'
+    | 'settings.set'
+    | 'settings.storage.measure';
   params: {
     [k: string]: unknown;
   };
@@ -2831,4 +2838,41 @@ export interface CreatureGeometryCloseParams {
 }
 export interface CreatureGeometryCloseResult {
   closed: true;
+}
+export interface SettingsSnapshot {
+  formatVersion: 1;
+  file: 'absent' | 'read' | 'unreadable' | 'newer';
+  problem: SettingsProblem | null;
+  lastChangedAt: SettingsTimestamp | null;
+  communityBuildHistory: {
+    value: boolean;
+    defaultValue: false;
+    source: 'default' | 'saved' | 'unreadable';
+    problem: SettingsProblem | null;
+  };
+  storage: {
+    dataDirectory: string;
+  };
+  downloadLimits: {
+    parallelDownloads: number;
+    backgroundDownloads: number;
+    bandwidthCapBytesPerSecond: string | null;
+    adjustable: boolean;
+  };
+}
+export interface SettingsProblem {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+export interface SettingsSetParams {
+  name: 'communityBuildHistory';
+  value: boolean;
+}
+export interface StorageMeasurement {
+  bytes: string;
+  files: string;
+  skipped: string;
+  startedAt: SettingsTimestamp;
+  measuredAt: SettingsTimestamp;
 }

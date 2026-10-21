@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -177,6 +177,31 @@ test('Retention separates historical receipts, dated presence, progress and dura
   assert.equal(validator('RetentionList')({jobs:Array(10).fill(snapshot)}),false);
   for(const method of ['retention.read','retention.list','retention.set'])
     validate('EngineRequest',{protocolVersion:1,id:method,method,params:{}});
+});
+
+test('Settings keep unreadable values apart from saved ones and take only a known switch', async () => {
+  const snapshot = JSON.parse(await readFile(path.join(root, 'contracts/examples/settings-snapshot.json'), 'utf8'));
+  validate('SettingsSnapshot', snapshot);
+  validate('SettingsSnapshot', { ...snapshot, file: 'absent', lastChangedAt: null, communityBuildHistory: { value: false, defaultValue: false, source: 'default', problem: null } });
+  const community = snapshot.communityBuildHistory;
+  for (const patch of [{ file: 'missing' }, { formatVersion: 2 }, { lastChangedAt: '2026-10-18 12:02' }, { lastChangedAt: '2026-10-18T12:02:00' },
+    { communityBuildHistory: { ...community, source: 'guessed' } }, { communityBuildHistory: { ...community, defaultValue: true } },
+    { communityBuildHistory: { ...community, value: 'false' } }, { storage: { dataDirectory: '' } }, { storage: { dataDirectory: '/x', size: '1' } },
+    { downloadLimits: { ...snapshot.downloadLimits, bandwidthCapBytesPerSecond: 1024 } }, { downloadLimits: { ...snapshot.downloadLimits, parallelDownloads: 0 } }, { extra: true }])
+    assert.equal(validator('SettingsSnapshot')({ ...snapshot, ...patch }), false, JSON.stringify(patch));
+  const measurement = { bytes: '51749982208', files: '1204', skipped: '0', startedAt: '2026-10-20T13:12:00.1234567+00:00', measuredAt: '2026-10-20T13:12:04Z' };
+  validate('StorageMeasurement', measurement);
+  for (const patch of [{ bytes: 51749982208 }, { bytes: '01' }, { skipped: '-1' }, { measuredAt: null }, { path: '/x' }])
+    assert.equal(validator('StorageMeasurement')({ ...measurement, ...patch }), false, JSON.stringify(patch));
+  const request = (method, params) => ({ protocolVersion: 1, id: method, method, params });
+  validate('EngineRequest', request('settings.read', {}));
+  validate('EngineRequest', request('settings.storage.measure', {}));
+  validate('EngineRequest', request('settings.set', { name: 'communityBuildHistory', value: true }));
+  for (const params of [{}, { name: 'communityBuildHistory' }, { name: 'communityBuildHistory', value: 'true' }, { name: 'bandwidthCap', value: true },
+    { name: 'communityBuildHistory', value: true, path: '/tmp' }])
+    assert.equal(validator('EngineRequest')(request('settings.set', params)), false, JSON.stringify(params));
+  assert.equal(validator('EngineRequest')(request('settings.read', { path: '/tmp' })), false);
+  assert.equal(validator('EngineRequest')(request('settings.storage.measure', { root: '/' })), false);
 });
 
 test('Items pages preserve all name states and literal bounded query shapes', async () => {
@@ -483,6 +508,23 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   const unknownLabels=await request('items.classifications',{productId:'wow',buildIdentity:'a'.repeat(64),sourceRegion:'us',
     researchLocale:'enUS',artifactId:'b'.repeat(64),itemIds:['7'],policyRevision:'classification-label-index-v3'});
   assert.equal(unknownLabels.error?.code,'INVALID_REQUEST');
+  assert.ok(hello.result.capabilities.includes('settings-v1'));
+  const settings = await request('settings.read');
+  assert.ok(!settings.error, JSON.stringify(settings.error));
+  validate('SettingsSnapshot', settings.result);
+  assert.equal(settings.result.file, 'absent', 'A fresh data folder has no settings file and reading never creates one.');
+  assert.equal(settings.result.communityBuildHistory.source, 'default');
+  // Real paths: Windows temp folders can be given in 8.3 form, which the engine expands.
+  assert.equal(realpathSync.native(settings.result.storage.dataDirectory), realpathSync.native(data));
+  assert.equal((await request('settings.set', { name: 'communityBuildHistory', value: 'true' })).error?.code, 'INVALID_REQUEST');
+  const saved = await request('settings.set', { name: 'communityBuildHistory', value: true });
+  assert.ok(!saved.error, JSON.stringify(saved.error));
+  validate('SettingsSnapshot', saved.result);
+  assert.deepEqual([saved.result.file, saved.result.communityBuildHistory.value, saved.result.communityBuildHistory.source], ['read', true, 'saved']);
+  const measured = await request('settings.storage.measure');
+  assert.ok(!measured.error, JSON.stringify(measured.error));
+  validate('StorageMeasurement', measured.result);
+  assert.ok(BigInt(measured.result.bytes) > 0n, 'The catalog and settings file are in the measured folder.');
   const jobs = await request('retention.list');
   assert.ok(!jobs.error, JSON.stringify(jobs.error));
   validate('RetentionList', jobs.result);
