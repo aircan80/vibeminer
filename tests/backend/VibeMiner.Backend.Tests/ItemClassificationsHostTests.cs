@@ -482,10 +482,7 @@ public sealed class ItemClassificationsHostTests
     }
     private static TableDataSnapshot Source(bool subclass = false)
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "contracts/discovery.schema.json"))) directory = directory.Parent;
-        if (directory is null) throw new InvalidOperationException("Repository authored fixture is required.");
-        var snapshot = JsonSerializer.Deserialize<ItemsSnapshot>(File.ReadAllText(Path.Combine(directory.FullName, "tests/desktop/fixtures/items-snapshot.json")), Json)!;
+        var snapshot = JsonSerializer.Deserialize<ItemsSnapshot>(File.ReadAllText(RepositoryPaths.File("tests/desktop/fixtures/items-snapshot.json")), Json)!;
         return snapshot.ItemSource with { TableId = subclass ? "95d8638f" : "b977271e", Association = snapshot.ItemSource.Association with { FileDataId = subclass ? "1261604" : "1140189" },
             Columns = subclass ? [new("ClassID", "integer", false, null), new("SubClassID", "integer", false, null), new("DisplayName_lang", "string", false, null)]
                 : [new("ID", "integer", true, null), new("ClassID", "integer", false, null), new("ClassName_lang", "string", false, null)] };

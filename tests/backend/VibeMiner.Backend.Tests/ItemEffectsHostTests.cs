@@ -17,8 +17,7 @@ public sealed class ItemEffectsHostTests
     private static TaskCompletionSource Signal()=>new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static T Fixture<T>(string name)
     {
-        var directory=new DirectoryInfo(AppContext.BaseDirectory);while(directory is not null&&!File.Exists(Path.Combine(directory.FullName,"contracts/discovery.schema.json")))directory=directory.Parent;
-        return JsonSerializer.Deserialize<T>(File.ReadAllText(Path.Combine(directory!.FullName,"contracts/examples",name+".json")),Json)!;
+        return JsonSerializer.Deserialize<T>(File.ReadAllText(RepositoryPaths.File(Path.Combine("contracts/examples",name+".json"))),Json)!;
     }
     private static ItemEffectsReadiness Readiness()
     {var value=Fixture<ItemEffectsReadiness>("item-effects-readiness");return value with{Source=value.Source! with{Snapshot=value.Snapshot!.BridgeSource}};}

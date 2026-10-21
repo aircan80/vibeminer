@@ -1,4 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup>
+  <!-- Source tree root, so authored fixtures resolve wherever the build output goes. -->
+  <AssemblyMetadata Include="VibeMinerRepositoryRoot" Value="$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..'))" />
   <ProjectReference Include="../../../src/backend/VibeMiner.Infrastructure/VibeMiner.Infrastructure.csproj" />
   <ProjectReference Include="../../../src/backend/VibeMiner.Host/VibeMiner.Host.csproj" />
   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />

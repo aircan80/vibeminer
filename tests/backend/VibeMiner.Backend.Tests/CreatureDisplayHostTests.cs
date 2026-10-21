@@ -21,12 +21,7 @@ public sealed class CreatureDisplayHostTests
         ? new() { ["productId"] = "wow", ["buildIdentity"] = Context.BuildIdentity, ["sourceRegion"] = "us", ["researchLocale"] = "enUS", ["artifactId"] = Artifact, ["creatureId"] = "7", ["slot"] = 0 }
         : new() { ["productId"] = "wow", ["buildIdentity"] = Context.BuildIdentity, ["sourceRegion"] = "us", ["researchLocale"] = "enUS" };
     private static Dictionary<string, object?> PageScope() { var value = Scope(false); value["artifactId"] = Artifact; return value; }
-    private static string FixturePath(string name)
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "contracts/discovery.schema.json"))) directory = directory.Parent;
-        return Path.Combine(directory!.FullName, "contracts/examples", name);
-    }
+    private static string FixturePath(string name) => RepositoryPaths.File(Path.Combine("contracts/examples", name));
     private static T Fixture<T>(string name) => JsonSerializer.Deserialize<T>(File.ReadAllText(FixturePath(name)), Json)!;
     private static CreatureDisplayMetadataResult Result() => Fixture<CreatureDisplayMetadataResult>("creature-display-metadata.json");
     private static CreaturesSnapshot CoreSnapshot() => Fixture<CreaturesSnapshot>("creatures-snapshot.json");

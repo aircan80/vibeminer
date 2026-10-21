@@ -63,6 +63,7 @@ Simulated I/O failures, process termination and physical full-volume/power-loss 
 | `VIBEMINER_ENGINE_PATH` | Desktop main | Engine binary or DLL to launch |
 | `VIBEMINER_DOTNET` | Desktop main, contract tests, `tools/dotnet.mjs` | `dotnet` executable to use |
 | `VIBEMINER_CONTRACT_HOST_ASSEMBLY` | `tests/contracts/engine-contract.test.mjs` | Host DLL for the actual-Host contract check. Set it when testing an isolated build, or the check runs against (or refuses) the normal output. |
+| `VIBEMINER_REPO_ROOT` | `tests/backend` (`RepositoryPaths`) | Fallback source tree for authored files such as `contracts/examples/`. Backend tests normally use the root embedded at build time, so only set it if that tree has moved or gone. |
 | `VIBEMINER_AUTHORED_FIXTURES` | Desktop main, Electron tests | `1` makes the UI label its data "Authored test data" when running against the authored backend fixture |
 
 ### Offline checks
@@ -75,6 +76,7 @@ When a result must be attributable to an exact commit:
 
 - Test an archive of that commit (`git archive <sha>`), not the working tree.
 - Build with a separate `--artifacts-path` and `-p:RestoreLockedMode=true`, with a private `TMPDIR`.
+  Backend tests read authored files from the source tree they were built from (embedded as assembly metadata), not from a walk up from the test binary, so the artifacts path can sit anywhere.
 - Never write to normal build outputs or the owner's app profile. Use `VIBEMINER_DATA_DIR` and point `VIBEMINER_CONTRACT_HOST_ASSEMBLY`/`VIBEMINER_ENGINE_PATH` at the isolated build.
 - Report each run's own pass/fail counts. Never add up overlapping cohorts into a total.
 - A failed broad run stays failed until the same broad run is repeated and passes. A focused rerun of the failing test doesn't turn it into a pass.

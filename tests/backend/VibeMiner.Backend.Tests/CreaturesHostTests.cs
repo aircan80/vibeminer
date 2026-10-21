@@ -271,8 +271,7 @@ public sealed class CreaturesHostTests
             i == 1 ? CreatureDisplayState.NoDeclaredDisplay : i == 2 ? CreatureDisplayState.InvalidDisplayReference : CreatureDisplayState.Declared, Field(8 + i), Field(12 + i))).ToArray());
     private static CreaturesSnapshot Snapshot()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory); while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "contracts/discovery.schema.json"))) directory = directory.Parent;
-        return JsonSerializer.Deserialize<CreaturesSnapshot>(File.ReadAllText(Path.Combine(directory!.FullName, "contracts/examples/creatures-snapshot.json")), Json)!;
+        return JsonSerializer.Deserialize<CreaturesSnapshot>(File.ReadAllText(RepositoryPaths.File("contracts/examples/creatures-snapshot.json")), Json)!;
     }
     private sealed class Store : ICreaturesStore
     {
