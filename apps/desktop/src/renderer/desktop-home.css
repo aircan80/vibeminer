@@ -207,6 +207,27 @@
 .desktop-home[data-area="files"]{--panel-w:var(--insp-w)}
 .desktop-home .dh-files{display:grid;grid-template-columns:minmax(0,1fr) var(--insp-w);grid-template-rows:minmax(0,1fr);gap:1px;background:var(--line);min-height:0}
 .desktop-home .dh-files-filters{flex-wrap:nowrap}
+.desktop-home .dh-files-filters .dh-fsearch{width:11.666667rem;flex:0 1 11.666667rem}
+.desktop-home .dh-files-filters select{flex:0 1 auto;min-width:0}
+.desktop-home .dh-fsearch[aria-invalid="true"]{border-color:var(--warn-line)}
+.desktop-home .dh-fbtn{display:none}
+.desktop-home .dh-fbtn .dh-fcount{min-width:1.213333rem;height:1.213333rem;border-radius:999px;background:var(--teal);color:#fff;font-size:var(--fs-s);display:grid;place-items:center;padding:0 .28rem;font-weight:600}
+.desktop-home .dh-fbtn .dh-chev{font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .dh-fbtn[aria-expanded="true"]{background:var(--mint);border-color:var(--pill);color:var(--teal)}
+.desktop-home .dh-fextra{display:contents}
+.desktop-home .dh-check{display:inline-flex;align-items:center;gap:.326667rem;font-size:var(--fs-m);white-space:nowrap}
+.desktop-home .dh-check input{width:.933333rem;height:.933333rem;margin:0;accent-color:var(--teal)}
+.desktop-home .dh-member{border:1px solid var(--line);border-radius:6px;padding:.466667rem .606667rem;margin-top:.56rem;background:var(--paper)}
+.desktop-home .dh-member.dh-current{border-color:var(--teal);box-shadow:inset 3px 0 0 var(--teal)}
+.desktop-home .dh-member dl.dh-facts{font-size:var(--fs-s)}
+.desktop-home .dh-member dl.dh-facts dd.dh-mono{font-size:var(--fs-s)}
+.desktop-home .dh-insp-body>.dh-row{display:flex;align-items:center;gap:.42rem;flex-wrap:wrap}
+.desktop-home .dh-local-wait.dh-catalog-missing{margin:.56rem .802667rem;max-width:none;flex:none}
+.desktop-home .dh-note-short{display:none}
+.desktop-home.dh-compact .dh-note-long{display:none}
+.desktop-home.dh-compact .dh-note-short{display:block}
+/* The segmented group clips overflow, so its focus ring sits inside each button, as on the area buttons. */
+.desktop-home .dh-segmented button:focus-visible{outline-offset:-3px}
 .desktop-home .dh-list-scroll{position:relative;flex:1 1 auto;overflow:auto;min-height:5.6rem;background:var(--paper);scroll-padding-top:var(--thead)}
 .desktop-home .dh-fcols{display:grid;grid-template-columns:6.066667rem minmax(8.4rem,2.2fr) 6.066667rem minmax(6.066667rem,1.1fr) minmax(5.133333rem,.9fr) 6.066667rem;align-items:center;column-gap:.802667rem;padding:0 .802667rem}
 .desktop-home .dh-fthead{position:sticky;top:0;z-index:1;height:var(--thead);background:var(--toolbar);border-bottom:1px solid var(--line);font-size:var(--fs-s);font-weight:600;color:var(--muted);white-space:nowrap}
@@ -258,6 +279,10 @@
 .desktop-home.dh-compact .dh-fcols>:nth-child(5){display:none}
 .desktop-home.dh-compact .dh-files-filters{flex-wrap:wrap}
 .desktop-home.dh-compact .dh-list-scroll{overflow-x:hidden}
+/* At 200% on small windows the search stays visible and the other filters collapse behind Filters, a nonmodal disclosure. */
+.desktop-home.dh-compact .dh-fbtn{display:inline-flex}
+.desktop-home.dh-compact .dh-fextra{display:none}
+.desktop-home.dh-compact .dh-fextra.dh-open{display:flex;flex-wrap:wrap;align-items:center;gap:.466667rem .56rem;flex:1 1 100%}
 .desktop-home.dh-compact .dh-statusbar .dh-secondary{display:none}
 
 /* App shell additions: window grid, hidden areas, fixture label, scrolling area panes. */

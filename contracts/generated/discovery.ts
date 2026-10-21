@@ -189,6 +189,10 @@ export interface DiscoveryContract {
   engineFailure: EngineFailure;
   workspaceSnapshot: WorkspaceSnapshot;
   inventoryPage: InventoryPage;
+  inventoryFilesParams?: InventoryFilesParams;
+  inventoryFilesPage?: InventoryFilesPage;
+  inventoryFileParams?: InventoryFileParams;
+  inventoryFileDetail?: InventoryFileDetail;
   downloadPage: DownloadPage;
   tableCatalogPage: TableCatalogPage;
   tableDefinitionSnapshot: TableDefinitionSnapshot;
@@ -613,6 +617,143 @@ export interface InventoryEntry {
   localeFlags: string | null;
   contentFlags: string | null;
   nameHash: string | null;
+}
+/**
+ * inventory.files: one bounded page of Files rows (D068). Every filter tests single memberships; a file is listed when one membership passes all of them.
+ */
+export interface InventoryFilesParams {
+  productId: string;
+  buildIdentity: string;
+  sourceRegion: string;
+  generation: string;
+  limit: number;
+  after?: string;
+  /**
+   * Exact ROOT FileDataID.
+   */
+  fileDataId?: string;
+  /**
+   * Full lowercase CKey, or a prefix of at least four hex digits.
+   */
+  contentKey?: string;
+  /**
+   * Raw locale mask; a membership matches when it shares a bit.
+   */
+  localeFlags?: string;
+  /**
+   * none (derived content flags are zero), or a raw mask whose bits must all be set.
+   */
+  contentFlags?: string;
+  family?: 'root' | 'install';
+  storedOnly?: boolean;
+}
+export interface InventoryFilesPage {
+  productId: string;
+  buildIdentity: string;
+  sourceRegion: string;
+  generation: string;
+  /**
+   * @maxItems 100
+   */
+  entries: InventoryFile[];
+  totalCount: string | null;
+  nextCursor: string | null;
+  /**
+   * The engine stopped at its per-request examination bound before filling the page; nextCursor continues the search.
+   */
+  scanLimited: boolean;
+}
+/**
+ * One ROOT FileDataID or one exact install name with every membership summarized. Sizes are encoded bytes of resolved memberships; unresolved ones are counted, never sized.
+ */
+export interface InventoryFile {
+  key: string;
+  family: 'root' | 'install';
+  fileDataId: string | null;
+  name: string | null;
+  /**
+   * Every membership of the file; sealing refuses a file with more than 4,096.
+   */
+  membershipCount: number;
+  matchingCount: number;
+  contentKeyCount: number;
+  encodedBytesMin: string | null;
+  encodedBytesMax: string | null;
+  unresolvedCount: number;
+  localeFlags: string | null;
+  storedCount: number;
+}
+/**
+ * inventory.file: every membership of one Files row, in membership order, marked against the same filters.
+ */
+export interface InventoryFileParams {
+  productId: string;
+  buildIdentity: string;
+  sourceRegion: string;
+  generation: string;
+  limit: number;
+  file: string;
+  after?: string;
+  /**
+   * Exact ROOT FileDataID.
+   */
+  fileDataId?: string;
+  /**
+   * Full lowercase CKey, or a prefix of at least four hex digits.
+   */
+  contentKey?: string;
+  /**
+   * Raw locale mask; a membership matches when it shares a bit.
+   */
+  localeFlags?: string;
+  /**
+   * none (derived content flags are zero), or a raw mask whose bits must all be set.
+   */
+  contentFlags?: string;
+  family?: 'root' | 'install';
+  storedOnly?: boolean;
+}
+export interface InventoryFileDetail {
+  productId: string;
+  buildIdentity: string;
+  sourceRegion: string;
+  generation: string;
+  file: string;
+  family: 'root' | 'install';
+  fileDataId: string | null;
+  name: string | null;
+  membershipCount: number;
+  matchingCount: number;
+  /**
+   * @maxItems 100
+   */
+  memberships: InventoryFileMembership[];
+  nextCursor: string | null;
+}
+export interface InventoryFileMembership {
+  id: string;
+  family: 'root' | 'install';
+  blockOrdinal: number | null;
+  entryOrdinal: number | null;
+  installOrdinal: number | null;
+  localeFlags: string | null;
+  contentFlags: string | null;
+  rawContentFlags: InventoryRawContentFlags | null;
+  nameHash: string | null;
+  contentKey: string;
+  encodingKey: string | null;
+  decodedBytes: string | null;
+  encodedBytes: string | null;
+  stored: boolean;
+  matches: boolean;
+}
+/**
+ * The three raw ROOT block parts; the derived content flags are first | second | (third << 17).
+ */
+export interface InventoryRawContentFlags {
+  first: string;
+  second: string;
+  third: number;
 }
 export interface DownloadPage {
   productId: string;

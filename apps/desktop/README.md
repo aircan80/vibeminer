@@ -1,6 +1,6 @@
 # VibeMiner Electron desktop
 
-Electron main manages one local C# engine; the sandboxed renderer presents guided discovery, dedicated preparation, the C Build overview, horizontal build areas, the Tables definition explorer, a bounded download-object ledger and the legacy local Files catalog. Preload exposes only products, bounded discovery reads, refresh, exact workspace opening, exact-generation inventory reads, exact-ledger download-object reads, bounded provider catalogue/definition reads, exact table readiness/preparation and artifact-bound row pages, cancellation, progress and a read-only authored-test disclosure. C# owns HTTP and SQLite. No renderer/main game parsing or acquisition exists.
+Electron main manages one local C# engine; the sandboxed renderer presents guided discovery, dedicated preparation, the C Build overview, horizontal build areas, the Tables definition explorer, a bounded download-object ledger and the legacy local Files catalog. Preload exposes only products, bounded discovery reads, refresh, exact workspace opening, exact-generation inventory reads and bounded Files queries, exact-ledger download-object reads, bounded provider catalogue/definition reads, exact table readiness/preparation and artifact-bound row pages, cancellation, progress and a read-only authored-test disclosure. C# owns HTTP and SQLite. No renderer/main game parsing or acquisition exists.
 
 From the repository root, use the pinned toolchain described in [BUILDING.md](../../BUILDING.md):
 

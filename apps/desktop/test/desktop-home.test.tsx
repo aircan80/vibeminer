@@ -44,6 +44,8 @@ it('moves the Files selection with arrow keys from one listbox tab stop and keep
  Element.prototype.scrollIntoView=vi.fn();
  render(<DownloadObjects snapshot={w} summary={{...w.download!,objectCount:'5'}} bridge={bridge} active onReopen={()=>{}}/>);
  await screen.findByText('Object 1');
+ // No file catalog yet: the view says what is missing and that it is coming, so encoded objects never read as the file list.
+ const note=screen.getByRole('note',{name:'File catalog not prepared'});expect(note).toHaveTextContent(/page through the download manifest.s encoded objects below and see which are stored locally.*FileDataID \(ROOT\) or install name/);expect(note).not.toHaveTextContent(/coming/);
  const list=screen.getByRole('listbox');expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected','true');expect(screen.getByRole('heading',{name:'Encoded object 1'})).toBeInTheDocument();
  list.focus();fireEvent.keyDown(list,{key:'ArrowDown'});expect(screen.getByRole('heading',{name:'Encoded object 2'})).toBeInTheDocument();expect(list).toHaveAttribute('aria-activedescendant',screen.getAllByRole('option')[1].id);
  fireEvent.keyDown(list,{key:'End'});expect(screen.getByRole('heading',{name:'Encoded object 3'})).toBeInTheDocument();expect(list).toHaveFocus();

@@ -21,6 +21,8 @@ import tableCatalogue from '../../../contracts/examples/table-catalog-page.json'
 import tableDefinition from '../../../contracts/examples/table-definition.json';
 import downloadWorkspace from '../../../tests/desktop/fixtures/download-workspace.json';
 import inventoryPage from '../../../contracts/examples/inventory-page.json';
+import filesPage from '../../../contracts/examples/inventory-files-page.json';
+import fileDetail from '../../../contracts/examples/inventory-file-detail.json';
 class Child extends EventEmitter implements EngineProcess {
   stdout = new PassThrough(); stderr = new PassThrough();
   requests: { id: string; method: string }[] = [];
@@ -218,6 +220,48 @@ describe('bounded local engine transport', () => {
     if (variant === 'numericBytes') (value.entries[0] as any).encodedBytes = 100;
     const page = expect(client.request('inventory.read', { productId: inventoryPage.productId, buildIdentity: inventoryPage.buildIdentity, sourceRegion: inventoryPage.sourceRegion, generation: inventoryPage.generation, limit: variant === 'duplicateRows' ? 50 : 1 }, 'page')).rejects.toMatchObject({ code: 'PROTOCOL_ERROR' });
     child.reply('page', value); await page;
+  });
+  describe('Files queries', () => {
+    const scope = { productId: filesPage.productId, buildIdentity: filesPage.buildIdentity, sourceRegion: filesPage.sourceRegion, generation: filesPage.generation, limit: 50 };
+    async function filesSetup(capable = true) { const value = setup(), hello = value.client.hello(); value.child.reply(value.child.requests[0].id, { protocolVersion: 1, engineVersion: 'authored', capabilities: capable ? ['inventory-files-v1'] : [] }); await hello; return value; }
+    it('pins pages and the inspector to the exact query, and needs the Files capability', async () => {
+      const without = await filesSetup(false); await expect(without.client.request('inventory.files', { ...scope, localeFlags: '2' })).rejects.toMatchObject({ code: 'UNSUPPORTED' }); expect(without.child.requests).toHaveLength(1);
+      const { child, client } = await filesSetup();
+      const page = client.request('inventory.files', { ...scope, localeFlags: '2' }, 'files'); child.reply('files', filesPage); await expect(page).resolves.toEqual(filesPage);
+      const file = client.request('inventory.file', { ...scope, limit: 100, file: 'root:12345', localeFlags: '2' }, 'file'); child.reply('file', fileDetail); await expect(file).resolves.toEqual(fileDetail);
+    });
+    it.each(['context', 'order', 'family', 'rootName', 'installName', 'total', 'limitedWithoutCursor', 'cursorBehind', 'matching', 'sizes', 'platform'])('rejects an inconsistent Files page %s', async variant => {
+      const { child, client } = await filesSetup(); const value = structuredClone(filesPage) as any; const params: Record<string, unknown> = { ...scope, localeFlags: '2' };
+      if (variant === 'context') value.generation = '2';
+      if (variant === 'order') value.entries.reverse();
+      if (variant === 'family') params.family = 'root';
+      if (variant === 'rootName') value.entries[0].name = 'invented/root/name.blp';
+      if (variant === 'installName') value.entries[1].name = null;
+      if (variant === 'total') value.totalCount = '2';
+      if (variant === 'limitedWithoutCursor') { value.scanLimited = true; value.nextCursor = null; }
+      if (variant === 'cursorBehind') value.nextCursor = 'root:1';
+      if (variant === 'matching') value.entries[0].matchingCount = 0;
+      if (variant === 'sizes') value.entries[0].encodedBytesMin = null;
+      if (variant === 'platform') value.entries[0].platform = 'Windows';
+      const page = expect(client.request('inventory.files', params, 'files')).rejects.toMatchObject({ code: 'PROTOCOL_ERROR' }); child.reply('files', value); await page;
+    });
+    it.each(['file', 'order', 'rawFlags', 'unresolved', 'installFlags', 'cursor'])('rejects an inconsistent file inspector reply %s', async variant => {
+      const { child, client } = await filesSetup(); const value = structuredClone(fileDetail) as any;
+      if (variant === 'file') value.file = 'root:12346';
+      if (variant === 'order') value.memberships.reverse();
+      if (variant === 'rawFlags') value.memberships[0].rawContentFlags.second = '0';
+      if (variant === 'unresolved') value.memberships[1].encodedBytes = '100';
+      if (variant === 'installFlags') { value.memberships[0].family = 'install'; }
+      if (variant === 'cursor') value.nextCursor = '1';
+      const work = expect(client.request('inventory.file', { ...scope, limit: 100, file: 'root:12345' }, 'file')).rejects.toMatchObject({ code: 'PROTOCOL_ERROR' }); child.reply('file', value); await work;
+    });
+    it.each([
+      { fileDataId: '4294967296' }, { fileDataId: '1', contentKey: 'abcd' }, { contentKey: 'ABCD' }, { contentKey: 'abc' }, { localeFlags: '0' }, { contentFlags: 'any' },
+      { family: 'size' }, { storedOnly: 'true' }, { after: 'root:4294967296' }, { after: '12' }, { platform: 'Windows' }, { limit: 101 }, { search: 'Interface' }
+    ])('rejects an unbounded or mistyped Files request %#', async params => {
+      const { child, client } = await filesSetup(); await expect(client.request('inventory.files', { ...scope, ...params })).rejects.toMatchObject({ code: 'INVALID_REQUEST' }); expect(child.requests).toHaveLength(1);
+      await expect(client.request('inventory.file', { ...scope, file: 'install:0' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    });
   });
   it.each([
     { generation: '0', limit: 50 }, { generation: '1', limit: 101 }, { generation: '1', limit: 0 },

@@ -128,12 +128,20 @@ public sealed partial class DiscoveryCatalog : IInventoryCatalog
     internal Task AddOriginsAsync(long generation, IReadOnlyList<InventoryOrigin> origins, CancellationToken token) => Schedule(() =>
     {
         using var tx = Db.BeginTransaction();
-        using var cmd = Command("INSERT INTO inventory_origins(g,id,family,name,fdid,ckey,reference,width,declared_encoded,declared_decoded,locale,flags,name_hash,raw) VALUES($g,$i,$f,$n,$d,$c,$r,$w,$e,$b,$l,$a,$h,$raw)", tx);
+        // Files columns (D068): numeric ROOT FileDataID/locale/content flags, and the install file group, which is the
+        // first membership ID with the same exact install name (earlier rows are always committed or in this batch).
+        using var cmd = Command("INSERT INTO inventory_origins(g,id,family,name,fdid,ckey,reference,width,declared_encoded,declared_decoded,locale,flags,name_hash,raw,fdid_n,locale_n,flags_n,grp) VALUES($g,$i,$f,$n,$d,$c,$r,$w,$e,$b,$l,$a,$h,$raw,$dn,$ln,$an," +
+            "CASE WHEN $f='install' THEN coalesce((SELECT min(id) FROM inventory_origins INDEXED BY inventory_install_names WHERE g=$g AND family='install' AND name=$n),$i) END)", tx);
+        static long? Number(string? value) => value is null ? null : long.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
         foreach (var o in origins)
         {
             token.ThrowIfCancellationRequested();
+            var root = o.Family == "root";
+            if (root && (o.FileDataId is null || o.LocaleFlags is null || o.ContentFlags is null) || o.Family == "install" && o.Name is null)
+                throw new DiscoveryException("CATALOG_INTEGRITY", "A file membership is missing its identity.");
             Insert(cmd, ("$g", generation), ("$i", o.Id), ("$f", o.Family), ("$n", o.Name), ("$d", o.FileDataId), ("$c", o.ContentKey),
-                ("$r", o.Reference), ("$w", o.ReferenceBytes), ("$e", o.DeclaredEncoded), ("$b", o.DeclaredDecoded), ("$l", o.LocaleFlags), ("$a", o.ContentFlags), ("$h", o.NameHash), ("$raw", o.Raw));
+                ("$r", o.Reference), ("$w", o.ReferenceBytes), ("$e", o.DeclaredEncoded), ("$b", o.DeclaredDecoded), ("$l", o.LocaleFlags), ("$a", o.ContentFlags), ("$h", o.NameHash), ("$raw", o.Raw),
+                ("$dn", root ? Number(o.FileDataId) : null), ("$ln", root ? Number(o.LocaleFlags) : null), ("$an", root ? Number(o.ContentFlags) : null));
         }
         tx.Commit(); return true;
     }, token);
@@ -266,7 +274,11 @@ public sealed partial class DiscoveryCatalog : IInventoryCatalog
             "SELECT EXISTS(SELECT 1 FROM inventory_origins WHERE g=$g AND family IN ('download','size') AND (encoded!=declared_encoded OR declared_encoded IS NULL OR width NOT IN (9,16) OR (family='download' AND width!=16) OR length(reference)!=width*2 OR length(ekey)!=32 OR substr(ekey,1,width*2)!=reference))",
             "SELECT EXISTS(SELECT 1 FROM inventory_origins o WHERE o.g=$g AND o.family='size' AND o.width=9 AND NOT EXISTS(SELECT 1 FROM en_objects e WHERE e.g=o.g AND e.ekey=o.ekey) AND NOT EXISTS(SELECT 1 FROM inventory_origins d WHERE d.g=o.g AND d.family='download' AND d.reference=o.ekey AND d.width=16))",
             "SELECT EXISTS(SELECT ekey FROM inventory_units WHERE g=$g EXCEPT SELECT ekey FROM inventory_origins WHERE g=$g)",
-            "SELECT EXISTS(SELECT 1 FROM inventory_logical l WHERE l.g=$g AND NOT EXISTS(SELECT 1 FROM inventory_origins o WHERE o.g=l.g AND o.ckey=l.ckey AND o.family IN ('root','install')))"
+            "SELECT EXISTS(SELECT 1 FROM inventory_logical l WHERE l.g=$g AND NOT EXISTS(SELECT 1 FROM inventory_origins o WHERE o.g=l.g AND o.ckey=l.ckey AND o.family IN ('root','install')))",
+            "SELECT EXISTS(SELECT 1 FROM inventory_origins WHERE g=$g AND (CASE WHEN family='root' THEN fdid_n IS NOT CAST(fdid AS INTEGER) OR locale_n IS NOT CAST(locale AS INTEGER) OR flags_n IS NOT CAST(flags AS INTEGER) OR grp IS NOT NULL ELSE fdid_n IS NOT NULL OR locale_n IS NOT NULL OR flags_n IS NOT NULL OR (family='install') != (grp IS NOT NULL) END))",
+            // Files columns are derived and outside the digest, so each is checked against its digest-covered source here:
+            // an install row's group is the first membership ID with the same exact name in the same generation.
+            "SELECT EXISTS(SELECT 1 FROM inventory_origins o WHERE o.g=$g AND o.family='install' AND o.grp IS NOT (SELECT min(x.id) FROM inventory_origins x INDEXED BY inventory_install_names WHERE x.g=o.g AND x.family='install' AND x.name=o.name))"
         ];
         foreach (var query in inconsistencies)
         {
@@ -280,6 +292,7 @@ public sealed partial class DiscoveryCatalog : IInventoryCatalog
             token.ThrowIfCancellationRequested();
             Execute("UPDATE inventory_units SET retained=1,shared=EXISTS(SELECT 1 FROM inventory_units x JOIN inventory_generations y ON y.id=x.g JOIN inventory_generations z ON z.id=$g WHERE x.ekey=$e AND y.state='ready' AND y.build_id != z.build_id) WHERE g=$g AND ekey=$e", tx, ("$g", generation), ("$e", key));
         }
+        SealInventoryFiles(generation, verifiedKeys, tx, token);
         long Sum(string table, string column, string extra = "") => Convert.ToInt64(Scalar($"SELECT COALESCE(SUM({column}),0) FROM {table} WHERE g=$g {extra}", tx, ("$g", generation)));
         long Count(string table, string extra = "") => Convert.ToInt64(Scalar($"SELECT COUNT(*) FROM {table} WHERE g=$g {extra}", tx, ("$g", generation)));
         static string N(long value) => value.ToString(CultureInfo.InvariantCulture);

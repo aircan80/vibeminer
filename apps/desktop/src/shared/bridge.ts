@@ -15,16 +15,16 @@ import type { RetentionSet } from './retention';
 import type { SettingsSnapshot, SettingsSetParams, StorageMeasurement } from './settings';
 import type { RetentionTarget, RetentionSnapshot, RetentionList, DownloadSummaries, DownloadSummariesParams } from '../../../../contracts/generated/discovery';
 import type { TableDataParams, TableRowsParams } from './table-data';
-import type { Product, DiscoveryPage, DiscoveryCatalogPage, EngineProgress, WorkspaceSnapshot, InventoryPage, DownloadPage, TableCatalogPage, TableDefinitionSnapshot, TableDataSnapshot, TableDataReadiness, TableDataPage } from '../../../../contracts/generated/discovery';
+import type { Product, DiscoveryPage, DiscoveryCatalogPage, EngineProgress, WorkspaceSnapshot, InventoryPage, DownloadPage, TableCatalogPage, TableDefinitionSnapshot, TableDataSnapshot, TableDataReadiness, TableDataPage, InventoryFilesPage, InventoryFileDetail } from '../../../../contracts/generated/discovery';
 import type { TablesCatalogParams, TableDefinitionParams } from './tables';
 import { isDownloadWorkspace, type DownloadReadParams } from './download';
-import { isInventoryWorkspace, type InventoryReadParams } from './inventory';
+import { isInventoryWorkspace, type InventoryReadParams, type InventoryFilesParams, type InventoryFileParams } from './inventory';
 export type DiscoveryFilter = 'all' | 'local' | 'advertised';
 export type ReadParams = { productId: string; filter?: DiscoveryFilter; limit?: number; cursor?: string };
 /** Cross-product read. Without productId it reads every registered product. */
 export type ReadAllParams = { productId?: string; filter?: DiscoveryFilter; limit?: number; cursor?: string };
 export type OpenParams = { productId: string; buildIdentity: string; sourceRegion: string };
-export type RequestMethod = 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'workspace.open' | 'inventory.read' | 'download.read' | 'download.summaries' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'settings.read' | 'settings.set' | 'settings.storage.measure' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
+export type RequestMethod = 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'workspace.open' | 'inventory.read' | 'inventory.files' | 'inventory.file' | 'download.read' | 'download.summaries' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'settings.read' | 'settings.set' | 'settings.storage.measure' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
 export type BridgeReply<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; retryable: boolean } };
 export interface DiscoveryBridge {
   onGeometryRetirement?(listener:(notice:GeometryViewRetirement)=>void):()=>void;
@@ -83,6 +83,8 @@ export interface DiscoveryBridge {
   tableDefinition(params: TableDefinitionParams): Promise<BridgeReply<TableDefinitionSnapshot>>;
   download(params: DownloadReadParams): Promise<BridgeReply<DownloadPage>>;
   inventory(params: InventoryReadParams): Promise<BridgeReply<InventoryPage>>;
+  inventoryFiles(params: InventoryFilesParams): Promise<BridgeReply<InventoryFilesPage>>;
+  inventoryFile(params: InventoryFileParams): Promise<BridgeReply<InventoryFileDetail>>;
   cancel(requestId: string): Promise<BridgeReply<{ requested: boolean }>>;
   onProgress(listener: (progress: EngineProgress) => void): () => void;
 }

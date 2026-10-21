@@ -31,7 +31,7 @@ function bridgeMock(settings: Partial<DiscoveryBridge> = {}): DiscoveryBridge {
     products: vi.fn(async () => success({ products: testProducts })), read: vi.fn(unavailable), refresh: vi.fn(unavailable),
     readAll: vi.fn(async () => success(catalog(page))), refreshAll: vi.fn(unavailable),
     tableData: vi.fn(async () => success({ snapshot: null })), tablePrepare: vi.fn(unavailable), tableRows: vi.fn(unavailable), tablesCatalog: vi.fn(unavailable), tableDefinition: vi.fn(unavailable),
-    download: vi.fn(unavailable), inventory: vi.fn(unavailable), open: vi.fn(unavailable),
+    download: vi.fn(unavailable), inventory: vi.fn(unavailable), inventoryFiles: vi.fn(unavailable), inventoryFile: vi.fn(unavailable), open: vi.fn(unavailable),
     cancel: vi.fn(async () => success({ requested: true })), onProgress: vi.fn(() => () => {}),
     settingsRead: vi.fn(async () => success(fresh)), settingsSet: vi.fn(async params => success(saved(params.value))),
     storageMeasure: vi.fn(async () => success(measured)),

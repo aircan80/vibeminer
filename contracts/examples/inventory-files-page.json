@@ -1,0 +1,39 @@
+{
+  "productId": "wow",
+  "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "sourceRegion": "us",
+  "generation": "1",
+  "entries": [
+    {
+      "key": "root:12345",
+      "family": "root",
+      "fileDataId": "12345",
+      "name": null,
+      "membershipCount": 2,
+      "matchingCount": 1,
+      "contentKeyCount": 2,
+      "encodedBytesMin": "100",
+      "encodedBytesMax": "100",
+      "unresolvedCount": 1,
+      "localeFlags": "514",
+      "storedCount": 1
+    },
+    {
+      "key": "install:7",
+      "family": "install",
+      "fileDataId": null,
+      "name": "authored/install-a.bin",
+      "membershipCount": 1,
+      "matchingCount": 1,
+      "contentKeyCount": 1,
+      "encodedBytesMin": "64",
+      "encodedBytesMax": "64",
+      "unresolvedCount": 0,
+      "localeFlags": null,
+      "storedCount": 0
+    }
+  ],
+  "totalCount": null,
+  "nextCursor": "install:7",
+  "scanLimited": false
+}

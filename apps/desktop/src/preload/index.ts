@@ -56,6 +56,8 @@ const bridge: DiscoveryBridge = Object.freeze<DiscoveryBridge>({
   tableDefinition: params => ipcRenderer.invoke('discovery:invoke', 'tables.definition', params),
   download: params => ipcRenderer.invoke('discovery:invoke', 'download.read', params),
   inventory: params => ipcRenderer.invoke('discovery:invoke', 'inventory.read', params),
+  inventoryFiles: params => ipcRenderer.invoke('discovery:invoke', 'inventory.files', params),
+  inventoryFile: params => ipcRenderer.invoke('discovery:invoke', 'inventory.file', params),
   cancel: requestId => ipcRenderer.invoke('discovery:invoke', 'request.cancel', { requestId }),
   onProgress: (listener: (progress: EngineProgress) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, progress: EngineProgress) => listener(progress);

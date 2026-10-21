@@ -29,7 +29,7 @@ function bridgeMock(read: DiscoveryPage = page, extra: DiscoveryCatalogPage['bui
     readAll: vi.fn(async params => success(answer(params.productId, params.filter))),
     refreshAll: vi.fn(async () => success(answer())),
     tableData: vi.fn(async () => success({ snapshot: null })), tablePrepare: vi.fn(unavailable), tableRows: vi.fn(unavailable), tablesCatalog: vi.fn(unavailable), tableDefinition: vi.fn(unavailable),
-    download: vi.fn(unavailable), inventory: vi.fn(unavailable), open: vi.fn(unavailable),
+    download: vi.fn(unavailable), inventory: vi.fn(unavailable), inventoryFiles: vi.fn(unavailable), inventoryFile: vi.fn(unavailable), open: vi.fn(unavailable),
     cancel: vi.fn(async () => success({ requested: true })), onProgress: vi.fn(() => () => {})
   };
 }

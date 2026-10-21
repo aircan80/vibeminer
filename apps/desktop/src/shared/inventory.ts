@@ -1,4 +1,4 @@
-import type { InventoryPage, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
+import type { InventoryFileDetail, InventoryFileParams, InventoryFilesPage, InventoryFilesParams, InventoryPage, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { OpenParams } from './bridge';
 export type InventoryReadParams = OpenParams & { generation: string; limit: number; after?: string };
 const unsigned = /^(0|[1-9][0-9]{0,18})$/;
@@ -42,3 +42,76 @@ export function encodedPercentage(part: string, total: string): string {
   const basisPoints = BigInt(part) * 10000n / BigInt(total);
   return `${basisPoints / 100n}.${(basisPoints % 100n).toString().padStart(2, '0')}%`;
 }
+
+// Files (contracts/inventory-v1.md#files): one row per ROOT FileDataID or exact install name.
+export type { InventoryFilesParams, InventoryFileParams };
+export type FileFilters = Pick<InventoryFilesParams, 'fileDataId' | 'contentKey' | 'localeFlags' | 'contentFlags' | 'family' | 'storedOnly'>;
+const fileKeyPattern = /^(root:(0|[1-9][0-9]{0,9})|install:[1-9][0-9]{0,18})$/;
+const filesCursorPattern = /^(root:(0|[1-9][0-9]{0,9})|install:(0|[1-9][0-9]{0,18}))$/;
+const u32 = (value: string) => BigInt(value) <= 4294967295n;
+const filterKeys = ['fileDataId', 'contentKey', 'localeFlags', 'contentFlags', 'family', 'storedOnly'];
+function contextValid(p: Record<string, unknown>) {
+  return typeof p.productId === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(p.productId) && typeof p.buildIdentity === 'string' && /^[0-9a-f]{64}$/.test(p.buildIdentity) && typeof p.sourceRegion === 'string' && /^[a-z]{2,8}$/.test(p.sourceRegion) && typeof p.generation === 'string' && positive.test(p.generation) && Number.isInteger(p.limit) && (p.limit as number) >= 1 && (p.limit as number) <= 100;
+}
+export function validFileFilters(p: Record<string, unknown>): boolean {
+  const decimal32 = (v: unknown, zero: boolean) => typeof v === 'string' && (zero ? /^(0|[1-9][0-9]{0,9})$/ : /^[1-9][0-9]{0,9}$/).test(v) && u32(v);
+  return (p.fileDataId === undefined || decimal32(p.fileDataId, true)) && (p.contentKey === undefined || typeof p.contentKey === 'string' && /^[0-9a-f]{4,32}$/.test(p.contentKey))
+    && !(p.fileDataId !== undefined && p.contentKey !== undefined) && (p.localeFlags === undefined || decimal32(p.localeFlags, false))
+    && (p.contentFlags === undefined || p.contentFlags === 'none' || decimal32(p.contentFlags, false)) && (p.family === undefined || p.family === 'root' || p.family === 'install')
+    && (p.storedOnly === undefined || typeof p.storedOnly === 'boolean');
+}
+export function validInventoryFiles(value: unknown): value is InventoryFilesParams {
+  if (!value || typeof value !== 'object') return false;
+  const p = value as Record<string, unknown>;
+  return contextValid(p) && validFileFilters(p) && (p.after === undefined || typeof p.after === 'string' && filesCursorPattern.test(p.after) && (!p.after.startsWith('root:') || u32(p.after.slice(5))))
+    && Object.keys(p).every(key => ['productId', 'buildIdentity', 'sourceRegion', 'generation', 'limit', 'after', ...filterKeys].includes(key));
+}
+export function validInventoryFile(value: unknown): value is InventoryFileParams {
+  if (!value || typeof value !== 'object') return false;
+  const p = value as Record<string, unknown>;
+  return contextValid(p) && validFileFilters(p) && typeof p.file === 'string' && fileKeyPattern.test(p.file) && (!p.file.startsWith('root:') || u32(p.file.slice(5))) && (p.after === undefined || typeof p.after === 'string' && positive.test(p.after))
+    && Object.keys(p).every(key => ['productId', 'buildIdentity', 'sourceRegion', 'generation', 'limit', 'file', 'after', ...filterKeys].includes(key));
+}
+/** Orders Files positions: every ROOT row before every install row, then by value. */
+export function filePosition(key: string): [number, bigint] { const install = key.startsWith('install:'); return [install ? 1 : 0, BigInt(key.slice(install ? 8 : 5))]; }
+const after = (a: [number, bigint], b: [number, bigint]) => a[0] !== b[0] ? a[0] > b[0] : a[1] > b[1];
+const narrows = (p: FileFilters) => p.fileDataId !== undefined || p.contentKey !== undefined || p.localeFlags !== undefined || p.contentFlags !== undefined || !!p.storedOnly;
+export function inventoryFilesPageMatches(page: InventoryFilesPage, params: InventoryFilesParams): boolean {
+  if (page.productId !== params.productId || page.buildIdentity !== params.buildIdentity || page.sourceRegion !== params.sourceRegion || page.generation !== params.generation || page.entries.length > params.limit) return false;
+  if (narrows(params) ? page.totalCount !== null : page.totalCount === null) return false;
+  let previous: [number, bigint] | null = params.after === undefined ? null : filePosition(params.after);
+  for (const file of page.entries) {
+    const position = filePosition(file.key), root = position[0] === 0;
+    if (previous && !after(position, previous)) return false;
+    if (params.family && file.family !== params.family || file.family !== (root ? 'root' : 'install')) return false;
+    // ROOT has no names; install rows carry their actual name and no ROOT locale flags.
+    if (root ? file.fileDataId !== String(position[1]) || file.name !== null || file.localeFlags === null : file.fileDataId !== null || file.name === null || file.localeFlags !== null) return false;
+    if (file.matchingCount < 1 || file.matchingCount > file.membershipCount || file.storedCount > file.membershipCount || file.unresolvedCount > file.membershipCount || file.contentKeyCount > file.membershipCount) return false;
+    if ((file.unresolvedCount === file.membershipCount) !== (file.encodedBytesMin === null) || (file.encodedBytesMin === null) !== (file.encodedBytesMax === null) || file.encodedBytesMin !== null && BigInt(file.encodedBytesMin) > BigInt(file.encodedBytesMax!)) return false;
+    previous = position;
+  }
+  if (page.scanLimited && page.nextCursor === null) return false;
+  if (page.nextCursor !== null && previous && after(previous, filePosition(page.nextCursor))) return false;
+  if (page.nextCursor !== null && params.after !== undefined && !after(filePosition(page.nextCursor), filePosition(params.after))) return false;
+  return true;
+}
+export function inventoryFileDetailMatches(detail: InventoryFileDetail, params: InventoryFileParams): boolean {
+  if (detail.productId !== params.productId || detail.buildIdentity !== params.buildIdentity || detail.sourceRegion !== params.sourceRegion || detail.generation !== params.generation || detail.file !== params.file || detail.memberships.length > params.limit) return false;
+  const [section, value] = filePosition(params.file), root = section === 0;
+  if (detail.family !== (root ? 'root' : 'install') || (root ? detail.fileDataId !== String(value) || detail.name !== null : detail.fileDataId !== null || detail.name === null) || detail.matchingCount > detail.membershipCount) return false;
+  let cursor = BigInt(params.after ?? '0');
+  for (const m of detail.memberships) {
+    if (BigInt(m.id) <= cursor || m.family !== detail.family || (m.encodingKey === null) !== (m.encodedBytes === null)) return false;
+    if (root) {
+      if (m.blockOrdinal === null || m.entryOrdinal === null || m.installOrdinal !== null || m.localeFlags === null || m.contentFlags === null || !m.rawContentFlags) return false;
+      const raw = m.rawContentFlags;
+      if ((BigInt(raw.first) | BigInt(raw.second) | (BigInt(raw.third) << 17n)) !== BigInt(m.contentFlags)) return false;
+    } else if (m.installOrdinal === null || m.blockOrdinal !== null || m.localeFlags !== null || m.contentFlags !== null || m.rawContentFlags !== null || m.nameHash !== null) return false;
+    cursor = BigInt(m.id);
+  }
+  return detail.nextCursor === null || detail.memberships.length > 0 && detail.nextCursor === detail.memberships.at(-1)!.id;
+}
+/** Known locale bit names (docs/formats/root.md); every other bit stays a raw mask. */
+export const localeBits: readonly [number, string][] = [[0x2, 'enUS'], [0x200, 'enGB'], [0x80, 'esES'], [0x1000, 'esMX']];
+export const localeNames = (mask: string) => { const value = BigInt(mask); return localeBits.filter(([bit]) => (value & BigInt(bit)) !== 0n).map(([, name]) => name); };
+export const hex = (value: string | number) => '0x' + BigInt(value).toString(16).toUpperCase().padStart(8, '0');

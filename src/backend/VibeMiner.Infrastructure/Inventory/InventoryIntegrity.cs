@@ -121,7 +121,7 @@ public sealed partial class DiscoveryCatalog
     // Each child delete is its own short worker operation; never cascade-delete millions of rows.
     internal async Task CleanupStagingInventoriesAsync(CancellationToken token, Func<string, Task>? progress = null)
     {
-        var children = DigestTables.Select(table => table.Name).Concat(new[] { "inventory_available", "inventory_merge_results", "inventory_merge_state", "inventory_resolution_cursor" }).ToArray();
+        var children = DigestTables.Select(table => table.Name).Concat(new[] { "inventory_available", "inventory_merge_results", "inventory_merge_state", "inventory_resolution_cursor", "inventory_root_variants", "inventory_file_stats" }).ToArray();
         var tables = await Schedule(() => children.Where(table =>
             Scalar("SELECT 1 FROM sqlite_master WHERE type='table' AND name=$n", null, ("$n", table)) is not null).ToArray(), token);
         while (true)

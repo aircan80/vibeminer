@@ -1,0 +1,49 @@
+{
+  "productId": "wow",
+  "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "sourceRegion": "us",
+  "generation": "1",
+  "file": "root:12345",
+  "family": "root",
+  "fileDataId": "12345",
+  "name": null,
+  "membershipCount": 2,
+  "matchingCount": 1,
+  "memberships": [
+    {
+      "id": "1",
+      "family": "root",
+      "blockOrdinal": 0,
+      "entryOrdinal": 0,
+      "installOrdinal": null,
+      "localeFlags": "2",
+      "contentFlags": "268435456",
+      "rawContentFlags": { "first": "0", "second": "268435456", "third": 0 },
+      "nameHash": null,
+      "contentKey": "11111111111111111111111111111111",
+      "encodingKey": "44444444444444444444444444444444",
+      "decodedBytes": "300",
+      "encodedBytes": "100",
+      "stored": true,
+      "matches": true
+    },
+    {
+      "id": "2",
+      "family": "root",
+      "blockOrdinal": 1,
+      "entryOrdinal": 0,
+      "installOrdinal": null,
+      "localeFlags": "512",
+      "contentFlags": "134217728",
+      "rawContentFlags": { "first": "134217728", "second": "0", "third": 0 },
+      "nameHash": "18446744073709551615",
+      "contentKey": "22222222222222222222222222222222",
+      "encodingKey": null,
+      "decodedBytes": null,
+      "encodedBytes": null,
+      "stored": false,
+      "matches": false
+    }
+  ],
+  "nextCursor": null
+}

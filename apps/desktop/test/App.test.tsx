@@ -22,7 +22,7 @@ function bridgeMock(): DiscoveryBridge {
     refreshAll: vi.fn(async () => success(catalog(page))),
     tableData: vi.fn(async () => success({ snapshot: null })), tablePrepare: vi.fn(unavailable), tableRows: vi.fn(unavailable), tablesCatalog: vi.fn(unavailable), tableDefinition: vi.fn(unavailable),
     download: vi.fn(async () => ({ ok: false as const, error: { code: 'NOT_PREPARED', message: 'Authored unavailable download ledger.', retryable: false } })),
-    inventory: vi.fn(unavailable), open: vi.fn(unavailable),
+    inventory: vi.fn(unavailable), inventoryFiles: vi.fn(unavailable), inventoryFile: vi.fn(unavailable), open: vi.fn(unavailable),
     cancel: vi.fn(async () => success({ requested: true })), onProgress: vi.fn(() => () => {})
   };
 }

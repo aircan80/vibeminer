@@ -41,7 +41,7 @@ public sealed class InventoryIntegrityTests
         {
             fixture.Execute($"CREATE TEMP TABLE reordered AS SELECT * FROM {table} WHERE g=1 ORDER BY rowid DESC; DELETE FROM {table} WHERE g=1; INSERT INTO {table} SELECT * FROM reordered; DROP TABLE reordered;");
         }
-        fixture.Execute("UPDATE inventory_units SET retained=1,shared=1 WHERE g=1; DELETE FROM inventory_available WHERE g=1;");
+        fixture.Execute("UPDATE inventory_units SET retained=1,shared=1 WHERE g=1; UPDATE inventory_origins SET stored=1 WHERE g=1; DELETE FROM inventory_available WHERE g=1;");
         Assert.Equal(before, await fixture.Catalog.ComputeInventoryDigestAsync(1, CancellationToken.None));
     }
 
@@ -153,7 +153,7 @@ public sealed class InventoryIntegrityTests
                 ["en_content"] = "$g,printf('%032x',n),n",
                 ["en_candidates"] = "$g,printf('%032x',n),0,printf('%032x',n)",
                 ["en_objects"] = "$g,printf('%032x',n),n",
-                ["inventory_origins"] = "$g,n,'root',NULL,CAST(n AS TEXT),printf('%032x',n),NULL,16,NULL,n,'1','0',NULL,'{}',printf('%032x',n),n,n",
+                ["inventory_origins"] = "$g,n,'root',NULL,CAST(n AS TEXT),printf('%032x',n),NULL,16,NULL,n,'1','0',NULL,'{}',printf('%032x',n),n,n,n,1,0,NULL,0",
                 ["inventory_tags"] = "$g,'root',n,'tag',1,x'80'",
                 ["inventory_logical"] = "$g,printf('%032x',n),n",
                 ["inventory_units"] = "$g,printf('%032x',n),n,0,0",

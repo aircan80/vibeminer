@@ -71,7 +71,7 @@ The workbench is three panes: catalogue (17rem), records, inspector (24.3rem, 34
 
 ## Files
 
-A file explorer for the build's prepared catalog: a filter row, a list with one row per FileDataID, and a file inspector. The inspector head ends where the list column header ends. Grouping by FileDataID and the filtered query are [#20](https://github.com/aircan80/vibeminer/issues/20); today's `inventory.read` returns plain membership pages with no filters.
+A file explorer for the build's prepared catalog: a filter row, a list with one row per FileDataID, and a file inspector. The inspector head ends where the list column header ends. Grouping by FileDataID and the filtered query came with [#20](https://github.com/aircan80/vibeminer/issues/20) (`inventory.files` and `inventory.file`, [D068](../../DECISIONS.md)).
 
 - **Filter row:** search by FileDataID or content key, locale flag (enUS 0x2, enGB 0x200, esES 0x80, esMX 0x1000), content flags (raw masks), source family (All, ROOT, Install) and **Stored locally**. No platform filter: platform is never inferred from content flags.
 - **At 200% on small windows** the search stays visible and the other filters collapse behind **Filters**, a nonmodal disclosure (`aria-expanded`). It shows the active filter count ("Filters 2", read as "2 active"). Tab moves from it into the controls, and Escape closes it and returns focus to it.
@@ -107,6 +107,8 @@ A file explorer for the build's prepared catalog: a filter row, a list with one 
 
 ## Deliberate departures
 
+- **Files without a file catalog (the app today, not drawn here):** no **Prepare file catalog** button and no disabled filter row. Production opening can't prepare the ROOT/install catalog yet ([#35](https://github.com/aircan80/vibeminer/issues/35)), so there is nothing to start. Instead a note spans the list width: "File catalog not prepared", what works today (paging the download manifest's encoded objects and their local status) and that FileDataID and CKey search and per-file rows need that catalog. It sits at the top of the list's scroll area and shrinks to one line at 200% text so rows stay in view.
+
 - **The activity entry hides when idle on Home too**, as on Discovery. Decided by the owner on #6.
 - **The brand is bigger than on the first Discovery reference:** a 17px (`1.214rem`) wordmark and a 28px (`2rem`) logo instead of 14px and `1.57rem`. It's an owner decision shared with the approved all-products Discovery mockup (#10). It's the one size off the 11/13/14/19 scale.
 - **Source details moves out of the build header** into the Home pane head next to Metadata. The header keeps exactly the fields from the spec. The Home **Storage** jump is gone because every panel is visible.
@@ -124,7 +126,6 @@ A file explorer for the build's prepared catalog: a filter row, a list with one 
 - **Engine work this mockup assumes, not built today:**
   - [#19](https://github.com/aircan80/vibeminer/issues/19): Follow by column value, a target-column lookup (`tables.rows` filters by record ID only)
   - [#17](https://github.com/aircan80/vibeminer/issues/17): batched reference text
-  - [#20](https://github.com/aircan80/vibeminer/issues/20): Files grouped per FileDataID, with filtered queries (`inventory.read` takes no filters)
   - [#21](https://github.com/aircan80/vibeminer/issues/21): the opt-in community listfile, with its own setting and a decision like #9
 - Once approved, a decision row supersedes D021 for Home and its areas, as D059 did for Discovery.
 

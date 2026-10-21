@@ -61,6 +61,18 @@
     "inventoryPage": {
       "$ref": "#/definitions/InventoryPage"
     },
+    "inventoryFilesParams": {
+      "$ref": "#/definitions/InventoryFilesParams"
+    },
+    "inventoryFilesPage": {
+      "$ref": "#/definitions/InventoryFilesPage"
+    },
+    "inventoryFileParams": {
+      "$ref": "#/definitions/InventoryFileParams"
+    },
+    "inventoryFileDetail": {
+      "$ref": "#/definitions/InventoryFileDetail"
+    },
     "downloadPage": {
       "$ref": "#/definitions/DownloadPage"
     },
@@ -2273,6 +2285,605 @@
         "generation",
         "entries",
         "totalCount",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "InventoryFilesParams": {
+      "title": "InventoryFilesParams",
+      "description": "inventory.files: one bounded page of Files rows (D068). Every filter tests single memberships; a file is listed when one membership passes all of them.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sourceRegion": {
+          "type": "string",
+          "pattern": "^[a-z]{2,8}$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "after": {
+          "type": "string",
+          "pattern": "^(root:(0|[1-9][0-9]{0,9})|install:(0|[1-9][0-9]{0,18}))$"
+        },
+        "fileDataId": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,9})$",
+          "description": "Exact ROOT FileDataID."
+        },
+        "contentKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{4,32}$",
+          "description": "Full lowercase CKey, or a prefix of at least four hex digits."
+        },
+        "localeFlags": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,9}$",
+          "description": "Raw locale mask; a membership matches when it shares a bit."
+        },
+        "contentFlags": {
+          "type": "string",
+          "pattern": "^(none|[1-9][0-9]{0,9})$",
+          "description": "none (derived content flags are zero), or a raw mask whose bits must all be set."
+        },
+        "family": {
+          "enum": [
+            "root",
+            "install"
+          ]
+        },
+        "storedOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "sourceRegion",
+        "generation",
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    "InventoryFileParams": {
+      "title": "InventoryFileParams",
+      "description": "inventory.file: every membership of one Files row, in membership order, marked against the same filters.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sourceRegion": {
+          "type": "string",
+          "pattern": "^[a-z]{2,8}$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^(root:(0|[1-9][0-9]{0,9})|install:[1-9][0-9]{0,18})$"
+        },
+        "after": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "fileDataId": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,9})$",
+          "description": "Exact ROOT FileDataID."
+        },
+        "contentKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{4,32}$",
+          "description": "Full lowercase CKey, or a prefix of at least four hex digits."
+        },
+        "localeFlags": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,9}$",
+          "description": "Raw locale mask; a membership matches when it shares a bit."
+        },
+        "contentFlags": {
+          "type": "string",
+          "pattern": "^(none|[1-9][0-9]{0,9})$",
+          "description": "none (derived content flags are zero), or a raw mask whose bits must all be set."
+        },
+        "family": {
+          "enum": [
+            "root",
+            "install"
+          ]
+        },
+        "storedOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "sourceRegion",
+        "generation",
+        "file",
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    "InventoryFile": {
+      "title": "InventoryFile",
+      "description": "One ROOT FileDataID or one exact install name with every membership summarized. Sizes are encoded bytes of resolved memberships; unresolved ones are counted, never sized.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^(root:(0|[1-9][0-9]{0,9})|install:[1-9][0-9]{0,18})$"
+        },
+        "family": {
+          "enum": [
+            "root",
+            "install"
+          ]
+        },
+        "fileDataId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,9})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "membershipCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "description": "Every membership of the file; sealing refuses a file with more than 4,096."
+        },
+        "matchingCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "contentKeyCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "encodedBytesMin": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "encodedBytesMax": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unresolvedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "localeFlags": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,9})$",
+              "description": "Union of the raw ROOT locale masks; null for install files."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "storedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        }
+      },
+      "required": [
+        "key",
+        "family",
+        "fileDataId",
+        "name",
+        "membershipCount",
+        "matchingCount",
+        "contentKeyCount",
+        "encodedBytesMin",
+        "encodedBytesMax",
+        "unresolvedCount",
+        "localeFlags",
+        "storedCount"
+      ],
+      "additionalProperties": false
+    },
+    "InventoryFilesPage": {
+      "title": "InventoryFilesPage",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sourceRegion": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/InventoryFile"
+          }
+        },
+        "totalCount": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$",
+              "description": "Files in the chosen family; null whenever another filter narrows the list."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(root:(0|[1-9][0-9]{0,9})|install:(0|[1-9][0-9]{0,18}))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scanLimited": {
+          "type": "boolean",
+          "description": "The engine stopped at its per-request examination bound before filling the page; nextCursor continues the search."
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "sourceRegion",
+        "generation",
+        "entries",
+        "totalCount",
+        "nextCursor",
+        "scanLimited"
+      ],
+      "additionalProperties": false
+    },
+    "InventoryRawContentFlags": {
+      "title": "InventoryRawContentFlags",
+      "description": "The three raw ROOT block parts; the derived content flags are first | second | (third << 17).",
+      "type": "object",
+      "properties": {
+        "first": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,9})$"
+        },
+        "second": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,9})$"
+        },
+        "third": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        }
+      },
+      "required": [
+        "first",
+        "second",
+        "third"
+      ],
+      "additionalProperties": false
+    },
+    "InventoryFileMembership": {
+      "title": "InventoryFileMembership",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "family": {
+          "enum": [
+            "root",
+            "install"
+          ]
+        },
+        "blockOrdinal": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entryOrdinal": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "installOrdinal": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 500000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "localeFlags": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,9})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentFlags": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,9})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rawContentFlags": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InventoryRawContentFlags"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nameHash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "encodingKey": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decodedBytes": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "encodedBytes": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stored": {
+          "type": "boolean"
+        },
+        "matches": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "family",
+        "blockOrdinal",
+        "entryOrdinal",
+        "installOrdinal",
+        "localeFlags",
+        "contentFlags",
+        "rawContentFlags",
+        "nameHash",
+        "contentKey",
+        "encodingKey",
+        "decodedBytes",
+        "encodedBytes",
+        "stored",
+        "matches"
+      ],
+      "additionalProperties": false
+    },
+    "InventoryFileDetail": {
+      "title": "InventoryFileDetail",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sourceRegion": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^(root:(0|[1-9][0-9]{0,9})|install:[1-9][0-9]{0,18})$"
+        },
+        "family": {
+          "enum": [
+            "root",
+            "install"
+          ]
+        },
+        "fileDataId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,9})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "membershipCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "matchingCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "memberships": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/InventoryFileMembership"
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "sourceRegion",
+        "generation",
+        "file",
+        "family",
+        "fileDataId",
+        "name",
+        "membershipCount",
+        "matchingCount",
+        "memberships",
         "nextCursor"
       ],
       "additionalProperties": false

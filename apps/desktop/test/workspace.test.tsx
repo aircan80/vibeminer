@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Build, DiscoveryPage, EngineProgress, WorkspaceSnapshot, InventoryPage, DownloadPage, TableDefinitionSnapshot, TableDataSnapshot } from '../../../contracts/generated/discovery';
+import type { Build, DiscoveryPage, EngineProgress, WorkspaceSnapshot, InventoryPage, InventoryFilesPage, InventoryFileDetail, DownloadPage, TableDefinitionSnapshot, TableDataSnapshot } from '../../../contracts/generated/discovery';
 import type { BridgeReply, DiscoveryBridge } from '../src/shared/bridge';
 import { App } from '../src/renderer/App';
 import pageFixture from '../../../contracts/examples/discovery-page.json';
@@ -10,6 +10,8 @@ import definitionsFixture from '../../../tests/desktop/fixtures/table-definition
 import downloadFixture from '../../../tests/desktop/fixtures/download-workspace.json';
 import configurationFixture from '../../../contracts/examples/workspace-snapshot.json';
 import inventoryPageFixture from '../../../contracts/examples/inventory-page.json';
+import filesFixture from '../../../contracts/examples/inventory-files-page.json';
+import detailFixture from '../../../contracts/examples/inventory-file-detail.json';
 import { catalog } from './catalog-page';
 const success = <T,>(value: T): BridgeReply<T> => ({ ok: true, value });
 const failure = (code = 'CANCELED', retryable = true): BridgeReply<WorkspaceSnapshot> => ({ ok: false, error: { code, message: `Authored ${code} outcome.`, retryable } });
@@ -26,6 +28,9 @@ function snapshot(build = routed(), region = 'us'): WorkspaceSnapshot {
     { ...workspaceFixture.configurations[1], role: 'cdnConfig', key: build.cdnConfig }
   ] } as WorkspaceSnapshot;
 }
+const context = { productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', generation: '1', limit: 50 };
+// The authored Files page for this exact build, unfiltered (exact total, no cursor) unless a test patches it.
+const filesPage = (patch: Partial<InventoryFilesPage> = {}): InventoryFilesPage => ({ ...(filesFixture as InventoryFilesPage), buildIdentity: base.id, totalCount: '2', nextCursor: null, ...patch });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 function setup(builds: Build[] = [routed()]) {
   const progress = new Set<(p: EngineProgress) => void>();
@@ -47,6 +52,8 @@ function setup(builds: Build[] = [routed()]) {
     tableDefinition: vi.fn(async () => ({ ok: false as const, error: { code: 'NOT_TESTED', message: 'Definitions outside this test.', retryable: false } })),
     download: vi.fn(async () => ({ ok: false as const, error: { code: 'NOT_PREPARED', message: 'Authored unavailable download ledger.', retryable: false } })),
     inventory: vi.fn(async params => success({ ...inventoryPageFixture, productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion, generation: params.generation } as InventoryPage)),
+    inventoryFiles: vi.fn(async () => success(filesPage())),
+    inventoryFile: vi.fn(async params => success({ ...detailFixture, buildIdentity: params.buildIdentity, file: params.file } as InventoryFileDetail)),
     cancel: vi.fn(async () => success({ requested: true })),
     onProgress: vi.fn(listener => { progress.add(listener); return () => { progress.delete(listener); }; })
   };
@@ -201,66 +208,193 @@ describe('verified inventory opening and preserved discovery', () => {
     const dialog = screen.getByRole('dialog'); expect(within(dialog).getByText('600 bytes')).toBeVisible(); expect(within(dialog).getByText('Unique ROOT/IN contents (CKeys)')).toBeVisible(); expect(within(dialog).getByText('Exact encoded objects (EKeys)')).toBeVisible();
   });
   it('reads Files only on entry through the exact sealed local context with bounded page parameters', async () => {
-    const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' }); expect(bridge.inventory).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('FileDataID 12345');
-    expect(bridge.inventory).toHaveBeenCalledWith({ productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', generation: '1', limit: 50 });
-    expect(screen.getByText(/Name not known/)).toBeVisible(); expect(within(screen.getByRole('complementary', { name: 'Membership 1' })).getByText(inventoryPageFixture.entries[0].encodingKey)).toBeVisible(); expect(screen.getByText(/1 memberships on this page · 6 total/)).toBeVisible();
-    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Download all', hidden: true })).not.toBeInTheDocument(); expect(bridge.refreshAll).not.toHaveBeenCalled();
+    const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' }); expect(bridge.inventoryFiles).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    expect(bridge.inventoryFiles).toHaveBeenCalledWith(context); expect(bridge.inventory).not.toHaveBeenCalled();
+    expect(screen.getByText('Name not known')).toBeVisible(); expect(screen.getByText('authored/install-a.bin')).toBeVisible(); expect(screen.getByText(/2 files on this page · 2 files in this catalog/)).toBeVisible();
+    const inspector = await screen.findByRole('complementary', { name: 'FileDataID 12345' }); await within(inspector).findByText(detailFixture.memberships[0].encodingKey!);
+    expect(bridge.inventoryFile).toHaveBeenCalledWith({ ...context, limit: 100, file: 'root:12345' });
+    expect(screen.getByRole('searchbox', { name: 'Search by FileDataID or content key' })).toBeVisible(); expect(screen.queryByRole('button', { name: 'Download all', hidden: true })).not.toBeInTheDocument(); expect(bridge.refreshAll).not.toHaveBeenCalled();
   });
   it('keeps page controls focused and current rows readable during paged local reads', async () => {
-    const { bridge } = setup(); const later = deferred<BridgeReply<InventoryPage>>();
-    vi.mocked(bridge.inventory).mockResolvedValueOnce(success(inventoryPageFixture as InventoryPage)).mockReturnValueOnce(later.promise);
-    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('FileDataID 12345');
+    const { bridge } = setup(); const later = deferred<BridgeReply<InventoryFilesPage>>();
+    vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ nextCursor: 'root:12345', entries: [filesFixture.entries[0]] as InventoryFilesPage['entries'] }))).mockReturnValueOnce(later.promise);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
     const next = screen.getByRole('button', { name: 'Next page' }); next.focus(); fireEvent.click(next);
-    expect(next).toHaveFocus(); expect(next).toHaveAttribute('aria-disabled', 'true'); expect(screen.getByText('FileDataID 12345')).toBeVisible();
-    await act(async () => later.resolve(success({ ...inventoryPageFixture, entries: [{ ...inventoryPageFixture.entries[0], id: '2', family: 'install', name: 'authored/install.bin', fileDataId: null, retained: false }], nextCursor: '2' } as InventoryPage)));
-    expect(screen.getByText('authored/install.bin')).toBeVisible(); expect(next).toHaveFocus(); expect(bridge.inventory).toHaveBeenLastCalledWith({ productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', generation: '1', limit: 50, after: '1' });
-    fireEvent.click(screen.getByRole('button', { name: 'Previous page' })); await screen.findByText('FileDataID 12345'); expect(bridge.inventory).toHaveBeenLastCalledWith({ productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', generation: '1', limit: 50 });
+    expect(next).toHaveFocus(); expect(next).toHaveAttribute('aria-disabled', 'true'); expect(within(screen.getByRole('listbox')).getByText('12345')).toBeVisible();
+    await act(async () => later.resolve(success(filesPage({ entries: [filesFixture.entries[1]] as InventoryFilesPage['entries'] }))));
+    expect(within(screen.getByRole('listbox')).getByText('authored/install-a.bin')).toBeVisible(); expect(next).toHaveFocus(); expect(bridge.inventoryFiles).toHaveBeenLastCalledWith({ ...context, after: 'root:12345' });
+    fireEvent.click(screen.getByRole('button', { name: 'Previous page' })); await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenLastCalledWith(context));
   });
   it('preserves good rows and the exact failed cursor when retrying a failed page', async () => {
-    const { bridge } = setup(); vi.mocked(bridge.inventory).mockResolvedValueOnce(success(inventoryPageFixture as InventoryPage)).mockResolvedValueOnce({ ok: false, error: { code: 'BUSY', message: 'Authored catalog busy.', retryable: true } }).mockResolvedValueOnce(success({ ...inventoryPageFixture, entries: [{ ...inventoryPageFixture.entries[0], id: '2' }], nextCursor: '2' } as InventoryPage));
-    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('FileDataID 12345'); fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
-    await screen.findByText('BUSY'); expect(screen.getByText('FileDataID 12345')).toBeVisible(); fireEvent.click(screen.getByRole('button', { name: 'Retry page' }));
-    await waitFor(() => expect(bridge.inventory).toHaveBeenCalledTimes(3)); expect(vi.mocked(bridge.inventory).mock.calls[1][0]).toEqual(vi.mocked(bridge.inventory).mock.calls[2][0]);
+    const { bridge } = setup(); vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ nextCursor: 'root:12345', entries: [filesFixture.entries[0]] as InventoryFilesPage['entries'] }))).mockResolvedValueOnce({ ok: false, error: { code: 'BUSY', message: 'Authored catalog busy.', retryable: true } }).mockResolvedValueOnce(success(filesPage({ entries: [filesFixture.entries[1]] as InventoryFilesPage['entries'] })));
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345'); fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+    await screen.findByText('BUSY'); expect(within(screen.getByRole('listbox')).getByText('12345')).toBeVisible();
+    const retry = screen.getByRole('button', { name: 'Retry page' }); retry.focus(); fireEvent.click(retry);
+    await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenCalledTimes(3)); expect(vi.mocked(bridge.inventoryFiles).mock.calls[1][0]).toEqual(vi.mocked(bridge.inventoryFiles).mock.calls[2][0]);
+    await within(screen.getByRole('listbox')).findByText('authored/install-a.bin');
+    // The Retry button is gone; focus is on the Files heading, not the document body.
+    expect(screen.queryByRole('button', { name: 'Retry page' })).not.toBeInTheDocument(); expect(screen.getByRole('heading', { name: 'Files' })).toHaveFocus();
   });
-  it('refuses mismatched prepared generations instead of substituting a newer catalog', async () => {
-    const { bridge } = setup(); vi.mocked(bridge.inventory).mockResolvedValue(success({ ...inventoryPageFixture, generation: '2' } as InventoryPage));
+  // A retried page move keeps its own history step: Previous after a retried Next goes back to page 1,
+  // and Previous after a retried Previous goes one further back instead of reading the same page again.
+  const page1 = () => success(filesPage({ nextCursor: 'root:12345', entries: [filesFixture.entries[0]] as InventoryFilesPage['entries'] }));
+  const page2 = () => success(filesPage({ nextCursor: 'install:7', entries: [filesFixture.entries[1]] as InventoryFilesPage['entries'] }));
+  const page3 = () => success(filesPage({ entries: [] }));
+  const busyPage = { ok: false as const, error: { code: 'BUSY', message: 'Authored catalog busy.', retryable: true } };
+  it('goes back to the first page after a failed Next is retried', async () => {
+    const { bridge } = setup(); vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(page1()).mockResolvedValueOnce(busyPage).mockResolvedValueOnce(page2()).mockResolvedValueOnce(page1());
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' })); await screen.findByText('BUSY');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry page' })); await within(screen.getByRole('listbox')).findByText('authored/install-a.bin');
+    expect(bridge.inventoryFiles).toHaveBeenLastCalledWith({ ...context, after: 'root:12345' });
+    const previous = screen.getByRole('button', { name: 'Previous page' }); expect(previous).toHaveAttribute('aria-disabled', 'false'); fireEvent.click(previous);
+    await within(screen.getByRole('listbox')).findByText('12345'); expect(bridge.inventoryFiles).toHaveBeenCalledTimes(4); expect(bridge.inventoryFiles).toHaveBeenLastCalledWith(context);
+    expect(screen.getByRole('button', { name: 'Previous page' })).toHaveAttribute('aria-disabled', 'true');
+  });
+  it('steps back one more page after a failed Previous is retried', async () => {
+    const { bridge } = setup(); vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(page1()).mockResolvedValueOnce(page2()).mockResolvedValueOnce(page3()).mockResolvedValueOnce(busyPage).mockResolvedValueOnce(page2()).mockResolvedValueOnce(page1());
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' })); await within(screen.getByRole('listbox')).findByText('authored/install-a.bin');
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' })); await screen.findByText('No files');
+    fireEvent.click(screen.getByRole('button', { name: 'Previous page' })); await screen.findByText('BUSY');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry page' })); await within(await screen.findByRole('listbox')).findByText('authored/install-a.bin');
+    expect(bridge.inventoryFiles).toHaveBeenLastCalledWith({ ...context, after: 'root:12345' });
+    fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
+    await within(screen.getByRole('listbox')).findByText('12345'); expect(bridge.inventoryFiles).toHaveBeenCalledTimes(6); expect(bridge.inventoryFiles).toHaveBeenLastCalledWith(context);
+  });
+  it('refuses mismatched prepared generations and invented ROOT names instead of showing them', async () => {
+    const { bridge } = setup(); vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success({ ...filesPage(), generation: '2' }));
     await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('INVENTORY_CONTEXT_MISMATCH');
-    expect(screen.queryByText('FileDataID 12345')).not.toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Reopen this build' })).toBeEnabled(); expect(screen.queryByRole('button', { name: 'Retry page' })).not.toBeInTheDocument();
+    expect(screen.queryByText('12345')).not.toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Reopen this build' })).toBeEnabled(); expect(screen.queryByRole('button', { name: 'Retry page' })).not.toBeInTheDocument();
+    vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ totalCount: null, entries: [{ ...filesFixture.entries[0], name: 'must-not-be-a-root-filename' }] as InventoryFilesPage['entries'] })));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Locale flag' }), { target: { value: '2' } });
+    await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenCalledTimes(2)); expect(screen.queryByText('must-not-be-a-root-filename')).not.toBeInTheDocument(); expect(screen.getByText('INVENTORY_CONTEXT_MISMATCH')).toBeVisible();
   });
-  it('shows exact membership keys, decoded length and raw flags without inventing ROOT filenames', async () => {
-    const { bridge } = setup(); vi.mocked(bridge.inventory).mockResolvedValue(success({ ...inventoryPageFixture, entries: [{ ...inventoryPageFixture.entries[0], name: 'must-not-be-a-root-filename', nameHash: '18446744073709551615' }] } as InventoryPage));
-    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('FileDataID 12345'); expect(screen.queryByText('must-not-be-a-root-filename')).not.toBeInTheDocument();
-    const list = screen.getByRole('listbox'); list.focus(); fireEvent.click(screen.getByRole('option')); const inspector = screen.getByRole('complementary', { name: 'Membership 1' });
-    expect(within(inspector).getByText('18446744073709551615')).toBeVisible(); expect(within(inspector).getByText('300 bytes')).toBeVisible(); expect(within(inspector).getByText(inventoryPageFixture.entries[0].encodingKey)).toBeVisible(); expect(within(inspector).getByText(inventoryPageFixture.entries[0].contentKey)).toBeVisible(); expect(within(inspector).getByText('Raw locale flags')).toBeVisible();
-    expect(list).toHaveFocus(); expect(screen.getByRole('option')).toHaveAttribute('aria-selected', 'true');
+  it('shows every membership with raw flags, keys and lengths, and keeps unresolved sizes unknown', async () => {
+    setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    const list = screen.getByRole('listbox'); list.focus(); fireEvent.click(within(screen.getByRole('listbox')).getAllByRole('option')[0]);
+    const inspector = screen.getByRole('complementary', { name: 'FileDataID 12345' }); await within(inspector).findByText('Membership 1');
+    expect(within(inspector).getByText('Membership 2')).toBeVisible(); expect(within(inspector).getByText('ffffffffffffffff')).toBeVisible(); expect(within(inspector).getByText('300 bytes')).toBeVisible();
+    expect(within(inspector).getByText('ROOT · block 1, entry 0')).toBeVisible(); expect(within(inspector).getByText('0x00000200')).toBeVisible(); expect(within(inspector).getByText(/raw parts 0x08000000 · 0x00000000 · 0/)).toBeVisible();
+    expect(within(inspector).getByText('Unresolved · CONTENT_UNRESOLVED')).toBeVisible(); expect(within(inspector).getAllByText('Unknown')).toHaveLength(2);
+    expect(within(inspector).getByText(/no platform is inferred/)).toBeVisible(); expect(within(inspector).getByText(/Name not known. ROOT has no names/)).toBeVisible();
+    expect(screen.getByText('+1 unresolved')).toBeVisible(); expect(screen.getByText('1 of 2 stored')).toBeVisible(); expect(screen.getByText('enUS, enGB')).toBeVisible();
+    expect(list).toHaveFocus(); expect(within(screen.getByRole('listbox')).getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
+  });
+  it('sends each filter as an exact flat field, names the search when nothing matches and clears back to the search box', async () => {
+    const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    const search = screen.getByRole('searchbox', { name: 'Search by FileDataID or content key' });
+    vi.mocked(bridge.inventoryFiles).mockImplementation(async params => success(filesPage({ entries: [], totalCount: Object.keys(params).length > 5 ? null : '2' })));
+    fireEvent.change(search, { target: { value: '99999999' } }); fireEvent.keyDown(search, { key: 'Enter' });
+    await screen.findByText("No file in this build's prepared catalog has FileDataID 99999999.");
+    expect(bridge.inventoryFiles).toHaveBeenLastCalledWith({ ...context, fileDataId: '99999999' });
+    fireEvent.change(search, { target: { value: 'ABCD12' } }); fireEvent.keyDown(search, { key: 'Enter' });
+    await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenLastCalledWith({ ...context, contentKey: 'abcd12' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Locale flag' }), { target: { value: '512' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Content flags' }), { target: { value: '134217728' } });
+    fireEvent.click(within(screen.getByRole('group', { name: 'Source family' })).getByRole('button', { name: 'ROOT' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Stored locally' }));
+    await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenLastCalledWith({ ...context, contentKey: 'abcd12', localeFlags: '512', contentFlags: '134217728', family: 'root', storedOnly: true }));
+    await screen.findByText("No file in this build's prepared catalog has a content key starting abcd12 with these filters (4 active).");
+    expect(screen.getByRole('button', { name: /^Filters/ })).toHaveAccessibleName('Filters, 4 active');
+    const calls = vi.mocked(bridge.inventoryFiles).mock.calls.length;
+    fireEvent.change(search, { target: { value: 'not a key' } }); fireEvent.keyDown(search, { key: 'Enter' });
+    expect(screen.getByText('Search not understood')).toBeVisible(); expect(search).toHaveAttribute('aria-invalid', 'true'); expect(bridge.inventoryFiles).toHaveBeenCalledTimes(calls);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenLastCalledWith(context)); await waitFor(() => expect(search).toHaveFocus()); expect(search).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: 'Locale flag' })).toHaveValue('0'); expect(screen.getByRole('checkbox', { name: 'Stored locally' })).not.toBeChecked();
+  });
+  it('marks which memberships matched the active filters in the inspector', async () => {
+    const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    vi.mocked(bridge.inventoryFiles).mockResolvedValue(success(filesPage({ totalCount: null })));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Locale flag' }), { target: { value: '2' } });
+    await waitFor(() => expect(bridge.inventoryFile).toHaveBeenLastCalledWith({ ...context, limit: 100, file: 'root:12345', localeFlags: '2' }));
+    const inspector = screen.getByRole('complementary', { name: 'FileDataID 12345' });
+    expect(await within(inspector).findByText('Matches the filters')).toBeVisible(); expect(within(inspector).getByText('Does not match')).toBeVisible();
+    expect(within(inspector).getByText(/2 in ROOT · 2 different content keys · 1 matches the filters/)).toBeVisible();
+    expect(inspector.querySelectorAll('.dh-member.dh-current')).toHaveLength(1);
+  });
+  it('explains a too-broad content key calmly and a scan-limited empty page without claiming absence', async () => {
+    const { bridge } = setup(); vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ nextCursor: 'install:7' })));
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    await within(screen.getByRole('complementary', { name: 'FileDataID 12345' })).findByText('Membership 1');
+    vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce({ ok: false, error: { code: 'INVENTORY_FILTER_BROAD', message: 'More than 16,384 memberships have a content key starting abcd. Type more of the key.', retryable: false } });
+    const search = screen.getByRole('searchbox', { name: 'Search by FileDataID or content key' }); fireEvent.change(search, { target: { value: 'abcd' } }); fireEvent.keyDown(search, { key: 'Enter' });
+    expect(await screen.findByText('Content key too short for this catalog')).toBeVisible(); expect(screen.queryByRole('button', { name: 'Retry page' })).not.toBeInTheDocument();
+    // The old rows stay readable but are labelled as the previous filters' rows; nothing pages them with the new filters.
+    const list = screen.getByRole('listbox'); expect(within(list).getByText('12345')).toBeVisible(); expect(within(list).getByText('authored/install-a.bin')).toBeVisible();
+    expect(screen.getByText('These rows are from the previous filters')).toBeVisible();
+    expect(screen.getByText('2 files from the previous filters · not the current results')).toBeVisible(); expect(screen.queryByText(/matching files on this page/)).not.toBeInTheDocument();
+    for (const name of ['Next page', 'Previous page', 'First page']) expect(screen.getByRole('button', { name })).toHaveAttribute('aria-disabled', 'true');
+    const calls = vi.mocked(bridge.inventoryFiles).mock.calls.length; fireEvent.click(screen.getByRole('button', { name: 'Next page' })); expect(bridge.inventoryFiles).toHaveBeenCalledTimes(calls);
+    // The inspector keeps the filters of the rows it belongs to.
+    expect(vi.mocked(bridge.inventoryFile).mock.calls.every(([params]) => !('contentKey' in params))).toBe(true);
+    fireEvent.change(search, { target: { value: '' } }); fireEvent.keyDown(search, { key: 'Enter' }); await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenLastCalledWith(context));
+    vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ entries: [], totalCount: null, scanLimited: true, nextCursor: 'root:4000000' })));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Stored locally' }));
+    expect(await screen.findByText('No match yet')).toBeVisible(); expect(screen.getByText(/Searched through FileDataID 4,000,000/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Next page' })).toHaveAttribute('aria-disabled', 'false'); expect(screen.queryByText('No files match')).not.toBeInTheDocument();
+  });
+  it('keeps the picked file across filter changes and says when the filters exclude it', async () => {
+    const { bridge } = setup();
+    const install = { ...detailFixture.memberships[0], id: '7', family: 'install', blockOrdinal: null, entryOrdinal: null, installOrdinal: 0, localeFlags: null, contentFlags: null, rawContentFlags: null, nameHash: null };
+    vi.mocked(bridge.inventoryFile).mockImplementation(async params => success((params.file.startsWith('install:')
+      ? { ...detailFixture, buildIdentity: params.buildIdentity, file: params.file, family: 'install', fileDataId: null, name: 'authored/install-a.bin', membershipCount: 1, matchingCount: params.contentFlags ? 0 : 1, memberships: [{ ...install, matches: !params.contentFlags }] }
+      : { ...detailFixture, buildIdentity: params.buildIdentity, file: params.file }) as InventoryFileDetail));
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' }));
+    const list = await screen.findByRole('listbox'); await within(list).findByText('12345');
+    fireEvent.click(within(list).getAllByRole('option')[1]); expect(screen.getByRole('complementary', { name: 'authored/install-a.bin' })).toBeVisible();
+    // Still in the new results: it stays selected; the selection does not jump to the first row.
+    vi.mocked(bridge.inventoryFiles).mockImplementation(async params => success(filesPage({ entries: [filesFixture.entries[1]] as InventoryFilesPage['entries'], totalCount: params.storedOnly ? null : '1' })));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Source family' })).getByRole('button', { name: 'Install' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Stored locally' }));
+    await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenLastCalledWith({ ...context, family: 'install', storedOnly: true }));
+    await waitFor(() => expect(within(screen.getByRole('listbox')).getByRole('option')).toHaveAttribute('aria-selected', 'true'));
+    await within(screen.getByRole('complementary', { name: 'authored/install-a.bin' })).findByText('Membership 7');
+    expect(screen.getByRole('complementary', { name: 'authored/install-a.bin' })).not.toHaveTextContent('outside');
+    // Excluded by the filters: the selection stays in the inspector and says so; the first row is not picked instead.
+    vi.mocked(bridge.inventoryFiles).mockImplementation(async () => success(filesPage({ entries: [filesFixture.entries[0]] as InventoryFilesPage['entries'], totalCount: null })));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Source family' })).getByRole('button', { name: 'All' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Content flags' }), { target: { value: '134217728' } });
+    await waitFor(() => expect(bridge.inventoryFile).toHaveBeenLastCalledWith({ ...context, limit: 100, file: 'install:7', storedOnly: true, contentFlags: '134217728' }));
+    const inspector = screen.getByRole('complementary', { name: 'authored/install-a.bin' });
+    expect(await within(inspector).findByText('Selected file is outside these results')).toBeVisible(); expect(inspector).toHaveTextContent('outside these results');
+    expect(within(screen.getByRole('listbox')).getByRole('option')).toHaveAttribute('aria-selected', 'false');
+  });
+  it('toggles the Filters disclosure with its active count', async () => {
+    setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    const toggle = screen.getByRole('button', { name: /^Filters/ }); expect(toggle).toHaveAttribute('aria-expanded', 'false'); expect(toggle).toHaveAttribute('aria-controls', 'file-filters');
+    fireEvent.click(toggle); expect(toggle).toHaveAttribute('aria-expanded', 'true'); expect(document.getElementById('file-filters')).toHaveClass('dh-open');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Stored locally' })); expect(toggle).toHaveAccessibleName('Filters, 1 active');
   });
   it('returns Files to the Home origin and retains its local page without another read', async () => {
-    const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' }); const browse = screen.getByRole('button', { name: 'Browse in Files' }); browse.focus(); fireEvent.click(browse); await screen.findByText('FileDataID 12345');
-    fireEvent.click(screen.getByRole('button', { name: /Return to build overview/ })); await waitFor(() => expect(browse).toHaveFocus()); fireEvent.click(screen.getByRole('button', { name: 'Files' })); expect(screen.getByText('FileDataID 12345')).toBeVisible(); expect(bridge.inventory).toHaveBeenCalledTimes(1);
+    const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' }); const browse = screen.getByRole('button', { name: 'Browse in Files' }); browse.focus(); fireEvent.click(browse); await within(await screen.findByRole('listbox')).findByText('12345');
+    fireEvent.click(screen.getByRole('button', { name: /Return to build overview/ })); await waitFor(() => expect(browse).toHaveFocus()); fireEvent.click(screen.getByRole('button', { name: 'Files' })); expect(within(screen.getByRole('listbox')).getByText('12345')).toBeVisible(); expect(bridge.inventoryFiles).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); await screen.findByRole('button', { name: 'Open build' }); expect(bridge.readAll).toHaveBeenCalledTimes(1); expect(bridge.refreshAll).not.toHaveBeenCalled();
   });
   it('discards a late catalog result after leaving the exact Home context', async () => {
-    const { bridge } = setup(); const pending = deferred<BridgeReply<InventoryPage>>(); vi.mocked(bridge.inventory).mockReturnValue(pending.promise);
-    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await waitFor(() => expect(bridge.inventory).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); await act(async () => pending.resolve(success(inventoryPageFixture as InventoryPage)));
-    expect(screen.queryByRole('heading', { name: 'Files' })).not.toBeInTheDocument(); expect(screen.queryByText('FileDataID 12345')).not.toBeInTheDocument(); expect(screen.getByRole('combobox', { name: 'Product' })).toHaveValue('all');
+    const { bridge } = setup(); const pending = deferred<BridgeReply<InventoryFilesPage>>(); vi.mocked(bridge.inventoryFiles).mockReturnValue(pending.promise);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); await act(async () => pending.resolve(success(filesPage())));
+    expect(screen.queryByRole('heading', { name: 'Files' })).not.toBeInTheDocument(); expect(screen.queryByText('12345')).not.toBeInTheDocument(); expect(screen.getByRole('combobox', { name: 'Product' })).toHaveValue('all');
   });
-
-  it('keeps the selected membership in the inspector when a page replaces its original row', async () => {
-    const { bridge } = setup(); const later = deferred<BridgeReply<InventoryPage>>(); vi.mocked(bridge.inventory).mockResolvedValueOnce(success(inventoryPageFixture as InventoryPage)).mockReturnValueOnce(later.promise);
-    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('FileDataID 12345');
-    fireEvent.click(screen.getByRole('option')); fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
-    await act(async () => later.resolve(success({ ...inventoryPageFixture, entries: [{ ...inventoryPageFixture.entries[0], id: '2' }], nextCursor: '2' } as InventoryPage)));
-    expect(screen.getByRole('complementary', { name: 'Membership 1' })).toHaveTextContent('outside the current page'); expect(screen.getByRole('option')).toHaveAttribute('aria-selected', 'false');
+  it('drops a page that a newer filter superseded', async () => {
+    const { bridge } = setup(); const slow = deferred<BridgeReply<InventoryFilesPage>>();
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    vi.mocked(bridge.inventoryFiles).mockReturnValueOnce(slow.promise).mockResolvedValueOnce(success(filesPage({ entries: [filesFixture.entries[1]] as InventoryFilesPage['entries'], totalCount: null })));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Locale flag' }), { target: { value: '2' } });
+    fireEvent.click(within(screen.getByRole('group', { name: 'Source family' })).getByRole('button', { name: 'Install' }));
+    await screen.findByText(/1 matching files on this page/);
+    await act(async () => slow.resolve(success(filesPage({ entries: [filesFixture.entries[0]] as InventoryFilesPage['entries'], totalCount: null }))));
+    expect(within(screen.getByRole('listbox')).queryByText('12345')).not.toBeInTheDocument(); expect(within(screen.getByRole('listbox')).getByText('authored/install-a.bin')).toBeVisible();
   });
-
-  it('advances bottom pagination through the same bounded exact-generation query without duplicate reads', async () => {
-    const { bridge } = setup(); vi.mocked(bridge.inventory).mockResolvedValueOnce(success(inventoryPageFixture as InventoryPage)).mockResolvedValueOnce(success({ ...inventoryPageFixture, entries: [{ ...inventoryPageFixture.entries[0], id: '2' }], nextCursor: '2' } as InventoryPage));
-    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('FileDataID 12345');
-    const bottom = screen.getByRole('button', { name: 'Next page' }); bottom.focus(); fireEvent.click(bottom);
-    await screen.findByText(/rows 2–2/); expect(bridge.inventory).toHaveBeenCalledTimes(2); expect(bridge.inventory).toHaveBeenLastCalledWith({ productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', generation: '1', limit: 50, after: '1' }); expect(bottom).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Next page' })).toBeVisible();
+  it('keeps the selected file in the inspector when a page replaces its original row', async () => {
+    const { bridge } = setup(); const later = deferred<BridgeReply<InventoryFilesPage>>(); vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ nextCursor: 'root:12345', entries: [filesFixture.entries[0]] as InventoryFilesPage['entries'] }))).mockReturnValueOnce(later.promise);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    fireEvent.click(within(screen.getByRole('listbox')).getByRole('option')); fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+    await act(async () => later.resolve(success(filesPage({ entries: [filesFixture.entries[1]] as InventoryFilesPage['entries'] }))));
+    expect(screen.getByRole('complementary', { name: 'FileDataID 12345' })).toHaveTextContent('outside the current page'); expect(within(screen.getByRole('listbox')).getByRole('option')).toHaveAttribute('aria-selected', 'false');
   });
 
   it('shows backend stage numbering and one visible explanation, then updates from an unknown total', async () => {
@@ -310,11 +444,11 @@ describe('verified inventory opening and preserved discovery', () => {
   });
   it('admits configurations with a typed unknown download size without inventing zero or readiness', async () => {
     const { bridge } = setup(); vi.mocked(bridge.open).mockResolvedValue(success({ ...downloadSnapshot(), download: null, downloadProblem: { code: 'DOWNLOAD_UNDECLARED', message: 'This build does not declare a download manifest.' }, metadata: null, metadataState: 'configurationsVerified', retentionState: 'unknown' })); await begin(); await screen.findByRole('heading', { name: 'Build overview' });
-    expect(screen.getByText('Published download size is unknown')).toBeVisible(); expect(screen.getByText('DOWNLOAD_UNDECLARED')).toBeVisible(); expect(screen.getByText(/This build does not declare a download manifest\./)).toBeVisible(); expect(screen.queryByRole('button', { name: /Download objects.*Unavailable/ })).not.toBeInTheDocument(); expect(screen.queryByText('0 bytes')).not.toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Recheck this build' })).toBeEnabled(); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); expect(screen.getByRole('heading', { name: 'Files' })).toHaveFocus(); expect(screen.getByText('File catalog not prepared', { selector: 'strong' })).toBeVisible(); expect(screen.queryByRole('listbox')).not.toBeInTheDocument(); expect(bridge.download).not.toHaveBeenCalled();
+    expect(screen.getByText('Published download size is unknown')).toBeVisible(); expect(screen.getByText('DOWNLOAD_UNDECLARED')).toBeVisible(); expect(screen.getByText(/This build does not declare a download manifest\./)).toBeVisible(); expect(screen.queryByRole('button', { name: /Download objects.*Unavailable/ })).not.toBeInTheDocument(); expect(screen.queryByText('0 bytes')).not.toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Recheck this build' })).toBeEnabled(); fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); expect(screen.getByRole('heading', { name: 'Files' })).toHaveFocus(); expect(screen.getByText('File catalog not prepared', { selector: 'strong' })).toBeVisible(); expect(screen.getByText(/no supported download manifest/)).toHaveTextContent(/Search by FileDataID or CKey.*FileDataID \(ROOT\) or install name.*doesn't prepare yet/); expect(screen.queryByText(/coming/)).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: /Prepare/ })).not.toBeInTheDocument(); expect(screen.queryByRole('listbox')).not.toBeInTheDocument(); expect(bridge.download).not.toHaveBeenCalled();
   });
   it('pages exact download objects locally, preserves old rows on errors and fences a newer assessment', async () => {
     const { bridge } = setup(); vi.mocked(bridge.open).mockResolvedValue(success(downloadSnapshot())); const later = deferred<BridgeReply<DownloadPage>>(); vi.mocked(bridge.download).mockResolvedValueOnce(success(downloadPage())).mockReturnValueOnce(later.promise).mockResolvedValueOnce(success({ ...downloadPage('1'), assessedAt: '2026-10-19T12:00:01Z' }));
-    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); const browse = screen.getByRole('button', { name: 'Browse in Files' }); browse.focus(); fireEvent.click(browse); await screen.findByText('Object 1'); expect(screen.getByRole('heading', { name: 'Files' })).toHaveFocus(); expect(screen.getAllByText('00000000000000000000000000000001').length).toBeGreaterThan(0); expect(document.querySelector('.dh-files')).not.toHaveTextContent(/FileDataID/);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' }); const browse = screen.getByRole('button', { name: 'Browse in Files' }); browse.focus(); fireEvent.click(browse); await screen.findByText('Object 1'); expect(screen.getByRole('heading', { name: 'Files' })).toHaveFocus(); expect(screen.getAllByText('00000000000000000000000000000001').length).toBeGreaterThan(0); expect(screen.getByRole('listbox')).not.toHaveTextContent(/FileDataID/); expect(document.querySelector('.dh-files .dh-inspector')).not.toHaveTextContent(/FileDataID/);
     const next = screen.getByRole('button', { name: 'Next page' }); next.focus(); fireEvent.click(next); expect(next).toHaveFocus(); expect(next).toHaveAttribute('aria-disabled', 'true'); expect(screen.getByText('Object 1')).toBeVisible();
     await act(async () => later.resolve({ ok: false, error: { code: 'LOCAL_READ_FAILED', message: 'Authored local failure.', retryable: true } })); expect(screen.getByText('Object 1')).toBeVisible(); fireEvent.click(screen.getByRole('button', { name: 'Retry page' })); await screen.findByText('DOWNLOAD_CONTEXT_MISMATCH'); expect(screen.getByText('Object 1')).toBeVisible(); expect(screen.queryByText('Object 2')).not.toBeInTheDocument(); expect(bridge.download).toHaveBeenLastCalledWith({ productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', ledgerId: downloadFixture.download.ledgerId, limit: 50, after: '1' });
     fireEvent.click(screen.getByRole('button', { name: /Return to build overview/ })); await waitFor(() => expect(browse).toHaveFocus()); fireEvent.click(within(screen.getByRole('navigation', { name: 'Build areas' })).getByRole('button', { name: 'Files' })); expect(bridge.download).toHaveBeenCalledTimes(3); expect(screen.getByText('Object 1')).toBeVisible();

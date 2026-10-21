@@ -112,7 +112,7 @@ public sealed class InventoryPreparationTests
     {
         await using var h = await Harness.Create(); var snapshot = await h.Open();
         var g = snapshot.Inventory!.Generation;
-        for (var i = 1000; i < 1100; i++) await h.Execute($"INSERT INTO inventory_origins SELECT g,{i},'install',replace(hex(zeroblob(2048)),'0','<'),NULL,ckey,NULL,0,NULL,decoded,NULL,NULL,NULL,'authored escaped name',ekey,encoded,decoded FROM inventory_origins WHERE g={g} AND id=1");
+        for (var i = 1000; i < 1100; i++) await h.Execute($"INSERT INTO inventory_origins SELECT g,{i},'install',replace(hex(zeroblob(2048)),'0','<'),NULL,ckey,NULL,0,NULL,decoded,NULL,NULL,NULL,'authored escaped name',ekey,encoded,decoded,NULL,NULL,NULL,{i},0 FROM inventory_origins WHERE g={g} AND id=1");
         var summary = snapshot.Inventory with { MembershipCount = "108" };
         await h.Execute("UPDATE inventory_generations SET summary='" + JsonSerializer.Serialize(summary, new JsonSerializerOptions(JsonSerializerDefaults.Web)).Replace("'", "''", StringComparison.Ordinal) + "'");
         string? after = null; var ids = new HashSet<string>(); var pages = 0;

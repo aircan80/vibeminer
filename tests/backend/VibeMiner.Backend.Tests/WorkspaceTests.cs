@@ -211,7 +211,7 @@ public sealed class WorkspaceTests
         var page = await upgraded.Catalog.ReadAsync("wow", "all", 50, null, CancellationToken.None);
         var request = new WorkspaceRequest("wow", page.Builds[0].Id, "us");
         Assert.Equal("configurationReady", (await upgraded.Service.OpenAsync(request)).Readiness);
-        Assert.Equal(16L, upgraded.Scalar("PRAGMA user_version"));
+        Assert.Equal(17L, upgraded.Scalar("PRAGMA user_version"));
     }
 
     [Fact]

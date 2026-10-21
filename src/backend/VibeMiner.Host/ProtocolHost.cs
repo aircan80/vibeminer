@@ -164,7 +164,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
             {
                 case "hello":
                     RequireOnly(parameters);
-                    var capabilities = new List<string> { "discovery-v1", "discovery-all-products-v1", "local-history", "cancellation", "home-download-v1", "download-v1", "inventory-v1", "tables-definitions-v1", "tables-data-v1" };
+                    var capabilities = new List<string> { "discovery-v1", "discovery-all-products-v1", "local-history", "cancellation", "home-download-v1", "download-v1", "inventory-v1", "inventory-files-v1", "tables-definitions-v1", "tables-data-v1" };
                     if (retention is not null) capabilities.Add("retention-v1");
                     if (settings is not null) capabilities.Add("settings-v1");
                     if (downloadSummaries is not null) capabilities.Add("download-summary-v1");
@@ -269,6 +269,31 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                         throw new DiscoveryException("INVALID_REQUEST", "The page size must be an integer.");
                     result = await inventory.ReadAsync(new(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"), RequiredString(parameters, "sourceRegion"),
                         RequiredString(parameters, "generation"), pageLimit, OptionalString(parameters, "after")), request.Cancellation.Token);
+                    break;
+                case "inventory.files":
+                case "inventory.file":
+                    {
+                        var single = method == "inventory.file";
+                        RequireOnly(parameters, [.. InventoryContextNames, .. InventoryFilterNames, .. (single ? new[] { "file" } : [])]);
+                        if (inventory is null) throw new DiscoveryException("INVENTORY_UNAVAILABLE", "Inventory queries are unavailable.");
+                        var filesLimit = single ? InventoryService.MaxMembershipsPage : 50;
+                        if (parameters.TryGetProperty("limit", out var filesSize) && (filesSize.ValueKind != JsonValueKind.Number || !filesSize.TryGetInt32(out filesLimit)))
+                            throw new DiscoveryException("INVALID_REQUEST", "The page size must be an integer.");
+                        var storedOnly = false;
+                        if (parameters.TryGetProperty("storedOnly", out var storedValue))
+                        {
+                            if (storedValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                                throw new DiscoveryException("INVALID_REQUEST", "The storedOnly filter must be a boolean.");
+                            storedOnly = storedValue.GetBoolean();
+                        }
+                        var fileFilter = new InventoryFileFilter(OptionalString(parameters, "fileDataId"), OptionalString(parameters, "contentKey"), OptionalString(parameters, "localeFlags"),
+                            OptionalString(parameters, "contentFlags"), OptionalString(parameters, "family"), storedOnly);
+                        string fileProduct = RequiredString(parameters, "productId"), fileBuild = RequiredString(parameters, "buildIdentity"),
+                            fileRegion = RequiredString(parameters, "sourceRegion"), fileGeneration = RequiredString(parameters, "generation");
+                        result = single
+                            ? await inventory.ReadFileAsync(new(fileProduct, fileBuild, fileRegion, fileGeneration, RequiredString(parameters, "file"), fileFilter, filesLimit, OptionalString(parameters, "after")), request.Cancellation.Token)
+                            : await inventory.ReadFilesAsync(new(fileProduct, fileBuild, fileRegion, fileGeneration, fileFilter, filesLimit, OptionalString(parameters, "after")), request.Cancellation.Token);
+                    }
                     break;
                 case "download.read":
                     RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "ledgerId", "limit", "after");
@@ -706,6 +731,8 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
         if (value.ValueKind != JsonValueKind.Object || value.EnumerateObject().GroupBy(property => property.Name).Any(group => group.Count() > 1))
             throw new DiscoveryException("INVALID_REQUEST", "A JSON object without duplicate fields is required.");
     }
+    private static readonly string[] InventoryContextNames = ["productId", "buildIdentity", "sourceRegion", "generation", "limit", "after"];
+    private static readonly string[] InventoryFilterNames = ["fileDataId", "contentKey", "localeFlags", "contentFlags", "family", "storedOnly"];
     private static void RequireOnly(JsonElement value, params string[] names)
     {
         if (value.EnumerateObject().Any(property => !names.Contains(property.Name, StringComparer.Ordinal)))

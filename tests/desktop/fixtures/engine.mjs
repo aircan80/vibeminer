@@ -122,7 +122,7 @@ function settingsSnapshot() {
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1', 'inventory-files-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[])] });
   if(creaturesEnabled&&method.startsWith('creatures.')){
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
     if(!opened.has(key))return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
@@ -317,6 +317,21 @@ async function dispatch(request) {
     return reply(id, { productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion,
       generation: params.generation, entries, totalCount: '60', nextCursor: after + entries.length < all.length ? entries.at(-1).id : null });
   }
+  if (method === 'inventory.files' || method === 'inventory.file') {
+    const key = `${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
+    const snapshot = opened.get(key);
+    if (!snapshot?.inventory || params.generation !== snapshot.inventory.generation) return fail(id, 'INVENTORY_NOT_FOUND', 'This exact authored inventory is unavailable.');
+    if (existsSync(path.join(directory, 'files-error'))) return fail(id, 'LOCAL_READ_FAILED', 'Authored local Files read failed.', true);
+    if (params.contentKey && params.contentKey.length < 6 && fileMembers.filter(m => m.contentKey.startsWith(params.contentKey)).length > 8) return fail(id, 'INVENTORY_FILTER_BROAD', `More than 8 authored memberships have a content key starting ${params.contentKey}. Type more of the key.`);
+    if (method === 'inventory.files') return reply(id, filesPage(params));
+    const members = fileMembers.filter(m => m.file === params.file);
+    if (!members.length) return fail(id, 'INVENTORY_FILE_NOT_FOUND', 'This prepared inventory has no such file.');
+    const after = BigInt(params.after || '0'), page = members.filter(m => BigInt(m.id) > after).slice(0, params.limit);
+    const more = members.filter(m => BigInt(m.id) > after).length > page.length;
+    return reply(id, { productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion, generation: params.generation, file: params.file,
+      family: members[0].family, fileDataId: members[0].family === 'root' ? params.file.slice(5) : null, name: members[0].name, membershipCount: members.length,
+      matchingCount: members.filter(m => fileMatches(m, params)).length, memberships: page.map(m => ({ ...wireMember(m), matches: fileMatches(m, params) })), nextCursor: more ? page.at(-1).id : null });
+  }
   if (method === 'workspace.open') {
     const build = pageFor(params.productId).builds.find(build => build.id === params.buildIdentity);
     if (!build) return fail(id, 'BUILD_NOT_FOUND', 'This exact authored build is not saved.');
@@ -341,7 +356,10 @@ async function dispatch(request) {
     try {
       await waitForRelease('release-open', controller.signal);
       if (existsSync(path.join(directory, 'open-error'))) return fail(id, 'CONFIGURATION_INTEGRITY', 'Authored configuration verification failed.');
-      const snapshot = JSON.parse(readFileSync(path.join(root, 'tests/desktop/fixtures/download-workspace.json'), 'utf8'));
+      // An inventory-workspace control file opens the legacy sealed research catalog, whose Files list is per FileDataID.
+      const inventoryMode = existsSync(path.join(directory, 'inventory-workspace'));
+      const snapshot = JSON.parse(readFileSync(path.join(root, inventoryMode ? 'contracts/examples/inventory-workspace.json' : 'tests/desktop/fixtures/download-workspace.json'), 'utf8'));
+      if (inventoryMode) snapshot.inventory.membershipCount = String(fileMembers.length + 6);
       snapshot.build = build;
       snapshot.build.isNew = false; snapshot.build.isLocal = true;
       const acknowledged = saved.get(params.productId)?.builds.find(row => row.id === build.id);
@@ -394,3 +412,48 @@ async function dispatch(request) {
 }
 const lines = createInterface({ input: process.stdin });
 lines.on('line', line => { void dispatch(JSON.parse(line)).catch(() => { process.exitCode = 1; process.stdin.destroy(); }); });
+
+// Authored Files catalog: 40 ROOT FileDataIDs (some with an enGB variant, some encrypted, some unresolved) and two install names.
+const authoredKey = seed => { let h = '', x = (seed * 2654435761) >>> 0; for (let i = 0; i < 32; i++) { x = (x * 1103515245 + 12345) >>> 0; h += '0123456789abcdef'[x >>> 28]; } return h; };
+const fileMembers = (() => {
+  const out = []; let id = 1207000;
+  for (let i = 0; i < 40; i++) {
+    const fdid = 800001 + i, locales = i % 9 === 3 ? [0x2, 0x200] : [0x2];
+    locales.forEach((locale, k) => {
+      const first = i % 17 === 6 ? 0x08000000 : 0, unresolved = i === 30 && k === 0;
+      out.push({ id: String(++id), file: `root:${fdid}`, family: 'root', name: null, blockOrdinal: 1 + (i >> 4) + k, entryOrdinal: i, installOrdinal: null,
+        localeFlags: String(locale), contentFlags: String(first | 0x10000000), rawContentFlags: { first: String(first), second: '268435456', third: 0 },
+        nameHash: k ? null : String(5000n + BigInt(i)), contentKey: authoredKey(900 + i * 3 + locale), encodingKey: unresolved ? null : authoredKey(1900 + i * 3 + locale),
+        decodedBytes: unresolved ? null : String(4096 + i * 97), encodedBytes: unresolved ? null : String(4160 + i * 101 + k * 7), stored: k ? i % 5 !== 0 : i % 5 === 0 });
+    });
+  }
+  for (const [i, name] of ['authored/install/launcher.bin', 'authored/install/launcher.bin', 'authored/install/readme.txt'].entries()) {
+    const first = name === 'authored/install/launcher.bin' ? 1207100 : 1207100 + i;
+    out.push({ id: String(1207100 + i), file: `install:${first}`, family: 'install', name, blockOrdinal: null, entryOrdinal: null, installOrdinal: i, localeFlags: null, contentFlags: null,
+      rawContentFlags: null, nameHash: null, contentKey: authoredKey(3000 + i), encodingKey: authoredKey(3100 + i), decodedBytes: String(900 + i), encodedBytes: String(960 + i), stored: i === 2 });
+  }
+  return out;
+})();
+const wireMember = ({ file, name, ...member }) => member;
+function fileMatches(m, p) {
+  if (p.family && m.family !== p.family || p.storedOnly && !m.stored || p.contentKey && !m.contentKey.startsWith(p.contentKey)) return false;
+  if (m.family === 'install') return !p.fileDataId && !p.localeFlags && !p.contentFlags;
+  if (p.fileDataId && m.file !== `root:${p.fileDataId}`) return false;
+  const locale = BigInt(m.localeFlags), flags = BigInt(m.contentFlags);
+  return (!p.localeFlags || (locale & BigInt(p.localeFlags)) !== 0n) && (!p.contentFlags || (p.contentFlags === 'none' ? flags === 0n : (flags & BigInt(p.contentFlags)) === BigInt(p.contentFlags)));
+}
+function filesPage(p) {
+  const files = [...new Set(fileMembers.map(m => m.file))].map(key => fileMembers.filter(m => m.file === key));
+  const position = key => key.startsWith('install:') ? [1, BigInt(key.slice(8))] : [0, BigInt(key.slice(5))];
+  const afterKey = p.after ? position(p.after) : null, later = key => { const k = position(key); return !afterKey || (k[0] !== afterKey[0] ? k[0] > afterKey[0] : k[1] > afterKey[1]); };
+  const matching = files.filter(group => later(group[0].file) && group.some(m => fileMatches(m, p)));
+  const page = matching.slice(0, p.limit), narrowed = p.fileDataId || p.contentKey || p.localeFlags || p.contentFlags || p.storedOnly;
+  const total = files.filter(group => !p.family || group[0].family === p.family).length;
+  return { productId: p.productId, buildIdentity: p.buildIdentity, sourceRegion: p.sourceRegion, generation: p.generation, scanLimited: false,
+    totalCount: narrowed ? null : String(total), nextCursor: matching.length > page.length ? page.at(-1)[0].file : null,
+    entries: page.map(group => { const sizes = group.filter(m => m.encodedBytes !== null).map(m => BigInt(m.encodedBytes)); const locale = group.reduce((a, m) => a | BigInt(m.localeFlags ?? 0), 0n);
+      return { key: group[0].file, family: group[0].family, fileDataId: group[0].family === 'root' ? group[0].file.slice(5) : null, name: group[0].name, membershipCount: group.length,
+        matchingCount: group.filter(m => fileMatches(m, p)).length, contentKeyCount: new Set(group.map(m => m.contentKey)).size,
+        encodedBytesMin: sizes.length ? String(sizes.reduce((a, b) => a < b ? a : b)) : null, encodedBytesMax: sizes.length ? String(sizes.reduce((a, b) => a > b ? a : b)) : null,
+        unresolvedCount: group.length - sizes.length, localeFlags: group[0].family === 'root' ? String(locale) : null, storedCount: group.filter(m => m.stored).length }; }) };
+}

@@ -28,7 +28,7 @@ App-wide settings live in `settings-v1.json` in the engine data directory, next 
 
 The catalog is `discovery-v1.sqlite3` in the engine data directory. It opens with `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=FULL`, `busy_timeout=5000` and file-backed temp storage. One worker runs all SQLite work with at most 64 queued operations. The engine refuses a catalog with a newer `user_version` than it knows (`CATALOG_VERSION`).
 
-The schema is at `user_version` 16, the first with per-ledger stored coverage ([D065](DECISIONS.md)); version 15 was the first with build identity v2 ([D061](DECISIONS.md)). There is no migration from older catalogs: a fresh catalog writes `catalog_lineage` = `stored-coverage-v1`, and any catalog without it, including a complete version 15 `build-identity-v2` catalog, is refused with `CATALOG_RESET_REQUIRED`. The version and lineage are read on a read-only connection before any read-write open, so a refused catalog, including a pending `-wal` an older engine left behind, stays byte-for-byte unchanged (a read-write close would checkpoint it). The host exits with code 3 (code 4 for a newer catalog) and the code on stderr; the desktop shows it as a typed notice that names the catalog folder and the user's step (close VibeMiner, move or rename the folder, start again). It offers no delete, retry or refresh. Starting over means a fresh data directory; never erase the owner's profile without their OK.
+The schema is at `user_version` 17, the first with the Files columns and indexes ([D068](DECISIONS.md)); 16 was the first with per-ledger stored coverage ([D065](DECISIONS.md)) and 15 the first with build identity v2 ([D061](DECISIONS.md)). A version-16 catalog upgrades in place. There is no migration from older catalogs: a fresh catalog writes `catalog_lineage` = `stored-coverage-v1`, and any catalog without it, including a complete version 15 `build-identity-v2` catalog, is refused with `CATALOG_RESET_REQUIRED`. The version and lineage are read on a read-only connection before any read-write open, so a refused catalog, including a pending `-wal` an older engine left behind, stays byte-for-byte unchanged (a read-write close would checkpoint it). The host exits with code 3 (code 4 for a newer catalog) and the code on stderr; the desktop shows it as a typed notice that names the catalog folder and the user's step (close VibeMiner, move or rename the folder, start again). It offers no delete, retry or refresh. Starting over means a fresh data directory; never erase the owner's profile without their OK.
 
 Fresh creation still runs the steps below in order, each committing its own `user_version`, so a creation interrupted between steps resumes. Each lives with its feature:
 
@@ -47,7 +47,8 @@ Fresh creation still runs the steps below in order, each committing its own `use
 | 13 | `item_effects_bridge_artifacts`, `item_effects_bridge_admissions` |
 | 14 | `geometry_artifacts`, `geometry_source_locators` |
 | 15 | Stored coverage: `stored_changes`, `object_absence`, `stored_coverage`, `stored_pages`, `root_scopes`; SHA indexes on `encoded_objects` and `content_objects` |
-| 16 | Marks creation complete |
+| 16 | Marks stored coverage complete |
+| 17 | Files ([D068](DECISIONS.md)): numeric FileDataID, locale, content flags, install group and stored mark on `inventory_origins` (backfilled for existing rows), its Files indexes, `inventory_root_variants`, `inventory_file_stats` |
 
 The catalog stores observed builds and raw source references; per-region observations; first-seen/baseline/Open acknowledgements; verified object aliases and build memberships; artifact generations and source bindings; admitted inventories; retention policy and job checkpoints; and bounded query indexes.
 
@@ -127,6 +128,13 @@ Bounds ([InventoryCatalog](../src/backend/VibeMiner.Infrastructure/Inventory/Inv
 - The read snapshot refuses to continue when the WAL exceeds 2 GiB.
 - Cleanup deletes at most 8,192 rows per statement.
 - ROOT/IN resolution cursors read and commit in batches of 256.
+
+Files ([D068](DECISIONS.md), [inventory-v1](../contracts/inventory-v1.md#files), [InventoryFiles](../src/backend/VibeMiner.Infrastructure/Inventory/InventoryFiles.cs)) reads a sealed generation only:
+
+- Each origin row stores `fdid_n`, `locale_n` and `flags_n` (ROOT) or `grp` (install: the first membership ID with the same exact name). They are written with the row (backfilled when a version-16 catalog upgrades) and checked against `fdid`, `locale`, `flags` and `name` at every seal (`grp` must equal the first membership ID with that name in the generation); the catalog digest covers those source columns, not the derived ones. `stored` mirrors `inventory_units.retained` of the row's EKey and is rewritten at every seal.
+- Partial indexes: `inventory_root_files` (FileDataID order), `inventory_root_variant_files` (one FileDataID-ordered range per locale/content-flag pair), `inventory_stored_files` (stored rows only), `inventory_install_files`; `inventory_content` gains `fdid_n`. Every seal rebuilds `inventory_root_variants` (memberships per pair) and `inventory_file_stats` (file and member counts) for the planner, and rechecks the 4,096-memberships-per-file cap.
+- A request drives from the narrowest index: exact FileDataID, CKey, merged variant ranges (at most 256 pairs, 8 then 64 rows per refill), stored rows, or the FileDataID-ordered scan when nothing narrower applies. A filter whose variant statistics have no member returns at once. A file has at most 4,096 memberships (sealing refuses more). Each request stops at the first file boundary after 65,536 membership rows, at most 90,112 in all, then returns `scanLimited` with a cursor.
+- Measured with `tools/benchmarks/FilesQuery` on a retail ROOT (3,262,082 memberships, 1,932,853 FileDataIDs, 1,291 variant pairs), warm cache: first pages 0.1 to 3.6 ms median across 21 filter cases, no page above 6 ms, no scan-limited page. The two ROOT indexes take about 160 MiB; the stored index grows to 97 MiB when every membership is stored. A full-budget scan request took about 36 ms.
 
 ## Build inventory and retention
 

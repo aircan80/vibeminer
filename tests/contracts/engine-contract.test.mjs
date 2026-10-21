@@ -87,6 +87,32 @@ test('inventory-ready Home requires measured sealed metadata and bounded exact i
   assert.equal(validator('InventoryPage')({ ...page, entries: [{ ...page.entries[0], encodedBytes: 100 }] }), false);
 });
 
+test('Files pages and the file inspector stay bounded and keep unknown sizes and names unknown', async () => {
+  const page = JSON.parse(await readFile(path.join(root, 'contracts/examples/inventory-files-page.json'), 'utf8'));
+  const detail = JSON.parse(await readFile(path.join(root, 'contracts/examples/inventory-file-detail.json'), 'utf8'));
+  validate('InventoryFilesPage', page); validate('InventoryFileDetail', detail);
+  const scope = { productId: 'wow', buildIdentity: page.buildIdentity, sourceRegion: 'us', generation: '1', limit: 50 };
+  validate('InventoryFilesParams', { ...scope, after: 'install:0', fileDataId: '0', localeFlags: '2', contentFlags: 'none', family: 'root', storedOnly: true });
+  validate('InventoryFilesParams', { ...scope, contentKey: 'abcd', contentFlags: '134217728' });
+  validate('InventoryFileParams', { ...scope, file: 'install:7', after: '1', contentKey: '11111111111111111111111111111111' });
+  // The schema bounds digits; the 0..4294967295 range is checked by the desktop validators and the engine.
+  for (const invalid of [{ fileDataId: '12345678901' }, { fileDataId: 7 }, { contentKey: 'abc' }, { contentKey: 'ABCD' }, { localeFlags: '0' }, { contentFlags: 'any' },
+    { family: 'download' }, { storedOnly: 'yes' }, { after: 'root:-1' }, { after: '12' }, { platform: 'Windows' }, { limit: 101 }]) {
+    assert.equal(validator('InventoryFilesParams')({ ...scope, ...invalid }), false, JSON.stringify(invalid));
+  }
+  assert.equal(validator('InventoryFileParams')({ ...scope, file: 'install:0' }), false, 'install:0 is a cursor, never a file');
+  assert.equal(validator('InventoryFilesPage')({ ...page, entries: Array(101).fill(page.entries[0]) }), false);
+  assert.equal(validator('InventoryFilesPage')({ ...page, scanLimited: undefined }), false);
+  assert.equal(validator('InventoryFilesPage')({ ...page, entries: [{ ...page.entries[0], membershipCount: 4097 }] }), false, 'a file has at most 4,096 memberships');
+  assert.equal(validator('InventoryFileDetail')({ ...detail, membershipCount: 4097 }), false);
+  assert.equal(validator('InventoryFilesPage')({ ...page, entries: [{ ...page.entries[0], encodedBytesMin: 100 }] }), false);
+  assert.equal(validator('InventoryFilesPage')({ ...page, entries: [{ ...page.entries[0], platform: 'Windows' }] }), false, 'no platform is inferred');
+  assert.equal(validator('InventoryFileDetail')({ ...detail, memberships: Array(101).fill(detail.memberships[0]) }), false);
+  assert.equal(validator('InventoryFileDetail')({ ...detail, memberships: [{ ...detail.memberships[1], encodedBytes: '0'.repeat(2) }] }), false);
+  // Unresolved memberships keep EKey and sizes null instead of a zero or a guess.
+  assert.equal(detail.memberships[1].encodingKey, null); assert.equal(detail.memberships[1].encodedBytes, null);
+});
+
 test('preparation progress accepts numbered and unknown totals while bounding explanation structure', () => {
   const frame = { protocolVersion: 1, type: 'progress', requestId: 'open', sequence: 1,
     stage: 'Checking build configurations', region: 'us', completed: null, total: null, unit: null };
@@ -546,6 +572,13 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.ok(!measured.error, JSON.stringify(measured.error));
   validate('StorageMeasurement', measured.result);
   assert.ok(BigInt(measured.result.bytes) > 0n, 'The catalog and settings file are in the measured folder.');
+  assert.ok(hello.result.capabilities.includes('inventory-files-v1'));
+  const fileScope = { productId: 'wow', buildIdentity: 'a'.repeat(64), sourceRegion: 'us', generation: '1', limit: 50 };
+  const files = await request('inventory.files', { ...fileScope, localeFlags: '2', storedOnly: true });
+  assert.equal(files.error?.code, 'INVENTORY_NOT_FOUND', 'A fresh catalog has no prepared inventory to list.');
+  assert.equal((await request('inventory.file', { ...fileScope, file: 'root:1' })).error?.code, 'INVENTORY_NOT_FOUND');
+  assert.equal((await request('inventory.files', { ...fileScope, storedOnly: 'yes' })).error?.code, 'INVALID_REQUEST');
+  assert.equal((await request('inventory.files', { ...fileScope, platform: 'Windows' })).error?.code, 'INVALID_REQUEST');
   const jobs = await request('retention.list');
   assert.ok(!jobs.error, JSON.stringify(jobs.error));
   validate('RetentionList', jobs.result);
