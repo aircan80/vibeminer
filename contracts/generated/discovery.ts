@@ -17,6 +17,10 @@ export type CreatureGeometryStage =
 export type CreatureGeometryDependency = 'metadata' | 'model' | 'skin' | 'artifact';
 export type EngineRequest = EngineRequest1;
 export type WorkspaceSnapshot = WorkspaceSnapshot1;
+/**
+ * inventory.catalog reply (D071). pending carries its stage (and written memberships while writing); ready carries the sealed catalog Files reads; failed (after three attempts) and unsupported carry the cause, and the next Open retries both.
+ */
+export type FileCatalogStatus = FileCatalogStatus1;
 export type TableDefinitionSnapshot = TableDefinitionSnapshot1;
 export type ContentReceipt = ContentReceipt1;
 /**
@@ -197,6 +201,10 @@ export interface DiscoveryContract {
   inventoryFilesPage?: InventoryFilesPage;
   inventoryFileParams?: InventoryFileParams;
   inventoryFileDetail?: InventoryFileDetail;
+  fileCatalogParams?: FileCatalogParams;
+  fileCatalogStatus?: FileCatalogStatus;
+  fileCatalogList?: FileCatalogList;
+  fileCatalogSetParams?: FileCatalogSetParams;
   downloadPage: DownloadPage;
   tableCatalogPage: TableCatalogPage;
   tableDefinitionSnapshot: TableDefinitionSnapshot;
@@ -456,6 +464,9 @@ export interface EngineRequest1 {
     | 'request.cancel'
     | 'shutdown'
     | 'inventory.read'
+    | 'inventory.catalog'
+    | 'inventory.catalogs'
+    | 'inventory.catalog.set'
     | 'inventory.files'
     | 'inventory.file'
     | 'download.read'
@@ -774,6 +785,79 @@ export interface InventoryRawContentFlags {
   first: string;
   second: string;
   third: number;
+}
+/**
+ * inventory.catalog: where one opened build's file catalog stands (D071). One bounded read; it never starts a transfer, count or check.
+ */
+export interface FileCatalogParams {
+  productId: string;
+  buildIdentity: string;
+  sourceRegion: string;
+}
+export interface FileCatalogStatus1 {
+  productId: string;
+  buildIdentity: string;
+  sourceRegion: string;
+  buildVersion: string | null;
+  state: 'notOpened' | 'pending' | 'stopped' | 'ready' | 'failed' | 'unsupported';
+  stage: ('queued' | 'paused' | 'acquiring' | 'waiting' | 'reading' | 'writing' | 'sealing') | null;
+  completed: string | null;
+  total: string | null;
+  attempts: number;
+  catalog: FileCatalogSummary | null;
+  problem: FileCatalogProblem | null;
+  waitingFor: FileCatalogBuild | null;
+}
+/**
+ * A sealed ROOT/install file catalog (profile files-root-install-v1). Every count is exact.
+ */
+export interface FileCatalogSummary {
+  generation: string;
+  preparedAt: string;
+  rootFileCount: string;
+  installFileCount: string;
+  rootMembershipCount: string;
+  installMembershipCount: string;
+  uniqueContentCount: string;
+  /**
+   * Memberships whose CKey has no sized encoded object in ENCODING: no EKey and no encoded size, never zero.
+   */
+  unresolvedMembershipCount: string;
+  /**
+   * Memberships whose EKey was verified locally when the row was written.
+   */
+  storedMembershipCount: string;
+}
+export interface FileCatalogProblem {
+  code: string;
+  message: string;
+  retryable: boolean;
+  /**
+   * The underlying storage or I/O cause, for diagnosis.
+   */
+  detail: string | null;
+}
+export interface FileCatalogBuild {
+  productId: string;
+  buildIdentity: string;
+  buildVersion: string;
+}
+/**
+ * inventory.catalogs: the preparations Downloads & activity shows (pending, stopped or failed), most recently opened first.
+ */
+export interface FileCatalogList {
+  /**
+   * @maxItems 32
+   */
+  catalogs: FileCatalogStatus[];
+}
+/**
+ * inventory.catalog.set: stop a pending preparation, or resume a stopped or failed one.
+ */
+export interface FileCatalogSetParams {
+  productId: string;
+  buildIdentity: string;
+  action: 'stop' | 'resume';
 }
 export interface DownloadPage {
   productId: string;

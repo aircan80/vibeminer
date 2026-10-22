@@ -126,7 +126,7 @@ public sealed partial class DiscoveryCatalog
             Scalar("SELECT 1 FROM sqlite_master WHERE type='table' AND name=$n", null, ("$n", table)) is not null).ToArray(), token);
         while (true)
         {
-            var generation = await Schedule(() => Scalar("SELECT id FROM inventory_generations i WHERE state IN ('staging','abandoned') AND NOT EXISTS(SELECT 1 FROM inventory_checkpoints c WHERE c.g=i.id) ORDER BY id LIMIT 1"), token);
+            var generation = await Schedule(() => Scalar("SELECT id FROM inventory_generations i WHERE state IN ('staging','abandoned') AND profile<>'files-root-install-v1' AND NOT EXISTS(SELECT 1 FROM inventory_checkpoints c WHERE c.g=i.id) ORDER BY id LIMIT 1"), token);
             if (generation is null) return;
             var id = Convert.ToInt64(generation);
             long total = 0, completed = 0;

@@ -16,12 +16,14 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
     private readonly Task worker;
     private SqliteConnection? connection;
     private readonly string databasePath;
+    private readonly string fileCatalogDirectory;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private SqliteConnection Db => connection ?? throw new InvalidOperationException("Catalog is not initialized.");
 
     private DiscoveryCatalog(string dataDirectory)
     {
         databasePath = Path.Combine(dataDirectory, "discovery-v1.sqlite3");
+        fileCatalogDirectory = Path.Combine(dataDirectory, FileCatalogFolder);
         worker = Task.Run(async () =>
         {
             try { await foreach (var command in queue.Reader.ReadAllAsync()) await command(); }
@@ -37,9 +39,10 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
     }
     /// <summary>
     /// Catalog schema version. Version 16 is the first with per-ledger stored coverage (D065), version 17 the first with
-    /// the Files columns and indexes (D068). A version-16 catalog upgrades in place.
+    /// the Files columns and indexes (D068), version 18 the first with file catalogs prepared after Open (D071). Version-16
+    /// and version-17 catalogs upgrade in place.
     /// </summary>
-    internal const int CatalogVersion = 17;
+    internal const int CatalogVersion = 18;
     /// <summary>
     /// Written once when a fresh catalog is created. Older catalogs (build-identity-v2 at version 15, or none at all)
     /// never have it and are refused, never migrated.
@@ -68,7 +71,7 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         // Each step commits its own user_version. A fresh catalog interrupted between steps resumes here.
         Action[] steps = [UpgradeWorkspace, UpgradeInventory, UpgradeInventoryCheckpoints, UpgradeDownloads, UpgradeTablesData,
             UpgradeEncodedReceipts, UpgradeRetention, UpgradeItemIcons, UpgradeItemClassifications, UpgradeCreatures,
-            UpgradeItemEffects, UpgradeCreatureGeometry, UpgradeStoredCoverage, CompleteStoredCoverage, UpgradeInventoryFiles];
+            UpgradeItemEffects, UpgradeCreatureGeometry, UpgradeStoredCoverage, CompleteStoredCoverage, UpgradeInventoryFiles, UpgradeFileCatalogs];
         for (var current = Math.Max(version, 2); current < CatalogVersion; current++) steps[current - 2]();
     }
     /// <summary>Read-only recognition: returns the version, or refuses a catalog this engine must not read or change.</summary>
@@ -162,7 +165,8 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
                     11 or 26 => ("CATALOG_INTEGRITY", "The discovery catalog could not be verified.", false),
                     _ => ("STORAGE_FAILURE", "The discovery catalog could not complete this operation.", true)
                 };
-                completion.SetException(new DiscoveryException(code, message, retryable));
+                // The typed code is what callers act on; the SQLite cause stays with it for logs and problem details.
+                completion.SetException(new DiscoveryException(code, message, retryable) { Cause = $"SQLite {ex.SqliteErrorCode}/{ex.SqliteExtendedErrorCode}: {ex.Message}" });
             }
             catch (Exception ex) { completion.SetException(ex); }
             return Task.CompletedTask;

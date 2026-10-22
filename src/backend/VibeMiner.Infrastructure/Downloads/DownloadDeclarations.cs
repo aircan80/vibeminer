@@ -8,6 +8,8 @@ namespace VibeMiner.Infrastructure;
 internal static class DownloadDeclarations
 {
     internal static MetadataDeclaration? ReadDownload(TactConfiguration configuration) => Read(configuration, "download", false);
+    /// <summary>The install manifest declaration, if the build has one (D071: Files lists its names).</summary>
+    internal static MetadataDeclaration? ReadInstall(TactConfiguration configuration) => Read(configuration, "install", false);
     internal static MetadataExpectation ReadEncoding(TactConfiguration configuration) =>
         Read(configuration, "encoding", true)?.DirectExpectation ??
         throw new DiscoveryException("METADATA_UNSUPPORTED", "Resolving this download manifest requires a direct, sized encoding metadata source.");

@@ -16,8 +16,15 @@ public sealed record InventoryFilesRequest(string ProductId, string BuildIdentit
     string Generation, InventoryFileFilter Filter, int Limit = 50, string? After = null);
 public sealed record InventoryFileRequest(string ProductId, string BuildIdentity, string SourceRegion,
     string Generation, string File, InventoryFileFilter Filter, int Limit = 100, string? After = null);
+/// <summary>The file catalog status of one opened build (D071).</summary>
+public sealed record FileCatalogRequest(string ProductId, string BuildIdentity, string SourceRegion);
+/// <summary>Stop a running or queued preparation, or resume (retry) a stopped or failed one.</summary>
+public sealed record FileCatalogSetRequest(string ProductId, string BuildIdentity, string Action);
 public interface IInventoryCatalog
 {
+    Task<FileCatalogStatus> ReadFileCatalogAsync(FileCatalogRequest request, CancellationToken token);
+    Task<FileCatalogList> ListFileCatalogsAsync(CancellationToken token);
+    Task<FileCatalogStatus> SetFileCatalogAsync(FileCatalogSetRequest request, CancellationToken token);
     Task<InventoryPage> ReadInventoryAsync(InventoryReadRequest request, CancellationToken token);
     Task<InventoryFilesPage> ReadInventoryFilesAsync(InventoryFilesRequest request, CancellationToken token);
     Task<InventoryFileDetail> ReadInventoryFileAsync(InventoryFileRequest request, CancellationToken token);
@@ -65,6 +72,22 @@ public sealed class InventoryService(IInventoryCatalog catalog)
     public Task<InventoryFileDetail> ReadFileAsync(InventoryFileRequest request, CancellationToken token = default)
     {
         Validate(request); return catalog.ReadInventoryFileAsync(request, token);
+    }
+    public Task<FileCatalogStatus> ReadCatalogAsync(FileCatalogRequest request, CancellationToken token = default)
+    {
+        Validate(request); return catalog.ReadFileCatalogAsync(request, token);
+    }
+    public Task<FileCatalogList> ListCatalogsAsync(CancellationToken token = default) => catalog.ListFileCatalogsAsync(token);
+    public Task<FileCatalogStatus> SetCatalogAsync(FileCatalogSetRequest request, CancellationToken token = default)
+    {
+        Validate(request); return catalog.SetFileCatalogAsync(request, token);
+    }
+    public static void Validate(FileCatalogRequest request) =>
+        WorkspaceService.Validate(new(request.ProductId, request.BuildIdentity, request.SourceRegion));
+    public static void Validate(FileCatalogSetRequest request)
+    {
+        WorkspaceService.Validate(new(request.ProductId, request.BuildIdentity, "us"));
+        if (request.Action is not ("stop" or "resume")) throw new DiscoveryException("INVALID_REQUEST", "Choose stop or resume.");
     }
     public static void Validate(InventoryReadRequest request)
     {

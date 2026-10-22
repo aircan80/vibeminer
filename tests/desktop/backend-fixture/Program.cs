@@ -55,11 +55,13 @@ try
     var retentionDriver = new BuildRetentionDriver(catalog, objects, acquisition, sourcePlans, client, resources);
     var retention = new RetentionService(catalog, retentionDriver);
     await using var storedCoverage = new StoredCoverageWorker(catalog, objects, resources);
-    await using var rootScopes = new RootScopeWorker(catalog, objects, client, acquisition, resources, retentionDriver.NotifyIntentChanged);
+    var metadataPasses = new BackgroundMetadataGate();
+    await using var rootScopes = new RootScopeWorker(catalog, objects, client, acquisition, resources, retentionDriver.NotifyIntentChanged, metadataPasses);
+    await using var fileCatalogs = new FileCatalogWorker(catalog, objects, client, acquisition, resources, metadataPasses);
     try
     {
         await retention.RestoreAsync();
-        storedCoverage.Start(); rootScopes.Start();
+        storedCoverage.Start(); rootScopes.Start(); fileCatalogs.Start();
         var host = new ProtocolHost(discovery, workspace, new InventoryService(catalog),
             new DownloadService(new DownloadQuery(catalog, objects)), new TablesService(new TablesCatalog(catalog)), tables, retention,
             downloadSummaries: new DownloadSummaryService(catalog));

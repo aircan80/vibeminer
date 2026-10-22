@@ -9,6 +9,8 @@ public sealed class DiscoveryException(string code, string message, bool retryab
 {
     public string Code { get; } = code;
     public bool Retryable { get; } = retryable;
+    /// <summary>The underlying storage or I/O cause, for logs and problem details; never shown as the message.</summary>
+    public string? Cause { get; init; }
 }
 
 public sealed record Product(string Id, string Label, string Description);

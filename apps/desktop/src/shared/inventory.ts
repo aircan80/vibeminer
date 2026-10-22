@@ -1,4 +1,4 @@
-import type { InventoryFileDetail, InventoryFileParams, InventoryFilesPage, InventoryFilesParams, InventoryPage, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
+import type { FileCatalogList, FileCatalogSetParams, FileCatalogStatus, InventoryFileDetail, InventoryFileParams, InventoryFilesPage, InventoryFilesParams, InventoryPage, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { OpenParams } from './bridge';
 export type InventoryReadParams = OpenParams & { generation: string; limit: number; after?: string };
 const unsigned = /^(0|[1-9][0-9]{0,18})$/;
@@ -115,3 +115,44 @@ export function inventoryFileDetailMatches(detail: InventoryFileDetail, params: 
 export const localeBits: readonly [number, string][] = [[0x2, 'enUS'], [0x200, 'enGB'], [0x80, 'esES'], [0x1000, 'esMX']];
 export const localeNames = (mask: string) => { const value = BigInt(mask); return localeBits.filter(([bit]) => (value & BigInt(bit)) !== 0n).map(([, name]) => name); };
 export const hex = (value: string | number) => '0x' + BigInt(value).toString(16).toUpperCase().padStart(8, '0');
+
+// File catalog prepared after Open (D071, contracts/inventory-v1.md#file-catalog-after-open).
+export type FileCatalogParams = OpenParams;
+export type { FileCatalogStatus, FileCatalogList, FileCatalogSetParams };
+export function validFileCatalog(value: unknown): value is FileCatalogParams {
+  if (!value || typeof value !== 'object') return false;
+  const p = value as Record<string, unknown>;
+  return typeof p.productId === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(p.productId) && typeof p.buildIdentity === 'string' && /^[0-9a-f]{64}$/.test(p.buildIdentity)
+    && typeof p.sourceRegion === 'string' && /^[a-z]{2,8}$/.test(p.sourceRegion) && Object.keys(p).length === 3;
+}
+export function validFileCatalogSet(value: unknown): value is FileCatalogSetParams {
+  if (!value || typeof value !== 'object') return false;
+  const p = value as Record<string, unknown>;
+  return typeof p.productId === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(p.productId) && typeof p.buildIdentity === 'string' && /^[0-9a-f]{64}$/.test(p.buildIdentity)
+    && (p.action === 'stop' || p.action === 'resume') && Object.keys(p).length === 3;
+}
+/** One status agrees with itself: a stage only while pending, a written count only while writing, a named wait only while queued or waiting. */
+function fileCatalogConsistent(status: FileCatalogStatus): boolean {
+  if (status.waitingFor !== null && !(status.state === 'pending' && (status.stage === 'queued' || status.stage === 'waiting'))) return false;
+  if (status.state === 'pending' && status.stage === 'writing') return status.completed !== null && status.total !== null && BigInt(status.completed) <= BigInt(status.total);
+  if (status.completed !== null || status.total !== null) return false;
+  if (status.state !== 'ready') return true;
+  const c = status.catalog!;
+  const memberships = BigInt(c.rootMembershipCount) + BigInt(c.installMembershipCount);
+  return BigInt(c.rootFileCount) <= BigInt(c.rootMembershipCount) && BigInt(c.installFileCount) <= BigInt(c.installMembershipCount)
+    && BigInt(c.unresolvedMembershipCount) <= memberships && BigInt(c.storedMembershipCount) <= memberships && BigInt(c.uniqueContentCount) <= memberships;
+}
+/** The reply is for exactly this build and region, and its counts agree with each other. */
+export function fileCatalogMatches(status: FileCatalogStatus, params: FileCatalogParams): boolean {
+  return status.productId === params.productId && status.buildIdentity === params.buildIdentity && status.sourceRegion === params.sourceRegion && fileCatalogConsistent(status);
+}
+/** Activity's list: only pending, stopped or failed preparations, one per build, each consistent. */
+export function fileCatalogListMatches(list: FileCatalogList): boolean {
+  const builds = new Set(list.catalogs.map(status => `${status.productId}|${status.buildIdentity}`));
+  return builds.size === list.catalogs.length && list.catalogs.every(status => ['pending', 'stopped', 'failed'].includes(status.state) && fileCatalogConsistent(status));
+}
+/** A Stop or Resume reply is for the build it named and in a state that action can leave. */
+export function fileCatalogSetMatches(status: FileCatalogStatus, params: FileCatalogSetParams): boolean {
+  return status.productId === params.productId && status.buildIdentity === params.buildIdentity && fileCatalogConsistent(status)
+    && (params.action === 'stop' ? status.state === 'stopped' : status.state === 'pending');
+}

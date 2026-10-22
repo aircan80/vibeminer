@@ -1,0 +1,143 @@
+[
+  {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "buildVersion": "12.1.5.70448",
+    "state": "pending",
+    "stage": "writing",
+    "completed": "1048576",
+    "total": "3262082",
+    "attempts": 0,
+    "catalog": null,
+    "problem": null,
+    "waitingFor": null
+  },
+  {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "buildVersion": "12.1.5.70448",
+    "state": "pending",
+    "stage": "queued",
+    "completed": null,
+    "total": null,
+    "attempts": 1,
+    "catalog": null,
+    "problem": {
+      "code": "CONTENT_SOURCE_MISSING",
+      "message": "The file list could not be prepared.",
+      "retryable": true,
+      "detail": "The CDN did not serve this object."
+    },
+    "waitingFor": {
+      "productId": "wow",
+      "buildIdentity": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "buildVersion": "12.1.7.70901"
+    }
+  },
+  {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "buildVersion": "12.1.5.70448",
+    "state": "pending",
+    "stage": "paused",
+    "completed": null,
+    "total": null,
+    "attempts": 0,
+    "catalog": null,
+    "problem": null,
+    "waitingFor": null
+  },
+  {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "buildVersion": "12.1.5.70448",
+    "state": "stopped",
+    "stage": null,
+    "completed": null,
+    "total": null,
+    "attempts": 0,
+    "catalog": null,
+    "problem": null,
+    "waitingFor": null
+  },
+  {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "buildVersion": "12.1.5.70448",
+    "state": "ready",
+    "stage": null,
+    "completed": null,
+    "total": null,
+    "attempts": 0,
+    "catalog": {
+      "generation": "7",
+      "preparedAt": "2026-10-21T12:00:00.0000000+00:00",
+      "rootFileCount": "1932662",
+      "installFileCount": "191",
+      "rootMembershipCount": "3261808",
+      "installMembershipCount": "274",
+      "uniqueContentCount": "2881834",
+      "unresolvedMembershipCount": "10",
+      "storedMembershipCount": "1"
+    },
+    "problem": null,
+    "waitingFor": null
+  },
+  {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "buildVersion": "12.1.5.70448",
+    "state": "failed",
+    "stage": null,
+    "completed": null,
+    "total": null,
+    "attempts": 3,
+    "catalog": null,
+    "problem": {
+      "code": "STORAGE_UNAVAILABLE",
+      "message": "The file list could not be prepared.",
+      "retryable": true,
+      "detail": "IOException: Input/output error"
+    },
+    "waitingFor": null
+  },
+  {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "buildVersion": "12.1.5.70448",
+    "state": "unsupported",
+    "stage": null,
+    "completed": null,
+    "total": null,
+    "attempts": 0,
+    "catalog": null,
+    "problem": {
+      "code": "ROOT_UNSUPPORTED",
+      "message": "This build's file list could not be read. Trying again reads the same bytes, so it won't help.",
+      "retryable": false,
+      "detail": "Unsupported ROOT signature or version."
+    },
+    "waitingFor": null
+  },
+  {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "buildVersion": null,
+    "state": "notOpened",
+    "stage": null,
+    "completed": null,
+    "total": null,
+    "attempts": 0,
+    "catalog": null,
+    "problem": null,
+    "waitingFor": null
+  }
+]

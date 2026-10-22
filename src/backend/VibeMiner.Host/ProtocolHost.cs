@@ -164,7 +164,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
             {
                 case "hello":
                     RequireOnly(parameters);
-                    var capabilities = new List<string> { "discovery-v1", "discovery-all-products-v1", "local-history", "cancellation", "home-download-v1", "download-v1", "inventory-v1", "inventory-files-v1", "tables-definitions-v1", "tables-data-v1" };
+                    var capabilities = new List<string> { "discovery-v1", "discovery-all-products-v1", "local-history", "cancellation", "home-download-v1", "download-v1", "inventory-v1", "inventory-files-v1", "file-catalog-v1", "tables-definitions-v1", "tables-data-v1" };
                     if (tableData is not null && referenceText is not null) capabilities.Add("tables-reference-text-v1");
                     if (tableData is not null && follow is not null) capabilities.Add("tables-follow-v1");
                     if (retention is not null) capabilities.Add("retention-v1");
@@ -294,6 +294,23 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                         throw new DiscoveryException("INVALID_REQUEST", "The page size must be an integer.");
                     result = await inventory.ReadAsync(new(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"), RequiredString(parameters, "sourceRegion"),
                         RequiredString(parameters, "generation"), pageLimit, OptionalString(parameters, "after")), request.Cancellation.Token);
+                    break;
+                case "inventory.catalog":
+                    RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion");
+                    if (inventory is null) throw new DiscoveryException("INVENTORY_UNAVAILABLE", "Inventory queries are unavailable.");
+                    result = await inventory.ReadCatalogAsync(new(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"),
+                        RequiredString(parameters, "sourceRegion")), request.Cancellation.Token);
+                    break;
+                case "inventory.catalogs":
+                    RequireOnly(parameters);
+                    if (inventory is null) throw new DiscoveryException("INVENTORY_UNAVAILABLE", "Inventory queries are unavailable.");
+                    result = await inventory.ListCatalogsAsync(request.Cancellation.Token);
+                    break;
+                case "inventory.catalog.set":
+                    RequireOnly(parameters, "productId", "buildIdentity", "action");
+                    if (inventory is null) throw new DiscoveryException("INVENTORY_UNAVAILABLE", "Inventory queries are unavailable.");
+                    result = await inventory.SetCatalogAsync(new(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"),
+                        RequiredString(parameters, "action")), request.Cancellation.Token);
                     break;
                 case "inventory.files":
                 case "inventory.file":

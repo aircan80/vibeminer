@@ -1,9 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Build, DiscoveryPage, EngineProgress, WorkspaceSnapshot, InventoryPage, InventoryFilesPage, InventoryFileDetail, DownloadPage, TableDefinitionSnapshot, TableDataSnapshot } from '../../../contracts/generated/discovery';
+import type { Build, DiscoveryPage, EngineProgress, FileCatalogStatus, WorkspaceSnapshot, InventoryPage, InventoryFilesPage, InventoryFileDetail, DownloadPage, TableDefinitionSnapshot, TableDataSnapshot } from '../../../contracts/generated/discovery';
 import type { BridgeReply, DiscoveryBridge } from '../src/shared/bridge';
 import { App } from '../src/renderer/App';
+import { failedShort } from '../src/renderer/DownloadObjects';
 import pageFixture from '../../../contracts/examples/discovery-page.json';
 import workspaceFixture from '../../../contracts/examples/inventory-workspace.json';
 import definitionsFixture from '../../../tests/desktop/fixtures/table-definitions.json';
@@ -32,7 +33,7 @@ const context = { productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', 
 // The authored Files page for this exact build, unfiltered (exact total, no cursor) unless a test patches it.
 const filesPage = (patch: Partial<InventoryFilesPage> = {}): InventoryFilesPage => ({ ...(filesFixture as InventoryFilesPage), buildIdentity: base.id, totalCount: '2', nextCursor: null, ...patch });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
-function setup(builds: Build[] = [routed()]) {
+function setup(builds: Build[] = [routed()], extra: Partial<DiscoveryBridge> = {}) {
   const progress = new Set<(p: EngineProgress) => void>();
   const bridge: DiscoveryBridge = {
     itemsData: vi.fn(async()=>({ok:false as const,error:{code:'NOT_TESTED',message:'Items outside this test.',retryable:false}})),
@@ -55,7 +56,8 @@ function setup(builds: Build[] = [routed()]) {
     inventoryFiles: vi.fn(async () => success(filesPage())),
     inventoryFile: vi.fn(async params => success({ ...detailFixture, buildIdentity: params.buildIdentity, file: params.file } as InventoryFileDetail)),
     cancel: vi.fn(async () => success({ requested: true })),
-    onProgress: vi.fn(listener => { progress.add(listener); return () => { progress.delete(listener); }; })
+    onProgress: vi.fn(listener => { progress.add(listener); return () => { progress.delete(listener); }; }),
+    ...extra
   };
   render(<App bridge={bridge}/>);
   return { bridge, emit: (value: EngineProgress) => { for (const listener of progress) listener(value); } };
@@ -453,7 +455,7 @@ describe('verified inventory opening and preserved discovery', () => {
   it('opens measured download Home without a ROOT catalog and discloses exact scope and receipts', async () => {
     const { bridge } = setup(); vi.mocked(bridge.open).mockResolvedValue(success(downloadSnapshot())); await begin();
     await screen.findByRole('heading', { name: 'Build overview' });
-    expect(screen.getByText('Unique encoded objects')).toBeVisible(); expect(screen.getByText('Published download content', { exact: true })).toBeVisible(); expect(screen.getByText('Research file catalog')).toBeVisible(); expect(screen.getAllByText('Not prepared').length).toBeGreaterThan(0);
+    expect(screen.getByText('Unique encoded objects')).toBeVisible(); expect(screen.getByText('Published download content', { exact: true })).toBeVisible(); expect(screen.getByText('File list')).toBeVisible(); expect(screen.getAllByText('Not prepared').length).toBeGreaterThan(0);
     expect(within(screen.getByText('Catalog memberships').closest('.dh-metric')!).getByText('Not prepared')).toBeVisible(); expect(screen.queryByText('ROOT/IN decoded bytes')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: /Files.*Later/ })).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Download all' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Scope and measurement details' })); const dialog = screen.getByRole('dialog'); expect(within(dialog).getByText('6,000 bytes')).toBeVisible(); expect(within(dialog).getByText(downloadFixture.download.ledgerId)).toBeVisible(); expect(within(dialog).getByText(/Exact full encoding keys/)).toBeVisible(); fireEvent(dialog, new Event('cancel', { cancelable: true }));
     const metadata = screen.getByRole('button', { name: 'View metadata details' }); metadata.focus(); fireEvent.click(metadata); expect(document.querySelectorAll('.configuration-receipt')).toHaveLength(3); expect(within(screen.getByRole('dialog')).getByText('download · Verified')).toBeVisible(); fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true })); expect(metadata).toHaveFocus(); expect(bridge.inventory).not.toHaveBeenCalled();
@@ -499,4 +501,261 @@ it('keeps exact background table controls in unified activity across Discovery a
  fireEvent.click(screen.getByRole('button',{name:'Close downloads and activity'}));vi.mocked(bridge.open).mockReturnValueOnce(opening.promise);fireEvent.click(screen.getByRole('button',{name:'Open build'}));await screen.findByRole('heading',{name:'Open this build overview'});fireEvent.click(screen.getByRole('button',{name:/Downloads & activity/}));
  const stop=screen.getByRole('button',{name:'Stop ItemClass table'});stop.focus();fireEvent.click(stop);expect(screen.getByRole('button',{name:'Stopping…'})).toHaveFocus();await act(async()=>load.resolve({ok:false,error:{code:'CANCELED',message:'Stopped safely.',retryable:true}}));expect(screen.getByRole('heading',{name:'ItemClass table'})).toHaveFocus();
  const dismiss=within(screen.getByRole('heading',{name:'ItemClass table'}).closest('article')!).getByRole('button',{name:'Dismiss outcome'});dismiss.focus();fireEvent.click(dismiss);expect(screen.queryByRole('heading',{name:'ItemClass table'})).not.toBeInTheDocument();expect(screen.getByRole('heading',{name:'Downloads & activity'})).toHaveFocus();expect(bridge.tablePrepare).toHaveBeenCalledTimes(1);
+});
+
+// D071: Files before and after the build's file catalog is prepared in the background, and its Downloads & activity task.
+describe('file catalog prepared after Open', () => {
+  const opened = (): WorkspaceSnapshot => ({ ...snapshot(), ...downloadFixture, build: snapshot().build, sourceReference: snapshot().sourceReference } as WorkspaceSnapshot);
+  const objects = (): DownloadPage => { const result = opened(); return { productId: result.build.productId, buildIdentity: result.build.id, sourceRegion: 'us', ledgerId: result.download!.ledgerId, assessedAt: result.download!.assessedAt, totalCount: '60', nextCursor: '1', entries: [{ id: '1', encodingKey: '1'.padStart(32, '0'), encodedBytes: '100', verifiedAtAssessment: false }] }; };
+  const status = (patch: Partial<FileCatalogStatus>): FileCatalogStatus => ({ productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', buildVersion: base.version, state: 'pending', stage: 'queued', completed: null, total: null, attempts: 0, catalog: null, problem: null, waitingFor: null, ...patch });
+  const ready = status({ state: 'ready', stage: null, catalog: { generation: '7', preparedAt: '2026-10-21T12:00:00.0000000+00:00', rootFileCount: '1', installFileCount: '1', rootMembershipCount: '2', installMembershipCount: '1', uniqueContentCount: '2', unresolvedMembershipCount: '1', storedMembershipCount: '0' } });
+  function start(replies: FileCatalogStatus[], listed: FileCatalogStatus[] = []) {
+    let call = 0; const fileCatalog = vi.fn(async () => success(replies[Math.min(call++, replies.length - 1)]));
+    const fileCatalogs = vi.fn(async () => success({ catalogs: listed }));
+    const fileCatalogSet = vi.fn(async (params: { productId: string; buildIdentity: string; action: 'stop' | 'resume' }) => success(status({ state: params.action === 'stop' ? 'stopped' : 'pending', stage: params.action === 'stop' ? null : 'queued' })));
+    const { bridge } = setup([routed()], { fileCatalog, fileCatalogs, fileCatalogSet, capabilities: vi.fn(async () => success(['file-catalog-v1'])) } as Partial<DiscoveryBridge>);
+    vi.mocked(bridge.open).mockResolvedValue(success(opened())); vi.mocked(bridge.download).mockResolvedValue(success(objects()));
+    return { bridge, fileCatalog, fileCatalogs, fileCatalogSet };
+  }
+  it('says the file list is being prepared, at which stage, what it waits for and what is missing meanwhile', async () => {
+    const { fileCatalog } = start([status({ waitingFor: { productId: 'wow', buildIdentity: 'e'.repeat(64), buildVersion: '12.1.7.70901' } })]);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    expect(fileCatalog).toHaveBeenCalledWith({ productId: 'wow', buildIdentity: base.id, sourceRegion: 'us' });
+    // The metric is replaced when the first status arrives, so it is looked up again on every check.
+    await waitFor(() => expect(screen.getByText('Catalog memberships').closest('.dh-metric')).toHaveTextContent('Preparing…'));
+    expect(screen.getByText('Catalog memberships').closest('.dh-metric')).toHaveTextContent('Waiting for the file list of build 12.1.7.70901 to finish first.');
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const note = screen.getByRole('note', { name: 'Preparing file list…' });
+    // The mockup's tinted state box, with the stage on its own dim line.
+    expect(note).toHaveClass('dh-state-box'); expect(note).not.toHaveClass('dh-plain');
+    expect(within(note).getByText('Waiting for the file list of build 12.1.7.70901 to finish first.')).toHaveClass('dh-dim');
+    expect(note).toHaveTextContent(/FileDataID \(ROOT\) or install name appear when the list is sealed/);
+    expect(within(note).getByRole('button', { name: `Stop preparing file list for ${base.version}` })).toBeVisible();
+  });
+  it('writes progress as its own line while writing and stops by name from Files', async () => {
+    const { fileCatalogSet } = start([status({ stage: 'writing', completed: '1024', total: '3000' })]);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const note = screen.getByRole('note', { name: 'Preparing file list…' });
+    expect(within(note).getByText('Writing memberships: 1,024 of 3,000.')).toBeVisible();
+    fireEvent.click(within(note).getByRole('button', { name: `Stop preparing file list for ${base.version}` }));
+    await waitFor(() => expect(fileCatalogSet).toHaveBeenCalledWith({ productId: 'wow', buildIdentity: base.id, action: 'stop' }));
+  });
+  it('offers a list that becomes ready in the footer without moving the rows, focus or scroll, then reads that exact generation', async () => {
+    const { bridge, fileCatalog } = start([status({ stage: 'reading' }), ready]);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const list = screen.getByRole('listbox'); list.focus();
+    const scroll = list.closest('.dh-list-scroll') as HTMLElement; scroll.scrollTop = 40;
+    const note = screen.getByRole('note', { name: 'Preparing file list…' });
+    // At 100% Show file list is in the footer; the note's copy is the 200% form, hidden by CSS.
+    const show = await within(document.querySelector<HTMLElement>('.dh-files .dh-pane-foot')!).findByRole('button', { name: 'Show file list' }, { timeout: 3000 });
+    expect(within(screen.getByRole('note', { name: 'File list ready' })).getByRole('button', { name: 'Show file list' })).toHaveClass('dh-compact-only');
+    expect(show.closest('.dh-pane-foot')).not.toBeNull(); expect(show.closest('.dh-catalog-ready')!.querySelector('[role=status]')).toHaveTextContent('File list ready');
+    // The note keeps its box (and height), so nothing above the rows changes size; focus and scroll stay.
+    expect(screen.getByRole('note', { name: 'File list ready' })).toBe(note);
+    expect(fileCatalog).toHaveBeenCalledTimes(2); expect(list).toHaveFocus(); expect(scroll.scrollTop).toBe(40); expect(bridge.inventoryFiles).not.toHaveBeenCalled();
+    vi.mocked(bridge.inventoryFiles).mockResolvedValue(success(filesPage({ generation: '7' })));
+    fireEvent.click(show);
+    await within(await screen.findByRole('listbox')).findByText('12345');
+    expect(bridge.inventoryFiles).toHaveBeenCalledWith({ ...context, generation: '7' });
+    await new Promise(done => setTimeout(done, 1200)); expect(fileCatalog).toHaveBeenCalledTimes(2);
+  });
+  it('opens straight into one row per FileDataID once the catalog is sealed', async () => {
+    const { bridge } = start([ready]); vi.mocked(bridge.inventoryFiles).mockResolvedValue(success(filesPage({ generation: '7' })));
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    await screen.findByText('Ready to browse'); expect(screen.getByText('Unresolved memberships')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await within(await screen.findByRole('listbox')).findByText('12345');
+    expect(bridge.inventoryFiles).toHaveBeenCalledWith({ ...context, generation: '7' }); expect(bridge.download).not.toHaveBeenCalled();
+    expect(screen.getByText(/File catalog generation/)).toHaveTextContent('File catalog generation 7 · 3 memberships');
+  });
+  it('states a failure once, keeps its cause and offers Retry and Reopen', async () => {
+    const { fileCatalogSet } = start([status({ state: 'failed', stage: null, attempts: 3, problem: { code: 'STORAGE_UNAVAILABLE', message: 'The file list could not be prepared.', retryable: true, detail: 'IOException: Input/output error' } })]);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const note = await screen.findByRole('note', { name: 'File list not prepared' });
+    const long = note.querySelector('.dh-note-fit')!;
+    expect(long.querySelector('.dh-note-long')).toHaveTextContent('The file list could not be prepared. It failed three times.'); expect(long.querySelector('.dh-note-code')).toHaveTextContent('(STORAGE_UNAVAILABLE)');
+    // At 100% (without the 200% short form, which says Retry or reopen) the only retry is the button.
+    const wide = note.cloneNode(true) as HTMLElement; wide.querySelectorAll('.dh-note-inline').forEach(n => n.remove());
+    expect(wide.textContent!.match(/retr/gi) ?? []).toHaveLength(1); expect(note).toHaveTextContent('Cause: IOException: Input/output error');
+    expect(within(note).getByRole('button', { name: 'Reopen this build' })).toBeVisible();
+    fireEvent.click(within(note).getByRole('button', { name: `Retry preparing file list for ${base.version}` }));
+    await waitFor(() => expect(fileCatalogSet).toHaveBeenCalledWith({ productId: 'wow', buildIdentity: base.id, action: 'resume' }));
+  });
+  it('says retrying cannot help an unreadable file list and offers no Retry', async () => {
+    start([status({ state: 'unsupported', stage: null, problem: { code: 'ROOT_UNSUPPORTED', message: "This build's file list could not be read. Trying again reads the same bytes, so it won't help.", retryable: false, detail: null } })]);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const note = await screen.findByRole('note', { name: 'File list not prepared' });
+    expect(note).toHaveTextContent("won't help"); expect(within(note).queryByRole('button')).not.toBeInTheDocument();
+  });
+  it('gives every failure and unsupported code a 200% form with a short message and its next step', async () => {
+    // The codes the engine settles a preparation with (FileCatalogWorker): unreadable ones are unsupported, a full disk is
+    // final, anything else is failed after three attempts.
+    const unreadable = ['METADATA_MISSING', 'METADATA_UNSUPPORTED', 'METADATA_INVALID', 'METADATA_LIMIT', 'METADATA_UNRESOLVED', 'METADATA_SIZE_CONFLICT', 'CONTENT_UNRESOLVED', 'CONTENT_ROOT_UNSUPPORTED', 'RESOLVER_LIMIT',
+      'ROOT_UNSUPPORTED', 'ROOT_INVALID', 'ROOT_LIMIT', 'ROOT_SCOPE_INVALID', 'IN_UNSUPPORTED', 'IN_INVALID', 'IN_LIMIT', 'EN_UNSUPPORTED', 'EN_INVALID', 'EN_LIMIT', 'FILE_CATALOG_LIMIT', 'INVENTORY_LIMIT', 'INVENTORY_SIZE_CONFLICT'];
+    const problem = (code: string) => ({ code, message: 'Authored.', retryable: false, detail: null });
+    for (const code of unreadable) expect(failedShort(status({ state: 'unsupported', stage: null, attempts: 1, problem: problem(code) }), true)).toBe('Can’t be read. Retrying won’t help.');
+    expect(failedShort(status({ state: 'failed', stage: null, attempts: 1, problem: problem('STORAGE_FULL') }), true)).toBe('Disk full. Free some space, then retry.');
+    for (const code of ['STORAGE_UNAVAILABLE', 'FILE_CATALOG_UNAVAILABLE', 'FILE_CATALOG_CHANGED', 'CONTENT_SOURCE_MISSING', 'ENGINE_UNAVAILABLE']) {
+      expect(failedShort(status({ state: 'failed', stage: null, attempts: 3, problem: problem(code) }), true)).toBe('Failed three times. Retry or reopen the build.');
+      expect(failedShort(status({ state: 'failed', stage: null, attempts: 3, problem: problem(code) }), false)).toBe('Failed three times. Retry it.');
+    }
+    // In the note the short form sits beside the long one and the code, which CSS drops first when the note is narrow.
+    start([status({ state: 'failed', stage: null, attempts: 1, problem: { code: 'STORAGE_FULL', message: 'There is not enough free disk space to save this build\'s file list.', retryable: false, detail: null } })]);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const note = await screen.findByRole('note', { name: 'File list not prepared' });
+    const line = note.querySelector('.dh-note-fit')!;
+    expect(line.querySelector('.dh-note-long')).toHaveTextContent('There is not enough free disk space to save this build\'s file list. Free some disk space, then retry.');
+    expect(line.querySelector('.dh-note-inline')).toHaveTextContent('Disk full. Free some space, then retry.');
+    expect(line.querySelector('.dh-note-code')).toHaveTextContent('(STORAGE_FULL)');
+  });
+  it('folds a failed attempt into the Preparing stage line for 200% and keeps its code in the long form', async () => {
+    start([status({ stage: 'queued', attempts: 1, problem: { code: 'CONTENT_SOURCE_MISSING', message: 'The file list could not be prepared.', retryable: true, detail: null } })]);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const note = await screen.findByRole('note', { name: 'Preparing file list…' });
+    expect(within(note).getByText('Attempt 1 failed, retrying ·', { exact: false })).toHaveClass('dh-note-inline');
+    expect(within(note).getByText(/; it is tried again shortly\./).closest('p')).toHaveClass('dh-note-long');
+  });
+  it('after a Retry status read fails again, a later automatic read never moves focus', async () => {
+    const { fileCatalog } = start([]);
+    const outage = { ok: false, error: { code: 'ENGINE_UNAVAILABLE', message: 'Authored outage.', retryable: true } } as never;
+    fileCatalog.mockResolvedValue(outage);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    const panel = screen.getByRole('heading', { name: 'File catalog' }).closest('section')!;
+    const retry = await within(panel).findByRole('button', { name: 'Retry status' }, { timeout: 3000 });
+    const before = fileCatalog.mock.calls.length;
+    retry.focus(); fireEvent.click(retry);
+    await waitFor(() => expect(fileCatalog.mock.calls.length).toBe(before + 1));
+    await act(async () => { await new Promise(done => setTimeout(done, 50)); });
+    expect(within(panel).getByRole('button', { name: 'Retry status' })).toHaveFocus();
+    // The user leaves the panel; the next automatic read succeeds and replaces Retry status. Focus stays where it is.
+    (document.activeElement as HTMLElement).blur();
+    fileCatalog.mockResolvedValue(success(status({ stage: 'writing', completed: '1', total: '2' })) as never);
+    await waitFor(() => expect(within(panel).queryByRole('button', { name: 'Retry status' })).not.toBeInTheDocument(), { timeout: 4000 });
+    expect(screen.getByRole('heading', { name: 'File catalog' })).not.toHaveFocus();
+    expect(document.activeElement).toBe(document.body);
+  });
+  it('after Stop fails, a later automatic read never moves focus into the note', async () => {
+    let state: FileCatalogStatus = status({ stage: 'reading' });
+    const { fileCatalog, fileCatalogSet } = start([]);
+    fileCatalog.mockImplementation(async () => success(state));
+    fileCatalogSet.mockImplementation(async () => ({ ok: false, error: { code: 'ENGINE_UNAVAILABLE', message: 'Authored outage.', retryable: true } }) as never);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const stop = await screen.findByRole('button', { name: `Stop preparing file list for ${base.version}` }); stop.focus(); fireEvent.click(stop);
+    await waitFor(() => expect(fileCatalogSet).toHaveBeenCalled());
+    const reads = fileCatalog.mock.calls.length;
+    await waitFor(() => expect(fileCatalog.mock.calls.length).toBeGreaterThan(reads));
+    await act(async () => { await new Promise(done => setTimeout(done, 50)); });
+    (document.activeElement as HTMLElement).blur();
+    // Stopped from elsewhere: the next poll replaces Stop with Resume, and focus stays on the document body.
+    state = status({ state: 'stopped', stage: null });
+    await screen.findByRole('button', { name: `Resume preparing file list for ${base.version}` }, { timeout: 3000 });
+    expect(document.activeElement).toBe(document.body);
+  });
+  it('shows a failed status read with Retry instead of claiming the list is never prepared', async () => {
+    const { bridge, fileCatalog } = start([ready]);
+    fileCatalog.mockReset(); fileCatalog.mockResolvedValue({ ok: false, error: { code: 'ENGINE_UNAVAILABLE', message: 'Authored outage.', retryable: true } } as never);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const box = await screen.findByRole('status', { name: 'File list status unavailable' });
+    expect(box).toHaveTextContent('Authored outage. (ENGINE_UNAVAILABLE)'); expect(screen.queryByText(/doesn.t prepare/)).not.toBeInTheDocument();
+    fileCatalog.mockResolvedValue(success(ready) as never); vi.mocked(bridge.inventoryFiles).mockResolvedValue(success(filesPage({ generation: '7' })));
+    fireEvent.click(within(box).getByRole('button', { name: 'Retry status' }));
+    await within(document.querySelector<HTMLElement>('.dh-files .dh-pane-foot')!).findByRole('button', { name: 'Show file list' });
+  });
+  it('names a failed task with a short stage and states its message and code once', async () => {
+    const failed = status({ state: 'failed', stage: null, attempts: 3, problem: { code: 'STORAGE_UNAVAILABLE', message: 'The file list could not be prepared.', retryable: true, detail: 'IOException: Input/output error' } });
+    const { fileCatalogs } = start([failed], [failed]);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    await waitFor(() => expect(fileCatalogs).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole('button', { name: /File list · ROOT and install · needs attention/ }));
+    const task = (await screen.findByRole('heading', { name: 'File list · ROOT and install' })).closest('article')!;
+    expect(task).toHaveTextContent('File list needs attention'); expect(task.textContent!.match(/could not be prepared/g)).toHaveLength(1);
+    expect(within(task).getByRole('button', { name: `Retry preparing file list for ${base.version}` })).toBeVisible();
+  });
+  it('moves focus to the button that replaces Stop, Resume or Retry status instead of dropping it', async () => {
+    let state: FileCatalogStatus = status({ stage: 'reading' });
+    const { fileCatalog, fileCatalogSet } = start([]);
+    fileCatalog.mockImplementation(async () => success(state));
+    fileCatalogSet.mockImplementation(async params => { state = status({ state: params.action === 'stop' ? 'stopped' : 'pending', stage: params.action === 'stop' ? null : 'queued' }); return success(state); });
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const stop = await screen.findByRole('button', { name: `Stop preparing file list for ${base.version}` }); stop.focus(); fireEvent.click(stop);
+    await waitFor(() => expect(screen.getByRole('button', { name: `Resume preparing file list for ${base.version}` })).toHaveFocus());
+    fireEvent.click(screen.getByRole('button', { name: `Resume preparing file list for ${base.version}` }));
+    await waitFor(() => expect(screen.getByRole('button', { name: `Stop preparing file list for ${base.version}` })).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+  it('keeps focus in the note when Stop goes away because the list turned ready', async () => {
+    let state: FileCatalogStatus = status({ stage: 'reading' });
+    const { fileCatalog } = start([]);
+    fileCatalog.mockImplementation(async () => success(state));
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    (await screen.findByRole('button', { name: `Stop preparing file list for ${base.version}` })).focus();
+    state = ready;
+    const note = await screen.findByRole('note', { name: 'File list ready' }, { timeout: 3000 });
+    // jsdom has no layout, so the note's own Show file list (the 200% form) counts as shown and takes focus.
+    await waitFor(() => expect(within(note).getByRole('button', { name: 'Show file list' })).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+  it('marks an earlier status as not confirmed when later reads fail, with Retry status', async () => {
+    const { fileCatalog } = start([status({ stage: 'writing', completed: '10', total: '20' })]);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
+    const note = await screen.findByRole('note', { name: 'Preparing file list…' });
+    fileCatalog.mockResolvedValue({ ok: false, error: { code: 'ENGINE_UNAVAILABLE', message: 'Authored outage.', retryable: true } } as never);
+    await within(note).findByText(/Status not confirmed: Authored outage\. \(ENGINE_UNAVAILABLE\)/, undefined, { timeout: 3000 });
+    expect(within(note).getByText('Writing memberships: 10 of 20.')).toBeVisible();
+    fileCatalog.mockResolvedValue(success(status({ stage: 'writing', completed: '15', total: '20' })) as never);
+    // The 200% form repeats Retry status beside the note's actions; CSS shows one of the two.
+    fireEvent.click(within(note).getAllByRole('button', { name: 'Retry status' })[0]);
+    await within(note).findByText('Writing memberships: 15 of 20.');
+    expect(within(note).queryByText(/Status not confirmed/)).not.toBeInTheDocument();
+  });
+  it('says Checking… in the build readiness until the first status read answers', async () => {
+    const { fileCatalog } = start([]);
+    let answer!: (value: unknown) => void;
+    fileCatalog.mockImplementation(() => new Promise(done => { answer = done; }) as never);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    const row = await screen.findByText('File list');
+    await waitFor(() => expect(row.nextElementSibling).toHaveTextContent('Checking…'));
+    await act(async () => answer(success(status({ stage: 'reading' }))));
+    await waitFor(() => expect(screen.getByText('File list').nextElementSibling).toHaveTextContent('Preparing…'));
+  });
+  it('on Home, Retry status hands focus to the File catalog heading once the read succeeds', async () => {
+    const { fileCatalog } = start([]);
+    fileCatalog.mockResolvedValue({ ok: false, error: { code: 'ENGINE_UNAVAILABLE', message: 'Authored outage.', retryable: true } } as never);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    const panel = screen.getByRole('heading', { name: 'File catalog' }).closest('section')!;
+    let retry = await within(panel).findByRole('button', { name: 'Retry status' }, { timeout: 3000 });
+    fileCatalog.mockResolvedValue(success(status({ stage: 'writing', completed: '1', total: '2' })) as never);
+    retry.focus(); fireEvent.click(retry);
+    await waitFor(() => expect(within(panel).queryByRole('button', { name: 'Retry status' })).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'File catalog' })).toHaveFocus();
+    // The same after a later read fails and the last status is marked not confirmed.
+    fileCatalog.mockResolvedValue({ ok: false, error: { code: 'ENGINE_UNAVAILABLE', message: 'Authored outage.', retryable: true } } as never);
+    retry = await within(panel).findByRole('button', { name: 'Retry status' }, { timeout: 3000 });
+    fileCatalog.mockResolvedValue(success(status({ stage: 'writing', completed: '2', total: '2' })) as never);
+    retry.focus(); fireEvent.click(retry);
+    await waitFor(() => expect(within(panel).queryByRole('button', { name: 'Retry status' })).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'File catalog' })).toHaveFocus(); expect(document.activeElement).not.toBe(document.body);
+  });
+  it('lists one Downloads & activity task per build with its stage, a named Stop and Resume', async () => {
+    const writing = status({ stage: 'writing', completed: '10', total: '20' });
+    const { fileCatalogSet, fileCatalogs } = start([writing], [writing]);
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    await waitFor(() => expect(fileCatalogs).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole('button', { name: /Downloads & activity/ }));
+    const task = (await screen.findByRole('heading', { name: 'File list · ROOT and install' })).closest('article')!;
+    // The stage names the step; the counts are the measurement, shown once.
+    expect(task).toHaveTextContent('Writing memberships'); expect(task.textContent!.match(/10 of 20/g)).toHaveLength(1); expect(task).toHaveTextContent(base.version);
+    fireEvent.click(within(task).getByRole('button', { name: `Stop preparing file list for ${base.version}` }));
+    await waitFor(() => expect(fileCatalogSet).toHaveBeenCalledWith({ productId: 'wow', buildIdentity: base.id, action: 'stop' }));
+  });
 });

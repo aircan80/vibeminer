@@ -107,7 +107,7 @@ public sealed class InventoryFilesTests
         var expected = (await h.Catalog.ReadInventoryFilesAsync(new("wow", before.Build.Id, "us", g, new()), default)).Entries;
         // The catalog as #5's engine leaves it: no Files columns, indexes or statistics, version 16.
         await h.Restart(CatalogMigrationFixture.RemoveV17 + "PRAGMA user_version=16;");
-        Assert.Equal(17L, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(18L, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(0L, await h.Scalar($"SELECT count(*) FROM inventory_origins WHERE g={g} AND family='root' AND fdid_n IS NOT CAST(fdid AS INTEGER)"));
         Assert.Equal(0L, await h.Scalar($"SELECT count(*) FROM inventory_origins WHERE g={g} AND family='install' AND grp IS NULL"));
         // The saved digest still verifies, and the reseal records the Files statistics.
@@ -116,6 +116,25 @@ public sealed class InventoryFilesTests
         var page = await h.Catalog.ReadInventoryFilesAsync(new("wow", after.Build.Id, "us", g, new()), default);
         Assert.Equal(expected, page.Entries);
         Assert.Equal(2, (await h.Catalog.ReadInventoryFileAsync(new("wow", after.Build.Id, "us", g, "root:1001", new()), default)).MembershipCount);
+    }
+
+    [Fact]
+    public async Task A_version_17_catalog_with_a_prepared_inventory_upgrades_and_Files_keeps_reading_that_generation()
+    {
+        await using var h = await Prepared.Create();
+        var before = await h.Open(); var g = before.Inventory!.Generation;
+        var expected = (await h.Catalog.ReadInventoryFilesAsync(new("wow", before.Build.Id, "us", g, new()), default)).Entries;
+        // The catalog as #20's engine leaves it: Files columns and statistics, no file catalogs table, version 17.
+        await h.Restart(CatalogMigrationFixture.RemoveV18 + "PRAGMA user_version=17;");
+        Assert.Equal(18L, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(0L, await h.Scalar("SELECT count(*) FROM file_catalogs"));
+        // The legacy full catalog is still the one generation its workspace names, and nothing queues a second one for it (D071).
+        Assert.Equal(expected, (await h.Catalog.ReadInventoryFilesAsync(new("wow", before.Build.Id, "us", g, new()), default)).Entries);
+        h.Handler.BlockAll = true;
+        var after = await h.Open(); Assert.Equal(g, after.Inventory!.Generation);
+        Assert.Equal(expected, (await h.Catalog.ReadInventoryFilesAsync(new("wow", after.Build.Id, "us", g, new()), default)).Entries);
+        Assert.Equal(0L, await h.Scalar("SELECT count(*) FROM file_catalogs"));
+        Assert.Equal("notOpened", (await h.Catalog.ReadFileCatalogAsync(new("wow", after.Build.Id, "eu"), default)).State);
     }
 
     public static TheoryData<string> Filters => new()

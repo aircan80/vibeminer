@@ -121,18 +121,40 @@ public sealed partial class DiscoveryCatalog
         public bool Exhausted => Remaining <= 0;
         public void Read() { Remaining--; Used++; }
     }
-    private long ReadyFilesGeneration(string product, string build, string region, string generation)
+    /// <summary>
+    /// The exact sealed generation a Files request names. A legacy full catalog (home-inventory-v1) is read only for its own
+    /// build and region. A file catalog prepared after Open (D071) is read only while it is the build's ready one, through
+    /// any region the build was opened in. Every query is keyed by this one generation, so rows never mix.
+    /// </summary>
+    private (long G, string S) ReadyFilesGeneration(string product, string build, string region, string generation)
     {
         var g = long.Parse(generation, CultureInfo.InvariantCulture);
-        var ready = Scalar("SELECT 1 FROM inventory_generations WHERE id=$g AND build_id=$b AND region=$r AND state='ready' AND profile=$p", null,
-            ("$g", g), ("$b", build), ("$r", region), ("$p", InventoryWorkspacePreparer.Profile));
+        var ready = Scalar("""
+            SELECT 'main' FROM inventory_generations WHERE id=$g AND build_id=$b AND region=$r AND state='ready' AND profile=$p
+            UNION ALL SELECT 'file' FROM inventory_generations i JOIN file_catalogs f ON f.inventory=i.id AND f.build_id=i.build_id
+                WHERE i.id=$g AND i.build_id=$b AND i.state='ready' AND i.profile=$files AND f.state='ready' AND f.product=$product
+                    AND EXISTS(SELECT 1 FROM workspace_admissions a WHERE a.build_id=$b AND a.region=$r AND a.product=$product)
+            LIMIT 1
+            """, null, ("$g", g), ("$b", build), ("$r", region), ("$p", InventoryWorkspacePreparer.Profile), ("$files", FileCatalogProfile), ("$product", product));
         if (ready is null || (string?)Scalar("SELECT product FROM builds WHERE id=$b", null, ("$b", build)) != product)
             throw new DiscoveryException("INVENTORY_NOT_FOUND", "This exact prepared inventory is unavailable. Open the build again.", true);
-        return g;
+        if ((string)ready == "main") return (g, "main");
+        // A file catalog's rows are in its own file (D071); it must read back as this sealed generation of this build.
+        string schema;
+        try { schema = AttachFileCatalog(g, false); }
+        catch (Exception failure) when (failure is SqliteException or IOException or DiscoveryException)
+        {
+            EngineLog.Write($"File catalog {g} could not be opened for Files ({Cause(failure)}).");
+            throw new DiscoveryException("INVENTORY_NOT_FOUND", "This build's saved file list could not be read. Open the build again to prepare it.", true);
+        }
+        var identity = ReadFileCatalogIdentity(schema, null);
+        if (identity is null || identity.Generation != g || identity.Build != build || !identity.Sealed)
+            throw new DiscoveryException("INVENTORY_NOT_FOUND", "This build's saved file list could not be read. Open the build again to prepare it.", true);
+        return (g, schema);
     }
-    private FileStats ReadFileStats(long g)
+    private FileStats ReadFileStats(long g, string s)
     {
-        using var cmd = Command("SELECT root_files,install_files,root_members,variants,stored_root_members FROM inventory_file_stats WHERE g=$g", null, ("$g", g));
+        using var cmd = Command($"SELECT root_files,install_files,root_members,variants,stored_root_members FROM {s}.inventory_file_stats WHERE g=$g", null, ("$g", g));
         using var r = cmd.ExecuteReader();
         if (!r.Read()) throw new DiscoveryException("CATALOG_INTEGRITY", "The prepared inventory has no Files index.");
         return new(r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3), r.GetInt64(4));
@@ -141,8 +163,8 @@ public sealed partial class DiscoveryCatalog
     public Task<InventoryFilesPage> ReadInventoryFilesAsync(InventoryFilesRequest request, CancellationToken token) => Schedule(() =>
     {
         var (query, after) = InventoryService.Validate(request);
-        var g = ReadyFilesGeneration(request.ProductId, request.BuildIdentity, request.SourceRegion, request.Generation);
-        var stats = ReadFileStats(g);
+        var (g, s) = ReadyFilesGeneration(request.ProductId, request.BuildIdentity, request.SourceRegion, request.Generation);
+        var stats = ReadFileStats(g, s);
         var budget = new Budget(FilesExaminationBudget);
         var entries = new List<InventoryFile>(); var bytes = 0;
         InventoryFilePosition? position = after; var more = false; var limited = false;
@@ -154,10 +176,10 @@ public sealed partial class DiscoveryCatalog
         }
         if (query.IncludesRoot && after is not { Install: true })
         {
-            var root = new RootCandidates(this, g, query, stats, after?.Value ?? -1, budget, token);
+            var root = new RootCandidates(this, g, s, query, stats, after?.Value ?? -1, budget, token);
             foreach (var fdid in root.Read())
             {
-                var file = RootFile(g, fdid, query, budget, token);
+                var file = RootFile(g, s, fdid, query, budget, token);
                 if (file is not null && file.MatchingCount > 0 && !Offer(file)) break;
                 // A candidate that failed the full predicate is examined too; resume after it.
                 if (!more && file?.MatchingCount is null or 0) position = new InventoryFilePosition(false, fdid);
@@ -168,7 +190,7 @@ public sealed partial class DiscoveryCatalog
         if (!more && !limited && query.InstallCanMatch)
         {
             if (budget.Exhausted) limited = true;
-            else foreach (var file in InstallFiles(g, query, position is { Install: true } p ? p.Value : 0, budget, token))
+            else foreach (var file in InstallFiles(g, s, query, position is { Install: true } p ? p.Value : 0, budget, token))
             {
                 if (file is null) { limited = true; break; }
                 if (file.MatchingCount > 0 && !Offer(file)) break;
@@ -182,9 +204,9 @@ public sealed partial class DiscoveryCatalog
     }, token);
 
     /// <summary>All memberships of one ROOT FileDataID, summarized; null when the FileDataID has none.</summary>
-    private InventoryFile? RootFile(long g, long fdid, InventoryFileQuery query, Budget budget, CancellationToken token)
+    private InventoryFile? RootFile(long g, string s, long fdid, InventoryFileQuery query, Budget budget, CancellationToken token)
     {
-        using var cmd = Command("SELECT ckey,encoded,locale_n,flags_n,stored FROM inventory_origins INDEXED BY inventory_root_files WHERE g=$g AND fdid_n=$f", null, ("$g", g), ("$f", fdid));
+        using var cmd = Command($"SELECT ckey,encoded,locale_n,flags_n,stored FROM {s}.inventory_origins INDEXED BY inventory_root_files WHERE g=$g AND fdid_n=$f", null, ("$g", g), ("$f", fdid));
         using var r = cmd.ExecuteReader();
         var summary = new FileSummary();
         while (r.Read())
@@ -196,9 +218,9 @@ public sealed partial class DiscoveryCatalog
         return summary.Members == 0 ? null : summary.File("root:" + fdid.ToString(CultureInfo.InvariantCulture), "root", fdid.ToString(CultureInfo.InvariantCulture), null);
     }
     /// <summary>Install files in group order after <paramref name="after"/>; yields null once the budget ends a page early.</summary>
-    private IEnumerable<InventoryFile?> InstallFiles(long g, InventoryFileQuery query, long after, Budget budget, CancellationToken token)
+    private IEnumerable<InventoryFile?> InstallFiles(long g, string s, InventoryFileQuery query, long after, Budget budget, CancellationToken token)
     {
-        using var cmd = Command("SELECT grp,name,ckey,encoded,stored FROM inventory_origins INDEXED BY inventory_install_files WHERE g=$g AND family='install' AND grp>$a ORDER BY grp,id", null, ("$g", g), ("$a", after));
+        using var cmd = Command($"SELECT grp,name,ckey,encoded,stored FROM {s}.inventory_origins INDEXED BY inventory_install_files WHERE g=$g AND family='install' AND grp>$a ORDER BY grp,id", null, ("$g", g), ("$a", after));
         using var r = cmd.ExecuteReader();
         long group = -1; string? name = null; var summary = new FileSummary();
         while (r.Read())
@@ -234,7 +256,7 @@ public sealed partial class DiscoveryCatalog
     }
 
     /// <summary>Ascending candidate ROOT FileDataIDs from the smallest driving index. Stops at group boundaries when the budget ends.</summary>
-    private sealed class RootCandidates(DiscoveryCatalog catalog, long g, InventoryFileQuery query, FileStats stats, long after, Budget budget, CancellationToken token)
+    private sealed class RootCandidates(DiscoveryCatalog catalog, long g, string s, InventoryFileQuery query, FileStats stats, long after, Budget budget, CancellationToken token)
     {
         public bool Limited { get; private set; }
         /// <summary>The last FileDataID whose driver rows were all read when the budget ended the search.</summary>
@@ -242,14 +264,14 @@ public sealed partial class DiscoveryCatalog
         public IEnumerable<long> Read()
         {
             if (query.FileDataId is { } exact) return exact > after ? [exact] : [];
-            if (query.ContentKey is { Length: 32 } key) return Ordered("SELECT fdid_n,0,0,0 FROM inventory_origins INDEXED BY inventory_content WHERE g=$g AND ckey=$c AND family='root' AND fdid_n>$a ORDER BY fdid_n", ("$c", key));
+            if (query.ContentKey is { Length: 32 } key) return Ordered($"SELECT fdid_n,0,0,0 FROM {s}.inventory_origins INDEXED BY inventory_content WHERE g=$g AND ckey=$c AND family='root' AND fdid_n>$a ORDER BY fdid_n", ("$c", key));
             if (query.ContentKey is { } prefix) return Prefix(prefix);
             var total = Math.Max(stats.RootMembers, 1);
             List<(uint Locale, uint Flags, long Members)>? pairs = null; long variantMembers = total;
             if (query.VariantFilter && stats.Variants <= VariantPlanBound)
             {
                 pairs = [];
-                using var cmd = catalog.Command("SELECT locale,flags,members FROM inventory_root_variants WHERE g=$g", null, ("$g", g));
+                using var cmd = catalog.Command($"SELECT locale,flags,members FROM {s}.inventory_root_variants WHERE g=$g", null, ("$g", g));
                 using var r = cmd.ExecuteReader();
                 while (r.Read()) { var locale = (uint)r.GetInt64(0); var flags = (uint)r.GetInt64(1); if (query.MatchesVariant(locale, flags)) pairs.Add((locale, flags, r.GetInt64(2))); }
                 variantMembers = pairs.Sum(pair => pair.Members);
@@ -262,9 +284,9 @@ public sealed partial class DiscoveryCatalog
             // that scan is the fallback only when no narrowing index applies.
             var mergeable = pairs is not null && pairs.Count <= VariantMergeBound;
             if (query.StoredOnly && (!mergeable || storedMembers <= variantMembers))
-                return Ordered("SELECT fdid_n,locale_n,flags_n,1 FROM inventory_origins INDEXED BY inventory_stored_files WHERE g=$g AND stored=1 AND family='root' AND fdid_n>$a ORDER BY fdid_n");
+                return Ordered($"SELECT fdid_n,locale_n,flags_n,1 FROM {s}.inventory_origins INDEXED BY inventory_stored_files WHERE g=$g AND stored=1 AND family='root' AND fdid_n>$a ORDER BY fdid_n");
             if (mergeable) return Merge(pairs!);
-            return Ordered("SELECT fdid_n,locale_n,flags_n,stored FROM inventory_origins INDEXED BY inventory_root_files WHERE g=$g AND fdid_n>$a ORDER BY fdid_n");
+            return Ordered($"SELECT fdid_n,locale_n,flags_n,stored FROM {s}.inventory_origins INDEXED BY inventory_root_files WHERE g=$g AND fdid_n>$a ORDER BY fdid_n");
         }
         private bool Passes(uint locale, uint flags, bool stored) => query.MatchesVariant(locale, flags) && (!query.StoredOnly || stored);
         // One index-ordered stream: rows of one FileDataID are consecutive; a group is a candidate when any row passes.
@@ -290,11 +312,11 @@ public sealed partial class DiscoveryCatalog
         private IEnumerable<long> Prefix(string prefix)
         {
             (string, object?) lo = ("$lo", prefix), hi = ("$hi", prefix + "g"), at = ("$g", g);
-            var count = Convert.ToInt64(catalog.Scalar($"SELECT count(*) FROM (SELECT 1 FROM inventory_origins INDEXED BY inventory_content WHERE g=$g AND ckey>=$lo AND ckey<$hi LIMIT {ContentPrefixBound + 1})", null, at, lo, hi));
+            var count = Convert.ToInt64(catalog.Scalar($"SELECT count(*) FROM (SELECT 1 FROM {s}.inventory_origins INDEXED BY inventory_content WHERE g=$g AND ckey>=$lo AND ckey<$hi LIMIT {ContentPrefixBound + 1})", null, at, lo, hi));
             if (count > ContentPrefixBound)
                 throw new DiscoveryException("INVENTORY_FILTER_BROAD", $"More than {ContentPrefixBound:N0} memberships have a content key starting {prefix}. Type more of the key.");
             var ids = new SortedSet<long>();
-            using (var cmd = catalog.Command("SELECT fdid_n FROM inventory_origins INDEXED BY inventory_content WHERE g=$g AND ckey>=$lo AND ckey<$hi AND family='root' AND fdid_n>$a", null, at, lo, hi, ("$a", after)))
+            using (var cmd = catalog.Command($"SELECT fdid_n FROM {s}.inventory_origins INDEXED BY inventory_content WHERE g=$g AND ckey>=$lo AND ckey<$hi AND family='root' AND fdid_n>$a", null, at, lo, hi, ("$a", after)))
             using (var r = cmd.ExecuteReader()) while (r.Read()) { token.ThrowIfCancellationRequested(); budget.Read(); ids.Add(r.GetInt64(0)); }
             return Bounded(ids);
         }
@@ -309,7 +331,7 @@ public sealed partial class DiscoveryCatalog
         // resumes after (FileDataID, rowid).
         private IEnumerable<long> Merge(List<(uint Locale, uint Flags, long Members)> pairs)
         {
-            using var cmd = catalog.Command("SELECT fdid_n,stored,rowid FROM inventory_origins INDEXED BY inventory_root_variant_files WHERE g=$g AND locale_n=$l AND flags_n=$f AND fdid_n>=$a AND (fdid_n,rowid)>($a,$r) ORDER BY fdid_n,rowid LIMIT $n", null,
+            using var cmd = catalog.Command($"SELECT fdid_n,stored,rowid FROM {s}.inventory_origins INDEXED BY inventory_root_variant_files WHERE g=$g AND locale_n=$l AND flags_n=$f AND fdid_n>=$a AND (fdid_n,rowid)>($a,$r) ORDER BY fdid_n,rowid LIMIT $n", null,
                 ("$g", g), ("$l", 0L), ("$f", 0L), ("$a", 0L), ("$r", 0L), ("$n", 0L));
             cmd.Prepare();
             var buffers = new Queue<(long Fdid, bool Stored, long Row)>[pairs.Count]; var exhausted = new bool[pairs.Count];
@@ -343,11 +365,11 @@ public sealed partial class DiscoveryCatalog
     public Task<InventoryFileDetail> ReadInventoryFileAsync(InventoryFileRequest request, CancellationToken token) => Schedule(() =>
     {
         var (query, file, after) = InventoryService.Validate(request);
-        var g = ReadyFilesGeneration(request.ProductId, request.BuildIdentity, request.SourceRegion, request.Generation);
+        var (g, s) = ReadyFilesGeneration(request.ProductId, request.BuildIdentity, request.SourceRegion, request.Generation);
         // The file's own rows: at most MaxFileMemberships (checked at seal) through the install-group or FileDataID index.
         var where = file.Install ? "INDEXED BY inventory_install_files WHERE g=$g AND family='install' AND grp=$k" : "INDEXED BY inventory_root_files WHERE g=$g AND fdid_n=$k";
         int total = 0, matching = 0, read = 0; string? name = null;
-        using (var count = Command($"SELECT family,ckey,locale_n,flags_n,stored,fdid_n,name FROM inventory_origins {where}", null, ("$g", g), ("$k", file.Value)))
+        using (var count = Command($"SELECT family,ckey,locale_n,flags_n,stored,fdid_n,name FROM {s}.inventory_origins {where}", null, ("$g", g), ("$k", file.Value)))
         using (var r = count.ExecuteReader())
             while (r.Read())
             {
@@ -356,7 +378,7 @@ public sealed partial class DiscoveryCatalog
             }
         if (total == 0) throw new DiscoveryException("INVENTORY_FILE_NOT_FOUND", "This prepared inventory has no such file.");
         var members = new List<InventoryFileMembership>(); var bytes = 0; var more = false;
-        using (var page = Command($"SELECT id,family,ckey,ekey,decoded,encoded,locale_n,flags_n,name_hash,raw,stored,fdid_n FROM inventory_origins {where} AND id>$a ORDER BY id LIMIT $n", null,
+        using (var page = Command($"SELECT id,family,ckey,ekey,decoded,encoded,locale_n,flags_n,name_hash,raw,stored,fdid_n FROM {s}.inventory_origins {where} AND id>$a ORDER BY id LIMIT $n", null,
             ("$g", g), ("$k", file.Value), ("$a", after), ("$n", request.Limit + 1)))
         using (var r = page.ExecuteReader())
         {

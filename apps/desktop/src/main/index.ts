@@ -26,7 +26,7 @@ import { validProduct, validRead, validReadAll, validRequestId, validOpen } from
 import { validTablesCatalog, validTableDefinition } from '../shared/tables';
 import { validDownloadRead } from '../shared/download';
 import { validSummariesParams, validChangesParams } from '../shared/download-summary';
-import { validInventoryRead, validInventoryFiles, validInventoryFile } from '../shared/inventory';
+import { validInventoryRead, validInventoryFiles, validInventoryFile, validFileCatalog, validFileCatalogSet } from '../shared/inventory';
 import type { BridgeReply } from '../shared/bridge';
 protocol.registerSchemesAsPrivileged([{scheme:'vibeminer-image',privileges:{standard:true,secure:true}},{scheme:'vibeminer-geometry',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true}}]);
 let engine: EngineClient;
@@ -124,6 +124,9 @@ function registerBridge(): void {
       else if (method === 'inventory.read') { if (!validInventoryRead(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded inventory query.'); }
       else if (method === 'inventory.files') { if (!validInventoryFiles(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded Files query.'); }
       else if (method === 'inventory.file') { if (!validInventoryFile(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded file inspector query.'); }
+      else if (method === 'inventory.catalog') { if (!validFileCatalog(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact opened build and source region.'); }
+      else if (method === 'inventory.catalogs') { if (!params || typeof params !== 'object' || Object.keys(params).length) throw new EngineFailure('INVALID_REQUEST', 'The file list preparations take no parameters.'); }
+      else if (method === 'inventory.catalog.set') { if (!validFileCatalogSet(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact build and stop or resume.'); }
       else if (method === 'workspace.open') { if (!validOpen(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Choose an exact saved build and source region.'); }
       else if (method === 'request.cancel') { if (!validRequestId((params as { requestId?: unknown })?.requestId) || Object.keys(params as object).length !== 1) throw new EngineFailure('INVALID_REQUEST', 'Invalid cancellation request.'); }
       else throw new EngineFailure('INVALID_REQUEST', 'Unsupported desktop operation.');

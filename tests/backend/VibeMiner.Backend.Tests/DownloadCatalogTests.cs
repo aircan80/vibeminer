@@ -204,7 +204,7 @@ public sealed class DownloadCatalogTests
         await h.Catalog.DisposeAsync();
         await h.Execute(CatalogMigrationFixture.RemoveV9 + "DROP TABLE encoded_objects; DROP TABLE content_locators; DROP TABLE table_admissions; DROP TABLE table_artifacts; DROP TABLE content_objects; DROP TABLE resolver_artifacts; DROP TABLE download_admissions; DROP TABLE download_artifact_sources; DROP TABLE download_artifacts; PRAGMA user_version=5");
         h.Catalog = await DiscoveryCatalog.OpenAsync(h.Directory);
-        Assert.Equal(17, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(18, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM inventory_generations WHERE state='staging'"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM en_content"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM events"));

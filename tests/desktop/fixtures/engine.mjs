@@ -50,6 +50,10 @@ const followEnabled=process.env.VIBEMINER_FIXTURE_FOLLOW==='1';
 // The authored generic rows every prepared fixture table returns (tables.rows default branch).
 function genericRows(snapshot){const all=Array.from({length:60},(_,index)=>({id:String(index),isCopy:false,copySourceId:null,values:snapshot.columns.map((column,i)=>column.interpretation?'3011920367':column.isId?String(index):column.family==='string'?`Authored clear value ${index}`:column.family==='float'?'1.25':String(index+i+1))}));if(snapshot.textIssueCount==='1'){const columnIndex=snapshot.columns.findIndex(column=>column.family==='string'&&!column.isId);all[7].values[columnIndex]='';all[7].textIssues=[{columnIndex,code:'DB2_TEXT_ENCODING_INVALID',rawBytesHex:existsSync(path.join(directory,'table-long-text-issue'))?'ff'.repeat(65535):'c328'}];}return all;}
 const retentionEnabled=process.env.VIBEMINER_FIXTURE_RETENTION==='1';
+// D071: the file catalog prepared after Open. Pending until the control file file-catalog-ready exists (file-catalog-failed fails it).
+const fileCatalogEnabled=process.env.VIBEMINER_FIXTURE_FILE_CATALOG==='1', FILE_CATALOG_GENERATION='41';
+const catalogStops=new Set(), catalogRetried=new Set();
+const fileCatalogReady=key=>fileCatalogEnabled&&!!opened.get(key)&&!opened.get(key).inventory&&existsSync(path.join(directory,'file-catalog-ready'));
 const retentionJobs=new Map();
 const retentionSeed=JSON.parse(readFileSync(path.join(root,'contracts/examples/retention-snapshot.json'),'utf8'));
 function retentionSnapshot(target){
@@ -146,7 +150,7 @@ function settingsSnapshot() {
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1', 'inventory-files-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1', 'inventory-files-v1',...(fileCatalogEnabled?['file-catalog-v1']:[]),...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
   if(creaturesEnabled&&method.startsWith('creatures.')){
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
     if(!opened.has(key))return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
@@ -406,10 +410,49 @@ async function dispatch(request) {
     return reply(id, { productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion,
       generation: params.generation, entries, totalCount: '60', nextCursor: after + entries.length < all.length ? entries.at(-1).id : null });
   }
+  // D071 authored file catalog: pending (writing) until file-catalog-ready exists; file-catalog-failed fails it; a user Stop
+  // leaves it stopped until Resume. Every status carries the build's version and names nothing it waits for.
+  const catalogStatus = (productId, buildIdentity, sourceRegion) => {
+    const key = `${productId}|${buildIdentity}|${sourceRegion}`, snapshot = opened.get(key);
+    const base = { productId, buildIdentity, sourceRegion, buildVersion: snapshot?.build?.version ?? null, stage: null, completed: null, total: null, attempts: 0, catalog: null, problem: null, waitingFor: null };
+    if (!snapshot) return { ...base, state: 'notOpened' };
+    if (catalogStops.has(`${productId}|${buildIdentity}`)) return { ...base, state: 'stopped' };
+    // file-catalog-failed holds the failure: empty or "failed" for three failed attempts, "full" for a full disk, "unsupported" for an unreadable ROOT.
+    const failed = path.join(directory, 'file-catalog-failed');
+    if (existsSync(failed) && !catalogRetried.has(`${productId}|${buildIdentity}`)) {
+      const kind = readFileSync(failed, 'utf8').trim();
+      if (kind === 'full') return { ...base, state: 'failed', attempts: 1, problem: { code: 'STORAGE_FULL', message: 'There is not enough free disk space to save this build\'s file list.', retryable: false, detail: 'Less than 268435456 bytes free while writing.' } };
+      if (kind === 'unsupported') return { ...base, state: 'unsupported', attempts: 1, problem: { code: 'ROOT_UNSUPPORTED', message: 'This build\'s file list could not be read. Trying again reads the same bytes, so it won\'t help.', retryable: false, detail: null } };
+      return { ...base, state: 'failed', attempts: 3, problem: { code: 'STORAGE_UNAVAILABLE', message: 'The file list could not be prepared.', retryable: true, detail: 'IOException: Input/output error' } };
+    }
+    // file-catalog-retrying: the first attempt failed and the next one waits its turn.
+    if (existsSync(path.join(directory, 'file-catalog-retrying')) && !fileCatalogReady(key)) return { ...base, state: 'pending', stage: 'queued', attempts: 1, problem: { code: 'CONTENT_SOURCE_MISSING', message: 'The file list could not be prepared.', retryable: true, detail: null } };
+    const roots = new Set(fileMembers.filter(m => m.file.startsWith('root:')).map(m => m.file)), installs = new Set(fileMembers.filter(m => m.file.startsWith('install:')).map(m => m.file));
+    const rootMembers = fileMembers.filter(m => m.file.startsWith('root:')).length;
+    if (fileCatalogReady(key)) return { ...base, state: 'ready', catalog: { generation: FILE_CATALOG_GENERATION, preparedAt: '2026-10-21T12:00:00.0000000+00:00', rootFileCount: String(roots.size), installFileCount: String(installs.size),
+      rootMembershipCount: String(rootMembers), installMembershipCount: String(fileMembers.length - rootMembers), uniqueContentCount: String(new Set(fileMembers.map(m => m.contentKey)).size), unresolvedMembershipCount: String(fileMembers.filter(m => m.encodingKey === null).length), storedMembershipCount: String(fileMembers.filter(m => m.stored).length) } };
+    return { ...base, state: 'pending', stage: 'writing', completed: '1048576', total: '3262082' };
+  };
+  if (method === 'inventory.catalog') {
+    if (existsSync(path.join(directory, 'file-catalog-status-error'))) return fail(id, 'ENGINE_UNAVAILABLE', 'Authored status read failure.', true);
+    return reply(id, catalogStatus(params.productId, params.buildIdentity, params.sourceRegion));
+  }
+  if (method === 'inventory.catalogs') {
+    const catalogs = [...opened.entries()].filter(([, snapshot]) => !snapshot.inventory).map(([key]) => { const [p, b, r] = key.split('|'); return catalogStatus(p, b, r); })
+      .filter(status => ['pending', 'stopped', 'failed'].includes(status.state));
+    return reply(id, { catalogs: [...new Map(catalogs.map(status => [`${status.productId}|${status.buildIdentity}`, status])).values()].slice(0, 32) });
+  }
+  if (method === 'inventory.catalog.set') {
+    const build = `${params.productId}|${params.buildIdentity}`, key = [...opened.keys()].find(k => k.startsWith(build + '|'));
+    if (!key) return fail(id, 'FILE_CATALOG_NOT_FOUND', 'This build has no file list preparation. Open the build first.');
+    if (params.action === 'stop') catalogStops.add(build); else { catalogStops.delete(build); catalogRetried.add(build); }
+    return reply(id, catalogStatus(params.productId, params.buildIdentity, key.split('|')[2]));
+  }
   if (method === 'inventory.files' || method === 'inventory.file') {
     const key = `${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
     const snapshot = opened.get(key);
-    if (!snapshot?.inventory || params.generation !== snapshot.inventory.generation) return fail(id, 'INVENTORY_NOT_FOUND', 'This exact authored inventory is unavailable.');
+    const generation = snapshot?.inventory?.generation ?? (fileCatalogReady(key) ? FILE_CATALOG_GENERATION : null);
+    if (!generation || params.generation !== generation) return fail(id, 'INVENTORY_NOT_FOUND', 'This exact authored inventory is unavailable.');
     if (existsSync(path.join(directory, 'files-error'))) return fail(id, 'LOCAL_READ_FAILED', 'Authored local Files read failed.', true);
     if (params.contentKey && params.contentKey.length < 6 && fileMembers.filter(m => m.contentKey.startsWith(params.contentKey)).length > 8) return fail(id, 'INVENTORY_FILTER_BROAD', `More than 8 authored memberships have a content key starting ${params.contentKey}. Type more of the key.`);
     if (method === 'inventory.files') return reply(id, filesPage(params));

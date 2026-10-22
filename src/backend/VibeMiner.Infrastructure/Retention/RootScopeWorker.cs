@@ -22,6 +22,7 @@ public sealed class RootScopeWorker : IAsyncDisposable
     private readonly MetadataAcquirer roots;
     private readonly DownloadLedger ledgers;
     private readonly Action settled;
+    private readonly BackgroundMetadataGate passes;
     private readonly TimeProvider clock;
     private readonly TimeSpan retryDelay;
     private readonly CancellationTokenSource stop = new();
@@ -30,13 +31,13 @@ public sealed class RootScopeWorker : IAsyncDisposable
     private Task? loop;
 
     public RootScopeWorker(DiscoveryCatalog catalog, VerifiedObjectStore objects, HttpClient client, ISharedAcquisition? shared,
-        AcquisitionResources resources, Action settled)
-        : this(catalog, objects, client, shared, resources, settled, null) { }
+        AcquisitionResources resources, Action settled, BackgroundMetadataGate? passes = null)
+        : this(catalog, objects, client, shared, resources, settled, null, passes: passes) { }
 
     internal RootScopeWorker(DiscoveryCatalog catalog, VerifiedObjectStore objects, HttpClient client, ISharedAcquisition? shared,
-        AcquisitionResources resources, Action settled, TimeProvider? clock, TimeSpan? retryDelay = null)
+        AcquisitionResources resources, Action settled, TimeProvider? clock, TimeSpan? retryDelay = null, BackgroundMetadataGate? passes = null)
     {
-        this.catalog = catalog; this.objects = objects; this.resources = resources; this.settled = settled;
+        this.catalog = catalog; this.objects = objects; this.resources = resources; this.settled = settled; this.passes = passes ?? new();
         this.clock = clock ?? TimeProvider.System; this.retryDelay = retryDelay ?? TimeSpan.FromSeconds(30);
         var work = BackgroundWorkContext.Instance;
         configurations = new(catalog, objects, client, resources: resources);
@@ -142,6 +143,8 @@ public sealed class RootScopeWorker : IAsyncDisposable
         await using var root = await roots.AcquireAsync(inputs.Route, rootExpected, Quiet, token, await catalog.FindMetadataAsync(rootExpected.EncodingKey, token), source);
         await catalog.RecordMetadataAsync(root.Receipt, token);
         RootScope scope;
+        // Its key arrays never coexist with the file catalog's (D071); a waiting measurement goes first.
+        using var grant = await passes.EnterAsync(true, token);
         // Every CAS proof happens before the CPU permit is taken: never hold CPU while opening CAS objects.
         await using (var manifest = await ledgers.OpenReadSessionAsync(work.Manifest, token, resources, BackgroundWorkContext.Instance))
         await using (var rootDecoded = root.OpenDecoded())

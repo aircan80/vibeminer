@@ -73,6 +73,18 @@
     "inventoryFileDetail": {
       "$ref": "#/definitions/InventoryFileDetail"
     },
+    "fileCatalogParams": {
+      "$ref": "#/definitions/FileCatalogParams"
+    },
+    "fileCatalogStatus": {
+      "$ref": "#/definitions/FileCatalogStatus"
+    },
+    "fileCatalogList": {
+      "$ref": "#/definitions/FileCatalogList"
+    },
+    "fileCatalogSetParams": {
+      "$ref": "#/definitions/FileCatalogSetParams"
+    },
     "downloadPage": {
       "$ref": "#/definitions/DownloadPage"
     },
@@ -1040,6 +1052,9 @@
             "request.cancel",
             "shutdown",
             "inventory.read",
+            "inventory.catalog",
+            "inventory.catalogs",
+            "inventory.catalog.set",
             "inventory.files",
             "inventory.file",
             "download.read",
@@ -1526,6 +1541,38 @@
             "properties": {
               "params": {
                 "$ref": "#/definitions/SettingsEmptyParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "inventory.catalog"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/FileCatalogParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "inventory.catalog.set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/FileCatalogSetParams"
               }
             }
           }
@@ -2964,6 +3011,412 @@
         "nextCursor"
       ],
       "additionalProperties": false
+    },
+    "FileCatalogParams": {
+      "title": "FileCatalogParams",
+      "description": "inventory.catalog: where one opened build's file catalog stands (D071). One bounded read; it never starts a transfer, count or check.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sourceRegion": {
+          "type": "string",
+          "pattern": "^[a-z]{2,8}$"
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "sourceRegion"
+      ],
+      "additionalProperties": false
+    },
+    "FileCatalogSummary": {
+      "title": "FileCatalogSummary",
+      "description": "A sealed ROOT/install file catalog (profile files-root-install-v1). Every count is exact.",
+      "type": "object",
+      "properties": {
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "preparedAt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40
+        },
+        "rootFileCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "installFileCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "rootMembershipCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "installMembershipCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "uniqueContentCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "unresolvedMembershipCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$",
+          "description": "Memberships whose CKey has no sized encoded object in ENCODING: no EKey and no encoded size, never zero."
+        },
+        "storedMembershipCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$",
+          "description": "Memberships whose EKey was verified locally when the row was written."
+        }
+      },
+      "required": [
+        "generation",
+        "preparedAt",
+        "rootFileCount",
+        "installFileCount",
+        "rootMembershipCount",
+        "installMembershipCount",
+        "uniqueContentCount",
+        "unresolvedMembershipCount",
+        "storedMembershipCount"
+      ],
+      "additionalProperties": false
+    },
+    "FileCatalogProblem": {
+      "title": "FileCatalogProblem",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 400
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The underlying storage or I/O cause, for diagnosis."
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable",
+        "detail"
+      ],
+      "additionalProperties": false
+    },
+    "FileCatalogBuild": {
+      "title": "FileCatalogBuild",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "buildVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "buildVersion"
+      ],
+      "additionalProperties": false
+    },
+    "FileCatalogList": {
+      "title": "FileCatalogList",
+      "description": "inventory.catalogs: the preparations Downloads & activity shows (pending, stopped or failed), most recently opened first.",
+      "type": "object",
+      "properties": {
+        "catalogs": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/FileCatalogStatus"
+          }
+        }
+      },
+      "required": [
+        "catalogs"
+      ],
+      "additionalProperties": false
+    },
+    "FileCatalogSetParams": {
+      "title": "FileCatalogSetParams",
+      "description": "inventory.catalog.set: stop a pending preparation, or resume a stopped or failed one.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "action": {
+          "enum": [
+            "stop",
+            "resume"
+          ]
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "FileCatalogStatus": {
+      "title": "FileCatalogStatus",
+      "description": "inventory.catalog reply (D071). pending carries its stage (and written memberships while writing); ready carries the sealed catalog Files reads; failed (after three attempts) and unsupported carry the cause, and the next Open retries both.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sourceRegion": {
+          "type": "string"
+        },
+        "buildVersion": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "notOpened",
+            "pending",
+            "stopped",
+            "ready",
+            "failed",
+            "unsupported"
+          ]
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "enum": [
+                "queued",
+                "paused",
+                "acquiring",
+                "waiting",
+                "reading",
+                "writing",
+                "sealing"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completed": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "catalog": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FileCatalogSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FileCatalogProblem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "waitingFor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FileCatalogBuild"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "sourceRegion",
+        "buildVersion",
+        "state",
+        "stage",
+        "completed",
+        "total",
+        "attempts",
+        "catalog",
+        "problem",
+        "waitingFor"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "ready"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "catalog": {
+                "$ref": "#/definitions/FileCatalogSummary"
+              },
+              "problem": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "catalog": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "pending"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "stage": {
+                "enum": [
+                  "queued",
+                  "paused",
+                  "acquiring",
+                  "waiting",
+                  "reading",
+                  "writing",
+                  "sealing"
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "stage": {
+                "type": "null"
+              },
+              "completed": {
+                "type": "null"
+              },
+              "total": {
+                "type": "null"
+              },
+              "waitingFor": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "failed",
+                  "unsupported"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "problem": {
+                "$ref": "#/definitions/FileCatalogProblem"
+              }
+            }
+          }
+        }
+      ]
     },
     "DownloadSummary": {
       "title": "DownloadSummary",

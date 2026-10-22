@@ -206,7 +206,9 @@
 .desktop-home .dh-trail-sep{width:1px;height:1.213333rem;background:var(--line);margin:0 .326667rem;flex:none}
 .desktop-home .dh-statusbar{display:flex;align-items:center;gap:1.026667rem;height:1.633333rem;padding:0 .802667rem;background:var(--status);border-top:1px solid var(--line);font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden}
 .desktop-home .dh-statusbar strong{color:var(--ink);font-weight:600}
-.desktop-home .dh-statusbar .dh-busy{display:inline-flex;align-items:center;gap:.373333rem;color:var(--teal);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+/* A block, not a flex box, so a long activity line ends in an ellipsis instead of being cut mid-word; the pulse stays inline. */
+.desktop-home .dh-statusbar .dh-busy{display:block;min-width:0;color:var(--teal);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.desktop-home .dh-statusbar .dh-busy .dh-pulse{margin-right:.373333rem;vertical-align:middle}
 .desktop-home .dh-statusbar .dh-warn{color:var(--gold-ink);font-weight:600;overflow:hidden;text-overflow:ellipsis}
 .desktop-home .dh-records-grid th:first-child,.desktop-home .dh-records-grid td:first-child{position:sticky;left:0;z-index:1;background:var(--paper);box-shadow:inset -1px 0 0 var(--line-soft)}
 .desktop-home .dh-records-grid th:first-child{z-index:2;background:var(--toolbar)}
@@ -249,9 +251,37 @@
 .desktop-home .dh-member dl.dh-facts dd.dh-mono{font-size:var(--fs-s)}
 .desktop-home .dh-insp-body>.dh-row{display:flex;align-items:center;gap:.42rem;flex-wrap:wrap}
 .desktop-home .dh-local-wait.dh-catalog-missing{margin:.56rem .802667rem;max-width:none;flex:none}
+/* The file list hand-off sits in the Files footer, so the rows above never move when it appears (D071). */
+/* At 200% on small windows a Files footer with Return, the count and page controls (or the hand-off) wraps to two rows; the list gives up height first so the pane itself never scrolls. */
+.desktop-home.dh-compact .dh-files .dh-list-scroll,.desktop-home.dh-compact .dh-files .dh-pane>.dh-pane-scroll{min-height:3.2rem}
+.desktop-home .dh-catalog-ready{display:inline-flex;align-items:center;gap:.373333rem;flex-wrap:wrap;color:var(--ink)}
+.desktop-home .dh-catalog-ready strong{color:var(--teal)}
 .desktop-home .dh-note-short{display:none}
+/* Inline 200% forms: a short phrase or control shown only in the compact layout, beside text that stays. */
+.desktop-home .dh-note-inline,.desktop-home .dh-compact-only{display:none}
+.desktop-home.dh-compact .dh-note-inline{display:inline}
+.desktop-home.dh-compact .dh-compact-only{display:inline-flex}
+.desktop-home.dh-compact .dh-catalog-stale{display:none}
 .desktop-home.dh-compact .dh-note-long{display:none}
 .desktop-home.dh-compact .dh-note-short{display:block}
+/* A failed note's 200% form keeps its message and next step; its code goes first once the note gets narrow. */
+.desktop-home .dh-local-wait.dh-catalog-missing{container:catalog-note/inline-size}
+@container catalog-note (max-width:40rem){.desktop-home.dh-compact .dh-note-fit .dh-note-code{display:none}}
+/* At 200% the file list notes sit tighter and put their one short line beside the title, with the actions below, so an
+   object row stays in view under them, also below a followed FileDataID's notice. */
+.desktop-home.dh-compact .dh-local-wait.dh-catalog-missing{margin:.28rem .802667rem}
+.desktop-home.dh-compact .dh-catalog-missing>.dh-state-box{padding:.28rem .56rem}
+.desktop-home.dh-compact .dh-catalog-missing>.dh-inline-head{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.56rem}
+.desktop-home.dh-compact .dh-catalog-missing>.dh-inline-head>p{margin:0}
+.desktop-home.dh-compact .dh-catalog-missing>.dh-inline-head>.dh-row{flex-basis:100%;margin-top:.28rem}
+/* At 200% the ready note carries Show file list; the footer keeps only the polite announcement, visually hidden, so
+   Return, the count and the page controls keep one row. */
+.desktop-home.dh-compact .dh-wide-only{display:none}
+.desktop-home.dh-compact .dh-catalog-ready{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+/* At 200% a FileDataID followed into Files is one line, so the note below it and an object row stay in view. */
+.desktop-home.dh-compact .dh-files .dh-notice.file-target{margin-top:.28rem;padding:.28rem .56rem}
+.desktop-home.dh-compact .dh-files .dh-notice.file-target .dh-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.desktop-home.dh-compact .dh-files .dh-notice.file-target .dh-text>strong{display:inline}
 /* The segmented group clips overflow, so its focus ring sits inside each button, as on the area buttons. */
 .desktop-home .dh-segmented button:focus-visible{outline-offset:-3px}
 .desktop-home .dh-list-scroll{position:relative;flex:1 1 auto;overflow:auto;min-height:5.6rem;background:var(--paper);scroll-padding-top:var(--thead)}
@@ -475,7 +505,8 @@
 .desktop-home .dh-statusbar>span{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
 .desktop-home .dh-statusbar>span:first-child{flex-shrink:0}
 .desktop-home .dh-statusbar .dh-secondary,.desktop-home .dh-status-slot>span{flex-shrink:1000}
-.desktop-home .dh-statusbar .dh-fixture{flex-shrink:100}
+/* The fixture badge keeps its label; the activity line and secondary facts give up width first. */
+.desktop-home .dh-statusbar .dh-fixture{flex-shrink:0}
 .desktop-home .dh-statusbar>.dh-spacer{flex:1 1 0}
 .desktop-home.dh-compact .dh-statusbar .dh-fixture .dh-secondary{display:none}
 .desktop-home .dh-data{overflow:clip}

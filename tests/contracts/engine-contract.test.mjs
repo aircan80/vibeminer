@@ -187,6 +187,32 @@ test('inventory.files and inventory.file requests validate their bounded params'
     assert.equal(validator('EngineRequest')(request(method, params)), false, `${method} ${JSON.stringify(params)}`);
 });
 
+test('File catalog status keeps one shape per state and bounded requests (D071)', async () => {
+  const states = JSON.parse(await readFile(path.join(root, 'contracts/examples/file-catalog-status.json'), 'utf8'));
+  assert.deepEqual(states.map(status => `${status.state}/${status.stage ?? ''}`), ['pending/writing', 'pending/queued', 'pending/paused', 'stopped/', 'ready/', 'failed/', 'unsupported/', 'notOpened/']);
+  for (const status of states) validate('FileCatalogStatus', status);
+  const [writing, retrying, , stopped, ready, failed, unsupported, notOpened] = states;
+  for (const invalid of [
+    { ...writing, stage: 'downloading' }, { ...writing, completed: 12 }, { ...writing, catalog: ready.catalog },
+    { ...ready, catalog: null }, { ...ready, stage: 'writing' }, { ...ready, problem: retrying.problem },
+    { ...ready, catalog: { ...ready.catalog, unresolvedMembershipCount: '-1' } }, { ...ready, catalog: { ...ready.catalog, platform: 'Windows' } },
+    { ...failed, problem: null }, { ...unsupported, problem: null }, { ...failed, attempts: 4 }, { ...notOpened, stage: 'queued' },
+    { ...stopped, waitingFor: retrying.waitingFor }, { ...retrying, problem: { ...retrying.problem, detail: 'x'.repeat(401) } },
+    { ...retrying, problem: { ...retrying.problem, message: 'x'.repeat(401) } }, { ...writing, state: 'preparing' }, { ...writing, waitingFor: { productId: 'wow' } }]) {
+    assert.equal(validator('FileCatalogStatus')(invalid), false, JSON.stringify(invalid).slice(0, 120));
+  }
+  validate('FileCatalogList', { catalogs: states.filter(status => ['pending', 'stopped', 'failed'].includes(status.state)) });
+  assert.equal(validator('FileCatalogList')({ catalogs: Array(33).fill(writing) }), false);
+  const params = { productId: 'wow', buildIdentity: ready.buildIdentity, sourceRegion: 'us' };
+  validate('EngineRequest', { protocolVersion: 1, id: 'catalog', method: 'inventory.catalog', params });
+  for (const invalid of [{ ...params, generation: '1' }, { productId: 'wow', buildIdentity: ready.buildIdentity }, { ...params, buildIdentity: 'A'.repeat(64) }, { ...params, sourceRegion: 'US' }])
+    assert.equal(validator('EngineRequest')({ protocolVersion: 1, id: 'catalog', method: 'inventory.catalog', params: invalid }), false, JSON.stringify(invalid));
+  const set = { productId: 'wow', buildIdentity: ready.buildIdentity, action: 'stop' };
+  validate('EngineRequest', { protocolVersion: 1, id: 'set', method: 'inventory.catalog.set', params: set });
+  for (const invalid of [{ ...set, action: 'prepare' }, { ...set, sourceRegion: 'us' }, { productId: 'wow', action: 'resume' }])
+    assert.equal(validator('EngineRequest')({ protocolVersion: 1, id: 'set', method: 'inventory.catalog.set', params: invalid }), false, JSON.stringify(invalid));
+});
+
 test('preparation progress accepts numbered and unknown totals while bounding explanation structure', () => {
   const frame = { protocolVersion: 1, type: 'progress', requestId: 'open', sequence: 1,
     stage: 'Checking build configurations', region: 'us', completed: null, total: null, unit: null };
@@ -730,7 +756,19 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   validate('StorageMeasurement', measured.result);
   assert.ok(BigInt(measured.result.bytes) > 0n, 'The catalog and settings file are in the measured folder.');
   assert.ok(hello.result.capabilities.includes('inventory-files-v1'));
-  const fileScope = { productId: 'wow', buildIdentity: 'a'.repeat(64), sourceRegion: 'us', generation: '1', limit: 50 };
+  assert.ok(hello.result.capabilities.includes('file-catalog-v1'));
+  const catalogScope = { productId: 'wow', buildIdentity: 'a'.repeat(64), sourceRegion: 'us' };
+  const catalog = await request('inventory.catalog', catalogScope);
+  assert.ok(!catalog.error, JSON.stringify(catalog.error));
+  validate('FileCatalogStatus', catalog.result);
+  assert.equal(catalog.result.state, 'notOpened', 'A build that was never opened has no file catalog and reading never queues one.');
+  assert.equal((await request('inventory.catalog', { ...catalogScope, generation: '1' })).error?.code, 'INVALID_REQUEST');
+  assert.equal((await request('inventory.catalog', { ...catalogScope, sourceRegion: 'US' })).error?.code, 'INVALID_REQUEST');
+  const listed = await request('inventory.catalogs');
+  assert.ok(!listed.error, JSON.stringify(listed.error)); validate('FileCatalogList', listed.result); assert.deepEqual(listed.result.catalogs, []);
+  assert.equal((await request('inventory.catalog.set', { productId: 'wow', buildIdentity: 'a'.repeat(64), action: 'stop' })).error?.code, 'FILE_CATALOG_NOT_FOUND');
+  assert.equal((await request('inventory.catalog.set', { productId: 'wow', buildIdentity: 'a'.repeat(64), action: 'prepare' })).error?.code, 'INVALID_REQUEST');
+  const fileScope ={ productId: 'wow', buildIdentity: 'a'.repeat(64), sourceRegion: 'us', generation: '1', limit: 50 };
   const files = await request('inventory.files', { ...fileScope, localeFlags: '2', storedOnly: true });
   assert.equal(files.error?.code, 'INVENTORY_NOT_FOUND', 'A fresh catalog has no prepared inventory to list.');
   assert.equal((await request('inventory.file', { ...fileScope, file: 'root:1' })).error?.code, 'INVENTORY_NOT_FOUND');

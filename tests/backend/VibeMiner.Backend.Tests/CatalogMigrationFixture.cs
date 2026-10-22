@@ -4,8 +4,10 @@ internal static class CatalogMigrationFixture
 {
     // Synthetic old-schema cohorts must remove every newer table before setting their
     // historical user_version. Production migration never drops these tables.
+    // The step to version 18 added the file catalogs prepared after Open (D071).
+    internal const string RemoveV18 = "DROP TABLE file_catalogs;";
     // The step to version 17 added the Files columns, indexes and tables (D068); the step to 16 adds nothing.
-    internal const string RemoveV17 = """
+    internal const string RemoveV17 = RemoveV18 + """
         DROP INDEX inventory_root_files; DROP INDEX inventory_root_variant_files; DROP INDEX inventory_stored_files;
         DROP INDEX inventory_install_names; DROP INDEX inventory_install_files;
         DROP INDEX inventory_content; CREATE INDEX inventory_content ON inventory_origins(g,ckey,family);

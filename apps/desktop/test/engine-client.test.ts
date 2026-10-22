@@ -3,6 +3,7 @@ import {creatureSummary} from '../../../tests/desktop/fixtures/creatures.mjs';
 import {creaturesSnapshot,creaturesPage,creatureInspect} from '../../../tests/desktop/fixtures/creatures.mjs';
 import retentionFixture from '../../../contracts/examples/retention-snapshot.json';
 import summariesFixture from '../../../contracts/examples/download-summaries.json';
+import catalogStatuses from '../../../contracts/examples/file-catalog-status.json';
 import partialTableFixture from '../../../tests/desktop/fixtures/table-data-partial.json';
 import tableDataFixture from '../../../tests/desktop/fixtures/table-data.json';
 import referenceTextExample from '../../../contracts/examples/table-reference-text.json';
@@ -222,6 +223,27 @@ describe('bounded local engine transport', () => {
     if (variant === 'numericBytes') (value.entries[0] as any).encodedBytes = 100;
     const page = expect(client.request('inventory.read', { productId: inventoryPage.productId, buildIdentity: inventoryPage.buildIdentity, sourceRegion: inventoryPage.sourceRegion, generation: inventoryPage.generation, limit: variant === 'duplicateRows' ? 50 : 1 }, 'page')).rejects.toMatchObject({ code: 'PROTOCOL_ERROR' });
     child.reply('page', value); await page;
+  });
+  describe('file catalog status (D071)', () => {
+    const scope = { productId: 'wow', buildIdentity: catalogStatuses[0].buildIdentity, sourceRegion: 'us' };
+    async function catalogSetup(capable = true) { const value = setup(), hello = value.client.hello(); value.child.reply(value.child.requests[0].id, { protocolVersion: 1, engineVersion: 'authored', capabilities: capable ? ['file-catalog-v1'] : [] }); await hello; return value; }
+    it('needs the capability, takes exactly one build and region and accepts every state', async () => {
+      const without = await catalogSetup(false); await expect(without.client.request('inventory.catalog', scope)).rejects.toMatchObject({ code: 'UNSUPPORTED' }); expect(without.child.requests).toHaveLength(1);
+      const { child, client } = await catalogSetup();
+      for (const invalid of [{ ...scope, generation: '1' }, { ...scope, sourceRegion: 'US' }, { productId: 'wow', buildIdentity: scope.buildIdentity }])
+        await expect(client.request('inventory.catalog', invalid)).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+      expect(child.requests).toHaveLength(1);
+      for (const [index, status] of catalogStatuses.entries()) { const reply = client.request('inventory.catalog', scope, `catalog-${index}`); child.reply(`catalog-${index}`, status); await expect(reply).resolves.toEqual(status); }
+    });
+    it.each(['build', 'region', 'written', 'counts', 'stage'])('rejects a status that does not match its request %s', async variant => {
+      const { child, client } = await catalogSetup(); const value = structuredClone(variant === 'written' ? catalogStatuses[0] : catalogStatuses[4]) as any;
+      if (variant === 'build') value.buildIdentity = 'f'.repeat(64);
+      if (variant === 'region') value.sourceRegion = 'eu';
+      if (variant === 'written') value.completed = '9999999';
+      if (variant === 'counts') value.catalog.unresolvedMembershipCount = '9999999';
+      if (variant === 'stage') value.stage = 'writing';
+      const reply = expect(client.request('inventory.catalog', scope, 'catalog')).rejects.toMatchObject({ code: 'PROTOCOL_ERROR' }); child.reply('catalog', value); await reply;
+    });
   });
   describe('Files queries', () => {
     const scope = { productId: filesPage.productId, buildIdentity: filesPage.buildIdentity, sourceRegion: filesPage.sourceRegion, generation: filesPage.generation, limit: 50 };

@@ -17,7 +17,7 @@ public sealed class CreatureGeometryMigrationTests
         await h.Execute("INSERT INTO creatures_artifacts VALUES('old-creature','original-creature-proof');" +
             "INSERT INTO item_effects_bridge_artifacts VALUES('old-effects','original-effects-proof');" + RemoveGeometry);
         await h.Restart();
-        Assert.Equal(17L, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(18L, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(1L, await h.Scalar("SELECT count(*) FROM creatures_artifacts WHERE descriptor='original-creature-proof'"));
         Assert.Equal(1L, await h.Scalar("SELECT count(*) FROM item_effects_bridge_artifacts WHERE descriptor='original-effects-proof'"));
         Assert.Equal(0L, await h.Scalar("SELECT count(*) FROM geometry_artifacts"));
@@ -33,7 +33,7 @@ public sealed class CreatureGeometryMigrationTests
         Assert.Equal(13L, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(0L, await h.Scalar("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='geometry_artifacts'"));
         await h.Execute("DROP TABLE geometry_source_locators;"); await h.Restart();
-        Assert.Equal(17L, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(18L, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(0L, await h.Scalar("SELECT count(*) FROM pragma_foreign_key_check"));
     }
 
@@ -45,7 +45,7 @@ public sealed class CreatureGeometryMigrationTests
             "INSERT INTO geometry_source_locators VALUES('context-one','artifact','authority-one','original-capsule-one');" +
             "INSERT INTO geometry_source_locators VALUES('context-two','artifact','authority-two','original-capsule-two');");
         await h.Restart(); await h.Restart();
-        Assert.Equal(17L, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(18L, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(1L, await h.Scalar("SELECT count(*) FROM geometry_artifacts WHERE descriptor='first-descriptor'"));
         Assert.Equal(2L, await h.Scalar("SELECT count(*) FROM geometry_source_locators"));
     }
@@ -77,9 +77,9 @@ public sealed class CreatureGeometryMigrationTests
     public async Task Future_schema_is_refused_without_downgrade()
     {
         await using var h = await Harness.Create();
-        await h.Execute("PRAGMA user_version=18;");
+        await h.Execute("PRAGMA user_version=19;");
         Assert.Equal("CATALOG_VERSION", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Restart())).Code);
-        Assert.Equal(18L, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(19L, await h.Scalar("PRAGMA user_version"));
     }
 
     private sealed class Harness : IAsyncDisposable

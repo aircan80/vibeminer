@@ -1,7 +1,7 @@
 import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TableCatalogEntry, TableCatalogPage, TableDataSnapshot, TableDefinitionSnapshot, TableFollowPage, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
+import type { FileCatalogStatus, TableCatalogEntry, TableCatalogPage, TableDataSnapshot, TableDefinitionSnapshot, TableFollowPage, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
 import type { BridgeReply, DiscoveryBridge } from '../src/shared/bridge';
 import type { TablesCatalogParams } from '../src/shared/tables';
 import type { TableRowsParams } from '../src/shared/table-data';
@@ -9,7 +9,7 @@ import { followMatches, validTableFollow, type TableFollowParams } from '../src/
 import { describeFollow, followLabel } from '../src/renderer/table-follow-view';
 import { TablesExplorer } from '../src/renderer/TablesExplorer';
 import { FilesUnavailable } from '../src/renderer/DownloadObjects';
-import { FilesCatalog } from '../src/renderer/FilesCatalog';
+import { FilesCatalog, inventorySource } from '../src/renderer/FilesCatalog';
 import inventoryWorkspace from '../../../contracts/examples/inventory-workspace.json';
 import example from '../../../contracts/examples/table-follow.json';
 import itemFixture from '../../../tests/desktop/fixtures/table-data-partial.json';
@@ -225,10 +225,13 @@ describe('Follow in the Tables workbench', { timeout: 30000 }, () => {
 
 describe('Files hand-off', () => {
  it('searches the prepared catalog for the followed FileDataID with no other filter, and returns to the exact record', async () => {
-  const back = vi.fn(), prepared = inventoryWorkspace as unknown as Parameters<typeof FilesCatalog>[0]['snapshot'];
+  const back = vi.fn(), prepared = inventoryWorkspace as unknown as Parameters<typeof inventorySource>[0];
   const bridge = { inventoryFiles: vi.fn(async () => ({ ok: false, error: { code: 'LOCAL_READ_FAILED', message: 'Authored.', retryable: true } })), inventoryFile: vi.fn() } as unknown as DiscoveryBridge;
-  render(<FilesCatalog snapshot={prepared} bridge={bridge} active onReopen={() => {}} fileTarget={{ fileDataId: '800001', table: 'Item', recordId: '900001', seq: 1 }} onReturnToTable={back}/>);
-  await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenLastCalledWith({ productId: prepared.build.productId, buildIdentity: prepared.build.id, sourceRegion: prepared.sourceReference.region, generation: prepared.inventory.generation, limit: 50, fileDataId: '800001' }));
+  render(<FilesCatalog source={inventorySource(prepared)} bridge={bridge} active onReopen={() => {}} fileTarget={{ fileDataId: '800001', table: 'Item', recordId: '900001', seq: 1 }} onReturnToTable={back}/>);
+  const filtered = { productId: prepared.build.productId, buildIdentity: prepared.build.id, sourceRegion: prepared.sourceReference.region, generation: prepared.inventory.generation, limit: 50, fileDataId: '800001' };
+  await waitFor(() => expect(bridge.inventoryFiles).toHaveBeenCalled());
+  // Every read is the filtered one: an unfiltered first page read and then replaced fails here.
+  for (const [params] of vi.mocked(bridge.inventoryFiles).mock.calls) expect(params).toEqual(filtered);
   expect(screen.getByRole('searchbox', { name: 'Search by FileDataID or content key' })).toHaveValue('800001');
   expect(screen.queryByText(/can’t be looked up yet/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '← Return to Item record 900001' }));
@@ -241,6 +244,17 @@ describe('Files hand-off', () => {
   expect(screen.getByText(/^Followed from Item record 900001\. The file catalog isn’t prepared/)).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '← Return to Item record 900001' }));
   expect(back).toHaveBeenCalledTimes(1);
+ });
+ it('says the FileDataID can be looked up once the build’s file list is ready to show', () => {
+  const status: FileCatalogStatus = { productId: 'wow', buildIdentity: workspace.build.id, sourceRegion: 'us', buildVersion: workspace.build.version, state: 'ready', stage: null, completed: null, total: null, attempts: 0, problem: null, waitingFor: null,
+    catalog: { generation: '7', preparedAt: '2026-10-21T12:00:00.0000000+00:00', rootFileCount: '1', installFileCount: '0', rootMembershipCount: '1', installMembershipCount: '0', uniqueContentCount: '1', unresolvedMembershipCount: '0', storedMembershipCount: '0' } };
+  const onShow = vi.fn();
+  render(<FilesUnavailable snapshot={workspace} active fileTarget={{ fileDataId: '800001', table: 'Item', recordId: '900001', seq: 1 }} onReturnToTable={() => {}}
+    catalog={{ status, error: '', busy: false, taskKey: null, onShow, onAction: async () => {}, onRetryRead: async () => {} }}/>);
+  expect(screen.getByText('FileDataID 800001 can be looked up now')).toBeVisible();
+  expect(screen.queryByText(/can’t be looked up yet/)).not.toBeInTheDocument();
+  fireEvent.click(within(document.querySelector<HTMLElement>('.dh-pane-foot')!).getByRole('button', { name: 'Show file list' }));
+  expect(onShow).toHaveBeenCalledTimes(1);
  });
 });
 

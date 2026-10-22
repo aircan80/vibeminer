@@ -96,6 +96,8 @@ public sealed partial class DiscoveryCatalog : IRetentionStore, IRetentionDriver
         SaveRetentionJob(job, transaction);
         EnsureRetentionCoverage(job.Plan.Ledger, transaction);
         token.ThrowIfCancellationRequested(); transaction.Commit();
+        // A paused or resumed Download all pauses or resumes that build's file catalog preparation too (D071).
+        WakeFileCatalogs();
         return RetentionSnapshotOf(job, null);
     }, token);
 

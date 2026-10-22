@@ -61,6 +61,9 @@ const bridge: DiscoveryBridge = Object.freeze<DiscoveryBridge>({
   inventory: params => ipcRenderer.invoke('discovery:invoke', 'inventory.read', params),
   inventoryFiles: params => ipcRenderer.invoke('discovery:invoke', 'inventory.files', params),
   inventoryFile: params => ipcRenderer.invoke('discovery:invoke', 'inventory.file', params),
+  fileCatalog: params => ipcRenderer.invoke('discovery:invoke', 'inventory.catalog', params),
+  fileCatalogs: () => ipcRenderer.invoke('discovery:invoke', 'inventory.catalogs', {}),
+  fileCatalogSet: params => ipcRenderer.invoke('discovery:invoke', 'inventory.catalog.set', params),
   cancel: requestId => ipcRenderer.invoke('discovery:invoke', 'request.cancel', { requestId }),
   onProgress: (listener: (progress: EngineProgress) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, progress: EngineProgress) => listener(progress);

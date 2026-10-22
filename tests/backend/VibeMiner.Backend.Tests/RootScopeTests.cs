@@ -52,7 +52,7 @@ public sealed class RootScopeTests
         return bytes;
     }
     /// <summary>One unnamed TSFM v2 block listing the content keys in order, FileDataIDs 1, 2, 3, …</summary>
-    private static byte[] Root(string[] contentKeys)
+    internal static byte[] Root(string[] contentKeys)
     {
         using var output = new MemoryStream(); using var writer = new BinaryWriter(output);
         writer.Write("TSFM"u8); writer.Write(24u); writer.Write(2u); writer.Write((uint)contentKeys.Length); writer.Write(0u); writer.Write(0u);
@@ -62,7 +62,7 @@ public sealed class RootScopeTests
         writer.Flush(); return output.ToArray();
     }
     /// <summary>A one-page-per-table ENCODING with these content entries (several EKeys allowed) and encoded sizes.</summary>
-    private static byte[] EncodingManifest((string Content, string[] Keys)[] contents, (string Key, long Bytes)[] encodings)
+    internal static byte[] EncodingManifest((string Content, string[] Keys)[] contents, (string Key, long Bytes)[] encodings)
     {
         const int pageBytes = 1024;
         var contentPage = new byte[pageBytes]; var encodingPage = new byte[pageBytes];

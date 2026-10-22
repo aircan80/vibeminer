@@ -133,10 +133,12 @@ test('Download objects pages a pinned local ledger and returns focus to Home', a
     await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Browse in Files', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeFocused();
-    await expect(page.getByText(/^50 encoded objects on this page/)).toBeVisible();
+    // The footer count has a long form and a short one for small windows; the visible one names the same page.
+    await expect(page.locator('.dh-files .dh-pane-foot [role=status]').first()).toContainText(/^50 encoded objects on this page.*Objects 1–50 of 60$/);
     await expect(page.getByText('Object 1', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Next page', exact: true }).click();
-    await expect(page.getByText(/^10 encoded objects on this page/)).toBeVisible();
+    // The footer count has a long form and a short one for small windows; the visible one names the same page.
+    await expect(page.locator('.dh-files .dh-pane-foot [role=status]').first()).toContainText(/^10 encoded objects on this page.*Objects 51–60 of 60$/);
     await expect(page.getByText('Object 51', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Previous page', exact: true }).click();
     await expect(page.getByText('Object 1', { exact: true })).toBeVisible();

@@ -163,6 +163,51 @@ test('With a prepared file catalog a FileDataID opens Files searching that FileD
   } finally { await session.close(); }
 });
 
+test('With the file catalog prepared after Open (#35) a FileDataID opens Files searching that FileDataID in it', async () => {
+  const session = await launch(true, false, false, false, false, false, false, false, false, false, true, true);
+  try {
+    const { page, app, data } = session;
+    await writeFile(path.join(data, 'file-catalog-ready'), 'ready');
+    await openItem(page, app, data);
+    await expect(page.locator('section[aria-labelledby="home-catalog"]')).toContainText('Ready to browse');
+    await record(page, '1').click();
+    const files = page.locator('.dh-tables .dh-inspector').getByRole('button', { name: 'Find FileDataID 9 in Files', exact: true });
+    await files.click();
+    await expect(page.getByRole('searchbox', { name: 'Search by FileDataID or content key' })).toHaveValue('9');
+    // The search runs against the build's file catalog generation, not a legacy full catalog.
+    await expect.poll(async () => (await requests(data)).some(r => r.method === 'inventory.files' && r.params.fileDataId === '9' && r.params.generation === '41')).toBe(true);
+    // Every read of the list is the filtered one: no unfiltered first page is read and then replaced.
+    expect((await requests(data)).filter(r => r.method === 'inventory.files').every(r => r.params.fileDataId === '9' && r.params.generation === '41')).toBe(true);
+    await expect(page.getByText(/can’t be looked up yet/)).toHaveCount(0);
+    await page.getByRole('button', { name: '← Return to Item record 1', exact: true }).click();
+    await expect(page.locator('#table-title')).toHaveText('Item');
+    await expect(files).toBeFocused();
+  } finally { await session.close(); }
+});
+
+test('A FileDataID followed while the file list is preparing says it can’t be looked up yet, then that it can once ready', async () => {
+  const session = await launch(true, false, false, false, false, false, false, false, false, false, true, true);
+  try {
+    const { page, app, data } = session;
+    await openItem(page, app, data);
+    await record(page, '1').click();
+    await page.locator('.dh-tables .dh-inspector').getByRole('button', { name: 'Find FileDataID 9 in Files', exact: true }).click();
+    const notice = page.locator('.file-target');
+    await expect(notice).toContainText('FileDataID 9 can’t be looked up yet');
+    await expect(page.getByRole('note', { name: 'Preparing file list…' })).toBeVisible();
+    await captures(page, app, 'file-preparing');
+    // Sealed while Files shows the notice: the notice says the FileDataID can be looked up now, and Show file list opens it.
+    await writeFile(path.join(data, 'file-catalog-ready'), 'ready');
+    await expect(notice).toContainText('FileDataID 9 can be looked up now');
+    await expect(page.getByText(/can’t be looked up yet/)).toHaveCount(0);
+    await page.locator('.dh-pane-foot').getByRole('button', { name: 'Show file list' }).click();
+    await expect(page.getByRole('searchbox', { name: 'Search by FileDataID or content key' })).toHaveValue('9');
+    await expect.poll(async () => (await requests(data)).some(r => r.method === 'inventory.files')).toBe(true);
+    expect((await requests(data)).filter(r => r.method === 'inventory.files').every(r => r.params.fileDataId === '9' && r.params.generation === '41')).toBe(true);
+    await expect(notice).toHaveCount(0);
+  } finally { await session.close(); }
+});
+
 test('Following into a table that can’t be loaded keeps the chip and says no search ran', async () => {
   const session = await launch(true, false, false, false, false, false, false, false, false, false, true);
   try {

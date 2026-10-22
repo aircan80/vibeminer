@@ -205,6 +205,8 @@ public sealed partial class DiscoveryCatalog
         // Open admits the manifest; every file ROOT lists outside it is measured afterwards, in the background.
         if (binding.Scope == DownloadScope) EnsureRootScope(context.Build.ProductId, context.Build.Id, artifact, now, transaction);
         else EnsureStoredCoverage(artifact, now, transaction);
+        // The ROOT and install memberships Files lists are prepared afterwards too (D071).
+        EnsureFileCatalog(context.Build.ProductId, context.Build.Id, now, transaction);
         token.ThrowIfCancellationRequested(); transaction.Commit();
         return new WorkspaceSnapshot(DownloadBuild(context, isLocal: true), now, DownloadProfile, "partial", "verified", "notPrepared", "measured",
             "onDemand", null, null, context.Reference, configurations, null, metadata, summary, null);
@@ -221,6 +223,8 @@ public sealed partial class DiscoveryCatalog
         var admission = InsertDownloadWorkspace(context, configurations, now, transaction);
         Execute("INSERT INTO download_admissions VALUES($id,NULL,'[]',$t,NULL,NULL,$p)", transaction,
             ("$id", admission), ("$t", now), ("$p", Serialize(problem)));
+        // Without a usable download manifest the build's ROOT may still list its files (D071).
+        EnsureFileCatalog(context.Build.ProductId, context.Build.Id, now, transaction);
         token.ThrowIfCancellationRequested(); transaction.Commit();
         return new WorkspaceSnapshot(DownloadBuild(context, isLocal: false), now, DownloadProfile, "partial", "configurationsVerified", "notPrepared", "unknown",
             "onDemand", null, null, context.Reference, configurations, null, null, null, problem);

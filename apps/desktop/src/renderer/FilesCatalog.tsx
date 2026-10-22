@@ -4,7 +4,10 @@ import type { DiscoveryBridge } from '../shared/bridge';
 import { exactBytes, exactCount, filePosition, hex, inventoryFileDetailMatches, inventoryFilesPageMatches, localeBits, localeNames, readableBytes, type FileFilters, type InventoryFilesParams } from '../shared/inventory';
 import { useCoveredSide, useShell } from './HomeShell';
 import type { FileTarget } from './table-follow-view';
-type Prepared = WorkspaceSnapshot & { inventory: InventorySummary };
+/** One exact sealed generation Files reads: the legacy full catalog of the snapshot, or the build's file catalog prepared after Open (D071). */
+export type FilesSource = { productId: string; buildIdentity: string; sourceRegion: string; generation: string; preparedAt: string };
+export const inventorySource = (snapshot: WorkspaceSnapshot & { inventory: InventorySummary }): FilesSource =>
+  ({ productId: snapshot.build.productId, buildIdentity: snapshot.build.id, sourceRegion: snapshot.sourceReference.region, generation: snapshot.inventory.generation, preparedAt: snapshot.inventory.preparedAt });
 type Failure = { code: string; message: string; retryable: boolean };
 type Movement = 'initial' | 'next' | 'previous' | 'first' | 'retry';
 type Search = { fileDataId?: string; contentKey?: string } | null;
@@ -20,7 +23,7 @@ export function parseFileSearch(text: string): Search | 'invalid' {
   return 'invalid';
 }
 // Files (docs/design/desktop-home, #20): one row per ROOT FileDataID or install name, filters, and an inspector with every membership.
-export function FilesCatalog({ snapshot, bridge, active, onReopen, onReturn, fileTarget, onReturnToTable }: { snapshot: Prepared; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void; fileTarget?: FileTarget | null; onReturnToTable?: () => void }) {
+export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileTarget, onReturnToTable }: { source: FilesSource; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void; fileTarget?: FileTarget | null; onReturnToTable?: () => void }) {
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState<Search>(null);
   const [invalid, setInvalid] = useState(false);
@@ -39,7 +42,7 @@ export function FilesCatalog({ snapshot, bridge, active, onReopen, onReturn, fil
   const filters: FileFilters = { ...(search ?? {}), ...(locale !== '0' ? { localeFlags: locale } : {}), ...(flags !== 'any' ? { contentFlags: flags } : {}), ...(family !== 'all' ? { family } : {}), ...(stored ? { storedOnly: true } : {}) };
   const filterKey = JSON.stringify(filters);
   const activeCount = (locale !== '0' ? 1 : 0) + (flags !== 'any' ? 1 : 0) + (family !== 'all' ? 1 : 0) + (stored ? 1 : 0);
-  const context = { productId: snapshot.build.productId, buildIdentity: snapshot.build.id, sourceRegion: snapshot.sourceReference.region, generation: snapshot.inventory.generation, limit: 50 };
+  const context = { productId: source.productId, buildIdentity: source.buildIdentity, sourceRegion: source.sourceRegion, generation: source.generation, limit: 50 };
   const page = shown?.page ?? null, stale = !!shown && shown.key !== filterKey;
   const list = useListbox<InventoryFile>(page?.entries ?? [], file => file.key);
   // A successful Retry removes the focused Retry button; focus goes to the Files heading instead of the document body.
@@ -131,7 +134,7 @@ export function FilesCatalog({ snapshot, bridge, active, onReopen, onReturn, fil
   const selected = list.selected;
   return <FilesFrame fileTarget={fileTarget} onReturnToTable={onReturnToTable} active={active} pane={list.pane} onPane={list.setPane} headingRef={heading} head={head} covered={covered} selectedLabel="Selected file" notices={notices} list={rows}
     foot={<>{onReturn && <ReturnHome onReturn={onReturn}/>}<span role="status" aria-live="polite">{count}</span><span className="dh-spacer"/><CatalogPageControls busy={busy} canFirst={cursor !== undefined && !stale} canPrevious={history.length > 0 && !stale} canNext={!!page?.nextCursor && !stale} onFirst={() => { void read(undefined, 'first'); }} onPrevious={() => { void read(history.at(-1), 'previous'); }} onNext={() => { if (page?.nextCursor) void read(page.nextCursor, 'next'); }}/></>}
-    inspector={selected ? <FileInspector key={`${selected.entry.key}|${shown?.key ?? filterKey}`} file={selected.entry} onPage={selected.onPage} filters={shownFilters} narrowed={shownNarrowed} snapshot={snapshot} bridge={bridge}/>
+    inspector={selected ? <FileInspector key={`${selected.entry.key}|${shown?.key ?? filterKey}`} file={selected.entry} onPage={selected.onPage} filters={shownFilters} narrowed={shownNarrowed} source={source} bridge={bridge}/>
       : <><div className="dh-insp-head"><div className="dh-label">File inspector</div><h2 id="files-inspector-heading">No file selected</h2></div><div className="dh-insp-body"><p className="dh-reason" style={{ fontSize: 'var(--fs-m)' }}>{page && !page.entries.length ? 'Nothing matches these filters.' : 'Choose a row.'}</p><p className="dh-tiny">ROOT maps FileDataIDs to content keys per locale and content variant. It has no file names.</p></div></>}/>;
 }
 function SizeSummary({ file }: { file: InventoryFile }) {
@@ -145,7 +148,7 @@ function LocalSummary({ file }: { file: InventoryFile }) {
   return <span className="dh-dim">Not stored</span>;
 }
 // Every membership of the selected file, read in pages of 100; with filters on, the ones that passed them are marked.
-function FileInspector({ file, onPage, filters, narrowed, snapshot, bridge }: { file: InventoryFile; onPage: boolean; filters: FileFilters; narrowed: boolean; snapshot: Prepared; bridge: DiscoveryBridge }) {
+function FileInspector({ file, onPage, filters, narrowed, source, bridge }: { file: InventoryFile; onPage: boolean; filters: FileFilters; narrowed: boolean; source: FilesSource; bridge: DiscoveryBridge }) {
   const [detail, setDetail] = useState<InventoryFileDetail | null>(null);
   const [members, setMembers] = useState<InventoryFileMembership[]>([]);
   const [error, setError] = useState<Failure | null>(null);
@@ -154,7 +157,7 @@ function FileInspector({ file, onPage, filters, narrowed, snapshot, bridge }: { 
   useEffect(() => { alive.current = true; void load(undefined); return () => { alive.current = false; }; }, []);
   async function load(after: string | undefined) {
     setBusy(true);
-    const params = { productId: snapshot.build.productId, buildIdentity: snapshot.build.id, sourceRegion: snapshot.sourceReference.region, generation: snapshot.inventory.generation, limit: 100, file: file.key, ...filters, ...(after === undefined ? {} : { after }) };
+    const params = { productId: source.productId, buildIdentity: source.buildIdentity, sourceRegion: source.sourceRegion, generation: source.generation, limit: 100, file: file.key, ...filters, ...(after === undefined ? {} : { after }) };
     try {
       const reply = await bridge.inventoryFile(params);
       if (!alive.current) return;
@@ -166,7 +169,7 @@ function FileInspector({ file, onPage, filters, narrowed, snapshot, bridge }: { 
   }
   const root = file.family === 'root', title = root ? `FileDataID ${file.fileDataId}` : file.name!;
   const familyName = root ? 'ROOT' : 'Install';
-  const verified = new Date(snapshot.inventory.preparedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const verified = new Date(source.preparedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const total = detail?.membershipCount ?? file.membershipCount, matching = detail?.matchingCount ?? file.matchingCount;
   // A kept selection the filters now exclude stays in the inspector, labelled, instead of another row being picked.
   const outside = !onPage && narrowed && detail !== null && detail.matchingCount === 0;
@@ -198,9 +201,15 @@ function Membership({ member, narrowed, verified }: { member: InventoryFileMembe
 }
 export function ReturnHome({ onReturn }: { onReturn: () => void }) { return <button className="dh-btn" onClick={onReturn}>← Return to build overview</button>; }
 // Without a prepared catalog there is no FileDataID search, so a FileDataID followed from Tables (#19) can't be looked up.
-// The notice says so instead of presenting the list as that file; the foot keeps the way back to the record.
-export function FileTargetNotice({ target }: { target: FileTarget }) {
-  return <div className="dh-notice dh-calm file-target" role="status"><div className="dh-text"><strong>FileDataID {target.fileDataId} can’t be looked up yet</strong><span className="dh-detail">Followed from {target.table} record {target.recordId}. The file catalog isn’t prepared, so Files has no FileDataID search and nothing is claimed about that file.</span></div></div>;
+// The notice says so instead of presenting the list as that file; the foot keeps the way back to the record. Once the
+// build's file list becomes ready (D071) it says the FileDataID can be looked up with Show file list, which opens the list
+// searching it. At 200% it is one line.
+export function FileTargetNotice({ target, ready = false }: { target: FileTarget; ready?: boolean }) {
+  const title = ready ? `FileDataID ${target.fileDataId} can be looked up now` : `FileDataID ${target.fileDataId} can’t be looked up yet`;
+  const detail = ready ? `Followed from ${target.table} record ${target.recordId}. The file list is ready: Show file list, below, opens it searching that FileDataID.`
+    : `Followed from ${target.table} record ${target.recordId}. The file catalog isn’t prepared, so Files has no FileDataID search and nothing is claimed about that file.`;
+  return <div className="dh-notice dh-calm file-target" role="status"><div className="dh-text"><strong>{title}</strong><span className="dh-detail dh-note-long">{detail}</span>
+    <span className="dh-note-inline"> · {ready ? 'use Show file list below' : 'no file list yet'}</span></div></div>;
 }
 export function FilesFrame({ active, pane, onPane, headingRef, sub, head, notices, list, foot, inspector, covered, selectedLabel = 'Selected object', fileTarget, onReturnToTable }: { active: boolean; pane: 'list' | 'inspector'; onPane: (pane: 'list' | 'inspector') => void; headingRef: RefObject<HTMLHeadingElement | null>; sub?: string; head?: ReactNode; notices?: ReactNode; list: ReactNode; foot: ReactNode; inspector: ReactNode; covered: boolean; selectedLabel?: string; fileTarget?: FileTarget | null; onReturnToTable?: () => void }) {
   useEffect(() => { if (!active) onPane('list'); }, [active]);

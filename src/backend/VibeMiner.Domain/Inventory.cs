@@ -28,3 +28,23 @@ public sealed record InventoryFileMembership(string Id, string Family, int? Bloc
 public sealed record InventoryFileDetail(string ProductId, string BuildIdentity, string SourceRegion,
     string Generation, string File, string Family, string? FileDataId, string? Name, int MembershipCount,
     int MatchingCount, IReadOnlyList<InventoryFileMembership> Memberships, string? NextCursor);
+
+/// <summary>The sealed ROOT/install file catalog of one build (D071): file and membership counts, all exact.</summary>
+public sealed record FileCatalogSummary(string Generation, string PreparedAt, string RootFileCount, string InstallFileCount,
+    string RootMembershipCount, string InstallMembershipCount, string UniqueContentCount, string UnresolvedMembershipCount,
+    string StoredMembershipCount);
+/// <summary>A problem with its typed code and message, and the underlying storage or I/O cause when there is one.</summary>
+public sealed record FileCatalogProblem(string Code, string Message, bool Retryable, string? Detail = null);
+/// <summary>A build named by its exact identity and visible version.</summary>
+public sealed record FileCatalogBuild(string ProductId, string BuildIdentity, string BuildVersion);
+/// <summary>
+/// Where one opened build's file catalog stands (D071). State is notOpened, pending, stopped, ready, failed or unsupported.
+/// Stage (pending only) is queued, paused (with the build's Download all), acquiring, waiting, reading, writing or sealing;
+/// Completed and Total count written memberships while writing. WaitingFor names the build a queued preparation waits for,
+/// or the build whose ROOT scope measurement a waiting one waits for. Attempts counts failed attempts; a pending one with a
+/// problem is waiting to retry.
+/// </summary>
+public sealed record FileCatalogStatus(string ProductId, string BuildIdentity, string SourceRegion, string? BuildVersion, string State, string? Stage,
+    string? Completed, string? Total, int Attempts, FileCatalogSummary? Catalog, FileCatalogProblem? Problem, FileCatalogBuild? WaitingFor);
+/// <summary>The preparations Downloads & activity shows, at most 32.</summary>
+public sealed record FileCatalogList(IReadOnlyList<FileCatalogStatus> Catalogs);

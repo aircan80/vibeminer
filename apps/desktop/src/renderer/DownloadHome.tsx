@@ -11,16 +11,19 @@ import type { RetentionController } from './useRetention';
 import { RetentionModeBox } from './Retention';
 import { retentionKey } from '../shared/retention';
 import type { TableLoading } from './useTableLoading';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import type { FileTarget } from './table-follow-view';
-import type { Build, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
+import type { Build, FileCatalogStatus, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
 import { encodedPercentage, exactBytes, exactCount, isInventoryWorkspace, readableBytes } from '../shared/inventory';
 import type { Opening } from './useWorkspaceFlow';
 import { BuildAreas, useHomeFocus, type BuildArea } from './BuildAreas';
 import { TablesExplorer } from './TablesExplorer';
-import { DownloadObjects, FilesUnavailable } from './DownloadObjects';
-import { FilesCatalog } from './FilesCatalog';
+import { DownloadObjects, FilesUnavailable, catalogStage } from './DownloadObjects';
+import { FilesCatalog, inventorySource, type FilesSource } from './FilesCatalog';
+import { useFileCatalog, type useFileCatalogTasks } from './useFileCatalog';
+import type { CatalogView } from './DownloadObjects';
+export type FileCatalogTasks = ReturnType<typeof useFileCatalogTasks>;
 import { HomeShell, useCoveredSide, type ShellArea } from './HomeShell';
 
 type Evidence = 'source' | 'metadata' | 'measurement';
@@ -28,9 +31,30 @@ type Pane = 'overview' | 'files' | 'tables' | 'items' | 'creatures';
 const shellArea: Record<Pane, ShellArea> = { overview: 'home', files: 'files', tables: 'tables', items: 'items', creatures: 'creatures' };
 const joined = (values: string[]) => values.length ? values.map(x => x.toUpperCase()).join(', ') : 'no recorded region';
 // Home after a build opens (docs/design/desktop-home): one shell for the download-sized and the catalog-prepared workspace.
-export function DownloadHome({ activityNavigation, effectsLoading, effectsAvailable=false, creatureDisplays, creatureDisplayAvailable=false, creaturesLoading, creaturesAvailable=false, classificationsLoading, classificationsAvailable=false, subclassAvailable=false, iconsLoading, iconsAvailable=false, itemsLoading, itemsAvailable=false, retention, operation: op, catalogBuild, fixtureLabel, bridge, onChoose, onReopen, evidence, tableLoading }: { activityNavigation?:{area:'tables'|'items'|'creatures';sequence:number}|null;effectsLoading?:ItemEffectsLoading;effectsAvailable?:boolean; creatureDisplays?:CreatureDisplays;creatureDisplayAvailable?:boolean; creaturesLoading?:CreaturesLoading;creaturesAvailable?:boolean; classificationsLoading?:Classifications;classificationsAvailable?:boolean;subclassAvailable?:boolean; iconsLoading?:IconsLoading;iconsAvailable?:boolean; itemsLoading?: ItemsLoading; itemsAvailable?: boolean; retention?: RetentionController; tableLoading: TableLoading; operation: Opening & { result: WorkspaceSnapshot }; catalogBuild?: Build | null; fixtureLabel?: string | null; bridge: DiscoveryBridge; onChoose: () => void; onReopen: () => void; evidence: (mode: Evidence, close: () => void) => ReactNode }) {
+export function DownloadHome({ catalogTasks, activityNavigation, effectsLoading, effectsAvailable=false, creatureDisplays, creatureDisplayAvailable=false, creaturesLoading, creaturesAvailable=false, classificationsLoading, classificationsAvailable=false, subclassAvailable=false, iconsLoading, iconsAvailable=false, itemsLoading, itemsAvailable=false, retention, operation: op, catalogBuild, fixtureLabel, bridge, onChoose, onReopen, evidence, tableLoading }: { catalogTasks?: FileCatalogTasks; activityNavigation?:{area:'tables'|'items'|'creatures'|'files';sequence:number}|null;effectsLoading?:ItemEffectsLoading;effectsAvailable?:boolean; creatureDisplays?:CreatureDisplays;creatureDisplayAvailable?:boolean; creaturesLoading?:CreaturesLoading;creaturesAvailable?:boolean; classificationsLoading?:Classifications;classificationsAvailable?:boolean;subclassAvailable?:boolean; iconsLoading?:IconsLoading;iconsAvailable?:boolean; itemsLoading?: ItemsLoading; itemsAvailable?: boolean; retention?: RetentionController; tableLoading: TableLoading; operation: Opening & { result: WorkspaceSnapshot }; catalogBuild?: Build | null; fixtureLabel?: string | null; bridge: DiscoveryBridge; onChoose: () => void; onReopen: () => void; evidence: (mode: Evidence, close: () => void) => ReactNode }) {
   const snapshot = op.result, summary = snapshot.download, inventory = isInventoryWorkspace(snapshot) ? snapshot : null;
   const [pane, setPane] = useState<Pane>('overview');
+  // The build's file catalog prepared after Open (D071). A legacy full catalog snapshot carries its own generation; any other
+  // workspace reads the build's ready file catalog. Files never mixes the two: each view reads one exact generation.
+  // Only an engine with file-catalog-v1 prepares one; without it Files keeps the earlier "not prepared" note.
+  const catalogRead = useFileCatalog(bridge, snapshot, !inventory && !!catalogTasks, catalogTasks?.catalogs.map(c => `${c.buildIdentity}:${c.state}:${c.stage}`).join('|') ?? '');
+  const catalog = catalogRead.status;
+  const catalogSource: FilesSource | null = catalog?.state === 'ready' && catalog.catalog ? { productId: catalog.productId, buildIdentity: catalog.buildIdentity, sourceRegion: catalog.sourceRegion, generation: catalog.catalog.generation, preparedAt: catalog.catalog.preparedAt } : null;
+  const catalogKey = catalogSource ? `${catalogSource.productId}:${catalogSource.buildIdentity}:${catalogSource.sourceRegion}:${catalogSource.generation}` : null;
+  // A catalog that becomes ready while Files shows the download list is offered with a button rather than swapped in under
+  // the user, so async completion never moves focus; it is shown directly the next time Files opens.
+  const [adopted, setAdopted] = useState<string | null>(null);
+  useEffect(() => { if (catalogKey && pane !== 'files') setAdopted(catalogKey); }, [catalogKey, pane]);
+  const shownCatalog = catalogKey && adopted === catalogKey ? catalogSource : null;
+  const catalogTaskKey = `fileCatalog:${snapshot.build.productId}:${snapshot.build.id}`;
+  const [catalogNotice, setCatalogNotice] = useState('');
+  const catalogView: CatalogView | null = inventory || !bridge.fileCatalog || !catalogTasks ? null : {
+    status: catalog, error: catalogRead.error || catalogNotice, busy: catalogTasks?.busy === `${snapshot.build.productId}|${snapshot.build.id}`,
+    taskKey: catalogTasks?.catalogs.some(c => c.buildIdentity === snapshot.build.id && c.productId === snapshot.build.productId) ? catalogTaskKey : null,
+    ...(catalogKey ? { onShow: () => setAdopted(catalogKey) } : {}),
+    onAction: async action => { const result = await catalogTasks?.act({ productId: snapshot.build.productId, buildIdentity: snapshot.build.id, action }); setCatalogNotice(typeof result === 'string' ? result : ''); await catalogRead.retry(); },
+    onRetryRead: () => { setCatalogNotice(''); return catalogRead.retry(); },
+  };
   const itemSource=useItemSourceNavigation(pane,setPane);
   useEffect(()=>{if(activityNavigation)setPane(activityNavigation.area);},[activityNavigation?.sequence]);
   const [dialog, setDialog] = useState<Evidence | null>(null);
@@ -53,20 +77,21 @@ export function DownloadHome({ activityNavigation, effectsLoading, effectsAvaila
   const areas=<BuildAreas active={pane as BuildArea} onHome={()=>{setFromHome(false);setFileTarget(null);home();}} onTables={()=>go('tables')} onFiles={()=>go('files')} onItems={items?()=>go('items'):undefined} onCreatures={creatures?()=>go('creatures'):undefined}/>;
   const assessed=summary?new Date(summary.assessedAt).toLocaleString():null;
   const status=pane==='overview'?<span className="dh-secondary">{inventory?<>Catalog generation <strong>{inventory.inventory.generation}</strong> · {exactCount(inventory.inventory.membershipCount)} memberships</>:assessed?<>Assessed <strong>{assessed}</strong></>:'Download size unknown'}</span>
-    :pane==='files'?<span className="dh-secondary">{inventory?<>Catalog generation <strong>{inventory.inventory.generation}</strong> · {exactCount(inventory.inventory.membershipCount)} memberships</>:summary?<>Download manifest · <strong>{exactCount(summary.objectCount)}</strong> encoded objects</>:'File catalog not prepared'}</span>:null;
+    :pane==='files'?<span className="dh-secondary">{inventory?<>Catalog generation <strong>{inventory.inventory.generation}</strong> · {exactCount(inventory.inventory.membershipCount)} memberships</>:shownCatalog&&catalog?.catalog?<>File catalog generation <strong>{shownCatalog.generation}</strong> · {exactCount((BigInt(catalog.catalog.rootMembershipCount)+BigInt(catalog.catalog.installMembershipCount)).toString())} memberships</>:summary?<>Download manifest · <strong>{exactCount(summary.objectCount)}</strong> encoded objects</>:'File catalog not prepared'}</span>:null;
   return <HomeShell snapshot={snapshot} catalogBuild={catalogBuild} label={op.label} retention={retention} onChoose={onChoose} area={shellArea[pane]} areas={areas} fixtureLabel={fixtureLabel} status={status} dialog={dialog && evidence(dialog, () => setDialog(null))}>
     <section className="dh-home" hidden={pane !== 'overview'} aria-labelledby="home-heading">
       <div className="dh-pane-head"><h1 ref={heading} id="home-heading" tabIndex={-1}>Build overview</h1><span className="dh-sub">{snapshot.sourceReference.region.toUpperCase()} download source · advertised in {joined(snapshot.build.advertisedRegions)} · measurements cover every published variant</span><span className="dh-spacer"/><HomeUtilities onMetadata={() => setDialog('metadata')} onSource={() => setDialog('source')}/></div>
       <div className="dh-home-grid" ref={grid}>
         <section className="dh-panel" aria-labelledby="home-sizes"><div className="dh-panel-head"><h2 id="home-sizes">Download sizes</h2><span className="dh-scope">Encoded bytes</span></div><div className="dh-panel-body">{inventory ? <InventorySizes inventory={inventory.inventory}/> : <DownloadSizes snapshot={snapshot} onReopen={onReopen}/>}</div><div className="dh-panel-foot"><button className="dh-btn dh-small" onClick={() => setDialog('measurement')}>Scope and measurement details</button></div></section>
-        <section className="dh-panel" aria-labelledby="home-catalog"><div className="dh-panel-head"><h2 id="home-catalog">File catalog</h2><span className="dh-scope">ROOT and install manifests</span></div><div className="dh-panel-body">{inventory ? <CatalogFacts inventory={inventory.inventory}/> : <><div className="dh-metric"><span className="dh-mlabel">Catalog memberships</span><strong className="dh-unknown">Not prepared</strong><span className="dh-exact">No membership count is inferred</span></div><p className="dh-reason">{summary ? 'Files lists the download manifest’s encoded objects for now. Tables, Items and Creatures prepare their own data.' : 'Tables, Items and Creatures prepare their own data.'}</p></>}</div><div className="dh-panel-foot"><button className="dh-btn dh-small" onClick={files}>Browse in Files</button></div></section>
+        <section className="dh-panel" aria-labelledby="home-catalog"><div className="dh-panel-head"><h2 id="home-catalog" tabIndex={-1}>File catalog</h2><span className="dh-scope">ROOT and install manifests</span></div><div className="dh-panel-body">{inventory ? <CatalogFacts inventory={inventory.inventory}/> : catalogView && catalog?.state !== 'notOpened' ? <FileCatalogFacts view={catalogView} objects={!!summary}/> : <><div className="dh-metric"><span className="dh-mlabel">Catalog memberships</span><strong className="dh-unknown">Not prepared</strong><span className="dh-exact">No membership count is inferred</span></div><p className="dh-reason">{summary ? 'Files lists the download manifest’s encoded objects for now. Tables, Items and Creatures prepare their own data.' : 'Tables, Items and Creatures prepare their own data.'}</p></>}</div><div className="dh-panel-foot"><button className="dh-btn dh-small" onClick={files}>Browse in Files</button></div></section>
         <section className="dh-panel dh-wide" aria-labelledby="home-storage"><div className="dh-panel-head"><h2 id="home-storage">Local content &amp; shared storage</h2><span className="dh-scope">{inventory ? 'Published inventory scope · exact build' : 'Download manifest scope · exact build'}</span></div><div className="dh-panel-body"><div className="dh-storage-cols"><div>{inventory ? <InventoryStorage inventory={inventory.inventory}/> : <DownloadStorage snapshot={snapshot}/>}</div><div><RetentionModeBox flow={inventory ? undefined : retention} target={retentionTarget}/></div></div></div></section>
-        <Readiness snapshot={snapshot} inventory={inventory?.inventory ?? null} gameData={gameData} onMetadata={() => setDialog('metadata')}/>
+        <Readiness snapshot={snapshot} inventory={inventory?.inventory ?? null} catalog={catalog} catalogChecking={!!catalogView && !catalog} gameData={gameData} onMetadata={() => setDialog('metadata')}/>
       </div>
     </section>
-    {inventory ? <FilesCatalog key={`${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}:${inventory.inventory.generation}`} snapshot={inventory} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
-      : summary ? <DownloadObjects key={`${snapshot.build.id}:${summary.ledgerId}:${summary.assessedAt}`} snapshot={snapshot} summary={summary} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
-      : <FilesUnavailable snapshot={snapshot} active={pane === 'files'} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>}
+    {inventory ? <FilesCatalog key={`${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}:${inventory.inventory.generation}`} source={inventorySource(inventory)} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
+      : shownCatalog ? <FilesCatalog key={`catalog:${catalogKey}`} source={shownCatalog} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
+      : summary ? <DownloadObjects key={`${snapshot.build.id}:${summary.ledgerId}:${summary.assessedAt}`} snapshot={snapshot} summary={summary} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} catalog={catalogView} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
+      : <FilesUnavailable snapshot={snapshot} active={pane === 'files'} onReturn={fromHome ? returnHome : undefined} onReopen={onReopen} catalog={catalogView} fileTarget={fileTarget} onReturnToTable={returnToTable}/>}
     {items&&<div className="dh-area-scroll" hidden={pane!=='items'}><ItemsBrowser effectsLoading={effectsLoading} effectsAvailable={effectsAvailable} effectsSource={itemSource} classificationsLoading={classificationsLoading} classificationsAvailable={classificationsAvailable} subclassAvailable={subclassAvailable} iconsLoading={iconsLoading} iconsAvailable={iconsAvailable} key={`items:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}`} workspace={snapshot} bridge={bridge} active={pane==='items'} flow={itemsLoading!} focusRequest={itemsLoading!.viewRequest} onSource={itemSource.open}/></div>}
     {creatures&&<div className="dh-area-scroll" hidden={pane!=='creatures'}><CreaturesBrowser displays={creatureDisplays} displayAvailable={creatureDisplayAvailable} key={`creatures:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}`} workspace={snapshot} bridge={bridge} active={pane==='creatures'} flow={creaturesLoading!} focusRequest={creaturesLoading!.viewRequest} onSource={(source,id)=>itemSource.open(source,id,'creatures')}/></div>}
     <TablesExplorer key={`tables:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}:${snapshot.sourceReference.generation}`} snapshot={snapshot} bridge={bridge} active={pane === 'tables'} tableLoading={tableLoading} sourceRecord={itemSource.request} onReturnToItems={itemSource.returnToItems} onOpenFile={openFile}/>
@@ -83,6 +108,50 @@ function DownloadSizes({ snapshot, onReopen }: { snapshot: WorkspaceSnapshot; on
 }
 function InventorySizes({ inventory }: { inventory: InventorySummary }) {
   return <><Metric label="Required encoded content" value={readableBytes(inventory.totalEncodedBytes)} exact={exactBytes(inventory.totalEncodedBytes)}/><Facts rows={[['Exact encoded objects', exactCount(inventory.downloadObjectCount)], ['Scope', 'All published variants'], ['Decoded / installed size', 'Unknown', 'dh-dim']]}/></>;
+}
+// The build's file catalog on Home (D071): preparing with its stage, ready with exact counts, stopped, or why it is not
+// prepared. Actions live in Files and in Downloads & activity; Home says where.
+function FileCatalogFacts({ view, objects }: { view: CatalogView; objects: boolean }) {
+  // Retry status disappears once a read succeeds. Focus then goes to the control that took its place in this panel, or
+  // to the panel heading, never to the document body; a user who moved focus elsewhere meanwhile keeps it there. Once
+  // the read has finished the request is over, so a read that fails again leaves focus on Retry status and a later
+  // automatic read never moves it.
+  const root = useRef<HTMLDivElement>(null), moveFocus = useRef(false), seen = useRef(0);
+  const [finished, setFinished] = useState(0);
+  useLayoutEffect(() => {
+    const done = finished !== seen.current; seen.current = finished;
+    if (!moveFocus.current || !root.current) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && root.current.contains(active)) { if (done) moveFocus.current = false; return; }
+    moveFocus.current = false;
+    if (active && active !== document.body) return;
+    (root.current.querySelector<HTMLElement>('button') ?? document.getElementById('home-catalog'))?.focus({ preventScroll: true });
+  });
+  const retry = (event: MouseEvent<HTMLButtonElement>) => {
+    const mine = document.activeElement === event.currentTarget;
+    if (mine) moveFocus.current = true;
+    void Promise.resolve(view.onRetryRead()).then(() => { if (mine) setFinished(n => n + 1); });
+  };
+  return <div ref={root}><FileCatalogFactsBody view={view} objects={objects} onRetry={retry}/></div>;
+}
+function FileCatalogFactsBody({ view, objects, onRetry }: { view: CatalogView; objects: boolean; onRetry: (event: MouseEvent<HTMLButtonElement>) => void }) {
+  const catalog = view.status, meanwhile = objects ? 'Files lists the download manifest’s encoded objects until then.' : 'Files has no list until then.';
+  const metric = (value: string, exact: string) => <div className="dh-metric"><span className="dh-mlabel">Catalog memberships</span><strong className="dh-unknown">{value}</strong><span className="dh-exact">{exact}</span></div>;
+  // Before the first read: say it is being checked, never that the list is not prepared.
+  if (!catalog && !view.error) return metric('Checking…', 'Reading whether the file list is prepared');
+  if (!catalog) return <>{metric('Status unavailable', 'No membership count is inferred')}<p className="dh-reason">{view.error} <button className="dh-btn dh-small" onClick={onRetry}>Retry status</button></p></>;
+  const stale = view.error ? <p className="dh-reason dh-warn-t">Status not confirmed: {view.error} <button className="dh-btn dh-small" onClick={onRetry}>Retry status</button></p> : null;
+  return <>{facts()}{stale}</>;
+  function facts() {
+  if (catalog!.state === 'ready' && catalog!.catalog) {
+    const c = catalog!.catalog, members = (BigInt(c.rootMembershipCount) + BigInt(c.installMembershipCount)).toString();
+    return <><Metric label="Catalog memberships" value={exactCount(members)} exact="All published variants"/><Facts rows={[['ROOT FileDataIDs', exactCount(c.rootFileCount)], ['Install names', exactCount(c.installFileCount)], ['Unresolved memberships', exactCount(c.unresolvedMembershipCount), BigInt(c.unresolvedMembershipCount) > 0n ? 'dh-warn-t' : undefined], ['Catalog', 'Ready to browse', 'dh-ok']]}/></>;
+  }
+  if (catalog!.state === 'pending') return <>{metric('Preparing…', catalogStage(catalog!))}<p className="dh-reason">The ROOT and install manifests are read in the background after Open. {meanwhile}{catalog!.attempts > 0 && catalog!.problem && <> Attempt {catalog!.attempts} failed <code>({catalog!.problem.code})</code>; it is tried again shortly.</>} Progress and Stop are in Downloads &amp; activity.</p></>;
+  if (catalog!.state === 'stopped') return <>{metric('Stopped', 'The rows written so far are kept')}<p className="dh-reason">Resume it from Files or Downloads &amp; activity. Opening the build again resumes it too.</p></>;
+  const p = catalog!.problem;
+  return <>{metric('Not prepared', 'No membership count is inferred')}<p className="dh-reason">{p?.message} <code>({p?.code})</code>{catalog!.state === 'failed' ? ' Retry it from Files or Downloads & activity.' : ''}</p></>;
+  }
 }
 function CatalogFacts({ inventory }: { inventory: InventorySummary }) {
   return <><Metric label="Catalog memberships" value={exactCount(inventory.membershipCount)} exact="All published variants"/><Facts rows={[['ROOT memberships', exactCount(inventory.rootMembershipCount)], ['Unique ROOT/IN contents', exactCount(inventory.uniqueContentCount)], ['Catalog', 'Ready to browse', 'dh-ok']]}/></>;
@@ -105,10 +174,10 @@ function InventoryStorage({ inventory }: { inventory: InventorySummary }) {
     <Ledger rows={[[<>Verified locally available{measured && <span className="dh-dim"> · {encodedPercentage(inventory.verifiedEncodedBytes, inventory.totalEncodedBytes)}</span>}</>, readableBytes(inventory.verifiedEncodedBytes), digits(inventory.verifiedEncodedBytes)], ['Of those, shared with other builds', readableBytes(inventory.sharedVerifiedEncodedBytes), digits(inventory.sharedVerifiedEncodedBytes)], ['Additional encoded content required', readableBytes(inventory.remainingEncodedBytes), digits(inventory.remainingEncodedBytes)], ['Retained metadata (separate)', readableBytes(inventory.metadataEncodedBytes), digits(inventory.metadataEncodedBytes)]]}/>
     <p className="dh-tiny">Shared bytes are part of the verified bytes, not added again. Metadata may overlap content objects, so there is no grand disk total. These are not installed-game sizes.</p></>;
 }
-function Readiness({ snapshot, inventory, gameData, onMetadata }: { snapshot: WorkspaceSnapshot; inventory: InventorySummary | null; gameData: string; onMetadata: () => void }) {
+function Readiness({ snapshot, inventory, catalog, catalogChecking = false, gameData, onMetadata }: { snapshot: WorkspaceSnapshot; inventory: InventorySummary | null; catalog: FileCatalogStatus | null; catalogChecking?: boolean; gameData: string; onMetadata: () => void }) {
   const covered = useCoveredSide(), summary = snapshot.download, partial = snapshot.readiness === 'partial';
   const rows: [string, ReactNode, string?][] = inventory ? [['Required metadata', 'Verified', 'dh-ok'], ['File catalog', 'Ready', 'dh-ok'], ['Unique ROOT/IN contents', exactCount(inventory.uniqueContentCount)], ['Exact encoded objects', exactCount(inventory.downloadObjectCount)], ['Payload content locations', 'Not assessed', 'dh-dim'], ['Every file downloadable?', 'Not checked', 'dh-warn-t'], ['Research decoders', 'Selected WDC5 tables'], ['Encryption assessment', 'Not assessed', 'dh-dim']]
-    : [['Build and CDN configs', 'Verified', 'dh-ok'], ['Download manifest', summary ? 'Verified' : 'Unavailable', summary ? 'dh-ok' : 'dh-warn-t'], ['Research file catalog', 'Not prepared', 'dh-dim'], ['Decoded / installed size', 'Unknown', 'dh-dim'], ['Payload content locations', 'Not assessed', 'dh-dim'], ['Every object downloadable?', 'Not checked', 'dh-warn-t'], ['Research decoders', 'Selected WDC5 tables'], ['Encryption assessment', 'Not assessed', 'dh-dim']];
+    : [['Build and CDN configs', 'Verified', 'dh-ok'], ['Download manifest', summary ? 'Verified' : 'Unavailable', summary ? 'dh-ok' : 'dh-warn-t'], ['File list', catalog?.state === 'ready' ? 'Ready' : catalog?.state === 'pending' ? 'Preparing…' : catalog?.state === 'stopped' ? 'Stopped' : catalogChecking ? 'Checking…' : 'Not prepared', catalog?.state === 'ready' ? 'dh-ok' : 'dh-dim'], ['Decoded / installed size', 'Unknown', 'dh-dim'], ['Payload content locations', 'Not assessed', 'dh-dim'], ['Every object downloadable?', 'Not checked', 'dh-warn-t'], ['Research decoders', 'Selected WDC5 tables'], ['Encryption assessment', 'Not assessed', 'dh-dim']];
   rows.push(['Game data areas', gameData || 'Not provided by this engine', gameData ? undefined : 'dh-dim']);
   const explanation = inventory ? 'Metadata and the published file inventory are verified. Content stays on demand.' : summary ? 'Metadata and the download manifest are verified. Content stays on demand.' : 'Configurations identify this exact build. Download sizing is unavailable.';
   return <aside className="dh-panel dh-side" aria-labelledby="home-readiness" inert={covered}><div className="dh-panel-head"><h2 id="home-readiness">Build readiness</h2><span className="dh-scope">All published variants</span></div>
