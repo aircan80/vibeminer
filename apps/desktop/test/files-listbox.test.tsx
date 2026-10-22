@@ -21,3 +21,20 @@ it('keeps a key press that lands before the new page\'s effects run', () => {
   expect(screen.getByRole('option', { name: 'b' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('listbox')).toHaveAttribute('aria-activedescendant', screen.getByRole('option', { name: 'b' }).id);
 });
+// The last page's active row was its third. The next page arrives with the selection off it, so its active row is the first.
+// A key press before that page's effects run must move from the first row, not from a row the new page doesn't have.
+function NextPage({ entries, keyName }: { entries: string[]; keyName: string }) {
+  const list = useListbox<string>(entries, entry => entry);
+  const [pressedFor, setPressedFor] = useState<string[] | null>(null);
+  useLayoutEffect(() => { if (entries.length && pressedFor !== entries) { setPressedFor(entries); list.props.onKeyDown({ key: keyName, preventDefault() {} } as KeyboardEvent<HTMLDivElement>); } }, [entries]);
+  return <div {...list.props} aria-label="Authored list">{entries.map((entry, i) => <div key={entry} {...list.option(i)}>{entry}</div>)}<output>{list.selected?.entry ?? 'none'}</output></div>;
+}
+it('moves from the new page\'s own active row when a key lands before that page\'s effects run', () => {
+  Element.prototype.scrollIntoView = vi.fn();
+  const view = render(<NextPage entries={['a', 'b', 'c']} keyName="End"/>);
+  expect(screen.getByRole('status')).toHaveTextContent('c');
+  act(() => { view.rerender(<NextPage entries={['d', 'e']} keyName="ArrowUp"/>); });
+  expect(screen.getByRole('status')).toHaveTextContent('d');
+  expect(screen.getByRole('option', { name: 'd' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('listbox')).toHaveAttribute('aria-activedescendant', screen.getByRole('option', { name: 'd' }).id);
+});

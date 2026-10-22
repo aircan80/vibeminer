@@ -202,22 +202,20 @@ export function FilesFrame({ active, pane, onPane, headingRef, sub, head, notice
 }
 // A listbox like Discovery's build list: one Tab stop, arrow keys move the selection. A selection on another page stays in the inspector.
 export function useListbox<T>(entries: readonly T[], key: (entry: T) => string) {
-  const id = useId(), [chosen, setSelected] = useState<T | null>(null), [active, setActive] = useState(0), [pane, setPane] = useState<'list' | 'inspector'>('list');
-  // Until the user picks a row, the first row of the first page is selected (derived, so it is never a frame late).
+  const id = useId(), [chosen, setSelected] = useState<T | null>(null), [pane, setPane] = useState<'list' | 'inspector'>('list');
+  // Until the user picks a row, the first row of the first page is selected. The selection and the active row are derived
+  // in render, so a key press that lands before a new page's effects run still moves from that page's rows.
   const selected = chosen ?? entries[0] ?? null;
   const index = selected === null ? -1 : entries.findIndex(entry => key(entry) === key(selected));
+  const active = index >= 0 ? index : 0;
   // The page effect runs after paint. A key press can land first, so it reads the latest choice from a ref, not this render's.
   const latest = useRef<T | null>(null), picked = useRef(false);
-  useEffect(() => {
-    if (latest.current === null && entries.length) { latest.current = entries[0]; setSelected(entries[0]); }
-    const current = latest.current, at = current === null ? -1 : entries.findIndex(entry => key(entry) === key(current));
-    setActive(at >= 0 ? at : 0);
-  }, [entries]);
+  useEffect(() => { if (latest.current === null && entries.length) { latest.current = entries[0]; setSelected(entries[0]); } }, [entries]);
   const optionId = (i: number) => `${id}-option-${i}`;
-  function select(i: number) { const entry = entries[Math.max(0, Math.min(entries.length - 1, i))]; if (!entry) return; const next = entries.indexOf(entry); latest.current = entry; picked.current = true; setSelected(entry); setActive(next); requestAnimationFrame(() => document.getElementById(optionId(next))?.scrollIntoView({ block: 'nearest' })); }
+  function select(i: number) { const entry = entries[Math.max(0, Math.min(entries.length - 1, i))]; if (!entry) return; const next = entries.indexOf(entry); latest.current = entry; picked.current = true; setSelected(entry); requestAnimationFrame(() => document.getElementById(optionId(next))?.scrollIntoView({ block: 'nearest' })); }
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) { const target = ({ ArrowDown: active + 1, ArrowUp: active - 1, Home: 0, End: entries.length - 1, PageDown: active + 10, PageUp: active - 10 } as Record<string, number>)[event.key]; if (target === undefined || !entries.length) return; event.preventDefault(); select(target); }
   return { pane, setPane, selected: selected === null ? null : { entry: selected, onPage: index >= 0 }, // For a new result set: keep the row the user picked, otherwise follow the new first row.
-    refresh: () => { if (picked.current) return; latest.current = null; setSelected(null); setActive(0); },
+    refresh: () => { if (picked.current) return; latest.current = null; setSelected(null); },
     props: { role: 'listbox', tabIndex: 0, 'aria-activedescendant': entries.length ? optionId(active) : undefined, onKeyDown },
     option: (i: number) => ({ id: optionId(i), role: 'option', 'aria-selected': i === index, className: i === active ? ' dh-active' : '', onClick: () => select(i) }) };
 }
