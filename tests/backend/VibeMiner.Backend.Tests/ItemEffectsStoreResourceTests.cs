@@ -55,8 +55,10 @@ public sealed class ItemEffectsStoreResourceTests(ITestOutputHelper output)
         output.WriteLine("unusedDiscoveryProjectionEncodedBytes={0}; compact retains original source bodies/reference/configurations; poisonConfiguration={1}", encoded, poisonConfiguration);
     }
 
-    [Fact]
-    public async Task FourOwnedProofCopiesCanQueueBehindOneCatalogWorkerWithoutNewPublicationAdmissions()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FourOwnedProofCopiesCanQueueBehindOneCatalogWorkerWithoutNewPublicationAdmissions(bool leakFrames)
     {
         await using var f = await ItemEffectsStoreFixture.Create(coreColumns: 384);
         foreach (var role in Enum.GetValues<ItemEffectsSourceRole>())
@@ -74,18 +76,25 @@ public sealed class ItemEffectsStoreResourceTests(ITestOutputHelper output)
         var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var queued = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var release = new ManualResetEventSlim(); var arrivals = 0; var queuedCopies = 0; var armed = false;
+        // leakFrames: each copy parks a 20 MiB frame in state the store keeps alive (its callback).
+        var kept = new List<byte[]>(4);
         f.Store = new(f.H.Catalog, f.H.Objects, f.H.Store, f.H.Tables, f.Resources, TimeProvider.System,
             observeResources: phase =>
             {
                 if (!Volatile.Read(ref armed)) return;
                 if (phase == "result-before-count")
                 { if (Interlocked.Increment(ref arrivals) == 4) arrived.TrySetResult(); release.Wait(); }
-                if (phase == "catalog-input-queued" && Interlocked.Increment(ref queuedCopies) == 4) queued.TrySetResult();
+                if (phase != "catalog-input-queued") return;
+                if (leakFrames) lock (kept) kept.Add(new byte[20 << 20]);
+                if (Interlocked.Increment(ref queuedCopies) == 4) queued.TrySetResult();
             });
+        // Stands in for earlier work that is still live before the copies queue and is freed
+        // while they wait. It is larger than what the copies hold, so a baseline delta would go negative.
+        var earlier = new System.Runtime.CompilerServices.StrongBox<byte[]?>(new byte[16 << 20]);
         _ = await f.Store.ReadNamesAsync(request, default);
         using var admissionDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (f.Store.Pressure.Operations != 0) { admissionDeadline.Token.ThrowIfCancellationRequested(); await Task.Yield(); }
-        var baseline = GC.GetTotalMemory(true); Volatile.Write(ref armed, true);
+        var armedHeap = SettledHeap(); Volatile.Write(ref armed, true);
         var pending = Enumerable.Range(0, 4).Select(_ => f.Store.ReadNamesAsync(request, default)).ToArray();
         await using var blocker = new SqliteConnection("Data Source=" + Path.Combine(f.H.DirectoryPath, "discovery-v1.sqlite3"));
         await blocker.OpenAsync(); SqliteTransaction? transaction = null;
@@ -98,18 +107,56 @@ public sealed class ItemEffectsStoreResourceTests(ITestOutputHelper output)
             transaction = blocker.BeginTransaction(); release.Set();
             await queued.Task.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.All(pending, task => Assert.False(task.IsCompleted));
-            var delta = GC.GetTotalMemory(true) - baseline;
-            Assert.InRange(delta, 0, 48L << 20);
-            output.WriteLine("fourQueuedProofCopies sampledManagedLiveDelta={0}; coreColumnsEach384; bridgeMembers160; effect/nameMembers256; heldBridgeSlots={1}; heldTargetSlots={2}. One SQL worker is blocked BEFORE current-graph decode; separate6MiB executing-phase reservation still required.", delta, f.Store.Pressure.BridgeSlots, f.Store.Pressure.TargetSlots);
+            earlier.Value = null;
+            // Charge the queued copies by what their completion releases. Growth from the armed
+            // sample has no lower bound: earlier work freed in between (finalizers, pool trimming,
+            // leftover tasks) made it read -3 to -9 MB on Linux CI (#36). Its ceiling still
+            // catches a copy that leaves its frame in state the store keeps.
+            var queuedHeap = SettledHeap(); var bridgeSlots = f.Store.Pressure.BridgeSlots; var targetSlots = f.Store.Pressure.TargetSlots;
             transaction.Rollback(); transaction.Dispose(); transaction = null;
-            foreach (var task in pending) Assert.Equal(ItemEffectNameState.Ready, Assert.Single((await task).Outcomes).State);
-            Assert.Equal(4, queuedCopies); Assert.All(pending, task => Assert.True(task.IsCompleted));
+            await RequireReadyAsync(pending);
+            Assert.Equal(4, queuedCopies);
+            pending = [];
+            using var retireDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (f.Store.Pressure.Operations != 0) { retireDeadline.Token.ThrowIfCancellationRequested(); await Task.Yield(); }
+            var retiredHeap = SettledHeap(); var released = queuedHeap - retiredHeap; var retained = retiredHeap - armedHeap;
+            Assert.InRange(released, 0, 48L << 20);
+            if (leakFrames) Assert.True(retained > 48L << 20, $"Parked frames must count as retained; retained={retained}.");
+            else Assert.True(retained <= 48L << 20, $"Retired copies left {retained} bytes behind.");
+            GC.KeepAlive(kept);
+            output.WriteLine("fourQueuedProofCopies leakFrames={0}; releasedManagedLive={1}; retainedSinceArmed={2}; coreColumnsEach384; bridgeMembers160; effect/nameMembers256; heldBridgeSlots={3}; heldTargetSlots={4}. One SQL worker is blocked BEFORE current-graph decode; separate6MiB executing-phase reservation still required.", leakFrames, released, retained, bridgeSlots, targetSlots);
         }
         finally
         {
             release.Set(); transaction?.Rollback(); transaction?.Dispose();
             foreach (var task in pending) try { await task; } catch (DiscoveryException) { }
         }
+    }
+
+    // Its own state machine, so no hoisted local of the test keeps a finished task or result alive.
+    private static async Task RequireReadyAsync(Task<ItemEffectNamesResult>[] pending)
+    {
+        foreach (var task in pending) Assert.Equal(ItemEffectNameState.Ready, Assert.Single((await task).Outcomes).State);
+        Assert.All(pending, task => Assert.True(task.IsCompleted));
+    }
+
+    /// <summary>
+    /// Live managed heap after full blocking collections stop changing. GC.GetTotalMemory(true)
+    /// stops once two samples are within 5%, which on a 150 MB test process leaves up to ~8 MB of
+    /// finalizer-held or trimmed garbage in the "settled" number.
+    /// </summary>
+    private static long SettledHeap()
+    {
+        long previous = -1, change = 0;
+        for (var attempt = 0; attempt < 16; attempt++)
+        {
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            var current = GC.GetTotalMemory(false);
+            if (previous >= 0 && (change = Math.Abs(current - previous)) < 64 << 10) return current;
+            previous = current;
+        }
+        throw new Xunit.Sdk.XunitException($"Managed heap did not settle after 16 full collections; last change {change} bytes.");
     }
 
     [Fact]
