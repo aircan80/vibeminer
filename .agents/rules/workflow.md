@@ -13,23 +13,22 @@ How an issue moves from idea to closed. Read this before touching issues, branch
 1. **product-manager** writes the issue: 1-3 sentences of context, `- [ ]` acceptance criteria, `- [ ]` technical steps, and a review line for each trigger that applies: `- [ ] WoW review`, `- [ ] UI review`, `- [ ] Usability review`. One issue = one testable slice. Chores are checkboxes, not issues.
 2. **developer** sets `in-progress` and works on a local branch `issue-N`.
 3. When done, the developer squashes the branch to one commit on top of current `main`. The message ends with `Refs #N` (never `Closes`/`Fixes`).
-   - Push that exact commit once to its own CI ref: `git push origin <sha>:refs/heads/ci/issue-N-<short sha>`, where the short sha is `git rev-parse --short=12 <sha>`. CI (`.github/workflows/ci.yml`) builds and runs each part of `npm test` as its own step on Linux, Windows and macOS, and `npm run test:e2e` on Linux.
-   - A `ci/` ref is never pushed again or rewritten. Every new commit (fix, re-squash, rebase) gets its own new ref. Never force-push anything.
+   - The commit stays local. Nothing is pushed for CI. Never force-push anything.
 4. The developer calls **reviewer** and each listed expert. Each one posts one verdict comment on the issue against `git diff main...issue-N`. Fix blockers on the same branch, re-squash, and re-request only the reviewer who raised them.
 5. All verdicts pass → the developer flips the issue to `ready-for-qa`.
-6. **qa-testing** tests that exact commit in its own worktree.
-   - QA checks the CI run for that exact sha (`gh run list --commit <sha> --workflow CI`). Every job passes, or each failure is one already tracked by an open bug issue. Any other failure, or no run, is a fail.
+6. **qa-testing** tests that exact commit in its own clean worktree.
+   - QA runs `npm ci`, `npm run build`, `npm test` and `npm run test:e2e` there. That run is the gate; any failure is a fail.
    - Fail: comment the bug on the issue and flip it to `in-progress`.
    - Pass: comment `QA pass at <sha>`.
    - An unticked review line with no passing verdict comment is a fail.
 7. The developer runs `git merge --ff-only issue-N`.
-   - If `main` moved, rebase the single commit, push it to its new `ci/issue-N-<short sha>` ref and flip back to `ready-for-qa`. QA retests.
+   - If `main` moved, rebase the single commit and flip back to `ready-for-qa`. QA retests.
    - If conflict fixes changed code, the reviewer reviews again first.
-8. The owner approves `git push origin main`.
+8. The owner approves `git push origin main`. CI (`.github/workflows/ci.yml`) then runs on Linux as a clean-machine safety net. Windows and macOS are parked and get tested again when they're un-parked.
 9. Once the commit is on `origin/main`, QA ticks the acceptance criteria and review lines, posts one line ("Passed: <sha>."), removes the status label and closes the issue. Only QA closes issues.
-10. After closing, QA deletes the issue's CI refs: list them with `git ls-remote --heads origin 'refs/heads/ci/issue-N-*'`, then `git push origin --delete <ref>` for each. Deleting is the only change ever made to a `ci/` ref.
 
 ## Bugs
+- A failing CI run on `main`: new `bug` issue right away, naming the run and sha.
 - Found while the feature issue is open: comment on that issue and flip it to `in-progress`.
 - Found in a closed feature or existing code: new issue with the `bug` label.
 

@@ -30,14 +30,17 @@ test('every workflow action is pinned to a full commit SHA, and an action uses o
   assert.ok(pins.size > 0, 'workflows were found and read');
 });
 
-test('CI runs candidate refs on every platform with read-only permissions and no secrets', async () => {
+test('CI runs on pushes to main, on Linux, with read-only permissions and no secrets', async () => {
   const source = await readFile(path.join(directory, 'ci.yml'), 'utf8');
-  assert.match(source, /^on:\n  push:\n    branches:\n      - 'ci\/\*\*'\n  workflow_dispatch:\n\n(?=\S)/m, 'CI triggers only on ci/** pushes and dispatch');
+  assert.match(source, /^on:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n\n(?=\S)/m, 'CI triggers only on pushes to main and dispatch');
+  assert.doesNotMatch(source, /ci\/\*\*/, 'candidate ci/** refs no longer trigger CI');
   assert.match(source, /^permissions:\n  contents: read\n\n/m);
   assert.equal([...source.matchAll(/^\s*permissions:/gm)].length, 1, 'no job widens permissions');
   assert.doesNotMatch(source, /secrets\.|pull_request_target/);
   assert.match(source, /fail-fast: false/);
-  assert.match(source, /os: \[ubuntu-latest, windows-latest, macos-latest\]/);
+  // Linux only while Windows and macOS are parked (D074); the matrix stays so they come back with one line.
+  assert.equal([...source.matchAll(/^\s*os: \[(.*)\]$/gm)].map(match => match[1]).join(), 'ubuntu-latest', 'CI matrix is Linux only');
+  assert.match(source, /runs-on: \$\{\{ matrix\.os \}\}/);
   for (const command of ['npm ci', 'node tools/dotnet.mjs restore VibeMiner.slnx --locked-mode', 'npm run build', 'npm run test:e2e']) {
     assert.ok(source.includes(command), `CI runs ${command}`);
   }

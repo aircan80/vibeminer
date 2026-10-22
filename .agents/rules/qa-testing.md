@@ -19,7 +19,7 @@ Read: [workflow](workflow.md), [docs/TESTING.md](../../docs/TESTING.md).
 
 ## Test
 - Each acceptance criterion, plus the checks listed in [TESTING.md](../../docs/TESTING.md).
-- The CI run for the exact sha: `gh run list --commit <sha> --workflow CI`, then `gh run view <id>`. Every job passes, or each failure matches an open bug issue you name in the verdict. An unexplained failure or a missing run is a fail.
+- In the clean worktree at the exact sha: `npm ci`, `npm run build`, `npm test` and `npm run test:e2e`. This run is the gate; any failure is a fail. GitHub CI only runs after the push to `main`.
 - Check whichever of these apply:
   - cancel mid-download and mid-parse
   - reopen offline
@@ -37,9 +37,10 @@ Read: [workflow](workflow.md), [docs/TESTING.md](../../docs/TESTING.md).
 - Fail: one issue comment with steps, expected and actual. Flip the issue to `in-progress`.
 - Pass: `QA pass at <sha>.`
 - Close: after the commit is on `origin/main`, tick the criteria and review lines, comment `Passed: <sha>.`, remove the status label, close.
-- After closing, delete the issue's `ci/issue-N-*` refs on origin (workflow step 10). Never push, rewrite or force-push any other ref.
 
 ## Don't
 - Fix code.
+- Push, rewrite or delete any ref.
+- Wait on GitHub CI. A failing run on `main` gets its own `bug` issue (workflow, Bugs).
 - Write report files.
 - Close an issue whose merged commit differs from the one you tested.

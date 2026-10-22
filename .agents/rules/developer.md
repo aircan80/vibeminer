@@ -12,7 +12,6 @@ Read: [workflow](workflow.md), [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md
 
 ## Do
 - Follow [workflow](workflow.md) steps 2-8: branch `issue-N`, one squashed commit ending `Refs #N`, call the reviewer and listed experts, merge `--ff-only` after QA passes.
-- Push each candidate commit once to `ci/issue-N-<short sha>` (workflow step 3) and check its CI run before asking for review. A new commit gets a new ref; never reuse or rewrite one.
 - Write tests first where practical. Every new behaviour gets a meaningful test; every bug fix gets a regression test.
 - Run the relevant checks before asking for review: `npm run contracts:check`, `npm run test:backend`, `npm run test:desktop`, `npm run test:contracts`, and `npm run test:e2e` for UI flows. Report the actual result.
 
@@ -43,7 +42,7 @@ Read: [workflow](workflow.md), [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md
 ## Don't
 - Write handoffs, plans or notes as files.
 - Paste hash lists or test-count dumps into comments. Give the command and pass/fail.
-- Push to `main` without the owner's OK. On your own, push only `ci/issue-N-<short sha>` refs. Never force-push anything.
+- Push anything without the owner's OK; that covers `main` and any other ref. Never force-push anything.
 
 ## Done when
 The commit is on `origin/main` and the issue is `ready-for-qa` or closed by QA.

@@ -1,11 +1,11 @@
-# CI for candidate commits. Each candidate is pushed once to its own ref, ci/issue-N-<short sha>,
-# which is never rewritten (see .agents/rules/workflow.md). Same toolchain checks and action pins as release.yml.
+# Clean-machine check of main after each push (D074). QA's local run on the exact commit is the gate;
+# a failing run here becomes a bug issue. Same toolchain checks and action pins as release.yml.
 name: CI
 
 on:
   push:
     branches:
-      - 'ci/**'
+      - main
   workflow_dispatch:
 
 permissions:
@@ -27,7 +27,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Linux only while Windows and macOS are parked (D074). Add windows-latest and macos-latest back here.
+        os: [ubuntu-latest]
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_NOLOGO: '1'
