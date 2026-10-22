@@ -176,6 +176,8 @@ Product registry ([Discovery.cs](../src/backend/VibeMiner.Domain/Discovery.cs)):
 
 Friendly labels are community names, not Blizzard-authenticated. Keep raw IDs visible.
 
+IDs run up to 19 bytes (`wow_classic_era_ptr`). Storage checks derive their bound from the longest listed ID ([D075](DECISIONS.md)); never hard-code a shorter one.
+
 Facts that break naive code:
 
 - **Versions and CDN tables do not line up.** `wow` advertises `sg` and `xx` version rows with no matching CDN row. `wowf` has a `cn` CDN row with no version row. A region needs exactly one matching CDN `Name` row to be routable; a missing route does not invalidate the advertisement, and you never fall back to US.

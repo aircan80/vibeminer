@@ -29,14 +29,14 @@ public sealed partial class DiscoveryCatalog
             SELECT o.region,o.build_id,o.cdns_ordinal,o.original_fields,o.route_fields,e.product,
                 CASE WHEN typeof(o.region)='text' AND length(CAST(o.region AS BLOB)) BETWEEN 2 AND 8
                     AND typeof(o.build_id)='text' AND length(CAST(o.build_id AS BLOB))=64
-                    AND typeof(e.product)='text' AND length(CAST(e.product AS BLOB)) BETWEEN 1 AND 16
+                    AND typeof(e.product)='text' AND length(CAST(e.product AS BLOB)) BETWEEN 1 AND $maxProduct
                     AND typeof(o.original_fields)='text' AND length(CAST(o.original_fields AS BLOB))<=131072
                     AND (o.route_fields IS NULL OR typeof(o.route_fields)='text' AND length(CAST(o.route_fields AS BLOB))<=131072)
                     AND typeof(o.cdn_config)='text' AND length(o.cdn_config)=32 AND o.cdn_config NOT GLOB '*[^0-9a-f]*'
                     THEN 1 ELSE 0 END,o.cdn_config
             FROM observations o JOIN events e ON e.generation=o.generation
             WHERE o.generation=$generation AND o.ordinal=$ordinal
-            """, null, ("$generation", generation), ("$ordinal", sourceReference.VersionsRowOrdinal)))
+            """, null, ("$generation", generation), ("$ordinal", sourceReference.VersionsRowOrdinal), ("$maxProduct", ProductRegistry.MaxIdBytes)))
         using (var reader = command.ExecuteReader())
         {
             if (!reader.Read()) throw PinnedError("SOURCE_REFERENCE_UNAVAILABLE", "The exact retained observation is unavailable.");

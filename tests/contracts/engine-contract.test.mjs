@@ -587,6 +587,14 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.ok(Array.isArray(products.result?.products));
   assert.ok(products.result.products.some(product => product.id === 'wow'));
   for (const product of products.result.products) validate('Product', product);
+  // Every listed product fits every productId bound in the wire schema (#42), and the authored catalog example lists
+  // exactly the registry, so desktop tests that check validators against that example cover every listed product.
+  const productPatterns = new Set(), collect = node => { if (Array.isArray(node)) node.forEach(collect); else if (node && typeof node === 'object') for (const [key, value] of Object.entries(node)) { if (key === 'productId' && typeof value?.pattern === 'string') productPatterns.add(value.pattern); collect(value); } };
+  collect(schema);
+  assert.ok(productPatterns.size > 0);
+  for (const { id } of products.result.products) for (const pattern of productPatterns) assert.match(id, new RegExp(pattern), `${id} fits ${pattern}`);
+  const catalogExample = JSON.parse(await readFile(path.join(root, 'contracts/examples/discovery-catalog-page.json'), 'utf8'));
+  assert.deepEqual(catalogExample.products.map(status => status.productId), products.result.products.map(product => product.id));
   const empty = await request('discovery.read', { productId: 'wow' });
   assert.ok(!empty.error, JSON.stringify(empty.error));
   validate('DiscoveryPage', empty.result);

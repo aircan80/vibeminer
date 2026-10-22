@@ -29,6 +29,12 @@ public static class ProductRegistry
         new Product("wowf", "Edition unconfirmed", "Reviewed product ID; edition unconfirmed"),
         new Product("wow_classic_titan", "Edition unconfirmed", "Reviewed product ID; edition unconfirmed") });
 
+    /// <summary>
+    /// UTF-8 byte length of the longest registered product ID. Storage and proof checks bound a saved product
+    /// to this so a listed product always fits; membership itself is checked by <see cref="Validate"/>.
+    /// </summary>
+    public static readonly int MaxIdBytes = Products.Max(p => Encoding.UTF8.GetByteCount(p.Id));
+
     public static void Validate(string product)
     {
         if (!Products.Any(p => p.Id == product))

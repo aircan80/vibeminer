@@ -120,7 +120,7 @@ public sealed partial class DiscoveryCatalog
     {
         if(items?.Opening?.Build is null||items.Opening.Reference is null||items.Opening.Versions is null||items.Opening.Cdns is null||items.Configurations is null)throw EffectsItemsInvalid();
         var opening=items.Opening;var build=opening.Build;var reference=opening.Reference;
-        if(!DownloadHash(build.Id,64)||!DownloadHash(build.BuildConfig,32)||!DownloadHash(build.CdnConfig,32)||build.ProductId is null||build.ProductId.Length is <1 or >32||
+        if(!DownloadHash(build.Id,64)||!DownloadHash(build.BuildConfig,32)||!DownloadHash(build.CdnConfig,32)||build.ProductId is null||build.ProductId.Length<1||build.ProductId.Length>ProductRegistry.MaxIdBytes||
             build.Version is null||build.Version.Length is <1 or >43||!DownloadHash(reference.VersionsSha256,64)||!DownloadHash(reference.CdnsSha256,64)||
             reference.Region is null||reference.Region.Length is <1 or >16||reference.VersionsRowOrdinal<0||reference.CdnsRowOrdinal<0||
             !long.TryParse(reference.Generation,NumberStyles.None,CultureInfo.InvariantCulture,out var generation)||generation<1||generation.ToString(CultureInfo.InvariantCulture)!=reference.Generation||
