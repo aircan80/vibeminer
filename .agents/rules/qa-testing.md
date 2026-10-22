@@ -12,10 +12,8 @@ Read: [workflow](workflow.md), [docs/TESTING.md](../../docs/TESTING.md).
 ## Setup (worktree, so development keeps going)
 1. `git worktree add .claude/worktrees/qa-N <sha>`. Keep only one QA worktree at a time.
 2. In the worktree:
-   - `mkdir -p .local`
-   - symlink the main checkout's `.local/toolchains` and `.local/electron-cache` into it
+   - `source tools/dev-env.sh` (it picks up the main checkout's toolchains and Electron cache)
    - `npm ci`
-   - `source tools/dev-env.sh`
 3. Every app or Electron run uses `VIBEMINER_DATA_DIR=<worktree>/.local/qa-data`. Never touch the owner's app profile.
 4. When done: `git worktree remove .claude/worktrees/qa-N`.
 

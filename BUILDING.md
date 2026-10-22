@@ -15,7 +15,7 @@ If you have local SDKs under the ignored `.local/toolchains/`, load them with:
 source tools/dev-env.sh
 ```
 
-That helper also puts temporary files and Electron's download cache under `.local/`, avoiding this machine's restricted `/tmp` quota. On another checkout, install the declared SDKs normally; local toolchains are optional and are not committed. Electron includes its own runtime for end users.
+That helper also puts temporary files and Electron's download cache under `.local/`, avoiding this machine's restricted `/tmp` quota. It works from any directory and is safe to source twice. In a git worktree without its own `.local/toolchains` (such as `.claude/worktrees/*`), it uses the main checkout's toolchains and Electron download cache, found through `git rev-parse --git-common-dir`; `TMPDIR` stays in the worktree's own `.local/tmp`. A `TMPDIR` or `electron_config_cache` you already set is kept. On another checkout, install the declared SDKs normally; local toolchains are optional and are not committed. Electron includes its own runtime for end users.
 
 ## Install, build and run
 
