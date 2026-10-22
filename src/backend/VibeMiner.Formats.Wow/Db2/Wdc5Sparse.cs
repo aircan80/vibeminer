@@ -53,6 +53,7 @@ public static partial class Wdc5TableReader
                     if(id!=mapId)throw Fail("INVALID","Sparse external IDs and map IDs disagree.");
                     if(size==0||offset!=next||size>section.RecordsEnd-next)throw Fail("INVALID","Sparse maps must exactly cover the record area with positive contiguous absolute spans.");
                     if(size>limits.MaxRecordBytes)throw Fail("LIMIT","A sparse variable record exceeds its byte bound.");
+                    if(encryptedIds.Contains(id))throw Fail("INVALID","A sparse readable record repeats an encrypted-section identity.");
                     if(!locations.TryAdd(id,new(offset,size,sectionIndex,index,id)))throw Fail("INVALID","Sparse readable records repeat an identity.");
                     next+=size;
                 }
@@ -62,6 +63,7 @@ public static partial class Wdc5TableReader
             await ForRecords(decoded,tail.Copies,section.Copies,8,(row,_)=>
             {
                 var target=BinaryPrimitives.ReadUInt32LittleEndian(row);var source=BinaryPrimitives.ReadUInt32LittleEndian(row[4..]);
+                if(encryptedIds.Contains(target))throw Fail("INVALID","A sparse readable copy target repeats an encrypted-section identity.");
                 if(!copies.TryAdd(target,source))throw Fail("INVALID","Sparse copies repeat a target identity.");
             },token);
         }

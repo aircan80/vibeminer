@@ -117,6 +117,22 @@ public sealed class Wdc5TableReaderTests
         Assert.Equal(new Wdc5Completion(3,1,1,1,2,1,"unencryptedSections",bytes.Length),completion);Assert.Equal([7u,8u],sink.Rows.Select(row=>row.Id));
     }
 
+    [Theory]
+    [InlineData("readable")][InlineData("copy")][InlineData("sections")][InlineData("sameList")]
+    public async Task Encrypted_section_IDs_never_repeat_a_readable_row_copy_target_or_another_protected_ID(string kind)
+    {
+        // Regression for #49: Follow and reference text treat an ID match in a partial table as unique.
+        var definition=Definition("int ID\nint Value","$noninline,id$ID<u32>\nValue<u32>");var columns=new[]{new Column(0,0,0,32,0,0,0,0,0,[])};
+        byte[] Fixture(uint[] first,uint[] second)=>Build(columns,4,[new(U32(99),[7],[],[(8,7)]),new(new byte[8],[0,0],[],[],123,first),new(new byte[4],[0],[],[],456,second)]);
+        var clean=Fixture([21,22],[23]);var sink=new Sink();
+        Assert.Equal(new Wdc5Completion(4,1,1,2,3,0,"unencryptedSections",clean.Length),await Read(new AsyncInput(clean),definition,sink,new(AllowPartialEncryptedSections:true)));
+        Assert.Equal([7u,8u],sink.Rows.Select(row=>row.Id));
+        var bytes=kind switch{"readable"=>Fixture([21,22],[7]),"copy"=>Fixture([21,22],[8]),"sections"=>Fixture([21,22],[22]),_=>Fixture([21,21],[23])};sink=new Sink();
+        Assert.Equal("DB2_INVALID",(await Assert.ThrowsAsync<DiscoveryException>(()=>Read(new AsyncInput(bytes),definition,sink,new(AllowPartialEncryptedSections:true)))).Code);
+        Assert.Null(sink.Header);Assert.Empty(sink.Rows);
+        Assert.Equal("DB2_ENCRYPTED",(await Assert.ThrowsAsync<DiscoveryException>(()=>Read(new AsyncInput(bytes),definition,new Sink()))).Code);
+    }
+
     [Fact]
     public async Task Every_missing_source_byte_and_trailing_byte_fails_complete_geometry()
     {

@@ -153,6 +153,20 @@ public sealed class Wdc5SparseTests
         using var strict=Projection(fixture,1);Assert.Equal("DB2_ENCRYPTED",(await Assert.ThrowsAsync<DiscoveryException>(()=>Read(strict,new Sink()))).Code);
     }
 
+    [Theory]
+    [InlineData("readable")][InlineData("copy")][InlineData("sections")]
+    public async Task Sparse_encrypted_IDs_never_repeat_a_readable_identity_copy_target_or_another_protected_ID(string kind)
+    {
+        // Regression for #49, on the profile Retail ItemSparse uses.
+        Fixture Two(uint[] second)=>Build([new([Record("clear")],[7],[(8,7)]),new([Record("one")],[21],[],123,[21]),new([Record("two")],[30],[],456,second)]);
+        var clean=Two([30]);var sink=new Sink();
+        Assert.Equal(new Wdc5Completion(3,1,1,2,2,0,"unencryptedSections",clean.Bytes.Length),await Read(new AsyncSource(clean.Bytes),sink,new(AllowPartialEncryptedSections:true)));
+        Assert.Equal([7u,8u],sink.Rows.Select(row=>row.Id));
+        var fixture=Two(kind switch{"readable"=>[7],"copy"=>[8],_=>[21]});sink=new Sink();
+        Assert.Equal("DB2_INVALID",(await Assert.ThrowsAsync<DiscoveryException>(()=>Read(new AsyncSource(fixture.Bytes),sink,new(AllowPartialEncryptedSections:true)))).Code);
+        Assert.Null(sink.Header);Assert.Empty(sink.Rows);
+    }
+
     [Fact]
     public async Task Every_ordinary_body_and_suffix_byte_is_required_before_callbacks_even_for_sparse_sources()
     {

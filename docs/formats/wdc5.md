@@ -106,7 +106,7 @@ For Charges, half the pallet values are canonical signed16 extensions and half a
 ## IDs and copies
 
 - External IDs (flag `0x4`) come from the section's ID list. Otherwise the ID is read from the inline ID field. IDs are never repaired from ordinals or minimum ID, and ID 0 is real data.
-- Readable physical IDs must be unique. Copy targets must be unique and must not overlap physical IDs.
+- Readable physical IDs must be unique. Copy targets must be unique and must not overlap physical IDs. Neither may repeat an encrypted-section ID (see [Keyed sections](#keyed-encrypted-sections)).
 - Copy table entries are 8 bytes: target ID, source ID. Chains resolve to a physical row, up to depth 64; cycles fail. A copy whose chain ends at a keyed-section ID is excluded and counted. Any other unresolved source is an error.
 - Copies are re-decoded with the copy's own ID, because Common values depend on the record ID.
 
@@ -148,6 +148,7 @@ A nonzero section key declares a keyed section. Without `AllowPartialEncryptedSe
 - The header, descriptors, pallet/common data, every encrypted-ID list, ordinary sections, relationship blocks and gaps must all be readable.
 - Each BLTE hole must lie wholly inside one keyed section body. A hole anywhere else fails before the first callback.
 - Partial rows never prove a row is absent from the table or that a target is unique.
+- Encrypted-ID lists are clear, so they are checked: an ID may appear once across all lists (within one list too), and never as a readable physical ID or readable copy target. Otherwise `DB2_INVALID` before the header callback. Follow and reference text treat an ID match in a partial table as the one record with that ID; a file where a hidden record shares a readable ID would make that match wrong without anyone seeing it. The check reuses the encrypted-ID set the reader already builds and charges (64 B per ID against the index budget) and adds one lookup per readable ID and copy target, so no new allocation. The reader revision stays `wdc5-values-v7`: this only refuses files that were never valid. Retail 12.1.5.70448 ItemSparse (48 keyed sections) and Item (49) have no such overlap and still open.
 
 A verified source receipt does not mean a complete table: a fully decoded file can still declare keyed sections, and a projection never verifies the full CKey.
 

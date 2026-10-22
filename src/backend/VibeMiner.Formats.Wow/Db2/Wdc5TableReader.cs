@@ -109,7 +109,13 @@ public static partial class Wdc5TableReader
             var size=await ReadAt(decoded,prefixEnd,4,token);var count=Count(BinaryPrimitives.ReadUInt32LittleEndian(size),limits.MaxRows,"encrypted ID count");prefixEnd+=4;
             charged=checked(charged+count*64L);if(charged>limits.MaxIndexBytes)throw Fail("LIMIT","Encrypted-ID metadata exceeds its working-memory bound.");
             var bytes=await ReadAt(decoded,prefixEnd,checked(count*4),token);prefixEnd+=count*4L;
-            for(var i=0;i<count;i++){token.ThrowIfCancellationRequested();encryptedIds.Add(BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i*4,4)));}
+            // Partial rows are joined by record ID, so a protected ID must name exactly one record:
+            // never twice across (or within) encrypted lists, never as a readable row or copy below.
+            for(var i=0;i<count;i++)
+            {
+                token.ThrowIfCancellationRequested();
+                if(!encryptedIds.Add(BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i*4,4))))throw Fail("INVALID","Encrypted-section ID lists repeat a record ID.");
+            }
         }
         var endOfFile=prefixEnd;
         var populated=sections.Where(section=>section.End>section.Offset).OrderBy(section=>section.Offset).ToArray();
@@ -135,6 +141,7 @@ public static partial class Wdc5TableReader
             void Add(uint id,int row)
             {
                 var location=new Location(section.Offset+row*(long)recordSize,sectionIndex,checked((int)(global+row)),row,id);
+                if(encryptedIds.Contains(id))throw Fail("INVALID","A readable physical row repeats an encrypted-section record ID.");
                 if(!locations.TryAdd(id,location))throw Fail("INVALID","Readable physical rows repeat a record ID.");
             }
             if((flags&4)!=0)
@@ -152,6 +159,7 @@ public static partial class Wdc5TableReader
             await ForRecords(decoded,tail.Copies,section.Copies,8,(row,_)=>
             {
                 var target=BinaryPrimitives.ReadUInt32LittleEndian(row);var source=BinaryPrimitives.ReadUInt32LittleEndian(row[4..]);
+                if(encryptedIds.Contains(target))throw Fail("INVALID","A readable copy target repeats an encrypted-section record ID.");
                 if(!copyMap.TryAdd(target,source))throw Fail("INVALID","Copy declarations repeat a target ID.");
             },token);
             global+=section.Count;
