@@ -204,6 +204,7 @@ export interface DiscoveryContract {
   tableDataReadiness: TableDataReadiness;
   tableDataPage: TableDataPage;
   tableReferenceTextPage?: TableReferenceTextPage;
+  tableFollowPage?: TableFollowPage;
   retentionTarget: RetentionTarget;
   retentionSnapshot: RetentionSnapshot;
   retentionList: RetentionList;
@@ -466,6 +467,7 @@ export interface EngineRequest1 {
     | 'tables.data'
     | 'tables.rows'
     | 'tables.referenceText'
+    | 'tables.follow'
     | 'retention.read'
     | 'retention.list'
     | 'retention.set'
@@ -1215,6 +1217,33 @@ export interface TableReferenceTextRow {
   id: string;
   isCopy: boolean;
   copySourceId: string | null;
+}
+export interface TableFollowPage {
+  productId: string;
+  buildIdentity: string;
+  sourceRegion: string;
+  researchLocale: 'enUS';
+  policyRevision: 'table-follow-v1';
+  tableId: string;
+  artifactId: string;
+  columnIndex: number;
+  column: string;
+  value: string;
+  reference: TableReference;
+  targetTableId: string;
+  targetArtifactId: string;
+  targetColumnIndex: number | null;
+  targetIsId: boolean;
+  targetRange: TableFollowRange | null;
+  scope: 'complete' | 'unencryptedSections';
+  state: 'ready' | 'keyOutOfRange' | 'unindexed' | 'unsupported';
+  after: string;
+  page: TableDataPage | null;
+  problem: TableReferenceTextProblem | null;
+}
+export interface TableFollowRange {
+  minimum: string;
+  maximum: string;
 }
 export interface RetentionTarget {
   productId: string;

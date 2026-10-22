@@ -3,19 +3,22 @@ import type {SourceRecordRequest} from './useItemSourceNavigation';
 import { isPartialSource } from '../shared/table-data';
 import { TableDataView, RecordInspector, rawPhysicalType, candidateIntegerHint, type AdmittedRecord } from './TableDataView';
 import { useTableLoading, type TableLoading } from './useTableLoading';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { isFileDataReference, type DataPosition, type FileTarget, type FollowFilter, type FollowTarget } from './table-follow-view';
+import { validRecordId } from '../shared/table-data';
 import { createPortal } from 'react-dom';
-import type { TableCatalogEntry, TableCatalogPage, TableDefinitionField, TableDefinitionProvider, TableDefinitionSnapshot, TableDataSnapshot, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
+import type { TableCatalogEntry, TableCatalogPage, TableDefinitionField, TableDefinitionProvider, TableDefinitionSnapshot, TableDataSnapshot, TableReference, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
 import { fieldType, tableCatalogMatches, tableDefinitionMatches, type TablesCatalogParams } from '../shared/tables';
 import { exactCount } from '../shared/inventory';
 
 type Tab = 'data' | 'structure' | 'relations';
-type View = { snapshot: TableDefinitionSnapshot; field: string | null; layout: string | null; tab: Tab; target: string | null; returnToRelation?: boolean; sourceRecord?:SourceRecordRequest };
+// One trail entry. A Follow (#19) adds its filter; position is where its Data view was, so Back and Forward put it back.
+type View = { id: number; snapshot: TableDefinitionSnapshot; field: string | null; layout: string | null; tab: Tab; target: string | null; sourceRecord?:SourceRecordRequest; follow?: FollowFilter; position?: DataPosition };
 type Failure = { code: string; message: string; retryable: boolean };
 const title = (entry: TableCatalogEntry) => entry.name ?? `Unnamed table · ${entry.tableId}`;
 const named = (field: TableDefinitionField) => `${field.name}${field.verifiedName ? '' : ' ?'}`;
-export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceRecord, onReturnToItems }: { snapshot: WorkspaceSnapshot; bridge: DiscoveryBridge; active: boolean; tableLoading?: TableLoading; sourceRecord?:SourceRecordRequest|null; onReturnToItems?:()=>void }) {
+export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceRecord, onReturnToItems, onOpenFile }: { snapshot: WorkspaceSnapshot; bridge: DiscoveryBridge; active: boolean; tableLoading?: TableLoading; sourceRecord?:SourceRecordRequest|null; onReturnToItems?:()=>void; onOpenFile?:(target:Omit<FileTarget,'seq'>)=>void }) {
   const container=useRef<HTMLElement>(null),covered=useCoveredSide(),{compact,statusSlot}=useShell();
   // At enlarged text one pane shows at a time (docs/design/desktop-home). Picking or following a table shows Records.
   const [tablePane,setTablePane]=useState<'catalog'|'records'|'inspector'>('catalog'),[filterSlot,setFilterSlot]=useState<HTMLElement|null>(null),[footSlot,setFootSlot]=useState<HTMLElement|null>(null),[inspectorFoot,setInspectorFoot]=useState<HTMLElement|null>(null),[inspectorDetails,setInspectorDetails]=useState<HTMLElement|null>(null),[headingSlot,setHeadingSlot]=useState<HTMLElement|null>(null);
@@ -31,6 +34,10 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
   const [catalogError, setCatalogError] = useState<Failure | null>(null), [definitionError, setDefinitionError] = useState<Failure | null>(null);
   const [cursor, setCursor] = useState<string | undefined>(), [pages, setPages] = useState<(string | undefined)[]>([]);
   const [trail, setTrail] = useState<View[]>([]), [position, setPosition] = useState(0), [notice, setNotice] = useState('');
+  const viewIds = useRef(0), fileOrigin = useRef<HTMLElement | null>(null), openFile = useRef(onOpenFile); openFile.current = onOpenFile;
+  // Follow by value needs the engine capability; older engines keep definition navigation only.
+  const [followCapable, setFollowCapable] = useState(!!bridge.tableFollow && !bridge.capabilities);
+  useEffect(() => { let live = true; void bridge.capabilities?.().then(reply => { if (live && reply.ok) setFollowCapable(!!bridge.tableFollow && reply.value.includes('tables-follow-v1')); }).catch(() => { /* Keep Follow off. */ }); return () => { live = false; }; }, [bridge]);
   const search = useRef<HTMLInputElement>(null), catalogRetry = useRef<HTMLButtonElement>(null), catalogFocus = useRef<HTMLElement | null>(null);
   const heading = useRef<HTMLHeadingElement>(null), tableHeading = useRef<HTMLHeadingElement>(null), inspector = useRef<HTMLElement>(null);
   const alive = useRef(true), activeNow = useRef(active), catalogSequence = useRef(0), definitionSequence = useRef(0);
@@ -39,13 +46,10 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
   useEffect(() => { if (!active) return; const key = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f' && !search.current?.closest('[inert]')) { event.preventDefault(); setTablePane('catalog'); requestAnimationFrame(() => search.current?.focus()); } }; document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key); }, [active]);
   type Movement = 'fresh' | 'next' | 'previous' | 'first';
   const lastCatalog = useRef<{ params: TablesCatalogParams; movement: Movement }>({ params: { ...context, query: '', limit: 50 }, movement: 'fresh' });
-  const focusIntent = useRef<{ kind: 'heading' | 'trail'; field?: string | null; relation?: boolean } | null>(null);
+  const focusIntent = useRef<{ kind: 'heading' } | null>(null);
   useLayoutEffect(() => {
     const intent = focusIntent.current; if (!intent || !activeNow.current) return; focusIntent.current = null;
-    if (intent.kind === 'heading') { tableHeading.current?.focus({ preventScroll: true }); return; }
-    const relation = intent.relation ? [...document.querySelectorAll<HTMLButtonElement>('.tables-explorer:not([hidden]) [data-relation-field]')].find(element => element.dataset.relationField === intent.field) : undefined;
-    const field = [...document.querySelectorAll<HTMLButtonElement>('.tables-explorer:not([hidden]) [data-field-name]')].find(element => element.dataset.fieldName === intent.field);
-    (relation ?? field ?? tableHeading.current)?.focus({ preventScroll: true });
+    tableHeading.current?.focus({ preventScroll: true });
   }, [trail, position]);
   const currentTrail = useRef(trail), currentPosition = useRef(position); currentTrail.current = trail; currentPosition.current = position;
   const view = trail[position];
@@ -66,6 +70,7 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
     if (active) {
       const op=flow.operation,explicit=flow.viewRequest>consumedDataFocus.current&&op&&op.definition.productId===context.productId&&op.definition.buildIdentity===context.buildIdentity&&op.definition.sourceRegion===context.sourceRegion;
       if(explicit)consumedDataFocus.current=flow.viewRequest;
+      else if (fileOrigin.current?.isConnected) { fileOrigin.current.focus({ preventScroll: true }); fileOrigin.current = null; }
       else (compactNow.current&&tablePaneNow.current!=='catalog'&&tableHeading.current?tableHeading.current:heading.current)?.focus({ preventScroll: true });
     }
     else { focusIntent.current = null; catalogSequence.current++; definitionSequence.current++; setCatalogBusy(false); setDefinitionBusy(false); }
@@ -100,8 +105,8 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
       if (!alive.current || !activeNow.current || generation !== definitionSequence.current) return;
       if (!reply.ok) { setDefinitionError(reply.error); return; }
       if (!tableDefinitionMatches(reply.value, params, snapshot.build.version, provider.current ?? undefined)) { setDefinitionError({ code: 'DEFINITION_CONTEXT_MISMATCH', message: 'This definition belongs to another build, table or provider. The previous selection is preserved.', retryable: false }); return; }
-      const next: View = { snapshot: reply.value, field: target, layout: reply.value.definition?.candidates.length === 1 ? reply.value.definition.candidates[0].layoutHash : null, tab: append ? 'structure' : preferredMode.current==='structure'||preferredMode.current==='relations' ? preferredMode.current : ['Item','ItemClass'].includes(entry.name??'') ? 'data' : 'structure', target };
-      const sourceTrail = currentTrail.current.slice(0, currentPosition.current + 1).map((value, index) => index === currentPosition.current && sourceField ? { ...value, field: sourceField, returnToRelation: true } : value);
+      const next: View = { id: ++viewIds.current, snapshot: reply.value, field: target, layout: reply.value.definition?.candidates.length === 1 ? reply.value.definition.candidates[0].layoutHash : null, tab: append ? 'structure' : preferredMode.current==='structure'||preferredMode.current==='relations' ? preferredMode.current : ['Item','ItemClass'].includes(entry.name??'') ? 'data' : 'structure', target };
+      const sourceTrail = currentTrail.current.slice(0, currentPosition.current + 1).map((value, index) => index === currentPosition.current && sourceField ? { ...value, field: sourceField } : value);
       const nextTrail = append ? [...sourceTrail, next] : [next];
       if (nextTrail.length > 64) setNotice('The definition trail keeps the most recent 64 entries. Earlier entries were dropped.');
       focusIntent.current = { kind: 'heading' }; setTablePane('records');
@@ -123,11 +128,33 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
     } catch { if (alive.current && generation === definitionSequence.current) setDefinitionError({ code: 'ENGINE_UNAVAILABLE', message: 'The target definition could not be read. The source selection is preserved.', retryable: true }); }
     finally { if (alive.current && generation === definitionSequence.current) setDefinitionBusy(false); }
   }
+  // Follow a declared reference by its exact value (#19): the target table's Data, filtered by the engine on the target column.
+  async function followValue(f: FollowFilter, origin: HTMLElement | null) {
+    const target = followTarget(f.reference);
+    if (target?.kind === 'files') { if (!validRecordId(f.value) || !openFile.current) return; fileOrigin.current = origin; openFile.current({ fileDataId: f.value, table: f.sourceTable, recordId: f.recordId }); return; }
+    if (target?.kind !== 'table') return;
+    const generation = ++definitionSequence.current; setDefinitionBusy(true); setDefinitionError(null); setNotice('');
+    try {
+      const params = { ...context, tableId: target.tableId }, reply = await bridge.tableDefinition(params);
+      if (!alive.current || !activeNow.current || generation !== definitionSequence.current) return;
+      if (!reply.ok) { setDefinitionError(reply.error); return; }
+      if (!tableDefinitionMatches(reply.value, params, snapshot.build.version, provider.current ?? undefined) || reply.value.entry.name !== f.reference.table) { setDefinitionError({ code: 'DEFINITION_CONTEXT_MISMATCH', message: `The ${f.reference.table} definition does not match this exact build, table or provider. The source record is preserved.`, retryable: false }); return; }
+      const next: View = { id: ++viewIds.current, snapshot: reply.value, field: f.reference.column, layout: reply.value.definition?.candidates.length === 1 ? reply.value.definition.candidates[0].layoutHash : null, tab: 'data', target: null, follow: f };
+      const at = currentPosition.current, sourceTrail = currentTrail.current.slice(0, at + 1).map((value, index) => index === at ? { ...value, field: f.column.replace(/\[\d+\]$/, '') } : value);
+      const nextTrail = [...sourceTrail, next];
+      if (nextTrail.length > 64) setNotice('The trail keeps the most recent 64 entries. Earlier entries were dropped.');
+      focusIntent.current = { kind: 'heading' }; setTablePane('records');
+      setTrail(nextTrail.slice(-64)); setPosition(Math.min(nextTrail.length, 64) - 1);
+    } catch { if (alive.current && generation === definitionSequence.current) setDefinitionError({ code: 'ENGINE_UNAVAILABLE', message: 'The target definition could not be read. The source record is preserved.', retryable: true }); }
+    finally { if (alive.current && generation === definitionSequence.current) setDefinitionBusy(false); }
+  }
+  const savePosition = (id: number, value: DataPosition) => setTrail(previous => previous.some(v => v.id === id) ? previous.map(v => v.id === id ? { ...v, position: value } : v) : previous);
+  const clearFollow = (id: number) => setTrail(previous => previous.map(v => v.id === id ? { ...v, follow: undefined, position: undefined } : v));
   function update(changes: Partial<View>) { setTrail(previous => previous.map((value, index) => index === position ? { ...value, ...changes } : value)); }
   function navigate(next: number) {
     definitionSequence.current++; setDefinitionBusy(false); setDefinitionError(null); setPosition(next);
-    const destination = trail[next];
-    focusIntent.current = { kind: 'trail', field: destination?.field, relation: destination?.returnToRelation };
+    // ←, → and a crumb keep focus on themselves (docs/design/desktop-home); the destination's content isn't focused.
+    focusIntent.current = null;
     setTrail(previous => [...previous]);
   }
   useEffect(() => {
@@ -139,7 +166,7 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
     const value=flow.operation.definition;
     definitionSequence.current++; setDefinitionBusy(false); setDefinitionError(null);
     dataFocus.current=flow.viewRequest;if(activeNow.current)consumedDataFocus.current=flow.viewRequest;setTablePane('records');
-    setTrail(previous => { const index=previous.findIndex(x=>x.snapshot.entry.tableId===value.entry.tableId); if(index>=0){setPosition(index);return previous.map((v,i)=>i===index?{...v,tab:'data'}:v);}setPosition(0);return [{snapshot:value,field:null,layout:value.definition?.candidates.length===1?value.definition.candidates[0].layoutHash:null,tab:'data',target:null}]; });
+    setTrail(previous => { const index=previous.findIndex(x=>x.snapshot.entry.tableId===value.entry.tableId); if(index>=0){setPosition(index);return previous.map((v,i)=>i===index?{...v,tab:'data'}:v);}setPosition(0);return [{id:++viewIds.current,snapshot:value,field:null,layout:value.definition?.candidates.length===1?value.definition.candidates[0].layoutHash:null,tab:'data',target:null}]; });
   }, [flow.viewRequest]);
   const routed=useRef(0);
   useEffect(()=>{
@@ -151,7 +178,7 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
       if(!alive.current||!activeNow.current||generation!==definitionSequence.current)return;
       if(!reply.ok){setDefinitionError(reply.error);return;}
       if(!tableDefinitionMatches(reply.value,params,snapshot.build.version,provider.current??undefined)){setDefinitionError({code:'DEFINITION_CONTEXT_MISMATCH',message:'The exact item source definition could not be matched. Return to Items; its selection is preserved.',retryable:false});return;}
-      const next:View={snapshot:reply.value,field:null,layout:source.layoutHash,tab:'data',target:null,sourceRecord};setTablePane('records');
+      const next:View={id:++viewIds.current,snapshot:reply.value,field:null,layout:source.layoutHash,tab:'data',target:null,sourceRecord};setTablePane('records');
       setTrail(previous=>{const nextTrail=[...previous.slice(0,currentPosition.current+1),next].slice(-64);setPosition(nextTrail.length-1);return nextTrail;});
       setDataViews(previous=>[...previous.filter(value=>value.entry.tableId!==source.tableId).slice(-7),reply.value]);
     }).catch(()=>{if(alive.current&&generation===definitionSequence.current)setDefinitionError({code:'ENGINE_UNAVAILABLE',message:'The exact source definition could not be read. Return to Items; its selection is preserved.',retryable:true});}).finally(()=>{if(alive.current&&generation===definitionSequence.current)setDefinitionBusy(false);});
@@ -177,7 +204,8 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
   const inspectorPane = recordShown ? 'Selected record' : 'Inspector';
   const referenced = [...new Set(fields.filter(field => field.reference).map(field => field.reference!.table))].slice(0, 32);
   useEffect(() => {
-    if (!active || !view || (view.tab !== 'relations' && !selected?.reference)) return;
+    // On Data only once records are admitted: reference cells exist only then.
+    if (!active || !view || (view.tab === 'structure' && !selected?.reference) || (view.tab === 'data' && !admission)) return;
     const names = referenced.filter(name => !(name in targets)); if (!names.length) return;
     const generation = ++targetSequence.current;
     void (async () => { for (const name of names) {
@@ -186,7 +214,17 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
       const value: Target = found.kind === 'found' ? { state: found.entry.definitionState, entry: found.entry } : found.kind === 'absent' ? { state: 'missing' } : { state: 'unknown' };
       setTargets(previous => ({ ...previous, [name]: value }));
     } })();
-  }, [active, view?.snapshot, view?.tab, selected?.name, referenced.join('|')]);
+  }, [active, view?.snapshot, view?.tab, selected?.name, referenced.join('|'), !!admission]);
+  const filesAvailable = !!onOpenFile;
+  const followTarget = useMemo(() => (r: TableReference): FollowTarget | undefined => {
+    if (isFileDataReference(r)) return filesAvailable ? { kind: 'files' } : { kind: 'none', reason: 'FileDataID · Files can’t be opened from here.' };
+    const t = targets[r.table];
+    if (!t) return { kind: 'checking' };
+    if (t.state === 'bundled' && t.entry) return followCapable ? { kind: 'table', tableId: t.entry.tableId } : { kind: 'none', reason: 'This engine can’t follow references by value.' };
+    if (t.state === 'notBundled') return { kind: 'none', reason: `${r.table} definition not bundled, can’t follow.` };
+    if (t.state === 'missing') return { kind: 'none', reason: `The provider lists no ${r.table} table, so it can’t be followed.` };
+    return { kind: 'none', reason: `The ${r.table} definition couldn’t be identified, so it can’t be followed.` };
+  }, [targets, followCapable, filesAvailable]);
   function relationAction(field: TableDefinitionField, before?: () => void) {
     const reference = field.reference!, target = targets[reference.table];
     if (target?.state === 'notBundled') return <span className="dh-reason">Can’t follow: no bundled definition</span>;
@@ -233,7 +271,7 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
         {!fields.some(field => field.reference) && <p className="dh-reason">No relationships are declared in the displayed field set. Plain arrays and similar names do not create an edge.</p>}
         <div className="dh-label">Incoming</div><p className="dh-reason">Not available. The definition contract returns only {tableName}’s own declarations, so references from other tables to {tableName} aren’t listed.</p>
         <div className="dh-label">No declared reference</div><p className="dh-reason">{fields.filter(field => !field.reference && !field.isId).map(field => field.name).join(', ') || 'None'}. These stay plain values; a matching number never creates a link.</p></div>}
-      {dataViews.map(value => <TableDataView key={value.entry.tableId} definition={value} bridge={bridge} flow={flow} active={active && view?.tab === 'data' && view.snapshot.entry.tableId === value.entry.tableId} focusRequest={dataFocus.current} sourceRecord={view?.sourceRecord?.snapshot.tableId === value.entry.tableId ? view.sourceRecord : undefined} onRecord={setRecord} filterSlot={filterSlot} footSlot={footSlot} inspectorFoot={inspectorFoot} inspectorDetails={inspectorDetails} headingSlot={compact && view?.tab === 'data' ? headingSlot : null} onAdmission={value => setAdmissions(previous => ({ ...Object.fromEntries(Object.entries(previous).slice(-7)), [value.tableId]: value }))}/>)}
+      {dataViews.map(value => <TableDataView key={value.entry.tableId} definition={value} bridge={bridge} flow={flow} active={active && view?.tab === 'data' && view.snapshot.entry.tableId === value.entry.tableId} focusRequest={dataFocus.current} sourceRecord={view?.sourceRecord?.snapshot.tableId === value.entry.tableId ? view.sourceRecord : undefined} onRecord={setRecord} filterSlot={filterSlot} footSlot={footSlot} inspectorFoot={inspectorFoot} inspectorDetails={inspectorDetails} headingSlot={compact && view?.tab === 'data' ? headingSlot : null} onAdmission={value => setAdmissions(previous => ({ ...Object.fromEntries(Object.entries(previous).slice(-7)), [value.tableId]: value }))} entry={view?.snapshot.entry.tableId === value.entry.tableId ? { id: view.id, follow: view.follow, position: view.position } : undefined} onPosition={savePosition} followTarget={followTarget} onFollow={(f, origin) => void followValue(f, origin)} onClearFollow={clearFollow}/>)}
       <div className="dh-pane-foot"><div className="dh-foot-slot" ref={setFootSlot} hidden={view?.tab !== 'data'}/>{view && view.tab !== 'data' && provided && <><span>Definitions: {provided.name} · revision <span className="dh-mono">{provided.revision.slice(0, 7)}</span> · {provided.license}</span><span className="dh-spacer"/><span>Not SQL: no UNIQUE, NOT NULL or CASCADE is implied</span></>}{!view && <span>Definitions: WoWDBDefs contributors. Provider metadata does not prove file presence, readable rows or gameplay meaning.</span>}</div>
     </section>
     <aside ref={inspector} className="dh-inspector" aria-labelledby="table-inspector-heading" inert={covered}>{recordShown ? <RecordInspector record={visibleRecord!}>{source}</RecordInspector> : <><div className="dh-insp-head"><div className="dh-label">{selected ? 'Field inspector' : 'Definition inspector'}</div><h2 id="table-inspector-heading" tabIndex={-1}>{selected ? `${tableName}.${named(selected)}` : 'Source & interpretation'}</h2>{selected && <p>{fieldType(selected)} · {declaredWidth(selected)}</p>}</div>

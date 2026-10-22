@@ -46,6 +46,7 @@ const effectsEnabled=!!process.env.VIBEMINER_FIXTURE_EFFECTS,effectsAdmissions=n
 const effectsMode=()=>existsSync(path.join(directory,'effects-scenario.json'))?JSON.parse(readFileSync(path.join(directory,'effects-scenario.json'),'utf8')).scenario:'ready';
 const itemsEnabled=process.env.VIBEMINER_FIXTURE_ITEMS==='1', itemsAdmissions=new Map();
 const referenceTextEnabled=process.env.VIBEMINER_FIXTURE_REFERENCE_TEXT==='1';
+const followEnabled=process.env.VIBEMINER_FIXTURE_FOLLOW==='1';
 // The authored generic rows every prepared fixture table returns (tables.rows default branch).
 function genericRows(snapshot){const all=Array.from({length:60},(_,index)=>({id:String(index),isCopy:false,copySourceId:null,values:snapshot.columns.map((column,i)=>column.interpretation?'3011920367':column.isId?String(index):column.family==='string'?`Authored clear value ${index}`:column.family==='float'?'1.25':String(index+i+1))}));if(snapshot.textIssueCount==='1'){const columnIndex=snapshot.columns.findIndex(column=>column.family==='string'&&!column.isId);all[7].values[columnIndex]='';all[7].textIssues=[{columnIndex,code:'DB2_TEXT_ENCODING_INVALID',rawBytesHex:existsSync(path.join(directory,'table-long-text-issue'))?'ff'.repeat(65535):'c328'}];}return all;}
 const retentionEnabled=process.env.VIBEMINER_FIXTURE_RETENTION==='1';
@@ -144,7 +145,7 @@ function settingsSnapshot() {
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1', 'inventory-files-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1', 'inventory-files-v1',...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
   if(creaturesEnabled&&method.startsWith('creatures.')){
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
     if(!opened.has(key))return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
@@ -218,6 +219,25 @@ async function dispatch(request) {
     shutdown.abort();
     for (const controller of active.values()) controller.abort();
     reply(id, { stopping: true }); process.stdin.destroy(); return;
+  }
+  if (method === 'tables.follow') {
+    // Authored follow over the generic rows: the target rows whose declared column equals the value (contracts/table-follow-v1.md).
+    const contextKey=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`, source=tableData.get(`${contextKey}|${params.tableId}|${params.researchLocale}`), target=tableData.get(`${contextKey}|${params.targetTableId}|${params.researchLocale}`);
+    if (!followEnabled) return fail(id,'TABLE_FOLLOW_UNAVAILABLE','Following references is unavailable.');
+    if (!opened.has(contextKey)) return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
+    if (!source||source.artifactId!==params.artifactId) return fail(id,'TABLE_ARTIFACT_STALE','This exact admitted artifact is unavailable.');
+    const column=source.columns[params.columnIndex]; if (!column?.reference) return fail(id,'TABLE_FOLLOW_NOT_DECLARED','This column declares no reference.');
+    if (tableEntries.find(entry=>entry.tableId===params.targetTableId)?.name!==column.reference.table) return fail(id,'TABLE_FOLLOW_TARGET_MISMATCH','Not the declared table.');
+    if (!target) return fail(id,'TABLE_NOT_PREPARED','Load the target table first.');
+    if (target.artifactId!==params.targetArtifactId) return fail(id,'TABLE_ARTIFACT_STALE','The target rows changed.');
+    const controller=new AbortController();active.set(id,controller);
+    try{if(existsSync(path.join(directory,'hold-follow')))await waitForRelease('release-follow',controller.signal);}catch{return fail(id,'CANCELED','Authored follow stopped.');}finally{active.delete(id);}
+    const index=target.columns.findIndex(c=>c.name===column.reference.column),isId=target.columns[index]?.isId===true,range=isId?{minimum:'0',maximum:'4294967295'}:column.reference.column==='ClassID'?{minimum:'-128',maximum:'127'}:null;
+    const base={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:'enUS',policyRevision:'table-follow-v1',tableId:params.tableId,artifactId:params.artifactId,columnIndex:params.columnIndex,column:column.name,value:params.value,reference:column.reference,targetTableId:params.targetTableId,targetArtifactId:params.targetArtifactId,targetColumnIndex:index<0?null:index,targetIsId:isId,targetRange:index<0?null:range,scope:target.coverage.scope,after:params.after??'0',problem:null};
+    if (index<0) return reply(id,{...base,state:'unsupported',page:null,problem:{code:'TABLE_FOLLOW_LAYOUT',message:'No exact integer column to match.'}});
+    if (range&&(BigInt(params.value)<BigInt(range.minimum)||BigInt(params.value)>BigInt(range.maximum))) return reply(id,{...base,state:'keyOutOfRange',page:null});
+    const all=genericRows(target).filter(row=>isId?row.id===params.value:row.values[index]===params.value),after=Number(params.after??0),rows=all.slice(after,after+(params.limit??50)),end=after+rows.length;
+    return reply(id,{...base,state:'ready',page:{productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,tableId:params.targetTableId,researchLocale:'enUS',artifactId:params.targetArtifactId,rows,totalCount:String(all.length),nextCursor:end<all.length?String(end):null}});
   }
   if (method === 'tables.referenceText') {
     // Authored Item.ClassID -> ItemClass.ClassName_lang over the generic rows; every other reference is number only.

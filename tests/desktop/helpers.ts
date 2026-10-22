@@ -4,7 +4,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 export const root = fileURLToPath(new URL('../../', import.meta.url));
-export async function launch(fixtures = false, offlineEmpty = false, retention = false, items = false, icons = false, classifications: false|'class'|'subclass'=false, creatures=false,creatureDisplay=false,effects:false|true|'split'=false,referenceText=false) {
+export async function launch(fixtures = false, offlineEmpty = false, retention = false, items = false, icons = false, classifications: false|'class'|'subclass'=false, creatures=false,creatureDisplay=false,effects:false|true|'split'=false,referenceText=false,follow=false) {
   const data = await mkdtemp(path.join(tmpdir(), 'vibeminer-electron-'));
   const app = await electron.launch({
     args: [process.env.VIBEMINER_DESKTOP_TEST_APP_PATH??path.join(root, 'apps/desktop'), '--ozone-platform=headless', `--user-data-dir=${path.join(data, 'electron-profile')}`],
@@ -18,6 +18,7 @@ export async function launch(fixtures = false, offlineEmpty = false, retention =
       ...(effects?{VIBEMINER_FIXTURE_EFFECTS:effects==='split'?'split':'1'}:{}),
       ...(icons ? { VIBEMINER_FIXTURE_ICONS: '1' } : {}),
       ...(referenceText ? { VIBEMINER_FIXTURE_REFERENCE_TEXT: '1' } : {}),
+      ...(follow ? { VIBEMINER_FIXTURE_FOLLOW: '1' } : {}),
       ...(classifications?{VIBEMINER_FIXTURE_CLASSIFICATIONS:classifications}:{}),
       ...(offlineEmpty ? { VIBEMINER_FIXTURE_OFFLINE_EMPTY: '1' } : {}),
     } : {}) },

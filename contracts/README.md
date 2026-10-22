@@ -45,3 +45,5 @@ Production build opening and bounded object pages use [download-size Home](downl
 [Settings](settings-v1.md) are app-wide values the engine saves in its data folder, plus a cancellable measurement of that folder's size.
 
 [Table reference text](table-reference-text-v1.md) adds batched, local text for declared references on one row page, from a reviewed allowlist.
+
+[Table follow](table-follow-v1.md) lists the target rows of one declared reference by exact target column value.

@@ -88,6 +88,8 @@ Rows stream into one immutable artifact with a sorted ID directory. SQLite store
 
 Reference text ([contract](../contracts/table-reference-text-v1.md)) is a local, batched read for one row page: the engine reads the page, resolves allowlisted references against already admitted text tables through up to four dedicated verified readers, and reports an unprepared text table instead of acquiring it. The desktop prepares that table through `tables.prepare`, automatically when it is at most 1 MiB encoded and otherwise on Load text, and asks again.
 
+Follow ([contract](../contracts/table-follow-v1.md), [D072](DECISIONS.md)) lists the target rows of one declared reference by exact target column value. The engine checks the declaration and the target table, reads only admitted rows (the record ID through the ID directory, another column through a bounded scan of at most 4,096 rows) and never acquires. The desktop opens the target's Data, lets the ordinary table flow prepare it, then asks; the request carries a request ID so leaving the view cancels it.
+
 ## Electron boundary
 
 Main never trusts renderer-supplied build data, paths or URLs. The renderer names an exact saved identity; C# resolves and pins the observation, routes and receipts itself.

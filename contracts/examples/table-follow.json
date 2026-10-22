@@ -1,0 +1,36 @@
+{
+  "productId": "wow",
+  "buildIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sourceRegion": "us",
+  "researchLocale": "enUS",
+  "policyRevision": "table-follow-v1",
+  "tableId": "50238ec2",
+  "artifactId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "columnIndex": 1,
+  "column": "ClassID",
+  "value": "7",
+  "reference": { "table": "ItemClass", "column": "ClassID" },
+  "targetTableId": "b977271e",
+  "targetArtifactId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "targetColumnIndex": 2,
+  "targetIsId": false,
+  "targetRange": { "minimum": "-128", "maximum": "127" },
+  "scope": "complete",
+  "state": "ready",
+  "after": "0",
+  "page": {
+    "productId": "wow",
+    "buildIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sourceRegion": "us",
+    "tableId": "b977271e",
+    "researchLocale": "enUS",
+    "artifactId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "rows": [
+      { "id": "303", "isCopy": false, "copySourceId": null, "values": ["303", "Authored class B", "7"] },
+      { "id": "304", "isCopy": false, "copySourceId": null, "values": ["304", "Authored class C", "7"] }
+    ],
+    "totalCount": "2",
+    "nextCursor": null
+  },
+  "problem": null
+}

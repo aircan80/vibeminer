@@ -28,6 +28,8 @@ public sealed partial class TableDataStore
         internal TableRowArtifacts Rows { get; } = rows;
         // Match column index -> key -> (emitted matches, directory ordinal of the first match).
         internal Dictionary<int, Dictionary<long, (long Count, long Ordinal)>> Indexes { get; } = [];
+        // Follow (D072): match column index -> exact value -> directory ordinals of every matching row, in order.
+        internal Dictionary<int, Dictionary<Int128, List<long>>> Matches { get; } = [];
     }
 
     private sealed class TextTarget

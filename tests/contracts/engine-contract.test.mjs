@@ -278,6 +278,28 @@ test('Reference text keeps exact keys, closed states, the actual text source and
   validate('TableReferenceTextValue', { ...page.values[0], value: '18446744073709551615' });
 });
 
+test('Follow keeps the exact value, the declared reference, closed states and a bounded target page', async () => {
+  const page = JSON.parse(await readFile(path.join(root, 'contracts/examples/table-follow.json'), 'utf8'));
+  validate('TableFollowPage', page);
+  validate('TableFollowPage', { ...page, state: 'keyOutOfRange', value: '-129', page: null });
+  validate('TableFollowPage', { ...page, state: 'unindexed', page: null, problem: { code: 'TABLE_FOLLOW_UNINDEXED', message: 'Too many rows.' } });
+  validate('TableFollowPage', { ...page, value: '18446744073709551615', targetRange: { minimum: '0', maximum: '18446744073709551615' } });
+  validate('EngineRequest', { protocolVersion: 1, id: 'follow', method: 'tables.follow', params: {} });
+  const invalid = change => { const value = structuredClone(page); change(value); assert.equal(validator('TableFollowPage')(value), false, JSON.stringify(value).slice(0, 80)); };
+  invalid(value => { value.policyRevision = 'table-follow-v2'; });
+  invalid(value => { value.value = 7; });
+  invalid(value => { value.value = '07'; });
+  invalid(value => { value.value = '-0'; });
+  invalid(value => { value.state = 'guessed'; });
+  invalid(value => { value.scope = 'partial'; });
+  invalid(value => { value.targetTableId = 'ItemClass'; });
+  invalid(value => { value.columnIndex = 512; });
+  invalid(value => { value.page.rows = Array(51).fill(value.page.rows[0]); });
+  invalid(value => { delete value.reference; });
+  invalid(value => { value.targetRange.minimum = -128; });
+  invalid(value => { value.extra = true; });
+});
+
 test('Typed text evidence preserves authored invalid bytes and bounds the wire shape', async () => {
   const fixture = JSON.parse(await readFile(path.join(root, 'tests/desktop/fixtures/table-text-issues.json'), 'utf8'));
   const row = fixture.rows[0], issue = row.textIssues[0];
@@ -632,11 +654,17 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.ok(hello.result.capabilities.includes('creatures-v1'));
   assert.ok(hello.result.capabilities.includes('creature-display-metadata-v1'));
   assert.ok(hello.result.capabilities.includes('tables-reference-text-v1'));
+  assert.ok(hello.result.capabilities.includes('tables-follow-v1'));
   const textQuery={productId:'wow',buildIdentity:'a'.repeat(64),sourceRegion:'us',tableId:'50238ec2',researchLocale:'enUS',artifactId:'b'.repeat(64)};
   const text=await request('tables.referenceText',textQuery);
   assert.ok(text.error,'A fresh catalog cannot fabricate reference text.');
   assert.ok(!['INVALID_REQUEST','UNKNOWN_METHOD','TABLE_REFERENCE_TEXT_UNAVAILABLE'].includes(text.error.code));
   assert.equal((await request('tables.referenceText',{...textQuery,values:['9']})).error?.code,'INVALID_REQUEST');
+  const followQuery={...textQuery,columnIndex:1,value:'9',targetTableId:'b977271e',targetArtifactId:'c'.repeat(64)};
+  const followed=await request('tables.follow',followQuery);
+  assert.ok(followed.error,'A fresh catalog cannot fabricate followed rows.');
+  assert.ok(!['INVALID_REQUEST','UNKNOWN_METHOD','TABLE_FOLLOW_UNAVAILABLE'].includes(followed.error.code));
+  assert.equal((await request('tables.follow',{...followQuery,value:'09'})).error?.code,'INVALID_REQUEST');
   for(const capability of ['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1'])assert.ok(hello.result.capabilities.includes(capability),'The qualified production Effects adapter must expose all three phases together.');
   const creatureContext={productId:'wow',buildIdentity:'a'.repeat(64),sourceRegion:'us',researchLocale:'enUS'};
   const effects=await request('items.effects.data',{...creatureContext,itemsArtifactId:'b'.repeat(64),itemId:'7'});

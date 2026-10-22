@@ -124,7 +124,7 @@ A file explorer for the build's prepared catalog: a filter row, a list with one 
   - The activity panel covers the whole area, which becomes inert (see Activity entry).
 - **Reference cells are clickable by mouse only.** Each row keeps one selection control. The keyboard path is the Follow action on each reference in the record inspector.
 - **Engine work this mockup assumes, not built today:**
-  - [#19](https://github.com/aircan80/vibeminer/issues/19): Follow by column value, a target-column lookup (`tables.rows` filters by record ID only)
+  - [#19](https://github.com/aircan80/vibeminer/issues/19): Follow by column value, a target-column lookup (built as `tables.follow`, D072)
   - [#17](https://github.com/aircan80/vibeminer/issues/17): batched reference text
   - [#21](https://github.com/aircan80/vibeminer/issues/21): the opt-in community listfile, with its own setting and a decision like #9
 - Once approved, a decision row supersedes D021 for Home and its areas, as D059 did for Discovery.

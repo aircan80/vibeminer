@@ -8,7 +8,7 @@ using VibeMiner.Protocols.Tact;
 namespace VibeMiner.Infrastructure;
 
 /// <summary>Demand-only table admission. Large sources and rows stay immutable outside SQLite.</summary>
-public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTextStore, IAsyncDisposable
+public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTextStore, ITableFollowStore, IAsyncDisposable
 {
     private readonly DiscoveryCatalog catalog;
     private readonly VerifiedObjectStore objects;

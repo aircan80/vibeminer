@@ -3,6 +3,7 @@ import type { InventoryFile, InventoryFileDetail, InventoryFileMembership, Inven
 import type { DiscoveryBridge } from '../shared/bridge';
 import { exactBytes, exactCount, filePosition, hex, inventoryFileDetailMatches, inventoryFilesPageMatches, localeBits, localeNames, readableBytes, type FileFilters, type InventoryFilesParams } from '../shared/inventory';
 import { useCoveredSide, useShell } from './HomeShell';
+import type { FileTarget } from './table-follow-view';
 type Prepared = WorkspaceSnapshot & { inventory: InventorySummary };
 type Failure = { code: string; message: string; retryable: boolean };
 type Movement = 'initial' | 'next' | 'previous' | 'first' | 'retry';
@@ -19,7 +20,7 @@ export function parseFileSearch(text: string): Search | 'invalid' {
   return 'invalid';
 }
 // Files (docs/design/desktop-home, #20): one row per ROOT FileDataID or install name, filters, and an inspector with every membership.
-export function FilesCatalog({ snapshot, bridge, active, onReopen, onReturn }: { snapshot: Prepared; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void }) {
+export function FilesCatalog({ snapshot, bridge, active, onReopen, onReturn, fileTarget, onReturnToTable }: { snapshot: Prepared; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void; fileTarget?: FileTarget | null; onReturnToTable?: () => void }) {
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState<Search>(null);
   const [invalid, setInvalid] = useState(false);
@@ -49,7 +50,11 @@ export function FilesCatalog({ snapshot, bridge, active, onReopen, onReturn }: {
     if (!heading.current?.closest('[hidden]') && (document.activeElement === document.body || document.activeElement === previous)) heading.current?.focus({ preventScroll: true });
   }, [shown, error]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current++; }; }, []);
-  useEffect(() => { if (active) { heading.current?.focus({ preventScroll: true }); if (!page && !busy) void read(undefined, 'initial'); } }, [active]);
+  // A FileDataID followed from Tables (#19) becomes the search, no other filter narrows it, and the selection starts over.
+  // It applies before the first read, so an unfiltered page never shows for it; the filter change below reads it.
+  const target = useRef<number | null>(null), awaitingTarget = !!fileTarget && target.current !== fileTarget.seq && (search?.fileDataId !== fileTarget.fileDataId || activeCount > 0);
+  useEffect(() => { if (!fileTarget || target.current === fileTarget.seq) return; target.current = fileTarget.seq; list.reset(); setDraft(fileTarget.fileDataId); setInvalid(false); setSearch({ fileDataId: fileTarget.fileDataId }); setLocale('0'); setFlags('any'); setFamily('all'); setStored(false); }, [fileTarget?.seq]);
+  useEffect(() => { if (active) { heading.current?.focus({ preventScroll: true }); if (!page && !busy && !awaitingTarget) void read(undefined, 'initial'); } }, [active]);
   // A filter change starts again from the first page; an earlier reply is dropped by the request generation.
   // A row the user picked stays selected; the inspector says when it falls outside the new results.
   const readFilters = useRef(filterKey);
@@ -124,7 +129,7 @@ export function FilesCatalog({ snapshot, bridge, active, onReopen, onReturn }: {
       : page ? <div className="dh-state-box dh-plain" role="status"><strong>{stale ? 'No files matched the previous filters' : shownNarrowed ? 'No files match' : 'No files'}</strong><p>{shownNarrowed ? <>No file in this build's prepared catalog {described ?? 'matches these filters'}{described && shownActive ? ` with these filters (${shownActive} active)` : ''}.</> : 'This prepared catalog has no ROOT or install files.'}</p>{shownNarrowed && !stale && <div className="dh-row"><button className="dh-btn dh-small" onClick={clearFilters}>Clear filters</button></div>}</div>
       : <div className="dh-state-box dh-plain" role="status"><strong>Files not read yet</strong><p>Each page reads at most 50 files from this sealed local generation.</p></div>}</div></div>;
   const selected = list.selected;
-  return <FilesFrame active={active} pane={list.pane} onPane={list.setPane} headingRef={heading} head={head} covered={covered} selectedLabel="Selected file" notices={notices} list={rows}
+  return <FilesFrame fileTarget={fileTarget} onReturnToTable={onReturnToTable} active={active} pane={list.pane} onPane={list.setPane} headingRef={heading} head={head} covered={covered} selectedLabel="Selected file" notices={notices} list={rows}
     foot={<>{onReturn && <ReturnHome onReturn={onReturn}/>}<span role="status" aria-live="polite">{count}</span><span className="dh-spacer"/><CatalogPageControls busy={busy} canFirst={cursor !== undefined && !stale} canPrevious={history.length > 0 && !stale} canNext={!!page?.nextCursor && !stale} onFirst={() => { void read(undefined, 'first'); }} onPrevious={() => { void read(history.at(-1), 'previous'); }} onNext={() => { if (page?.nextCursor) void read(page.nextCursor, 'next'); }}/></>}
     inspector={selected ? <FileInspector key={`${selected.entry.key}|${shown?.key ?? filterKey}`} file={selected.entry} onPage={selected.onPage} filters={shownFilters} narrowed={shownNarrowed} snapshot={snapshot} bridge={bridge}/>
       : <><div className="dh-insp-head"><div className="dh-label">File inspector</div><h2 id="files-inspector-heading">No file selected</h2></div><div className="dh-insp-body"><p className="dh-reason" style={{ fontSize: 'var(--fs-m)' }}>{page && !page.entries.length ? 'Nothing matches these filters.' : 'Choose a row.'}</p><p className="dh-tiny">ROOT maps FileDataIDs to content keys per locale and content variant. It has no file names.</p></div></>}/>;
@@ -192,11 +197,16 @@ function Membership({ member, narrowed, verified }: { member: InventoryFileMembe
   </dl></div>;
 }
 export function ReturnHome({ onReturn }: { onReturn: () => void }) { return <button className="dh-btn" onClick={onReturn}>← Return to build overview</button>; }
-export function FilesFrame({ active, pane, onPane, headingRef, sub, head, notices, list, foot, inspector, covered, selectedLabel = 'Selected object' }: { active: boolean; pane: 'list' | 'inspector'; onPane: (pane: 'list' | 'inspector') => void; headingRef: RefObject<HTMLHeadingElement | null>; sub?: string; head?: ReactNode; notices?: ReactNode; list: ReactNode; foot: ReactNode; inspector: ReactNode; covered: boolean; selectedLabel?: string }) {
+// Without a prepared catalog there is no FileDataID search, so a FileDataID followed from Tables (#19) can't be looked up.
+// The notice says so instead of presenting the list as that file; the foot keeps the way back to the record.
+export function FileTargetNotice({ target }: { target: FileTarget }) {
+  return <div className="dh-notice dh-calm file-target" role="status"><div className="dh-text"><strong>FileDataID {target.fileDataId} can’t be looked up yet</strong><span className="dh-detail">Followed from {target.table} record {target.recordId}. The file catalog isn’t prepared, so Files has no FileDataID search and nothing is claimed about that file.</span></div></div>;
+}
+export function FilesFrame({ active, pane, onPane, headingRef, sub, head, notices, list, foot, inspector, covered, selectedLabel = 'Selected object', fileTarget, onReturnToTable }: { active: boolean; pane: 'list' | 'inspector'; onPane: (pane: 'list' | 'inspector') => void; headingRef: RefObject<HTMLHeadingElement | null>; sub?: string; head?: ReactNode; notices?: ReactNode; list: ReactNode; foot: ReactNode; inspector: ReactNode; covered: boolean; selectedLabel?: string; fileTarget?: FileTarget | null; onReturnToTable?: () => void }) {
   useEffect(() => { if (!active) onPane('list'); }, [active]);
   return <section className="dh-files" data-pane={pane} aria-label="Files" hidden={!active}>
     <div className="dh-pane-switch"><div className="dh-segmented" role="group" aria-label="Show pane"><button aria-pressed={pane === 'list'} onClick={() => onPane('list')}>Files list</button><button aria-pressed={pane === 'inspector'} onClick={() => onPane('inspector')}>{selectedLabel}</button></div></div>
-    <section className="dh-pane dh-list" aria-labelledby="files-heading"><div className="dh-pane-head dh-files-filters">{head ?? <><h1 ref={headingRef} id="files-heading" tabIndex={-1}>Files</h1><span className="dh-sub">{sub}</span></>}</div>{notices}{list}<div className="dh-pane-foot">{foot}</div></section>
+    <section className="dh-pane dh-list" aria-labelledby="files-heading"><div className="dh-pane-head dh-files-filters">{head ?? <><h1 ref={headingRef} id="files-heading" tabIndex={-1}>Files</h1><span className="dh-sub">{sub}</span></>}</div>{notices}{list}<div className="dh-pane-foot">{fileTarget && onReturnToTable && <button className="dh-btn return-table" onClick={onReturnToTable}>← Return to {fileTarget.table} record {fileTarget.recordId}</button>}{foot}</div></section>
     <aside className="dh-inspector" aria-labelledby="files-inspector-heading" inert={covered}>{inspector}</aside>
   </section>;
 }
@@ -216,6 +226,8 @@ export function useListbox<T>(entries: readonly T[], key: (entry: T) => string) 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) { const target = ({ ArrowDown: active + 1, ArrowUp: active - 1, Home: 0, End: entries.length - 1, PageDown: active + 10, PageUp: active - 10 } as Record<string, number>)[event.key]; if (target === undefined || !entries.length) return; event.preventDefault(); select(target); }
   return { pane, setPane, selected: selected === null ? null : { entry: selected, onPage: index >= 0 }, // For a new result set: keep the row the user picked, otherwise follow the new first row.
     refresh: () => { if (picked.current) return; latest.current = null; setSelected(null); },
+    /** A new destination, such as a FileDataID followed from Tables: forget the earlier pick too. */
+    reset: () => { picked.current = false; latest.current = null; setSelected(null); },
     props: { role: 'listbox', tabIndex: 0, 'aria-activedescendant': entries.length ? optionId(active) : undefined, onKeyDown },
     option: (i: number) => ({ id: optionId(i), role: 'option', 'aria-selected': i === index, className: i === active ? ' dh-active' : '', onClick: () => select(i) }) };
 }

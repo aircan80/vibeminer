@@ -140,10 +140,12 @@ Interpretation rules for the DBD reader:
 
 Table relationship rules (Tables explorer):
 
-- Follow only declared COLUMNS targets, and keep the target column. `Item.ClassID` links to `ItemClass.ClassID`.
+- Follow only declared COLUMNS targets, and keep the target column. `Item.ClassID` links to `ItemClass.ClassID`, never `ItemClass.ID`.
+- Follow by value compares exact integers. `Item.ClassID` is unsigned 8-bit in older layouts and `ItemClass.ClassID` signed 8-bit, so 200 doesn't match −56; a value outside the target column's declared width and sign matches nothing ([D072](DECISIONS.md)).
+- `FileData.ID` has no table definition. Its values are FileDataIDs and go to Files.
 - Plain integers and arrays get no invented edges. `ItemGroupSounds.Sound` has no SoundKit relation at this pin. `Item.SubclassID` gets no implicit composite ItemSubClass edge in the explorer.
 - A non-primary-key lookup can return several rows; show them, don't pick one. One readable row in a partial table does not prove uniqueness.
-- The Back/Forward definition trail keeps the most recent 64 entries ([TablesExplorer.tsx](../apps/desktop/src/renderer/TablesExplorer.tsx)).
+- The Back/Forward trail keeps the most recent 64 entries, for definition navigation and Follow alike ([TablesExplorer.tsx](../apps/desktop/src/renderer/TablesExplorer.tsx)).
 
 ## Reference text columns
 

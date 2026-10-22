@@ -420,6 +420,65 @@ public sealed class HostTests
                 [new(1, "9", "resolved", "Recipe", "1", new("301", false, null))]));
         }
     }
+    [Fact]
+    public async Task Follow_is_advertised_only_when_composed_validates_its_query_and_cancels_the_lookup()
+    {
+        using var directory = new TempDirectory(); await using var catalog = await DiscoveryCatalog.OpenAsync(directory.Path);
+        await using var data = new TableDataService(new GatedTableStore());
+        var store = new AuthoredFollow();
+        var query = new Dictionary<string, object> { ["productId"] = "wow", ["buildIdentity"] = new string('a', 64), ["sourceRegion"] = "us", ["tableId"] = "50238ec2",
+            ["researchLocale"] = "enUS", ["artifactId"] = new string('b', 64), ["columnIndex"] = 1, ["value"] = "7", ["targetTableId"] = "b977271e", ["targetArtifactId"] = new string('c', 64) };
+        Dictionary<string, object> With(string key, object value) => new(query) { [key] = value };
+        await using (var plain = await Session.Start(new DiscoveryService(new NeverSource(), catalog), data))
+        {
+            await plain.Send("hello", "hello");
+            Assert.DoesNotContain("tables-follow-v1", (await plain.Receive()).GetProperty("result").GetProperty("capabilities").EnumerateArray().Select(c => c.GetString()));
+            await plain.Send("unavailable", "tables.follow", query);
+            Assert.Equal("TABLE_FOLLOW_UNAVAILABLE", (await plain.Receive()).GetProperty("error").GetProperty("code").GetString());
+        }
+        await using var session = await Session.Start(new DiscoveryService(new NeverSource(), catalog), data, follow: new TableFollowService(store));
+        await session.Send("hello", "hello");
+        Assert.Contains("tables-follow-v1", (await session.Receive()).GetProperty("result").GetProperty("capabilities").EnumerateArray().Select(c => c.GetString()));
+        foreach (var (id, parameters) in new (string, object)[] { ("extra", With("targetColumn", "ClassID")), ("value", With("value", "07")), ("number", With("value", 7)),
+            ("column", With("columnIndex", "1")), ("limit", With("limit", 51)), ("target", With("targetTableId", "ItemClass")) })
+        {
+            await session.Send(id, "tables.follow", parameters);
+            Assert.Equal("INVALID_REQUEST", (await session.Receive()).GetProperty("error").GetProperty("code").GetString());
+        }
+        Assert.Equal(0, store.Calls);
+        await session.Send("page", "tables.follow", With("after", "50"));
+        var result = (await session.Receive()).GetProperty("result");
+        Assert.Equal(("ready", "table-follow-v1", "50", 2), (result.GetProperty("state").GetString(), result.GetProperty("policyRevision").GetString(), result.GetProperty("after").GetString(), result.GetProperty("targetColumnIndex").GetInt32()));
+        Assert.Equal(("-128", "2"), (result.GetProperty("targetRange").GetProperty("minimum").GetString(), result.GetProperty("page").GetProperty("totalCount").GetString()));
+        Assert.Equal(JsonValueKind.Null, result.GetProperty("problem").ValueKind);
+        Assert.Equal(new TableFollowRequest("wow", new string('a', 64), "us", "50238ec2", "enUS", new string('b', 64), 1, "7", "b977271e", new string('c', 64), 50, "50"), store.Last);
+        store.Block = true;
+        await session.Send("slow", "tables.follow", query);
+        await store.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await session.Send("stop", "request.cancel", new { requestId = "slow" });
+        var replies = new[] { await session.Receive(), await session.Receive() };
+        Assert.Contains(replies, reply => reply.GetProperty("id").GetString() == "slow" && reply.GetProperty("error").GetProperty("code").GetString() == "CANCELED");
+        Assert.True(store.Canceled);
+    }
+    private sealed class AuthoredFollow : ITableFollowStore
+    {
+        internal int Calls; internal TableFollowRequest? Last; internal bool Block, Canceled;
+        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<TableFollowPage> FollowAsync(TableFollowRequest request, CancellationToken token)
+        {
+            Calls++; Last = request;
+            if (Block)
+            {
+                Started.TrySetResult();
+                try { await Task.Delay(Timeout.Infinite, token); } catch (OperationCanceledException) { Canceled = true; throw; }
+            }
+            var page = new TableDataPage(request.ProductId, request.BuildIdentity, request.SourceRegion, request.TargetTableId, request.ResearchLocale, request.TargetArtifactId,
+                [new("303", false, null, ["303", "First", "7"])], "2", null);
+            return new(request.ProductId, request.BuildIdentity, request.SourceRegion, request.ResearchLocale, TableFollowRules.PolicyRevision, request.TableId, request.ArtifactId,
+                request.ColumnIndex, "ClassID", request.Value, new("ItemClass", "ClassID"), request.TargetTableId, request.TargetArtifactId, 2, false, new("-128", "127"),
+                "complete", TableFollowStates.Ready, request.After ?? "0", page, null);
+        }
+    }
     private sealed class GatedTableStore : ITableDataStore
     {
         internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -459,18 +518,18 @@ public sealed class HostTests
         private readonly StreamWriter writer;
         private readonly StreamReader reader;
         public Task Completion { get; }
-        private Session(TcpClient client, TcpClient server, DiscoveryService service, TableDataService? tableData = null, TableReferenceTextService? referenceText = null)
+        private Session(TcpClient client, TcpClient server, DiscoveryService service, TableDataService? tableData = null, TableReferenceTextService? referenceText = null, TableFollowService? follow = null)
         {
             this.client = client; this.server = server;
             writer = new StreamWriter(client.GetStream(), new UTF8Encoding(false), leaveOpen: true);
             reader = new StreamReader(client.GetStream(), Encoding.UTF8, leaveOpen: true);
-            Completion = new ProtocolHost(service, tableData: tableData, referenceText: referenceText).RunAsync(server.GetStream(), server.GetStream());
+            Completion = new ProtocolHost(service, tableData: tableData, referenceText: referenceText, follow: follow).RunAsync(server.GetStream(), server.GetStream());
         }
-        public static async Task<Session> Start(DiscoveryService service, TableDataService? tableData = null, TableReferenceTextService? referenceText = null)
+        public static async Task<Session> Start(DiscoveryService service, TableDataService? tableData = null, TableReferenceTextService? referenceText = null, TableFollowService? follow = null)
         {
             using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
             var client = new TcpClient(); await client.ConnectAsync((IPEndPoint)listener.LocalEndpoint);
-            var server = await listener.AcceptTcpClientAsync(); return new(client, server, service, tableData, referenceText);
+            var server = await listener.AcceptTcpClientAsync(); return new(client, server, service, tableData, referenceText, follow);
         }
         public Task Send(string id, string method, object? parameters = null) => SendRaw(JsonSerializer.Serialize(new { protocolVersion = 1, id, method, @params = parameters ?? new { } }));
         public async Task SendRaw(string value) { await writer.WriteLineAsync(value); await writer.FlushAsync(); }

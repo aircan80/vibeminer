@@ -3,11 +3,12 @@ import type { DownloadObjectEntry, DownloadPage, DownloadSummary, WorkspaceSnaps
 import type { DiscoveryBridge } from '../shared/bridge';
 import { downloadPageMatches, type DownloadReadParams } from '../shared/download';
 import { exactBytes, exactCount, readableBytes } from '../shared/inventory';
-import { CatalogPageControls, FilesFrame, ReturnHome, useListbox } from './FilesCatalog';
+import { CatalogPageControls, FileTargetNotice, FilesFrame, ReturnHome, useListbox } from './FilesCatalog';
+import type { FileTarget } from './table-follow-view';
 import { useCoveredSide } from './HomeShell';
 
 // Files for a download-sized build: the research file catalog isn't prepared, so the list shows the download manifest's unique encoded objects.
-export function DownloadObjects({ snapshot, summary, bridge, active, onReopen, onReturn }: { snapshot: WorkspaceSnapshot; summary: DownloadSummary; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void }) {
+export function DownloadObjects({ snapshot, summary, bridge, active, onReopen, onReturn, fileTarget, onReturnToTable }: { snapshot: WorkspaceSnapshot; summary: DownloadSummary; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void; fileTarget?: FileTarget | null; onReturnToTable?: () => void }) {
   const [page, setPage] = useState<DownloadPage | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ code: string; message: string; retryable: boolean } | null>(null);
@@ -52,8 +53,8 @@ export function DownloadObjects({ snapshot, summary, bridge, active, onReopen, o
   const first = page?.entries.length ? BigInt(cursor ?? '0') + 1n : null;
   const count = busy ? 'Reading the saved download ledger…' : page ? `${page.entries.length} encoded objects on this page · ${exactCount(page.totalCount)} total${page.entries.length ? ` · objects ${first}–${first! + BigInt(page.entries.length) - 1n}` : ''}` : 'No download-object page has been read yet.';
   const selected = list.selected;
-  return <FilesFrame active={active} pane={list.pane} onPane={list.setPane} headingRef={heading} sub="Download manifest · unique encoded objects · all published variants" covered={covered}
-    notices={<>{error && <div className="dh-notice dh-error" role="alert"><div className="dh-text"><strong>{error.code}</strong>{error.message} This view keeps the exact build, source, ledger and assessment. Reopen this build to obtain a new assessment.<div className="dh-row">{error.retryable && <button ref={retry} className="dh-btn dh-small" aria-disabled={busy} onClick={() => { if (!busy) void read(attempt.current.after, attempt.current.movement); }}>Retry page</button>}<button className="dh-btn dh-small" onClick={onReopen}>Reopen this build</button></div></div></div>}
+  return <FilesFrame fileTarget={fileTarget} onReturnToTable={onReturnToTable} active={active} pane={list.pane} onPane={list.setPane} headingRef={heading} sub="Download manifest · unique encoded objects · all published variants" covered={covered}
+    notices={<>{fileTarget && <FileTargetNotice target={fileTarget}/>}{error && <div className="dh-notice dh-error" role="alert"><div className="dh-text"><strong>{error.code}</strong>{error.message} This view keeps the exact build, source, ledger and assessment. Reopen this build to obtain a new assessment.<div className="dh-row">{error.retryable && <button ref={retry} className="dh-btn dh-small" aria-disabled={busy} onClick={() => { if (!busy) void read(attempt.current.after, attempt.current.movement); }}>Retry page</button>}<button className="dh-btn dh-small" onClick={onReopen}>Reopen this build</button></div></div></div>}
 </>}
     list={page && page.entries.length > 0 ? <div className="dh-list-scroll" aria-busy={busy}><CatalogNotPrepared withObjects/><div className="dh-ocols dh-fthead" aria-hidden="true"><span>Object</span><span>Encoding key (EKey)</span><span>Encoded size</span><span>Local at assessment</span></div>
       <div {...list.props} aria-label={`Download objects, one row per encoding key, assessed ${summary.assessedAt}`}>{page.entries.map((entry, index) => <div key={entry.id} {...list.option(index)} className={`dh-ocols${list.option(index).className}`}><span className="dh-fid">Object {entry.id}</span><span className="dh-mono">{entry.encodingKey}</span><span>{readableBytes(entry.encodedBytes)}</span><span>{entry.verifiedAtAssessment ? <span className="dh-ok">Verified locally</span> : <span className="dh-dim">Not verified locally</span>}</span></div>)}</div></div>
@@ -66,11 +67,11 @@ export function DownloadObjects({ snapshot, summary, bridge, active, onReopen, o
 }
 
 // Files with no readable list: no download ledger and no prepared catalog. A calm capability limit, with no producer to offer.
-export function FilesUnavailable({ snapshot, active, onReturn }: { snapshot: WorkspaceSnapshot; active: boolean; onReturn?: () => void }) {
+export function FilesUnavailable({ snapshot, active, onReturn, fileTarget, onReturnToTable }: { snapshot: WorkspaceSnapshot; active: boolean; onReturn?: () => void; fileTarget?: FileTarget | null; onReturnToTable?: () => void }) {
   const heading = useRef<HTMLHeadingElement>(null), covered = useCoveredSide();
   const [pane, setPane] = useState<'list' | 'inspector'>('list');
   useEffect(() => { if (active) heading.current?.focus({ preventScroll: true }); }, [active]);
-  return <FilesFrame active={active} pane={pane} onPane={setPane} headingRef={heading} sub="All published variants" covered={covered} selectedLabel="Selected file"
+  return <FilesFrame fileTarget={fileTarget} onReturnToTable={onReturnToTable} notices={fileTarget && <FileTargetNotice target={fileTarget}/>} active={active} pane={pane} onPane={setPane} headingRef={heading} sub="All published variants" covered={covered} selectedLabel="Selected file"
     list={<div className="dh-pane-scroll"><CatalogNotPrepared problem={snapshot.downloadProblem?.code}/></div>}
     foot={<>{onReturn && <ReturnHome onReturn={onReturn}/>}<span>Catalog not prepared</span></>}
     inspector={<><div className="dh-insp-head"><div className="dh-label">File inspector</div><h2 id="files-inspector-heading">No file selected</h2></div><div className="dh-insp-body"><p className="dh-reason" style={{ fontSize: 'var(--fs-m)' }}>The catalog has no memberships to inspect yet.</p><p className="dh-tiny">ROOT maps FileDataIDs to content keys per locale and content variant. It has no file names.</p></div></>}/>;

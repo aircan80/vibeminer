@@ -158,6 +158,13 @@
 .desktop-home .dh-ref{color:var(--teal);font-weight:600;text-decoration:underline dotted;text-underline-offset:3px}
 .desktop-home .dh-rt{color:var(--muted);font-weight:400;user-select:none;display:inline-block;max-width:18rem;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
 .desktop-home .dh-rt.dh-pending{letter-spacing:.08em}
+/* Follow (#19): a followable reference cell is clickable by mouse; the keyboard path is the inspector action. The filter chip comes from the reference. */
+.desktop-home .dh-records-grid td.dh-refcell.dh-follow{cursor:pointer}
+.desktop-home .dh-refcell.dh-follow:hover .dh-ref{text-decoration-style:solid}
+.desktop-home .dh-chip-filter{display:inline-flex;align-items:center;gap:.28rem;border:1px solid var(--pill);background:var(--mint);color:var(--teal);border-radius:999px;padding:0 .186667rem 0 .56rem;font-weight:600;white-space:nowrap}
+.desktop-home .dh-chip-x{border:0;background:none;color:inherit;cursor:pointer;width:1.306667rem;height:1.306667rem;border-radius:50%;padding:0}
+.desktop-home .dh-chip-x:hover{background:#d5eadf}
+.desktop-home.dh-compact .dh-follow-bar>span:last-child:not(.dh-chip-filter){display:none}
 .desktop-home .dh-data>.dh-notice.dh-keep{overflow:visible;flex:none}
 .desktop-home .dh-data>.dh-notice.dh-yield{display:none}
 .desktop-home .text-load-reason{font-size:var(--fs-s)}

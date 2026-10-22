@@ -11,7 +11,8 @@ import type { RetentionController } from './useRetention';
 import { RetentionModeBox } from './Retention';
 import { retentionKey } from '../shared/retention';
 import type { TableLoading } from './useTableLoading';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import type { FileTarget } from './table-follow-view';
 import type { Build, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
 import { encodedPercentage, exactBytes, exactCount, isInventoryWorkspace, readableBytes } from '../shared/inventory';
@@ -38,14 +39,18 @@ export function DownloadHome({ activityNavigation, effectsLoading, effectsAvaila
   useEffect(() => { heading.current?.focus({ preventScroll: true }); }, []);
   const { home, returnHome } = useHomeFocus(pane, heading, origin, () => setPane('overview'), grid);
   const [fromHome, setFromHome] = useState(false);
-  function files() { origin.current = { element: document.activeElement as HTMLElement, scroll: grid.current?.scrollTop ?? 0 }; setFromHome(true); setPane('files'); }
-  function go(next: Pane) { setFromHome(false); setPane(next); }
+  // A FileDataID followed from Tables (#19) opens Files with the way back to that record.
+  const [fileTarget, setFileTarget] = useState<FileTarget | null>(null), fileSeq = useRef(0);
+  const openFile = useCallback((target: Omit<FileTarget, 'seq'>) => { setFileTarget({ ...target, seq: ++fileSeq.current }); setFromHome(false); setPane('files'); }, []);
+  const returnToTable = () => { setFileTarget(null); setPane('tables'); };
+  function files() { origin.current = { element: document.activeElement as HTMLElement, scroll: grid.current?.scrollTop ?? 0 }; setFromHome(true); setFileTarget(null); setPane('files'); }
+  function go(next: Pane) { setFromHome(false); setFileTarget(null); setPane(next); }
   const retentionTarget=summary?{productId:snapshot.build.productId,buildIdentity:snapshot.build.id,sourceRegion:snapshot.sourceReference.region,ledgerId:summary.ledgerId}:null;
   const targetKey=retentionTarget?retentionKey(retentionTarget):'';
   useEffect(()=>{if(retentionTarget&&retention?.capability==='available')retention.ensure(retentionTarget);return()=>{if(targetKey)retention?.release(targetKey);};},[targetKey,retention?.capability]);
   const items=itemsAvailable&&!!itemsLoading,creatures=creaturesAvailable&&!!creaturesLoading;
   const gameData=[items&&'Items',creatures&&'Creatures'].filter(Boolean).join(', ');
-  const areas=<BuildAreas active={pane as BuildArea} onHome={()=>{setFromHome(false);home();}} onTables={()=>go('tables')} onFiles={()=>go('files')} onItems={items?()=>go('items'):undefined} onCreatures={creatures?()=>go('creatures'):undefined}/>;
+  const areas=<BuildAreas active={pane as BuildArea} onHome={()=>{setFromHome(false);setFileTarget(null);home();}} onTables={()=>go('tables')} onFiles={()=>go('files')} onItems={items?()=>go('items'):undefined} onCreatures={creatures?()=>go('creatures'):undefined}/>;
   const assessed=summary?new Date(summary.assessedAt).toLocaleString():null;
   const status=pane==='overview'?<span className="dh-secondary">{inventory?<>Catalog generation <strong>{inventory.inventory.generation}</strong> · {exactCount(inventory.inventory.membershipCount)} memberships</>:assessed?<>Assessed <strong>{assessed}</strong></>:'Download size unknown'}</span>
     :pane==='files'?<span className="dh-secondary">{inventory?<>Catalog generation <strong>{inventory.inventory.generation}</strong> · {exactCount(inventory.inventory.membershipCount)} memberships</>:summary?<>Download manifest · <strong>{exactCount(summary.objectCount)}</strong> encoded objects</>:'File catalog not prepared'}</span>:null;
@@ -59,12 +64,12 @@ export function DownloadHome({ activityNavigation, effectsLoading, effectsAvaila
         <Readiness snapshot={snapshot} inventory={inventory?.inventory ?? null} gameData={gameData} onMetadata={() => setDialog('metadata')}/>
       </div>
     </section>
-    {inventory ? <FilesCatalog key={`${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}:${inventory.inventory.generation}`} snapshot={inventory} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined}/>
-      : summary ? <DownloadObjects key={`${snapshot.build.id}:${summary.ledgerId}:${summary.assessedAt}`} snapshot={snapshot} summary={summary} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined}/>
-      : <FilesUnavailable snapshot={snapshot} active={pane === 'files'} onReturn={fromHome ? returnHome : undefined}/>}
+    {inventory ? <FilesCatalog key={`${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}:${inventory.inventory.generation}`} snapshot={inventory} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
+      : summary ? <DownloadObjects key={`${snapshot.build.id}:${summary.ledgerId}:${summary.assessedAt}`} snapshot={snapshot} summary={summary} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
+      : <FilesUnavailable snapshot={snapshot} active={pane === 'files'} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>}
     {items&&<div className="dh-area-scroll" hidden={pane!=='items'}><ItemsBrowser effectsLoading={effectsLoading} effectsAvailable={effectsAvailable} effectsSource={itemSource} classificationsLoading={classificationsLoading} classificationsAvailable={classificationsAvailable} subclassAvailable={subclassAvailable} iconsLoading={iconsLoading} iconsAvailable={iconsAvailable} key={`items:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}`} workspace={snapshot} bridge={bridge} active={pane==='items'} flow={itemsLoading!} focusRequest={itemsLoading!.viewRequest} onSource={itemSource.open}/></div>}
     {creatures&&<div className="dh-area-scroll" hidden={pane!=='creatures'}><CreaturesBrowser displays={creatureDisplays} displayAvailable={creatureDisplayAvailable} key={`creatures:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}`} workspace={snapshot} bridge={bridge} active={pane==='creatures'} flow={creaturesLoading!} focusRequest={creaturesLoading!.viewRequest} onSource={(source,id)=>itemSource.open(source,id,'creatures')}/></div>}
-    <TablesExplorer key={`tables:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}:${snapshot.sourceReference.generation}`} snapshot={snapshot} bridge={bridge} active={pane === 'tables'} tableLoading={tableLoading} sourceRecord={itemSource.request} onReturnToItems={itemSource.returnToItems}/>
+    <TablesExplorer key={`tables:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}:${snapshot.sourceReference.generation}`} snapshot={snapshot} bridge={bridge} active={pane === 'tables'} tableLoading={tableLoading} sourceRecord={itemSource.request} onReturnToItems={itemSource.returnToItems} onOpenFile={openFile}/>
   </HomeShell>;
 }
 // The docked activity panel covers the right end of the pane head too, so these become inert with the side column.

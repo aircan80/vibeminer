@@ -6,6 +6,7 @@ import summariesFixture from '../../../contracts/examples/download-summaries.jso
 import partialTableFixture from '../../../tests/desktop/fixtures/table-data-partial.json';
 import tableDataFixture from '../../../tests/desktop/fixtures/table-data.json';
 import referenceTextExample from '../../../contracts/examples/table-reference-text.json';
+import followExample from '../../../contracts/examples/table-follow.json';
 // @vitest-environment node
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
@@ -455,4 +456,12 @@ it('gates reference text by capability and rejects a reply bound to another page
  const good=client.request('tables.referenceText',query,'text');child.reply('text',r);await expect(good).resolves.toEqual(r);
  const later=client.request('tables.referenceText',{...query,after:'50'},'later').catch(e=>e.code);child.reply('later',r);expect(await later).toBe('PROTOCOL_ERROR');
  const rule=client.request('tables.referenceText',query,'rule').catch(e=>e.code),forged=structuredClone(r);forged.columns[0].textSource!.textColumn='VerboseName_lang';child.reply('rule',forged);expect(await rule).toBe('PROTOCOL_ERROR');
+});
+it('gates follow by capability and rejects rows that do not hold the followed value',async()=>{const{child,client}=setup(),f=followExample,query={productId:f.productId,buildIdentity:f.buildIdentity,sourceRegion:f.sourceRegion,researchLocale:'enUS' as const,tableId:f.tableId,artifactId:f.artifactId,columnIndex:f.columnIndex,value:f.value,targetTableId:f.targetTableId,targetArtifactId:f.targetArtifactId};
+ await expect(client.request('tables.follow',query,'no-cap')).rejects.toMatchObject({code:'UNSUPPORTED'});expect(child.requests).toHaveLength(0);
+ const hello=client.hello();child.reply(child.requests[0].id,{protocolVersion:1,engineVersion:'authored',capabilities:['tables-follow-v1']});await hello;
+ await expect(client.request('tables.follow',{...query,value:'07'})).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(child.requests).toHaveLength(1);
+ const good=client.request('tables.follow',query,'follow');child.reply('follow',f);await expect(good).resolves.toEqual(f);
+ const other=client.request('tables.follow',{...query,value:'8'},'other').catch(e=>e.code);child.reply('other',f);expect(await other).toBe('PROTOCOL_ERROR');
+ const forged=structuredClone(f);forged.page.rows[0].values[2]='8';const wrong=client.request('tables.follow',query,'wrong').catch(e=>e.code);child.reply('wrong',forged);expect(await wrong).toBe('PROTOCOL_ERROR');
 });

@@ -52,8 +52,9 @@ test('horizontal areas preserve exact build, object pages and a keyboard definit
     await relation.focus(); await page.keyboard.press('Enter');
     await expect(page.locator('#table-title')).toHaveText('ItemClass');
     await expect(page.getByRole('heading', { name: 'ItemClass.ClassID', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Back through definitions' }).click();
-    await expect(page.locator('#table-title')).toHaveText('Item'); await expect(relation).toBeFocused();
+    const back = page.getByRole('button', { name: 'Back through definitions' });
+    await back.click();
+    await expect(page.locator('#table-title')).toHaveText('Item'); await expect(back).toBeFocused();
     await page.getByRole('button', { name: 'Structure', exact: true }).click();
     await captures(page, session.app, 'structure');
     const search = page.getByRole('searchbox', { name: 'Search definitions' }); await search.fill('no_such_table_0011');

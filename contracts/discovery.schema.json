@@ -94,6 +94,9 @@
     "tableReferenceTextPage": {
       "$ref": "#/definitions/TableReferenceTextPage"
     },
+    "tableFollowPage": {
+      "$ref": "#/definitions/TableFollowPage"
+    },
     "retentionTarget": {
       "$ref": "#/definitions/RetentionTarget"
     },
@@ -1048,6 +1051,7 @@
             "tables.data",
             "tables.rows",
             "tables.referenceText",
+            "tables.follow",
             "retention.read",
             "retention.list",
             "retention.set",
@@ -4501,6 +4505,179 @@
         "values"
       ],
       "additionalProperties": false
+    },
+    "TableFollowRange": {
+      "title": "TableFollowRange",
+      "type": "object",
+      "properties": {
+        "minimum": {
+          "type": "string",
+          "pattern": "^(0|-?[1-9][0-9]{0,19})$",
+          "maxLength": 21
+        },
+        "maximum": {
+          "type": "string",
+          "pattern": "^(0|-?[1-9][0-9]{0,19})$",
+          "maxLength": 21
+        }
+      },
+      "required": [
+        "minimum",
+        "maximum"
+      ],
+      "additionalProperties": false
+    },
+    "TableFollowPage": {
+      "title": "TableFollowPage",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sourceRegion": {
+          "type": "string",
+          "maxLength": 8,
+          "pattern": "^[a-z]{2,8}$"
+        },
+        "researchLocale": {
+          "const": "enUS"
+        },
+        "policyRevision": {
+          "const": "table-follow-v1"
+        },
+        "tableId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}$",
+          "maxLength": 8
+        },
+        "artifactId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "maxLength": 64
+        },
+        "columnIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 511
+        },
+        "column": {
+          "type": "string",
+          "maxLength": 144
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^(0|-?[1-9][0-9]{0,19})$",
+          "maxLength": 21
+        },
+        "reference": {
+          "$ref": "#/definitions/TableReference"
+        },
+        "targetTableId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}$",
+          "maxLength": 8
+        },
+        "targetArtifactId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "maxLength": 64
+        },
+        "targetColumnIndex": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 511
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetIsId": {
+          "type": "boolean"
+        },
+        "targetRange": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TableFollowRange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope": {
+          "enum": [
+            "complete",
+            "unencryptedSections"
+          ]
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "keyOutOfRange",
+            "unindexed",
+            "unsupported"
+          ]
+        },
+        "after": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$",
+          "maxLength": 19
+        },
+        "page": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TableDataPage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TableReferenceTextProblem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "productId",
+        "buildIdentity",
+        "sourceRegion",
+        "researchLocale",
+        "policyRevision",
+        "tableId",
+        "artifactId",
+        "columnIndex",
+        "column",
+        "value",
+        "reference",
+        "targetTableId",
+        "targetArtifactId",
+        "targetColumnIndex",
+        "targetIsId",
+        "targetRange",
+        "scope",
+        "state",
+        "after",
+        "page",
+        "problem"
+      ]
     },
     "ContentReadableRange": {
       "title": "ContentReadableRange",
