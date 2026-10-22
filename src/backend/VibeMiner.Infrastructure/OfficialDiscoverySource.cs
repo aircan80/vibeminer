@@ -75,6 +75,8 @@ public sealed class OfficialDiscoverySource(HttpClient client, TimeProvider? tim
         { return new(null, Problem("NETWORK_IO", "The official metadata response could not be read.")); }
         finally { network.Release(); }
     }
+    /// <summary>Worded to read for one region or a grouped list of them.</summary>
+    public const string MissingRouteMessage = "Advertised without a CDN route, so not usable as a download source.";
     private static DiscoveryProblem Problem(string code, string message) => new(null, code, message);
     private static MetadataDocument? Parse(Download download, List<DiscoveryProblem> problems, CancellationToken token)
     {
@@ -114,7 +116,9 @@ public sealed class OfficialDiscoverySource(HttpClient client, TimeProvider? tim
             var routes = cdns?.Rows.Where(row => row.Fields["Name"] == region).ToArray() ?? [];
             MetadataRow? route = null;
             if (cdns is null) errors.Add(new(region, "ROUTE_UNAVAILABLE", "CDN route metadata could not be checked."));
-            else if (routes.Length == 0) errors.Add(new(region, "ROUTE_MISSING", "This advertised region has no matching CDN route."));
+            // Blizzard advertises some regions (wow, wowt and wow_beta: sg, xx) with no cdns row at all. That is a fact
+            // about the source, not a failed check, so it is a regional note (D076). Ambiguous or unusable routes stay problems.
+            else if (routes.Length == 0) errors.Add(DiscoveryProblem.RegionNote(region, "ROUTE_MISSING", MissingRouteMessage));
             else if (routes.Length != 1) errors.Add(new(region, "ROUTE_AMBIGUOUS", "This region has multiple matching CDN routes."));
             else if (routes[0].Fields["Path"].Length == 0 || string.IsNullOrWhiteSpace(routes[0].Fields["Hosts"]))
                 errors.Add(new(region, "ROUTE_INVALID", "This region has no usable CDN path and hosts."));
@@ -132,7 +136,7 @@ public sealed class OfficialDiscoverySource(HttpClient client, TimeProvider? tim
             }
             catch (DiscoveryException ex) { errors.Add(new(region, ex.Code, ex.Message)); }
         }
-        return new(documents, observations, successful, regions, errors, errors.Count == 0 ? "online" : "partial");
+        return new(documents, observations, successful, regions, errors, DiscoveryProblem.CheckedConnection(errors));
     }
     public void Dispose() { network.Dispose(); cpu.Dispose(); }
 }

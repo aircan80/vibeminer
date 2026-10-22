@@ -158,6 +158,39 @@ test('products failing with HTTP 500 or offline read as could not be checked, ne
   } finally { await session.close(); }
 });
 
+test('regions advertised without a CDN route are a calm note: the refresh completes and Retry never appears (#47)', async () => {
+  const session = await launch(true);
+  try {
+    const { page } = session;
+    await expect(page.locator('.build-row')).toHaveCount(2);
+    await writeFile(path.join(session.data, 'no-route-sg-xx'), 'retail');
+    await page.getByRole('button', { name: 'Refresh builds', exact: true }).click();
+    await writeFile(path.join(session.data, 'release-wow'), 'release');
+    await writeFile(path.join(session.data, 'release-wowt'), 'release');
+    await expect(page.getByRole('status')).toHaveText('Discovery complete. Checked 2 products.');
+    await expect(page.locator('.dv-checks')).toHaveText('Checked 2 products');
+    await expect(page.locator('.dv-notice')).toHaveCount(0);
+    await expect(page.locator('.dv-window')).not.toContainText(/Refresh incomplete|Earlier saved observations|A failed check|ROUTE_MISSING/);
+    await expect(page.locator('.dv-refresh')).toHaveText(/Refresh builds/);
+    await expect(page.getByRole('button', { name: 'Retry discovery' })).toHaveCount(0);
+    await page.locator('.build-row').first().click();
+    const routes = page.locator('dt', { hasText: 'CDN routes' }).locator('xpath=following-sibling::dd[1]');
+    await expect(routes).toContainText(/^US/);
+    await expect(routes.locator('.dv-route-note')).toHaveText('SG, XX: Advertised without a CDN route, so not usable as a download source.');
+    await expect(page.getByLabel('Download source')).toHaveValue('us');
+    await page.getByRole('button', { name: 'Source details' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.locator('.route-notes')).toHaveText('SG, XX: Advertised without a CDN route, so not usable as a download source. (ROUTE_MISSING)');
+    await expect(dialog).not.toContainText('Current attempt problems');
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    // F5 checks again; with only notes it still never turns into Retry.
+    await page.keyboard.press('F5');
+    await writeFile(path.join(session.data, 'release-wow'), 'release');
+    await expect(page.getByRole('status')).toHaveText('Discovery complete. Checked 2 products.');
+    await expect(page.locator('.dv-refresh')).toHaveText(/Refresh builds/);
+  } finally { await session.close(); }
+});
+
 test('when only wowt fails with HTTP 500 and only wow has history, nothing claims evidence for wowt or every product', async () => {
   const session = await launch(true);
   try {

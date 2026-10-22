@@ -65,7 +65,21 @@ public sealed record Build(string Id, string ProductId, string Version, string B
     string FirstSeenAt, string LastSeenAt, bool IsNew, bool IsAdvertised, bool IsLocal,
     string Availability, IReadOnlyList<SourceReceipt> SourceReceipts,
     IReadOnlyList<CdnConfigObservation> CdnConfigHistory, int CdnConfigHistoryCount);
-public sealed record DiscoveryProblem(string? Region, string Code, string Message);
+/// <summary>
+/// One finding of a discovery check. Severity "problem" means the check did not get everything it asked for, so the
+/// product's check is partial. Severity "note" is a regional fact about the official source that leaves the check
+/// complete, such as a region advertised without any CDN route (D076).
+/// </summary>
+public sealed record DiscoveryProblem(string? Region, string Code, string Message, string Severity = DiscoveryProblem.ProblemSeverity)
+{
+    public const string ProblemSeverity = "problem";
+    public const string NoteSeverity = "note";
+    /// <summary>A regional note: it is reported, but the check that found it is still complete.</summary>
+    public static DiscoveryProblem RegionNote(string region, string code, string message) => new(region, code, message, NoteSeverity);
+    /// <summary>The connection of a check that read the versions document: only problems make it partial, never notes.</summary>
+    public static string CheckedConnection(IEnumerable<DiscoveryProblem> findings) =>
+        findings.Any(finding => finding.Severity != NoteSeverity) ? "partial" : "online";
+}
 public sealed record DiscoveryPage(string ProductId, IReadOnlyList<Build> Builds, string? NextCursor,
     string? LastCheckedAt, IReadOnlyList<string> CheckedRegions, IReadOnlyList<DiscoveryProblem> Errors,
     bool HasSavedHistory, string Connection);

@@ -342,6 +342,10 @@ export interface DiscoveryProblem {
   region: string | null;
   code: string;
   message: string;
+  /**
+   * problem: the check did not get everything it asked for. note: a regional fact about the official source that leaves the check complete (D076).
+   */
+  severity: 'problem' | 'note';
 }
 export interface DiscoveryPage {
   productId: string;

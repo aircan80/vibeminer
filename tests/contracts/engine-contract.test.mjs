@@ -42,6 +42,11 @@ test('a cross-product page keeps exact builds, every product status and per-prod
   invalid(value => { delete value.products; });
   invalid(value => { value.products[0].connection = 'checked'; });
   invalid(value => { value.products[0].extra = true; });
+  // Every finding says whether it is a problem or a regional note (D076).
+  assert.deepEqual(page.products[0].errors.map(error => [error.region, error.severity]), [['sg', 'note'], ['xx', 'note']]);
+  assert.equal(page.products[0].connection, 'online', 'a check with only regional notes is complete');
+  invalid(value => { delete value.products[0].errors[0].severity; });
+  invalid(value => { value.products[0].errors[0].severity = 'info'; });
   invalid(value => { value.refreshProblems[0].region = 'us'; });
   invalid(value => { value.builds = Array(101).fill(value.builds[0]); });
   const request = (method, params) => ({ protocolVersion: 1, id: 'all', method, params });

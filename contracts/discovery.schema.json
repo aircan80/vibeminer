@@ -613,12 +613,21 @@
         },
         "message": {
           "type": "string"
+        },
+        "severity": {
+          "description": "problem: the check did not get everything it asked for. note: a regional fact about the official source that leaves the check complete (D076).",
+          "type": "string",
+          "enum": [
+            "problem",
+            "note"
+          ]
         }
       },
       "required": [
         "region",
         "code",
-        "message"
+        "message",
+        "severity"
       ],
       "additionalProperties": false
     },

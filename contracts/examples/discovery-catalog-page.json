@@ -159,9 +159,24 @@
       "productId": "wow",
       "lastCheckedAt": "2026-10-18T12:00:00Z",
       "checkedRegions": [
-        "us"
+        "sg",
+        "us",
+        "xx"
       ],
-      "errors": [],
+      "errors": [
+        {
+          "region": "sg",
+          "code": "ROUTE_MISSING",
+          "message": "Advertised without a CDN route, so not usable as a download source.",
+          "severity": "note"
+        },
+        {
+          "region": "xx",
+          "code": "ROUTE_MISSING",
+          "message": "Advertised without a CDN route, so not usable as a download source.",
+          "severity": "note"
+        }
+      ],
       "hasSavedHistory": true,
       "connection": "online"
     },
@@ -175,8 +190,9 @@
       "errors": [
         {
           "region": "eu",
-          "code": "ROUTE_MISSING",
-          "message": "This advertised region has no matching CDN route."
+          "code": "ROUTE_AMBIGUOUS",
+          "message": "This region has multiple matching CDN routes.",
+          "severity": "problem"
         }
       ],
       "hasSavedHistory": true,
@@ -198,7 +214,8 @@
         {
           "region": null,
           "code": "NETWORK_UNAVAILABLE",
-          "message": "Official metadata could not be reached."
+          "message": "Official metadata could not be reached.",
+          "severity": "problem"
         }
       ],
       "hasSavedHistory": false,

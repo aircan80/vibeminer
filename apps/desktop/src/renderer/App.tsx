@@ -178,12 +178,29 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
 
 type ProductFilter = 'all' | string;
 type ProblemGroup = { key: string; label: string; text: string; code: string };
+/**
+ * The findings that left a check incomplete. The engine marks regional facts about the official source, such as a
+ * region advertised without a CDN route, as notes; notes are never counted, retried or called incomplete (D076).
+ */
+export const checkProblems = (status: ProductDiscoveryStatus) => status.errors.filter(error => error.severity === 'problem');
+export type RegionNote = { key: string; regions: string[]; text: string; code: string };
+/** A product's notes from its latest check, grouped by wording. With `only`, just the notes about those regions. */
+export function regionNotes(status: ProductDiscoveryStatus | undefined, only?: readonly string[]): RegionNote[] {
+  const groups = new Map<string, RegionNote>();
+  for (const note of status?.errors ?? []) {
+    if (note.severity !== 'note' || only && (note.region === null || !only.includes(note.region))) continue;
+    const key = `${note.code}|${note.message}`, group = groups.get(key);
+    if (!group) groups.set(key, { key, regions: note.region === null ? [] : [note.region], text: note.message, code: note.code });
+    else if (note.region !== null && !group.regions.includes(note.region)) group.regions.push(note.region);
+  }
+  return [...groups.values()];
+}
 /** Per-product problems from the latest saved checks and from this session's refresh, grouped when products share one. */
 export function productProblems(statuses: readonly ProductDiscoveryStatus[], refreshProblems: readonly ProductRefreshProblem[]): ProblemGroup[] {
   const groups = new Map<string, { labels: string[]; text: string; code: string }>();
   const add = (key: string, label: string, text: string, code: string) => { const group = groups.get(key); if (group) { if (!group.labels.includes(label)) group.labels.push(label); } else groups.set(key, { labels: [label], text, code }); };
   for (const problem of refreshProblems) add(`refresh|${problem.code}|${problem.message}`, problem.productId, `check did not complete. ${problem.message}`, problem.code);
-  for (const status of statuses) for (const error of status.errors) add(`${error.region ?? ''}|${error.code}|${error.message}`, `${status.productId}${error.region ? ` ${error.region.toUpperCase()}` : ''}`, error.message, error.code);
+  for (const status of statuses) for (const error of checkProblems(status)) add(`${error.region ?? ''}|${error.code}|${error.message}`, `${status.productId}${error.region ? ` ${error.region.toUpperCase()}` : ''}`, error.message, error.code);
   return [...groups].map(([key, group]) => ({ key, label: group.labels.join(', '), text: group.text, code: group.code }));
 }
 /**
@@ -194,7 +211,7 @@ export const checkCompleted = (status: ProductDiscoveryStatus) => status.connect
 /** A latest check that was attempted but received no usable evidence. It never reads as a check that found nothing. */
 export const checkFailed = (status: ProductDiscoveryStatus) => status.connection === 'offline' || status.connection === 'partial' && status.checkedRegions.length === 0;
 /** The typed problem a failed check reports, for naming it in place. */
-const failureText = (status: ProductDiscoveryStatus | undefined, refresh?: ProductRefreshProblem) => refresh ? `${refresh.message} (${refresh.code})` : status?.errors[0] ? `${status.errors[0].message} (${status.errors[0].code})` : 'Official metadata could not be read.';
+const failureText = (status: ProductDiscoveryStatus | undefined, refresh?: ProductRefreshProblem) => { const first = status && checkProblems(status)[0]; return refresh ? `${refresh.message} (${refresh.code})` : first ? `${first.message} (${first.code})` : 'Official metadata could not be read.'; };
 export type CheckSummary = { checked: string[]; failed: string[]; notChecked: string[]; total: number };
 /**
  * Which products have a completed check. With a baseline (each product's lastCheckedAt when this session's latest
@@ -214,11 +231,13 @@ export function checkSummary(statuses: readonly ProductDiscoveryStatus[], baseli
 }
 const productNames = (ids: readonly string[]) => ids.length <= 3 ? ids.join(', ') : `${ids.length} products`;
 /**
- * What a problem leaves behind, per product with the problem: its own saved observations are kept, or it has none.
+ * What a failed check leaves behind, per product whose check failed: its own saved observations are kept, or it has
+ * none. Pass only failed checks: a failed check saves nothing, so what it has saved existed before it. A check that
+ * completed with a regional problem just saved its own observations, so nothing "earlier" is being kept for it.
  * Never decided from other products' history, and never "every product".
  */
-export function retainedEvidence(problemStatuses: readonly ProductDiscoveryStatus[]): string {
-  const kept = problemStatuses.filter(s => s.hasSavedHistory).map(s => s.productId), none = problemStatuses.filter(s => !s.hasSavedHistory).map(s => s.productId);
+export function retainedEvidence(failedStatuses: readonly ProductDiscoveryStatus[]): string {
+  const kept = failedStatuses.filter(s => s.hasSavedHistory).map(s => s.productId), none = failedStatuses.filter(s => !s.hasSavedHistory).map(s => s.productId);
   return [...(kept.length ? [`Earlier saved observations are kept for ${productNames(kept)}.`] : []), ...(none.length ? [`${productNames(none)}: no saved observations.`] : [])].join(' ');
 }
 /** "Checked 1 of 2 products · wowt not checked"; null when nothing was ever checked and no refresh ran this session. */
@@ -347,10 +366,12 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
         accept(windowPage, contextProduct);
         setSelectionNotice(wantedSelection && !windowPage.builds.some(build => build.id === wantedSelection) ? windowPage.nextCursor ? 'The selected exact build is outside the refreshed 500-build display window. No different build has been selected.' : 'The selected exact build is no longer returned by this view after refresh. No different build has been selected.' : '');
         const statuses = reply.value.products, total = statuses.length, checkedNow = statuses.filter(s => s.connection !== 'notChecked');
-        const failed = new Set([...statuses.filter(s => s.connection === 'offline' || s.errors.length > 0).map(s => s.productId), ...reply.value.refreshProblems.map(p => p.productId)]);
-        // What is kept is stated per product with a problem, from that product's own saved history.
-        const kept = retainedEvidence(statuses.filter(s => failed.has(s.productId)));
-        setMessage(checkedNow.length > 0 && checkedNow.every(checkFailed) ? `Could not refresh. ${kept}` : failed.size ? `Check completed with problems for ${failed.size} of ${total} products. ${kept}` : `Discovery complete. Checked ${total} products.`);
+        const notCommitted = new Set(reply.value.refreshProblems.map(p => p.productId));
+        // Regional notes are not problems; only failed checks and real problems count here.
+        const withProblems = new Set([...statuses.filter(s => s.connection === 'offline' || checkProblems(s).length > 0).map(s => s.productId), ...notCommitted]);
+        // What is kept is stated only for products whose check failed, from that product's own saved history.
+        const kept = retainedEvidence(statuses.filter(s => checkFailed(s) || notCommitted.has(s.productId)));
+        setMessage(checkedNow.length > 0 && checkedNow.every(checkFailed) ? `Could not refresh. ${kept}` : withProblems.size ? `Check completed with problems for ${withProblems.size} of ${total} products.${kept ? ` ${kept}` : ''}` : `Discovery complete. Checked ${total} products.`);
       } else if (reply.error.code === 'CANCELED') { setMessage('Discovery canceled. Products checked before stopping keep their new results.'); reread = true; }
       else { setError(`${reply.error.message} (${reply.error.code})`); setMessage('Discovery could not complete. Previous observations are still available.'); reread = true; }
     } catch { if (!disposed.current) { setError('The refreshed view could not be completed. Previous observations remain displayed; retry discovery to read a coherent window.'); setMessage('Discovery could not complete the refreshed view. Previous observations are still displayed.'); } }
@@ -393,8 +414,8 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
   const attempted = statuses.filter(s => s.connection !== 'notChecked' || refreshFailed.has(s.productId));
   const completed = attempted.filter(s => !failedNow(s) && checkCompleted(s));
   const failedChecks = attempted.filter(failedNow);
-  // Products the notice reports a problem for: failed attempts and checks with regional problems.
-  const problemStatuses = statuses.filter(s => failedNow(s) || s.errors.length > 0);
+  // Only failed attempts keep earlier evidence; a check with a regional problem just saved its own.
+  const failedStatuses = statuses.filter(failedNow);
   const allFailed = attempted.length > 0 && completed.length === 0;
   const anySaved = statuses.some(s => s.hasSavedHistory);
   const nothingSaved = !!page && !reading && !page.builds.length && filter === 'all' && productFilter === 'all' && !anySaved;
@@ -426,7 +447,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
   const notices = <>
     {problem && (refusedCatalog(problem) ? <RefusedNotice text={problem}/> : <div role="alert" className="dv-notice error"><div><strong>Products unavailable</strong>{problem}</div></div>)}
     {error && !(refusedCatalog(error) && refusedCatalog(problem)) && (refusedCatalog(error) ? <RefusedNotice text={error}/> : <div role="alert" className="dv-notice error"><div><><strong>Discovery problem</strong>{error} Saved observations remain available. Retry discovery checks every product again; engine failures require restarting VibeMiner.</></div></div>)}
-    {problems.length > 0 && !refused && <div className={`dv-notice${failedChecks.length ? ' error' : ''}`}><div><strong>{allFailed ? 'Refresh unavailable' : 'Refresh incomplete'}</strong>{anySaved ? `${retainedEvidence(problemStatuses)}${problemStatuses.some(s => s.hasSavedHistory) ? ' A failed check does not remove earlier advertisements.' : ''}` : 'No saved observations are available yet.'} Retry discovery checks every product again.<ul>{shownProblems.map(p => <li key={p.key}>{p.label}: {p.text} <code>({p.code})</code></li>)}</ul>{problems.length > shownProblems.length && <span>{problems.length - shownProblems.length} more problems. Source details lists the problems of the selected build's product.</span>}</div>{!busy && <button className="dv-btn" onClick={() => { refreshButton.current?.focus(); void refresh(); }}>Retry discovery</button>}</div>}
+    {problems.length > 0 && !refused && <div className={`dv-notice${failedChecks.length ? ' error' : ''}`}><div><strong>{allFailed ? 'Refresh unavailable' : 'Refresh incomplete'}</strong>{anySaved ? `${retainedEvidence(failedStatuses)}${failedStatuses.some(s => s.hasSavedHistory) ? ' A failed check does not remove earlier advertisements.' : ''}` : 'No saved observations are available yet.'} Retry discovery checks every product again.<ul>{shownProblems.map(p => <li key={p.key}>{p.label}: {p.text} <code>({p.code})</code></li>)}</ul>{problems.length > shownProblems.length && <span>{problems.length - shownProblems.length} more problems. Source details lists the problems of the selected build's product.</span>}</div>{!busy && <button className="dv-btn" onClick={() => { refreshButton.current?.focus(); void refresh(); }}>Retry discovery</button>}</div>}
     {!refused && hidden && filtered.length > 0 && (selected || filtersActive) && <div className="dv-notice"><div><strong>Selected build is hidden by these filters</strong>{selected ? `${selected.productId} ${selected.version} is still selected.` : 'The refresh did not reload its details.'} Clear filters to see it in the list.</div><button className="dv-btn" onClick={clearFilters}>Clear filters</button></div>}
     {openingElsewhere && <div className="dv-notice info">{openingBox(openingElsewhere)}</div>}
   </>;
@@ -538,7 +559,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
           <div className="dv-label">Observation</div>
           <dl><dt>Publication</dt><dd>{selected.isAdvertised ? `Current: advertised at the last completed check (${stamp(selected.lastSeenAt)})` : 'Not advertised at the last completed check'}{selectedStatus && failedNow(selectedStatus) && ' · latest check failed'}</dd>
             <dt>Advertised in</dt><dd>{selected.advertisedRegions.length ? regions(selected.advertisedRegions) : 'None at last check'}</dd>
-            <dt>CDN routes</dt><dd>{regions(routeRegions(selected))}{selected.advertisedRegions.filter(r => !routeRegions(selected).includes(r)).map(r => ` · ${r.toUpperCase()} has no CDN route`).join('')}</dd>
+            <dt>CDN routes</dt><dd><RouteRegions build={selected} status={selectedStatus}/></dd>
             <dt>Last seen</dt><dd>{stamp(selected.lastSeenAt)}</dd>
             <dt>File availability</dt><dd>Not checked</dd></dl>
           {selected.identityFields.KeyRing && <p className="dv-note">A key ring reference does not mean its keys are available.</p>}
@@ -564,6 +585,15 @@ function BuildOpenAction({ build, onOpen, onSource }: { build: Build; onOpen: (b
   const available = eligible.includes(source);
   return <div className={`dv-insp-foot${available ? '' : ' blocked'}`}><div className="dv-field"><label htmlFor="opening-source">Download source</label><select id="opening-source" className="dv-control" value={available ? source : ''} onChange={event => setSource(event.target.value)} disabled={!eligible.length}>{!available && <option value="">No recorded source route</option>}{eligible.map(region => <option key={region} value={region}>{region.toUpperCase()}</option>)}</select></div><button className="dv-btn primary dv-open" disabled={!available} aria-describedby="open-reason" onClick={() => { if (available) onOpen(build, source); }}>Open build</button><button className="dv-btn" onClick={onSource}>Source details</button><p className="dv-reason" id="open-reason">{available ? 'Browsing never downloads game content.' : 'Open needs a recorded CDN route. Refresh builds to check again, or inspect Source details.'}</p></div>;
 }
+/**
+ * The build's routed regions. Advertised regions without a route are named calmly with the engine's regional note;
+ * one left without a route by a problem (ambiguous, unusable or unchecked) keeps the plain "has no CDN route".
+ */
+function RouteRegions({ build, status }: { build: Build; status?: ProductDiscoveryStatus }) {
+  const routes = routeRegions(build), unrouted = build.advertisedRegions.filter(region => !routes.includes(region));
+  const notes = regionNotes(status, unrouted), noted = new Set(notes.flatMap(note => note.regions));
+  return <>{regions(routes)}{unrouted.filter(region => !noted.has(region)).map(region => ` · ${region.toUpperCase()} has no CDN route`).join('')}{notes.map(note => <span key={note.key} className="dv-route-note">{regions(note.regions)}: {note.text}</span>)}</>;
+}
 function Field({ label, value }: { label: string; value: string }) { return <><dt>{label}</dt><dd className="mono">{value}</dd></>; }
 function CdnConfigHint({ build, open }: { build: Build; open?: { cdnConfig: string; region: string } }) {
   // Only the open build's own source region decides whether switching would change anything.
@@ -582,5 +612,6 @@ function SourceDialog({ build, status, openCdnConfig, onClose }: { build: Build;
   const dialog = useRef<HTMLDialogElement>(null);
   const previous = useRef<HTMLElement | null>(null);
   useEffect(() => { previous.current = document.activeElement as HTMLElement; dialog.current?.showModal(); return () => { dialog.current?.close(); previous.current?.focus(); }; }, []);
-  return <dialog ref={dialog} aria-labelledby="source-title" onCancel={e => { e.preventDefault(); onClose(); }}><div className="dialog-heading"><div><div className="eyebrow">Discovery evidence</div><h2 id="source-title">Source details</h2></div><button autoFocus onClick={onClose}>Close</button></div><div className="dialog-body"><p><code>{build.productId}</code> · {build.version} · Build {build.buildId}</p><p>Checked regions for <code>{build.productId}</code>: {regions(status?.checkedRegions ?? [])} · Last attempt: {stamp(status?.lastCheckedAt ?? null)}</p><h3>Exact build references</h3><dl className="identity"><Field label="Build number" value={build.buildId}/><Field label="Build configuration" value={build.buildConfig}/><Field label="CDN configuration" value={build.cdnConfig}/><Field label="Product configuration" value={build.productConfig === null ? 'Not supplied' : build.productConfig}/><Field label="Exact identity" value={build.id}/><dt>First observed here</dt><dd>{stamp(build.firstSeenAt)}</dd><dt>Last observed</dt><dd>{stamp(build.lastSeenAt)}</dd></dl><CdnConfigHistory build={build} openCdnConfig={openCdnConfig}/><details><summary>Original identity fields</summary><dl className="identity">{Object.entries(build.identityFields).map(([name, value]) => <Field key={name} label={name} value={value === '' ? '(empty value)' : value}/>)}</dl></details><h3>Regional route evidence</h3><p>{regions(build.routeRegions)}. Route evidence is separate from advertisement-region grouping. The Download source control selects one eligible saved regional source for Open; that choice does not change the exact build identity or its grouped advertisements.</p><h3>Original receipts</h3>{build.sourceReceipts.length ? build.sourceReceipts.map((receipt, i) => <section className="receipt" key={i}><h4>{receipt.region.toUpperCase()} · {receipt.role}</h4><dl className="identity"><Field label="Requested URL" value={receipt.url}/><dt>Retrieved</dt><dd>{stamp(receipt.retrievedAt)}</dd><Field label="SHA-256" value={receipt.sha256}/><dt>Document length / row</dt><dd>{receipt.byteLength} bytes · {receipt.rowOrdinal === null ? 'No row ordinal' : `Row ${receipt.rowOrdinal}`}</dd></dl></section>) : <p>No receipts recorded.</p>}{!!status?.errors.length && <><h3>Current attempt problems</h3><ul>{status.errors.map((p, i) => <li key={i}>{p.region || 'Source'}: {p.message} ({p.code})</li>)}</ul></>}</div></dialog>;
+  const notes = regionNotes(status), problems = status ? checkProblems(status) : [];
+  return <dialog ref={dialog} aria-labelledby="source-title" onCancel={e => { e.preventDefault(); onClose(); }}><div className="dialog-heading"><div><div className="eyebrow">Discovery evidence</div><h2 id="source-title">Source details</h2></div><button autoFocus onClick={onClose}>Close</button></div><div className="dialog-body"><p><code>{build.productId}</code> · {build.version} · Build {build.buildId}</p><p>Checked regions for <code>{build.productId}</code>: {regions(status?.checkedRegions ?? [])} · Last attempt: {stamp(status?.lastCheckedAt ?? null)}</p><h3>Exact build references</h3><dl className="identity"><Field label="Build number" value={build.buildId}/><Field label="Build configuration" value={build.buildConfig}/><Field label="CDN configuration" value={build.cdnConfig}/><Field label="Product configuration" value={build.productConfig === null ? 'Not supplied' : build.productConfig}/><Field label="Exact identity" value={build.id}/><dt>First observed here</dt><dd>{stamp(build.firstSeenAt)}</dd><dt>Last observed</dt><dd>{stamp(build.lastSeenAt)}</dd></dl><CdnConfigHistory build={build} openCdnConfig={openCdnConfig}/><details><summary>Original identity fields</summary><dl className="identity">{Object.entries(build.identityFields).map(([name, value]) => <Field key={name} label={name} value={value === '' ? '(empty value)' : value}/>)}</dl></details><h3>Regional route evidence</h3><p>{regions(build.routeRegions)}. Route evidence is separate from advertisement-region grouping. The Download source control selects one eligible saved regional source for Open; that choice does not change the exact build identity or its grouped advertisements.</p>{notes.length > 0 && <><p>Notes from the latest check of <code>{build.productId}</code>:</p><ul className="route-notes">{notes.map(note => <li key={note.key}>{note.regions.length ? regions(note.regions) : 'Source'}: {note.text} <code>({note.code})</code></li>)}</ul></>}<h3>Original receipts</h3>{build.sourceReceipts.length ? build.sourceReceipts.map((receipt, i) => <section className="receipt" key={i}><h4>{receipt.region.toUpperCase()} · {receipt.role}</h4><dl className="identity"><Field label="Requested URL" value={receipt.url}/><dt>Retrieved</dt><dd>{stamp(receipt.retrievedAt)}</dd><Field label="SHA-256" value={receipt.sha256}/><dt>Document length / row</dt><dd>{receipt.byteLength} bytes · {receipt.rowOrdinal === null ? 'No row ordinal' : `Row ${receipt.rowOrdinal}`}</dd></dl></section>) : <p>No receipts recorded.</p>}{problems.length > 0 && <><h3>Current attempt problems</h3><ul>{problems.map((p, i) => <li key={i}>{p.region || 'Source'}: {p.message} ({p.code})</li>)}</ul></>}</div></dialog>;
 }

@@ -120,6 +120,7 @@
 .discovery-screen .dv-insp-body dd{margin:0;overflow-wrap:anywhere}
 .discovery-screen .dv-insp-body dd.mono{font-size:var(--dv-s);line-height:1.7}
 .discovery-screen .dv-note{margin:.56rem 0 0;font-size:var(--dv-s);color:var(--dv-muted)}
+.discovery-screen .dv-route-note{display:block;margin-top:.187rem;font-size:var(--dv-s);color:var(--dv-muted)}
 .discovery-screen .dv-state{border:1px solid #cfe2d6;background:var(--mint);border-radius:6px;padding:.513rem .653rem;font-size:var(--dv-m)}
 .discovery-screen .dv-state strong{display:block}
 .discovery-screen .dv-row{display:flex;gap:.373rem;margin-top:.42rem;flex-wrap:wrap}

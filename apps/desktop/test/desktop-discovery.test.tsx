@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App, checkLine, checkSummary, downloadedText, productProblems, retainedEvidence } from '../src/renderer/App';
+import { App, checkLine, checkProblems, checkSummary, downloadedText, productProblems, regionNotes, retainedEvidence } from '../src/renderer/App';
 import { storedPercent, summariesMatch, validSummariesParams } from '../src/shared/download-summary';
 import { ActivityTrigger, DownloadActivity } from '../src/renderer/DownloadActivity';
 import { SUMMARY_RETRY_MS } from '../src/renderer/useDownloadSummaries';
@@ -349,7 +349,7 @@ describe('desktop discovery layout', () => {
     // Another request's progress is ignored.
     act(() => { for (const listener of listeners) listener({ protocolVersion: 1, type: 'progress', requestId: 'other', sequence: 9, stage: 'Checking official metadata', region: null, completed: 12, total: 13, unit: 'products' }); });
     expect(document.querySelector('.dv-statusbar')).toHaveTextContent('5 of 13 done');
-    const offline = { region: null, code: 'NETWORK_UNAVAILABLE', message: 'Official metadata could not be reached.' };
+    const offline = { region: null, code: 'NETWORK_UNAVAILABLE', message: 'Official metadata could not be reached.', severity: 'problem' as const };
     await act(async () => held.resolve(success(catalog(page, { refreshProblems: [{ productId: 'wow', code: 'CATALOG_BUSY', message: 'The discovery catalog is busy.' }] }, [statusOf(page), { ...notChecked('wowt'), connection: 'offline', lastCheckedAt: '2026-10-20T09:00:00Z', errors: [offline] }]))));
     const notice = screen.getByText('Refresh unavailable').closest('.dv-notice') as HTMLElement;
     expect(notice).toHaveTextContent('wow: check did not complete. The discovery catalog is busy. (CATALOG_BUSY)');
@@ -375,7 +375,7 @@ describe('desktop discovery layout', () => {
     const bridge = bridgeMock(); await ready(bridge);
     // Before any refresh this session, the saved latest checks are summarized.
     expect(document.querySelector('.dv-checks')).toHaveTextContent(/^Checked 1 of 2 products · wowt not checked$/);
-    vi.mocked(bridge.refreshAll).mockResolvedValueOnce(success(catalog(page, {}, [statusOf({ ...page, lastCheckedAt: '2026-10-20T09:00:00Z' }), { ...notChecked('wowt'), connection: 'offline', lastCheckedAt: '2026-10-20T09:00:01Z', errors: [{ region: null, code: 'NETWORK_UNAVAILABLE', message: 'Unreachable.' }] }])));
+    vi.mocked(bridge.refreshAll).mockResolvedValueOnce(success(catalog(page, {}, [statusOf({ ...page, lastCheckedAt: '2026-10-20T09:00:00Z' }), { ...notChecked('wowt'), connection: 'offline', lastCheckedAt: '2026-10-20T09:00:01Z', errors: [{ region: null, code: 'NETWORK_UNAVAILABLE', message: 'Unreachable.', severity: 'problem' as const }] }])));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
     await waitFor(() => expect(document.querySelector('.dv-checks')).toHaveTextContent(/^Checked 1 of 2 products · wowt could not be checked$/));
     // A refresh that commits nothing new for wow does not count wow's older saved check.
@@ -398,8 +398,8 @@ describe('desktop discovery layout', () => {
     expect(document.querySelector('.dv-latest')).not.toHaveTextContent('oldest');
   });
   describe('failed checks never read as completed checks that found nothing', () => {
-    const http500 = { region: null, code: 'HTTP_STATUS', message: 'Official metadata returned an unsuccessful HTTP status.' };
-    const offline = { region: null, code: 'NETWORK_UNAVAILABLE', message: 'Official metadata could not be reached.' };
+    const http500 = { region: null, code: 'HTTP_STATUS', message: 'Official metadata returned an unsuccessful HTTP status.', severity: 'problem' as const };
+    const offline = { region: null, code: 'NETWORK_UNAVAILABLE', message: 'Official metadata could not be reached.', severity: 'problem' as const };
     // An HTTP 500 on both documents is saved as partial with no checked regions: nothing was received.
     const failedHttp = (productId: string) => ({ ...notChecked(productId), connection: 'partial' as const, lastCheckedAt: '2026-10-20T09:00:00Z', errors: [http500, http500] });
     const answering = (statuses: ReturnType<typeof notChecked>[], read: DiscoveryPage = page) => (params: { productId?: string; filter?: 'all' | 'local' | 'advertised' }) =>
@@ -499,7 +499,7 @@ describe('desktop discovery layout', () => {
     });
   });
   it('summarizes checks per product without counting failures', () => {
-    const statuses = [statusOf(page), { ...notChecked('wowt'), connection: 'offline' as const, lastCheckedAt: '2026-10-20T09:00:00Z' }, notChecked('wow_beta'), { ...notChecked('wow_classic'), connection: 'partial' as const, lastCheckedAt: '2026-10-20T09:00:00Z', checkedRegions: ['us'] }, { ...notChecked('wow_classic_ptr'), connection: 'partial' as const, lastCheckedAt: '2026-10-20T09:00:00Z', errors: [{ region: null, code: 'HTTP_STATUS', message: 'Official metadata returned an unsuccessful HTTP status.' }] }];
+    const statuses = [statusOf(page), { ...notChecked('wowt'), connection: 'offline' as const, lastCheckedAt: '2026-10-20T09:00:00Z' }, notChecked('wow_beta'), { ...notChecked('wow_classic'), connection: 'partial' as const, lastCheckedAt: '2026-10-20T09:00:00Z', checkedRegions: ['us'] }, { ...notChecked('wow_classic_ptr'), connection: 'partial' as const, lastCheckedAt: '2026-10-20T09:00:00Z', errors: [{ region: null, code: 'HTTP_STATUS', message: 'Official metadata returned an unsuccessful HTTP status.', severity: 'problem' as const }] }];
     expect(checkSummary(statuses, null, [])).toEqual({ checked: ['wow', 'wow_classic'], failed: ['wowt', 'wow_classic_ptr'], notChecked: ['wow_beta'], total: 5 }); // partial with no checked regions received nothing
     expect(checkSummary(statuses, new Map([['wow', page.lastCheckedAt], ['wowt', null], ['wow_beta', null], ['wow_classic', null], ['wow_classic_ptr', null]]), [{ productId: 'wow_beta', code: 'CATALOG_BUSY', message: 'Busy.' }]))
       .toEqual({ checked: ['wow_classic'], failed: ['wowt', 'wow_beta', 'wow_classic_ptr'], notChecked: ['wow'], total: 5 });
@@ -508,10 +508,33 @@ describe('desktop discovery layout', () => {
     expect(checkLine({ checked: ['a', 'b'], failed: [], notChecked: [], total: 2 }, true)).toBe('Checked 2 products');
   });
   it('groups one problem shared by several products', () => {
-    const offline = { region: null, code: 'NETWORK_UNAVAILABLE', message: 'Official metadata could not be reached.' };
+    const offline = { region: null, code: 'NETWORK_UNAVAILABLE', message: 'Official metadata could not be reached.', severity: 'problem' as const };
     const groups = productProblems([{ ...notChecked('wow_beta'), connection: 'offline', errors: [offline] }, { ...notChecked('wow_classic_era'), connection: 'offline', errors: [offline] },
-      { ...notChecked('wowt'), connection: 'partial', errors: [{ region: 'eu', code: 'ROUTE_MISSING', message: 'No route.' }] }], []);
-    expect(groups.map(group => `${group.label}: ${group.text} (${group.code})`)).toEqual(['wow_beta, wow_classic_era: Official metadata could not be reached. (NETWORK_UNAVAILABLE)', 'wowt EU: No route. (ROUTE_MISSING)']);
+      { ...notChecked('wowt'), connection: 'partial', errors: [{ region: 'eu', code: 'ROUTE_AMBIGUOUS', message: 'Two routes.', severity: 'problem' as const }, { region: 'sg', code: 'ROUTE_MISSING', message: 'No route.', severity: 'note' as const }] }], []);
+    expect(groups.map(group => `${group.label}: ${group.text} (${group.code})`)).toEqual(['wow_beta, wow_classic_era: Official metadata could not be reached. (NETWORK_UNAVAILABLE)', 'wowt EU: Two routes. (ROUTE_AMBIGUOUS)']);
+  });
+  it('never counts regional notes as problems, and groups them by wording for the regions asked about', () => {
+    const note = (region: string, message = 'No route.') => ({ region, code: 'ROUTE_MISSING', message, severity: 'note' as const });
+    const status = { ...notChecked('wow'), connection: 'online' as const, checkedRegions: ['sg', 'us', 'xx'], errors: [note('sg'), note('xx'), note('kr', 'Other.')] };
+    expect(productProblems([status], [])).toEqual([]);
+    expect(checkProblems(status)).toEqual([]);
+    expect(regionNotes(status).map(group => `${group.regions.join(',')}: ${group.text}`)).toEqual(['sg,xx: No route.', 'kr: Other.']);
+    expect(regionNotes(status, ['xx', 'us']).map(group => group.regions)).toEqual([['xx']]);
+    expect(regionNotes(undefined)).toEqual([]);
+    expect(checkSummary([status], null, [])).toEqual({ checked: ['wow'], failed: [], notChecked: [], total: 1 });
+  });
+  it('reports a completed check with a regional problem without claiming earlier evidence is kept', async () => {
+    const bridge = bridgeMock();
+    const ambiguous = { region: 'eu', code: 'ROUTE_AMBIGUOUS', message: 'This region has multiple matching CDN routes.', severity: 'problem' as const };
+    const after = [statusOf({ ...page, lastCheckedAt: '2026-10-20T09:00:00Z' }), { ...notChecked('wowt'), connection: 'partial' as const, lastCheckedAt: '2026-10-20T09:00:00Z', checkedRegions: ['eu', 'us'], hasSavedHistory: true, errors: [ambiguous] }];
+    vi.mocked(bridge.refreshAll).mockResolvedValueOnce(success(catalog(page, {}, after)));
+    await ready(bridge);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/^Check completed with problems for 1 of 2 products\.$/));
+    const notice = screen.getByText('Refresh incomplete').closest('.dv-notice') as HTMLElement;
+    expect(notice).toHaveTextContent('wowt EU: This region has multiple matching CDN routes. (ROUTE_AMBIGUOUS)');
+    expect(notice).not.toHaveTextContent(/Earlier saved observations|A failed check|no saved observations/);
+    expect(document.querySelector('.dv-checks')).toHaveTextContent(/^Checked 2 products$/);
   });
   it('separates a missing key ring from a present but empty one', async () => {
     await ready();

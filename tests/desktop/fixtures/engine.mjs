@@ -71,25 +71,34 @@ function checkedPage(productId) {
   // checked regions; unreachable saves offline. Both keep earlier builds.
   if (existsSync(path.join(directory, `http500-${productId}`))) {
     const page = pageFor(productId, 'all', 100);
-    const problem = { region: null, code: 'HTTP_STATUS', message: 'Official metadata returned an unsuccessful HTTP status.' };
+    const problem = { region: null, code: 'HTTP_STATUS', message: 'Official metadata returned an unsuccessful HTTP status.', severity: 'problem' };
     return { ...page, connection: 'partial', lastCheckedAt: new Date().toISOString(), checkedRegions: [], errors: [problem, problem] };
   }
   if (existsSync(path.join(directory, `offline-${productId}`))) {
     const page = pageFor(productId, 'all', 100);
-    return { ...page, connection: 'offline', lastCheckedAt: new Date().toISOString(), checkedRegions: [], errors: [{ region: null, code: 'NETWORK_UNAVAILABLE', message: 'Authored unavailable metadata source' }] };
+    return { ...page, connection: 'offline', lastCheckedAt: new Date().toISOString(), checkedRegions: [], errors: [{ region: null, code: 'NETWORK_UNAVAILABLE', message: 'Authored unavailable metadata source', severity: 'problem' }] };
   }
   if (offlineEmpty) {
     const page = pageFor(productId);
     page.connection = 'offline'; page.lastCheckedAt = new Date().toISOString();
-    page.errors = [{ region: null, code: 'NETWORK_UNAVAILABLE', message: 'Authored unavailable metadata source' }];
+    page.errors = [{ region: null, code: 'NETWORK_UNAVAILABLE', message: 'Authored unavailable metadata source', severity: 'problem' }];
     return page;
   }
   const page = structuredClone(seed);
   page.productId = productId; page.connection = 'online'; page.lastCheckedAt = new Date().toISOString();
   for (const build of page.builds) { build.productId = productId; if (productId !== 'wow') build.id = (productId === 'wowt' ? 'e' : '0').repeat(64); }
+  // Shaped like real retail metadata (#47): versions advertises sg and xx, cdns has no row for them. The engine keeps
+  // the advertisement, saves no route and reports each region as a note; the check is still online.
+  if (existsSync(path.join(directory, 'no-route-sg-xx'))) {
+    if (productId === 'wowt') page.builds = page.builds.slice(0, 1);
+    for (const build of page.builds) build.advertisedRegions = ['sg', 'us', 'xx'];
+    page.checkedRegions = ['sg', 'us', 'xx'];
+    page.errors = ['sg', 'xx'].map(region => ({ region, code: 'ROUTE_MISSING', message: 'Advertised without a CDN route, so not usable as a download source.', severity: 'note' }));
+    return page;
+  }
   if (productId === 'wowt') {
     page.builds = page.builds.slice(0, 1);
-    page.connection = 'partial'; page.errors = [{ region: 'xx', code: 'ROUTE_UNAVAILABLE', message: 'Authored missing regional route' }];
+    page.connection = 'partial'; page.errors = [{ region: 'xx', code: 'ROUTE_UNAVAILABLE', message: 'Authored missing regional route', severity: 'problem' }];
   }
   return page;
 }

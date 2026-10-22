@@ -180,7 +180,7 @@ IDs run up to 19 bytes (`wow_classic_era_ptr`). Storage checks derive their boun
 
 Facts that break naive code:
 
-- **Versions and CDN tables do not line up.** `wow` advertises `sg` and `xx` version rows with no matching CDN row. `wowf` has a `cn` CDN row with no version row. A region needs exactly one matching CDN `Name` row to be routable; a missing route does not invalidate the advertisement, and you never fall back to US.
+- **Versions and CDN tables do not line up.** `wow`, `wowt` and `wow_beta` advertise `sg` and `xx` version rows with no matching CDN row. `wowf` has a `cn` CDN row with no version row. A region needs exactly one matching CDN `Name` row to be routable; a missing route does not invalidate the advertisement, and you never fall back to US. A missing route is permanent source data, so it is a regional note and the check is still complete; an ambiguous or unusable route is a problem ([D076](DECISIONS.md)).
 - **Seqn is not build age.** `## seqn` is an upstream document sequence number. It is not a build number or a release order.
 - **Region is not locale.** Version rows carry no locale. Never infer enUS from `us`.
 - **The CN NetEase host is deliberately unsupported.** The transport accepts only HTTPS `level3.blizzard.com`, `level3.ssl.blizzard.com` and `<2–8 letters>.cdn.blizzard.com` with a `/tpr/<name>/` path. Anything else is an explicit refusal.

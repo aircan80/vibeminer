@@ -301,7 +301,7 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
             {
                 generation = reader.GetInt64(0); checkedAt = reader.IsDBNull(1) ? null : reader.GetString(1);
                 checkedRegions = Deserialize<string[]>(reader.GetString(2));
-                errors = Deserialize<DiscoveryProblem[]>(reader.GetString(3)); state = reader.GetString(4);
+                (errors, state) = SavedFindings(reader.GetString(3), checkedRegions, reader.GetString(4));
             }
         }
         var after = "";
@@ -399,7 +399,7 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
             {
                 checkedAt = reader.IsDBNull(0) ? null : reader.GetString(0);
                 checkedRegions = Deserialize<string[]>(reader.GetString(1));
-                errors = Deserialize<DiscoveryProblem[]>(reader.GetString(2)); state = reader.GetString(3);
+                (errors, state) = SavedFindings(reader.GetString(2), checkedRegions, reader.GetString(3));
             }
         }
         var history = Convert.ToInt64(Scalar("SELECT EXISTS(SELECT 1 FROM builds WHERE product=$p)", null, ("$p", product))) == 1;
@@ -596,6 +596,35 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         var command = Db.CreateCommand(); command.CommandText = sql; command.Transaction = transaction;
         foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
         return command;
+    }
+    private sealed record SavedFinding(string? Region, string? Code, string? Message, string? Severity);
+    /// <summary>
+    /// A latest check's saved findings and connection. Checks saved before D076 have no severity: a missing route
+    /// becomes the regional note it is now, and a check whose only findings were notes reads as the complete check it
+    /// was. The saved event rows are not rewritten.
+    /// </summary>
+    private static (DiscoveryProblem[] Findings, string Connection) SavedFindings(string json, string[] checkedRegions, string connection)
+    {
+        var saved = Deserialize<SavedFinding[]>(json);
+        var legacy = false;
+        var findings = new DiscoveryProblem[saved.Length];
+        for (var i = 0; i < saved.Length; i++)
+        {
+            var finding = saved[i] ?? throw new DiscoveryException("CATALOG_INTEGRITY", "Saved discovery data is incomplete.");
+            if (finding.Code is null || finding.Message is null)
+                throw new DiscoveryException("CATALOG_INTEGRITY", "Saved discovery data is incomplete.");
+            var severity = finding.Severity;
+            if (severity is null)
+            {
+                legacy = true;
+                severity = finding.Code == "ROUTE_MISSING" && finding.Region is not null ? DiscoveryProblem.NoteSeverity : DiscoveryProblem.ProblemSeverity;
+            }
+            else if (severity is not (DiscoveryProblem.ProblemSeverity or DiscoveryProblem.NoteSeverity))
+                throw new DiscoveryException("CATALOG_INTEGRITY", "Saved discovery data is invalid.");
+            findings[i] = new(finding.Region, finding.Code, finding.Message, severity);
+        }
+        if (legacy && connection == "partial" && checkedRegions.Length > 0) connection = DiscoveryProblem.CheckedConnection(findings);
+        return (findings, connection);
     }
     private void Execute(string sql, SqliteTransaction? transaction = null, params (string, object?)[] parameters)
     { using var command = Command(sql, transaction, parameters); command.ExecuteNonQuery(); }

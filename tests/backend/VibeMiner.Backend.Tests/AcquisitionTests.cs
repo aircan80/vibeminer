@@ -25,9 +25,10 @@ public sealed class AcquisitionTests
         Assert.Equal(new[] { "eu", "sg", "us" }, attempt.CheckedRegions);
         Assert.Equal(4, attempt.Observations.Count);
         Assert.Single(attempt.Observations.Select(row => row.Identity.Id).Distinct());
-        Assert.Contains(attempt.Errors, error => error.Region == "sg" && error.Code == "ROUTE_MISSING");
+        Assert.Contains(attempt.Errors, error => error.Region == "sg" && error.Code == "ROUTE_MISSING" && error.Severity == DiscoveryProblem.NoteSeverity);
         Assert.Equal(new[] { 0, 1, 2, 3 }, attempt.Observations.Select(row => row.VersionsOrdinal).Order());
-        Assert.Equal("partial", attempt.Connection);
+        // A region advertised without a route is a regional note; the check is complete (D076).
+        Assert.Equal("online", attempt.Connection);
     }
     [Fact]
     public async Task AmbiguousRoutesPreserveAdvertisementWithoutRouting()

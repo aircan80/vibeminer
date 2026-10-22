@@ -57,7 +57,10 @@ type Build = {
   cdnConfigHistory: CdnConfigObservation[]; // newest first, at most 16
   cdnConfigHistoryCount: number; // total; older entries beyond the cap are omitted, not lost
 };
-type DiscoveryProblem = { region: string | null; code: string; message: string };
+type DiscoveryProblem = {
+  region: string | null; code: string; message: string;
+  severity: "problem" | "note"; // a note never makes a check partial (D076)
+};
 type DiscoveryPage = {
   productId: string; builds: Build[]; nextCursor: string | null;
   lastCheckedAt: string | null; checkedRegions: string[];
@@ -91,6 +94,7 @@ type DiscoveryCatalogPage = {
 - **Order.** Registry product order, then the raw `BuildId` read as a decimal number, newest first (missing, non-decimal or longer than 18 digits sort last), then build identity. The order is only for display; identity is unchanged. Each `Build` is the same exact projection `discovery.read` returns, with the same integrity checks.
 - **Paging.** The cursor binds scope, product filter, visibility filter and the number of committed checks. A commit of any product refuses an older cursor with `STALE_CURSOR`; starting a refresh does not. A page carries at most 750,000 bytes of builds and at most 900,000 bytes of builds plus statuses, inside the 1 MiB frame.
 - **Per-product status.** `products[i]` is that product's saved latest check: the same `lastCheckedAt`, `checkedRegions`, `errors`, `hasSavedHistory` and `connection` a single-product page carries. A product never checked is `notChecked`.
+- **Problems and notes.** `errors` holds every finding of the latest check. `severity: "problem"` means the check did not get something it asked for; any problem makes a check that read the versions document `partial`. `severity: "note"` is a regional fact about the official source and leaves the check `online`. Today the only note is `ROUTE_MISSING`: a region the versions document advertises with no `cdns` row at all (Blizzard publishes `sg` and `xx` this way for `wow`, `wowt` and `wow_beta`). Its builds are kept, and it is never a download source. `ROUTE_AMBIGUOUS`, `ROUTE_INVALID` and `ROUTE_UNAVAILABLE` stay problems. The desktop counts, retries and calls a refresh incomplete only for problems; it shows notes beside the regions they describe. Checks saved before D076 carry no severity in the catalog: reads report their `ROUTE_MISSING` as a note and a check whose only findings were notes as `online`.
 - **Completed or failed.** A latest check received evidence when `connection` is `online`, or `partial` with at least one `checkedRegions` entry (the versions document was read). `offline`, and `partial` with no checked regions (for example HTTP 500 on both documents), are failed attempts: the desktop names them as "could not be checked", never as a check that found nothing, and never counts them or shows them as the latest check.
 - **Refresh.** `discovery.refreshAll` runs the existing per-product refresh for every registered product, at most three products at once, through the same official-source transport and its network and HTTP permits. Each product commits on its own. A product whose attempt fails with a typed error keeps its earlier evidence and appears in `refreshProblems`; the others continue. Network failures are ordinary committed checks with `offline` or `partial` status, as before.
 - **Progress.** One frame before any product starts, then one per finished product, in order: `{ stage: "Checking official metadata", completed, total, unit: "products", region: null }`. `total` is the registry size. There is no percentage, byte count or ETA.
@@ -100,7 +104,7 @@ type DiscoveryCatalogPage = {
 
 ## Discovery source and identity policy
 
-Use the fixed official metadata origin `https://us.version.battle.net`, requesting one `/v2/products/{productId}/versions` and `/cdns` pair per refresh. Each pair already contains regional rows; do not fan out the same URLs once per region. `products.list` uses the reviewed exact WoW registry; no implicit remote summary check on startup. Preserve observed rows for all bounded valid advertised regions; matching CDN rows establish route evidence, and missing/ambiguous routes become region-specific problems without erasing the advertisement. Never substitute US routing.
+Use the fixed official metadata origin `https://us.version.battle.net`, requesting one `/v2/products/{productId}/versions` and `/cdns` pair per refresh. Each pair already contains regional rows; do not fan out the same URLs once per region. `products.list` uses the reviewed exact WoW registry; no implicit remote summary check on startup. Preserve observed rows for all bounded valid advertised regions; matching CDN rows establish route evidence. A missing route is a regional note and an ambiguous or unusable one a regional problem; neither erases the advertisement ([D076](../docs/DECISIONS.md)). Never substitute US routing.
 
 Group identity includes exact product and Published channel, version, raw BuildId, normalized BuildConfig/ProductConfig hashes, and all additional versions fields including KeyRing/unknown values. Exclude Region, route and CDNConfig ([D061](../docs/DECISIONS.md)). CDNConfig is required and kept per observation and in the build's CDN config history. Preserve original documents, exact fields and row ordinals with immutable event receipts. Use canonical length-framed/sorted identity serialization with a revision; a digest is not permission to discard full identity data.
 

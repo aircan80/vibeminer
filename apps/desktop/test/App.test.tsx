@@ -157,7 +157,7 @@ describe('exact build discovery workflow', () => {
     fireEvent(dialog, new Event('cancel', { cancelable: true })); expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(source).toHaveFocus();
   });
   it('keeps saved advertisement evidence during offline refresh and presents failures separately', async () => {
-    const bridge = await ready(); vi.mocked(bridge.refreshAll).mockResolvedValue(success(catalog(page, {}, [{ ...statusOf(page), connection: 'offline', errors: [{ region: 'us', code: 'OFFLINE', message: 'Official metadata unavailable.' }] }])));
+    const bridge = await ready(); vi.mocked(bridge.refreshAll).mockResolvedValue(success(catalog(page, {}, [{ ...statusOf(page), connection: 'offline', errors: [{ region: 'us', code: 'OFFLINE', message: 'Official metadata unavailable.', severity: 'problem' as const }] }])));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' })); await screen.findByText('Refresh unavailable');
     expect(within(screen.getByRole('listbox')).getAllByText('Current', { exact: true })).toHaveLength(2); for (const retry of screen.getAllByRole('button', { name: 'Retry discovery' })) expect(retry).toBeEnabled(); expect(screen.getAllByRole('button', { name: 'Retry discovery' })).toHaveLength(2); expect(screen.queryByText(/No builds available/)).not.toBeInTheDocument();
     expect(screen.getByText(/wow US: Official metadata unavailable\./)).toBeVisible();
@@ -185,7 +185,7 @@ describe('exact build discovery workflow', () => {
     expect(screen.getByRole('option', { name: /Config aaaaaaaaaa/ })).toHaveAttribute('aria-selected', 'false');
   });
   it('presents offline empty history as a failed check with retry', async () => {
-    const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockResolvedValue(success(catalog({ ...original, builds: [], hasSavedHistory: false, connection: 'offline', errors: [{ region: null, code: 'OFFLINE', message: 'Metadata unavailable.' }] })));
+    const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockResolvedValue(success(catalog({ ...original, builds: [], hasSavedHistory: false, connection: 'offline', errors: [{ region: null, code: 'OFFLINE', message: 'Metadata unavailable.', severity: 'problem' as const }] })));
     render(<App bridge={bridge}/>); await screen.findByRole('heading', { name: 'Could not check any product' });
     expect(screen.getByText(/no saved observations are available/)).toBeVisible(); expect(screen.getAllByRole('button', { name: 'Retry discovery' })).toHaveLength(2); expect(screen.getByText(/No saved observations are available yet/)).toBeVisible(); expect(screen.queryByText('No saved builds yet')).not.toBeInTheDocument();
   });
@@ -213,10 +213,53 @@ describe('exact build discovery workflow', () => {
     expect(screen.getByRole('button', { name: '500-build display limit reached' })).toBeDisabled(); expect(screen.getByText(/searching beyond this display window is not available/)).toBeVisible();
     expect(screen.queryByText(/narrow the filter/)).not.toBeInTheDocument();
   }, 15000);
-  it('describes missing route evidence neutrally and explains full-scope retry', async () => {
-    const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockResolvedValue(success(catalog({ ...page, connection: 'partial', errors: [{ region: 'sg', code: 'ROUTE_MISSING', message: 'Advertisement has no matching route.' }] })));
-    await ready(bridge); expect(screen.getByText('Refresh incomplete')).toBeVisible(); expect(screen.getByText('Refresh incomplete').closest('.dv-notice')).not.toHaveClass('error'); // regional route problems only expect(screen.getByText(/Retry discovery checks every product again/)).toBeVisible(); expect(within(screen.getByRole('listbox')).getAllByText('Current', { exact: true })).toHaveLength(2);
-    expect(screen.getByText(/wow SG: Advertisement has no matching route\./)).toBeVisible();
+  it('describes an ambiguous route as a regional problem and explains full-scope retry', async () => {
+    const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockResolvedValue(success(catalog({ ...page, connection: 'partial', errors: [{ region: 'eu', code: 'ROUTE_AMBIGUOUS', message: 'This region has multiple matching CDN routes.', severity: 'problem' }] })));
+    await ready(bridge); expect(screen.getByText('Refresh incomplete')).toBeVisible(); expect(screen.getByText('Refresh incomplete').closest('.dv-notice')).not.toHaveClass('error'); // regional route problems only
+    expect(screen.getByText(/Retry discovery checks every product again/)).toBeVisible(); expect(within(screen.getByRole('listbox')).getAllByText('Current', { exact: true })).toHaveLength(2);
+    expect(screen.getByText(/wow EU: This region has multiple matching CDN routes\./)).toBeVisible();
+    // The check completed and saved these builds itself, so nothing "earlier" is being kept and nothing failed.
+    expect(screen.getByText('Refresh incomplete').closest('.dv-notice')).not.toHaveTextContent(/Earlier saved observations|A failed check/);
+    expect(document.querySelector('.dv-refresh')).toHaveTextContent('Retry discovery');
+  });
+  it('shows regions advertised without a CDN route as a calm note, not a problem (#47)', async () => {
+    const note = (region: string) => ({ region, code: 'ROUTE_MISSING', message: 'Advertised without a CDN route, so not usable as a download source.', severity: 'note' as const });
+    const routed = { ...page, builds: page.builds.map(build => ({ ...build, advertisedRegions: ['sg', 'us', 'xx'] })), connection: 'online' as const, checkedRegions: ['sg', 'us', 'xx'], errors: [note('sg'), note('xx')] };
+    const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockResolvedValue(success(catalog(routed)));
+    vi.mocked(bridge.refreshAll).mockResolvedValue(success(catalog(routed)));
+    await ready(bridge);
+    expect(screen.queryByText(/Refresh incomplete|Refresh unavailable/)).not.toBeInTheDocument();
+    expect(document.querySelector('.dv-notice')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry discovery' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh builds' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/^Discovery complete\. Checked 2 products\.$/));
+    expect(screen.getByRole('button', { name: 'Refresh builds' })).toBeVisible();
+    fireEvent.click(screen.getByRole('option', { name: /Config aaaaaaaaaa/ }));
+    const routes = screen.getByText('CDN routes', { selector: 'dt' }).nextElementSibling as HTMLElement;
+    expect(routes).toHaveTextContent(/^US/);
+    expect(routes.querySelector('.dv-route-note')).toHaveTextContent('SG, XX: Advertised without a CDN route, so not usable as a download source.');
+    expect(routes).not.toHaveTextContent('has no CDN route');
+    expect(screen.getByRole('combobox', { name: 'Download source' })).toHaveTextContent(/^US$/);
+    fireEvent.click(screen.getByRole('button', { name: 'Source details' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/SG, XX: Advertised without a CDN route/)).toHaveTextContent('SG, XX: Advertised without a CDN route, so not usable as a download source. (ROUTE_MISSING)');
+    expect(within(dialog).queryByText('Current attempt problems')).not.toBeInTheDocument();
+  });
+  it('keeps the plain no-route wording for a region left unrouted by a problem', async () => {
+    const mixed = { ...page, builds: page.builds.map(build => ({ ...build, advertisedRegions: ['eu', 'sg', 'us'] })), connection: 'partial' as const, checkedRegions: ['eu', 'sg', 'us'],
+      errors: [{ region: 'eu', code: 'ROUTE_INVALID', message: 'This region has no usable CDN path and hosts.', severity: 'problem' as const }, { region: 'sg', code: 'ROUTE_MISSING', message: 'Advertised without a CDN route, so not usable as a download source.', severity: 'note' as const }] };
+    const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockResolvedValue(success(catalog(mixed)));
+    await ready(bridge);
+    const notice = screen.getByText('Refresh incomplete').closest('.dv-notice') as HTMLElement;
+    expect(notice).toHaveTextContent('wow EU: This region has no usable CDN path and hosts. (ROUTE_INVALID)');
+    expect(notice).not.toHaveTextContent(/SG|ROUTE_MISSING/);
+    fireEvent.click(screen.getByRole('option', { name: /Config aaaaaaaaaa/ }));
+    const routes = screen.getByText('CDN routes', { selector: 'dt' }).nextElementSibling as HTMLElement;
+    expect(routes).toHaveTextContent('US · EU has no CDN route');
+    expect(routes.querySelector('.dv-route-note')).toHaveTextContent('SG: Advertised without a CDN route, so not usable as a download source.');
+    fireEvent.click(screen.getByRole('button', { name: 'Source details' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Current attempt problems').nextElementSibling).toHaveTextContent(/^eu: This region has no usable CDN path and hosts\. \(ROUTE_INVALID\)$/);
   });
 
   it('bounds refresh selection recovery at 500 identities and explains an outside-window selection', async () => {
