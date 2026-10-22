@@ -444,6 +444,8 @@ export interface EngineRequest1 {
     | 'request.cancel'
     | 'shutdown'
     | 'inventory.read'
+    | 'inventory.files'
+    | 'inventory.file'
     | 'download.read'
     | 'download.summaries'
     | 'tables.catalog'

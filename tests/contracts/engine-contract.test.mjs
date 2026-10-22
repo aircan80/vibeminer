@@ -118,6 +118,70 @@ test('Files pages and the file inspector stay bounded and keep unknown sizes and
   assert.equal(detail.memberships[1].encodingKey, null); assert.equal(detail.memberships[1].encodedBytes, null);
 });
 
+// Reads `export type RequestMethod = ...;` as a union of string literals. Comments are skipped,
+// a leading `|` is allowed and either quote style works; anything else throws instead of guessing.
+const requestMethodUnion = source => {
+  const head = /export\s+type\s+RequestMethod\s*=/.exec(source);
+  if (!head) throw new Error('no RequestMethod declaration');
+  const members = [];
+  let i = head.index + head[0].length, expect = 'first';
+  for (;;) {
+    if (i >= source.length) throw new Error('RequestMethod has no closing ;');
+    const ch = source[i];
+    if (/\s/.test(ch)) { i++; continue; }
+    if (source.startsWith('//', i)) { const end = source.indexOf('\n', i); i = end < 0 ? source.length : end; continue; }
+    if (source.startsWith('/*', i)) {
+      const end = source.indexOf('*/', i + 2);
+      if (end < 0) throw new Error('unterminated comment in RequestMethod');
+      i = end + 2; continue;
+    }
+    if (ch === '|' && (expect === 'first' || expect === 'bar')) { expect = 'member'; i++; continue; }
+    if (ch === ';' && expect === 'bar') return members;
+    if ((ch === "'" || ch === '"') && expect !== 'bar') {
+      const end = source.indexOf(ch, i + 1), literal = source.slice(i + 1, end);
+      if (end < 0 || !/^[a-z][A-Za-z.]*$/.test(literal)) throw new Error(`unexpected RequestMethod literal at ${i}`);
+      members.push(literal); i = end + 1; expect = 'bar'; continue;
+    }
+    throw new Error(`unexpected ${JSON.stringify(source.slice(i, i + 20))} in RequestMethod`);
+  }
+};
+
+test('the RequestMethod reader handles one-line, leading-bar, commented and double-quoted unions', () => {
+  assert.deepEqual(requestMethodUnion("export type RequestMethod = 'hello' | 'shutdown';"), ['hello', 'shutdown']);
+  assert.deepEqual(requestMethodUnion("export type RequestMethod =\n  | 'hello'\n  | 'items.page';\n"), ['hello', 'items.page']);
+  assert.deepEqual(requestMethodUnion([
+    'export type RequestMethod =',
+    "  // engine handshake; first frame",
+    "  | 'hello' /* a; b */",
+    '  | "items.icon.open" // opens; one view',
+    "  /* closing; */ | 'shutdown';",
+  ].join('\n')), ['hello', 'items.icon.open', 'shutdown']);
+  for (const bad of ["export type RequestMethod = 'hello' | string;", "export type RequestMethod = 'hello' 'shutdown';",
+    "export type RequestMethod = 'hello' | | 'shutdown';", "export type RequestMethod = 'hello' |;", "export type RequestMethod = 'hello'",
+    "export type RequestMethod = 'hello' /* open;", "export type RequestMethod = 'hello\";", 'export type Other = 1;'])
+    assert.throws(() => requestMethodUnion(bad), undefined, bad);
+});
+
+test('the schema request method enum lists exactly the bridge RequestMethod union', async () => {
+  const bridge = await readFile(path.join(root, 'apps/desktop/src/shared/bridge.ts'), 'utf8');
+  const bridgeMethods = requestMethodUnion(bridge);
+  const schemaMethods = schema.definitions.EngineRequest.properties.method.enum;
+  assert.equal(new Set(bridgeMethods).size, bridgeMethods.length, 'RequestMethod has no duplicates');
+  assert.equal(new Set(schemaMethods).size, schemaMethods.length, 'the schema method enum has no duplicates');
+  assert.deepEqual(bridgeMethods.filter(method => !schemaMethods.includes(method)), [], 'bridge methods missing from the schema enum');
+  assert.deepEqual(schemaMethods.filter(method => !bridgeMethods.includes(method)), [], 'schema methods missing from the bridge RequestMethod');
+});
+
+test('inventory.files and inventory.file requests validate their bounded params', () => {
+  const scope = { productId: 'wow', buildIdentity: 'a'.repeat(64), sourceRegion: 'us', generation: '1', limit: 50 };
+  const request = (method, params) => ({ protocolVersion: 1, id: 'files', method, params });
+  validate('EngineRequest', request('inventory.files', { ...scope, after: 'root:7', storedOnly: true }));
+  validate('EngineRequest', request('inventory.file', { ...scope, file: 'install:7' }));
+  for (const [method, params] of [['inventory.files', { ...scope, platform: 'Windows' }], ['inventory.files', { ...scope, limit: 101 }],
+    ['inventory.file', scope], ['inventory.file', { ...scope, file: 'install:0' }]])
+    assert.equal(validator('EngineRequest')(request(method, params)), false, `${method} ${JSON.stringify(params)}`);
+});
+
 test('preparation progress accepts numbered and unknown totals while bounding explanation structure', () => {
   const frame = { protocolVersion: 1, type: 'progress', requestId: 'open', sequence: 1,
     stage: 'Checking build configurations', region: 'us', completed: null, total: null, unit: null };

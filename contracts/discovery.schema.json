@@ -1019,6 +1019,8 @@
             "request.cancel",
             "shutdown",
             "inventory.read",
+            "inventory.files",
+            "inventory.file",
             "download.read",
             "download.summaries",
             "tables.catalog",
@@ -1084,6 +1086,38 @@
             "properties": {
               "params": {
                 "$ref": "#/definitions/DownloadSummariesParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "inventory.files"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/InventoryFilesParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "inventory.file"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/InventoryFileParams"
               }
             }
           }
