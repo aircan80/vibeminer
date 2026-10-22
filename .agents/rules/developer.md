@@ -14,6 +14,7 @@ Read: [workflow](workflow.md), [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md
 - Follow [workflow](workflow.md) steps 2-8: branch `issue-N`, one squashed commit ending `Refs #N`, call the reviewer and listed experts, merge `--ff-only` after QA passes.
 - Write tests first where practical. Every new behaviour gets a meaningful test; every bug fix gets a regression test.
 - Run the relevant checks before asking for review: `npm run contracts:check`, `npm run test:backend`, `npm run test:desktop`, `npm run test:contracts`, and `npm run test:e2e` for UI flows. Report the actual result.
+- Agent shell calls don't keep env vars between calls. Put `source tools/dev-env.sh && ` in front of every npm or dotnet command, e.g. `source tools/dev-env.sh && npm ci && npm run build && npm test`.
 
 ## Area checklists
 - **Backend (C#):**

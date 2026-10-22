@@ -6,10 +6,11 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 
-// Sources tools/dev-env.sh in bash against temporary checkouts and worktrees with stub toolchains.
+// Sources tools/dev-env.sh in bash, and zsh when installed, against temporary checkouts and worktrees with stub toolchains.
 const script = fileURLToPath(new URL('../../tools/dev-env.sh', import.meta.url));
-const skip = process.platform === 'win32' ? 'tools/dev-env.sh is a bash helper for Linux and macOS' : false;
+const skip = process.platform === 'win32' ? 'tools/dev-env.sh is a bash and zsh helper for Linux and macOS' : false;
 const which = tool => execFileSync('bash', ['-c', `command -v ${tool} || true`], { encoding: 'utf8' }).trim();
+const zsh = skip ? '' : which('zsh');
 const systemPath = skip ? [] : [...new Set([path.dirname(which('git')), '/usr/bin', '/bin'])];
 const nodeBin = '.local/toolchains/node-v24.22.0-linux-x64/bin';
 const dotnetRoot = '.local/toolchains/dotnet';
@@ -20,12 +21,14 @@ function env(base, extra = {}) {
   return { ...Object.fromEntries(inherited), PATH: systemPath.join(':'), GIT_CEILING_DIRECTORIES: base, ...extra };
 }
 
-function source(checkout, { base, cwd = base, times = 1, extra = {}, bash = 'bash' }) {
+function source(checkout, { base, cwd = base, times = 1, extra = {}, bash = 'bash', shell = bash, prelude = [] }) {
   const command = [
+    ...prelude,
     ...Array(times).fill(`source ${JSON.stringify(path.join(checkout, 'tools/dev-env.sh'))}`),
     'printf "%s\\n" "$PATH" "${DOTNET_ROOT:-}" "$TMPDIR" "$electron_config_cache"',
   ].join('; ');
-  const [pathValue, dotnet, tmpdir, electronCache] = execFileSync(bash, ['--noprofile', '--norc', '-c', command], { cwd, env: env(base, extra), encoding: 'utf8' }).split('\n');
+  const startup = shell === zsh ? ['-f'] : ['--noprofile', '--norc'];
+  const [pathValue, dotnet, tmpdir, electronCache] = execFileSync(shell, [...startup, '-c', command], { cwd, env: env(base, extra), encoding: 'utf8' }).split('\n');
   return { path: pathValue.split(':'), dotnet, tmpdir, electronCache };
 }
 
@@ -105,4 +108,14 @@ test('outside git, or with no git on PATH, only the checkout itself is used', { 
   assert.deepEqual(noGit.path, [bin]);
   assert.equal(noGit.tmpdir, path.join(worktree, '.local/tmp'));
   assert.equal(noGit.electronCache, path.join(worktree, '.local/electron-cache'));
+}));
+
+test('zsh finds the same roots as bash, even with a chpwd hook that prints', { skip: skip || (!zsh && 'zsh is not installed') }, () => withLayout(async ({ base, main, worktree }) => {
+  // The hook would end up in the captured root if the script let zsh run it.
+  const prelude = ['chpwd() { print chpwd-noise; }'];
+  for (const [checkout, cwd] of [[worktree, base], [main, worktree]]) {
+    const expected = source(checkout, { base, cwd });
+    assert.deepEqual(source(checkout, { base, cwd, shell: zsh, prelude }), expected);
+    assert.deepEqual(source(checkout, { base, cwd: path.join(checkout, 'tools'), shell: zsh, prelude, times: 2 }), expected, 'sourcing twice from another cwd gives the same result');
+  }
 }));

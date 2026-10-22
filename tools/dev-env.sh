@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
-# Source this file to use optional repository-local SDKs and temporary storage.
+# Source this file from bash or zsh to use optional repository-local SDKs and temporary storage.
 # A git worktree without its own .local/toolchains uses the main checkout's
 # toolchains and Electron download cache. TMPDIR stays per checkout.
+if [ -z "${BASH_VERSION:-}" ] && [ -z "${ZSH_VERSION:-}" ]; then
+  echo "tools/dev-env.sh: source this from bash or zsh; nothing was set." >&2
+  return 1
+fi
 _vibeminer_dev_env() {
-  local root tools_root common shared
-  root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" || return
+  # zsh: default options for this function only, and `%x` names the file that defined it.
+  [ -z "${ZSH_VERSION:-}" ] || emulate -L zsh
+  local root tools_root common shared file
+  if [ -n "${ZSH_VERSION:-}" ]; then file="${(%):-%x}"; else file="${BASH_SOURCE[0]}"; fi
+  # `cd -q` keeps zsh chpwd hooks from writing into the captured path; in bash the word vanishes.
+  root="$(CDPATH='' cd ${ZSH_VERSION:+-q} -- "$(dirname -- "$file")/.." && pwd)" || return
   tools_root="$root"
   if [[ ! -d "$root/.local/toolchains" ]] && command -v git >/dev/null 2>&1; then
     common="$(unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR; git -C "$root" rev-parse --git-common-dir 2>/dev/null)" || common=""
     if [[ -n "$common" ]]; then
       [[ "$common" == /* ]] || common="$root/$common"
-      shared="$(CDPATH='' cd -- "$common/.." 2>/dev/null && pwd)" || shared=""
+      shared="$(CDPATH='' cd ${ZSH_VERSION:+-q} -- "$common/.." 2>/dev/null && pwd)" || shared=""
       if [[ -n "$shared" && -d "$shared/.local/toolchains" ]]; then
         tools_root="$shared"
       fi
