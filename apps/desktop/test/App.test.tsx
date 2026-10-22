@@ -102,13 +102,18 @@ describe('exact build discovery workflow', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
     fireEvent.click(screen.getByRole('option', { name: /Config cccccccccc/ })); expect(screen.queryByText('CDN configuration republished.')).not.toBeInTheDocument();
   });
-  it('states CDN configurations omitted by the projection cap', async () => {
-    const current = page.builds[0];
-    const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockResolvedValue(success(catalog({ ...page, builds: [{ ...current, cdnConfigHistoryCount: 18 }, second] })));
+  it('states CDN configurations omitted by the projection cap with the same counts in the inspector and Source details', async () => {
+    // 19 configurations in total: the projection carries the newest 16, so Source details lists the newest 15 earlier ones.
+    const current = page.builds[0], entry = current.cdnConfigHistory[0];
+    const history = Array.from({ length: 16 }, (_, i) => { const at = new Date(Date.UTC(2026, 9, 18, 16 - i)).toISOString(); return { ...entry, cdnConfig: i ? i.toString(16).padStart(32, '0') : current.cdnConfig, firstSeenAt: at, lastSeenAt: at, advertisedRegions: i ? [] : entry.advertisedRegions }; });
+    const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockResolvedValue(success(catalog({ ...page, builds: [{ ...current, cdnConfigHistory: history, cdnConfigHistoryCount: 19 }, second] })));
     render(<App bridge={bridge}/>); fireEvent.click(await screen.findByRole('option', { name: /Config aaaaaaaaaa/ }));
-    expect(screen.getByText(/17 earlier CDN configurations are kept in Source details/)).toBeVisible();
+    const counts = '18 earlier CDN configurations are kept.', rest = 'the newest 15; the other 3 stay in the catalog with their receipts.';
+    expect(screen.getByRole('note')).toHaveTextContent(`CDN configuration republished. ${counts} Source details lists ${rest} The build is the same.`);
     fireEvent.click(screen.getByRole('button', { name: 'Source details' }));
-    expect(within(screen.getByRole('dialog')).getByText(/17 older CDN configurations are not shown here\. 18 in total/)).toBeVisible();
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByRole('heading', { level: 4 }).filter(h => /^Earlier · /.test(h.textContent || ''))).toHaveLength(15);
+    expect(within(dialog).getByText(`${counts} This list shows ${rest}`)).toBeVisible();
   });
   it('does not order CDN configurations advertised in the same check', async () => {
     const current = page.builds[0], entry = current.cdnConfigHistory[0], eu = entry.sourceReceipts.map(r => ({ ...r, region: 'eu' }));

@@ -561,6 +561,9 @@
         "cdnConfigHistory": {
           "description": "Every CDN configuration this build was advertised with, newest first, capped to the newest 16.",
           "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "tsType": "CdnConfigObservation[]",
           "items": {
             "$ref": "#/definitions/CdnConfigObservation"
           }

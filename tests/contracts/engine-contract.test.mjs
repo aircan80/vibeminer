@@ -65,6 +65,11 @@ test('a build carries its CDN configuration history outside its identity fields'
   assert.equal(validator('Build')(withoutHistory), false, 'every build projection states its CDN configuration history');
   assert.equal(validator('Build')({ ...build, cdnConfigHistory: [{ ...current, cdnConfig: 'B'.repeat(32) }] }), false, 'history keys are normalized lowercase hashes');
   assert.equal(validator('Build')({ ...build, cdnConfigHistory: [{ ...current, extra: true }] }), false, 'history entries are closed');
+  // The projection carries 1 to 16 entries (DiscoveryCatalog.MaxProjectedCdnConfigs); older ones are only counted.
+  const entries = count => Array.from({ length: count }, (_, i) => ({ ...current, cdnConfig: i.toString(16).padStart(32, '0') }));
+  validate('Build', { ...build, cdnConfigHistory: entries(16), cdnConfigHistoryCount: 19 });
+  assert.equal(validator('Build')({ ...build, cdnConfigHistory: [] }), false, 'a build has at least the CDN configuration it was advertised with');
+  assert.equal(validator('Build')({ ...build, cdnConfigHistory: entries(17), cdnConfigHistoryCount: 19 }), false, 'the history projection is capped to the newest 16');
 });
 
 test('Home configuration admission cannot claim a prepared inventory or invent a scope', async () => {

@@ -1,5 +1,5 @@
 import {createContext,useContext,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
-import type {WorkspaceSnapshot} from '../../../../contracts/generated/discovery';
+import type {Build,WorkspaceSnapshot} from '../../../../contracts/generated/discovery';
 import {useDownloadActivity} from './DownloadActivity';
 import {summaryLine} from './download-activity-state';
 import {BuildHeader} from './BuildHeader';
@@ -17,7 +17,7 @@ export function useShell(){return useContext(ShellContext);}
 // In the compact layout, and on Items and Creatures whose own layouts don't reserve that column, the whole area is inert instead.
 export function useCoveredSide(){const ui=useDownloadActivity(),{compact}=useShell();return !!ui?.expanded&&!compact;}
 export type ShellArea='home'|'tables'|'files'|'items'|'creatures';
-export function HomeShell({snapshot,label,retention,onChoose,area,areas,status,fixtureLabel,children,dialog}:{snapshot:WorkspaceSnapshot;label:string;retention?:RetentionController;onChoose:()=>void;area:ShellArea;areas:ReactNode;status?:ReactNode;fixtureLabel?:string|null;children:ReactNode;dialog?:ReactNode}){
+export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,areas,status,fixtureLabel,children,dialog}:{snapshot:WorkspaceSnapshot;catalogBuild?:Build|null;label:string;retention?:RetentionController;onChoose:()=>void;area:ShellArea;areas:ReactNode;status?:ReactNode;fixtureLabel?:string|null;children:ReactNode;dialog?:ReactNode}){
  const host=useRef<HTMLDivElement>(null),toolbar=useRef<HTMLElement>(null),statusBar=useRef<HTMLElement>(null);
  const [size,setSize]=useState<{compact:boolean;medium:boolean}>({compact:false,medium:false}),[statusSlot,setStatusSlot]=useState<HTMLElement|null>(null);
  useLayoutEffect(()=>{
@@ -36,7 +36,7 @@ export function HomeShell({snapshot,label,retention,onChoose,area,areas,status,f
  return <ShellContext.Provider value={{compact:size.compact,statusSlot}}><div ref={host} className={`desktop-home${size.compact?' dh-compact dh-medium':size.medium?' dh-medium':''}`} data-area={area}>
   <a className="dh-skip" href="#dh-area">Skip to content</a>
   <div className="dh-app">
-   <BuildHeader ref={toolbar} snapshot={snapshot} label={label} retention={retention} onChoose={onChoose} areas={areas} area={area}/>
+   <BuildHeader ref={toolbar} snapshot={snapshot} catalogBuild={catalogBuild} label={label} retention={retention} onChoose={onChoose} areas={areas} area={area}/>
    <main id="dh-area" className="dh-area" tabIndex={-1} inert={!!ui?.expanded&&(size.compact||area==='items'||area==='creatures')}>{children}</main>
    <footer className="dh-statusbar" ref={statusBar}>
     <span><strong>{snapshot.build.productId} {snapshot.build.version}</strong> · {snapshot.sourceReference.region.toUpperCase()} · enUS</span>

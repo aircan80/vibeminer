@@ -86,6 +86,22 @@ describe('verified inventory opening and preserved discovery', () => {
     expect(marked.map(h => h.textContent)).toEqual([`Earlier · ${opened.cdnConfig.slice(0, 10)}…${opened.cdnConfig.slice(-4)} · Used by the open build`]);
     expect(bridge.open).toHaveBeenCalledTimes(1);
   });
+  it('shows the newer CDN configuration note in the Home build header after a refresh, without reopening', async () => {
+    const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    const opened = routed(), newer = 'e'.repeat(32), build = screen.getByRole('button', { name: `Build ${opened.version}` });
+    fireEvent.click(build); expect(within(screen.getByRole('dialog')).queryByText(/now advertises/)).not.toBeInTheDocument(); fireEvent.click(build);
+    vi.mocked(bridge.refreshAll).mockResolvedValue(success(catalog({ ...pageFixture, builds: [{ ...opened, cdnConfig: newer, cdnConfigHistory: [{ ...opened.cdnConfigHistory[0], cdnConfig: newer, firstSeenAt: '2026-10-18T13:00:00Z', lastSeenAt: '2026-10-18T13:00:00Z' }, { ...opened.cdnConfigHistory[0], advertisedRegions: [] }], cdnConfigHistoryCount: 2 }] } as DiscoveryPage)));
+    fireEvent.click(screen.getByRole('button', { name: /Choose build/ })); fireEvent.click(await screen.findByRole('button', { name: 'Refresh builds' }));
+    await screen.findByText(/Discovery complete/);
+    fireEvent.click(screen.getByRole('button', { name: 'View verified overview' })); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: `Build ${opened.version}` }));
+    const dialog = screen.getByRole('dialog');
+    // The header keeps the configuration the build was opened with and names the one US advertises now.
+    expect(within(dialog).getByText('CDN configuration').nextElementSibling).toHaveTextContent(opened.cdnConfig);
+    expect(within(dialog).getByText('US now advertises').nextElementSibling).toHaveTextContent(newer);
+    expect(within(dialog).getByText(/US now advertises a different CDN configuration\. This open build keeps the one it was opened with\. Open again to switch/)).toBeVisible();
+    expect(bridge.open).toHaveBeenCalledTimes(1);
+  });
   it('does not tell a US open about a CDN configuration only another region advertises in the same check', async () => {
     const { bridge } = setup(); await begin(); await screen.findByRole('heading', { name: 'Build overview' });
     const opened = routed(), entry = opened.cdnConfigHistory[0], other = '0'.repeat(32);

@@ -66,7 +66,7 @@ type DiscoveryPage = {
 };
 ```
 
-In a discovery page `cdnConfig` is the newest entry of `cdnConfigHistory`. In a workspace snapshot it is the CDN config that open or admission was made with. Whether switching would change anything is decided per source region: only when the open's own region now advertises a different CDN config (its `advertisedRegions`, else its newest `sourceReceipts` for that region) is a new Open worth it. Entries with the same first and last check are a same-check tie ordered only by key; that order means nothing. The projection holds at most the newest 16 entries; `cdnConfigHistoryCount` is the total.
+In a discovery page `cdnConfig` is the newest entry of `cdnConfigHistory`. In a workspace snapshot it is the CDN config that open or admission was made with. Whether switching would change anything is decided per source region: only when the open's own region now advertises a different CDN config (its `advertisedRegions`, else its newest `sourceReceipts` for that region) is a new Open worth it. Entries with the same first and last check are a same-check tie ordered only by key; that order means nothing. The projection holds 1 to 16 entries, the newest first (schema `minItems`/`maxItems`); `cdnConfigHistoryCount` is the total. A refresh updates Discovery's projection of an open build, and the Home build header uses it for the same per-region check ([D073](../docs/DECISIONS.md)).
 
 ### Across products
 

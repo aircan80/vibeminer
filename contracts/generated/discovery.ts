@@ -328,6 +328,9 @@ export interface Build {
   sourceReceipts: SourceReceipt[];
   /**
    * Every CDN configuration this build was advertised with, newest first, capped to the newest 16.
+   *
+   * @minItems 1
+   * @maxItems 16
    */
   cdnConfigHistory: CdnConfigObservation[];
   /**

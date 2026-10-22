@@ -44,3 +44,34 @@ export function historyLabels(build: Build): ('Newest' | 'Also advertised' | 'Ea
   const top = newestGroupSize(build);
   return build.cdnConfigHistory.map((_, i) => i >= top ? 'Earlier' : top > 1 ? 'Also advertised' : 'Newest');
 }
+
+/**
+ * The catalog's projection of the open build when it is that exact build and no older than the open snapshot;
+ * otherwise the snapshot's own. A refresh only moves the catalog forward, so this is the newer history.
+ */
+export function latestOpenBuild(open: Build, catalog: Build | null | undefined): Build {
+  if (!catalog || catalog.productId !== open.productId || catalog.id !== open.id) return open;
+  return Date.parse(catalog.lastSeenAt) >= Date.parse(open.lastSeenAt) ? catalog : open;
+}
+
+/** The history counts the inspector and Source details both state, so the two can never disagree. */
+export function historyCounts(build: Build) {
+  const tied = newestGroupSize(build), shown = build.cdnConfigHistory.length;
+  const total = Math.max(build.cdnConfigHistoryCount, shown);
+  return { tied, total, earlier: total - tied, shownEarlier: shown - tied, omitted: total - shown };
+}
+
+/**
+ * One sentence about the configurations before the newest check. Empty when there are none, and in Source details
+ * when the list already shows every one.
+ */
+export function earlierHistoryText(build: Build, where: 'inspector' | 'details'): string {
+  const { earlier, shownEarlier, omitted } = historyCounts(build);
+  if (earlier < 1 || where === 'details' && omitted < 1) return '';
+  const kept = `${earlier} earlier CDN configuration${earlier === 1 ? ' is' : 's are'} kept`;
+  if (omitted < 1) return `${kept} in Source details.`;
+  const list = where === 'inspector' ? 'Source details lists' : 'This list shows';
+  const rest = `${omitted === 1 ? ' stays' : ' stay'} in the catalog with ${omitted === 1 ? 'its receipts' : 'their receipts'}.`;
+  if (shownEarlier < 1) return `${kept}. ${list} none of them; ${omitted === 1 ? 'it' : 'they'}${rest}`;
+  return `${kept}. ${list} the newest ${shownEarlier === 1 ? 'one' : shownEarlier}; the other ${omitted === 1 ? 'one' : omitted}${rest}`;
+}
