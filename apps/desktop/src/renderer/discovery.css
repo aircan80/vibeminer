@@ -100,6 +100,13 @@
 .discovery-screen .dv-track i{display:block;height:100%;background:var(--teal)}
 .discovery-screen .dv-meter.done{color:var(--teal);font-weight:600}
 .discovery-screen [role="option"] .dv-pulse{color:var(--teal)}
+/* Figures whose latest read failed (#50): muted, no teal, never presented as live. */
+.discovery-screen .dv-stale,.discovery-screen .dv-stale dd{color:var(--dv-muted)}
+.discovery-screen .dv-stale .dv-track i{background:var(--dv-muted)}
+/* The column header says so on a second line, which fits the header height at every text size and column width. */
+.discovery-screen .dv-stale-head{display:flex;flex-direction:column;line-height:1.15}
+.discovery-screen .dv-stale-tag{color:var(--dv-gold-ink)}
+.discovery-screen .dv-stale-note{margin:0 0 .373rem;font-size:var(--dv-s);color:var(--dv-muted);overflow-wrap:anywhere}
 .discovery-screen .dv-load-more{display:flex;align-items:center;gap:.747rem;padding:.653rem .8rem;font-size:var(--dv-m);color:var(--dv-muted)}
 .discovery-screen .dv-empty{display:grid;place-items:center;height:100%;padding:1.866667rem;text-align:center;color:var(--dv-muted)}
 .discovery-screen .dv-empty h2{color:var(--ink);font-size:var(--dv-b);letter-spacing:0;margin:0 0 .28rem}

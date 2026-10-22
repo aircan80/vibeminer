@@ -58,6 +58,45 @@ test('Downloaded on Discovery picks up an object stored while you watch, without
     await expect.poll(async () => (await calls('download.changes')).length).toBe(waits + 1);
   } finally { await session.close(); }
 });
+test('Downloaded on Discovery is marked not current while summary reads fail, and is current again once they succeed (#50)', async () => {
+  test.setTimeout(90_000);
+  const session = await launch(true);
+  try {
+    const { page, app } = session;
+    await page.locator('.build-row').first().click(); await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(session.data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
+    await page.getByRole('button', { name: /Choose build/ }).click();
+    const row = page.locator('.build-row').first(), downloaded = page.locator('#inspector dt', { hasText: 'Downloaded' }).locator('xpath=following-sibling::dd[1]');
+    await expect(row).toContainText('0%'); await expect(row).not.toContainText('not current');
+    await expect(downloaded).toHaveText(/^[\d,]+ bytes of [\d,]+ bytes · /);
+    const note = page.getByText(/^Not current\. These are the figures last read at /);
+    await expect(note).toHaveCount(0);
+    // The engine starts failing summary reads: the figure stays, muted and labelled, with the reason in the inspector.
+    await writeFile(path.join(session.data, 'summaries-error'), 'fail');
+    await expect(row).toContainText(', not current');
+    await expect(row.locator('.dv-stale .dv-meter')).toBeVisible();
+    await expect(page.locator('.dv-thead .dv-stale-tag')).toHaveText('not current');
+    await expect(note).toBeVisible();
+    await expect(note).toContainText('The latest read failed: Authored stored download figures could not be read. (LOCAL_READ_FAILED)');
+    await expect(downloaded).toHaveText(/^[\d,]+ bytes of [\d,]+ bytes · /);
+    expect(await row.locator('.dv-meter').evaluate(element => getComputedStyle(element).color)).toBe(await page.locator('.dv-insp-body dt').first().evaluate(element => getComputedStyle(element).color));
+    await capture(page, app, 'discovery-summaries-not-current');
+    // The header's second line fits, from the smallest window to the default, at 100% and 200% text.
+    for (const [width, height] of [[600, 480], [1280, 800]]) for (const font of [15, 30]) {
+      await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height), { width, height });
+      await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, font);
+      await expect.poll(() => page.locator('.dv-thead .dv-stale-head').evaluate(element => element.scrollHeight <= element.parentElement!.clientHeight && element.scrollWidth <= element.clientWidth), `${width}x${height} at ${font}px`).toBe(true);
+    }
+    await page.evaluate(() => { document.documentElement.style.fontSize = '15px'; });
+    // Reads succeed again: the next try (at most 30 s after the last) shows the figure as current.
+    await unlink(path.join(session.data, 'summaries-error'));
+    await expect(row).not.toContainText('not current', { timeout: 40_000 });
+    await expect(note).toHaveCount(0); await expect(row.locator('.dv-stale')).toHaveCount(0);
+    await expect(page.locator('.dv-thead')).not.toContainText('not current');
+    await expect(row).toContainText('0%');
+  } finally { await session.close(); }
+});
 test('download object paging retains rows and keyboard anchor during local reads and recoverable failures', async () => {
   const session = await launch(true);
   try {

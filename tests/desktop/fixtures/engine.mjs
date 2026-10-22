@@ -127,12 +127,13 @@ function waitForRelease(name, signal) {
   });
 }
 // Summary revision (D077): this run's epoch plus a count that moves whenever what a summary is read from changes here:
-// an open, a retention job or the scripted stored-summary.json and retention-state.json.
+// an open, a retention job or the scripted stored-summary.json and retention-state.json. A summaries-error file makes
+// summary reads fail (#50); it also moves the revision, so a standing download.changes wait answers and the next read fails.
 const summaryEpoch = randomBytes(8).toString('hex');
 let summaryCount = 0, summarySeen = null;
 function summaryRevision() {
   const text = name => existsSync(path.join(directory, name)) ? readFileSync(path.join(directory, name), 'utf8') : null;
-  const seen = JSON.stringify([text('stored-summary.json'), text('retention-state.json'), [...opened.keys()], [...retentionJobs.values()]]);
+  const seen = JSON.stringify([text('stored-summary.json'), text('retention-state.json'), [...opened.keys()], [...retentionJobs.values()], existsSync(path.join(directory, 'summaries-error'))]);
   if (seen !== summarySeen) { if (summarySeen !== null) summaryCount++; summarySeen = seen; }
   return `${summaryEpoch}-${summaryCount}`;
 }
@@ -336,6 +337,7 @@ async function dispatch(request) {
     return reply(id, value);
   }
   if (method === 'download.summaries') {
+    if (existsSync(path.join(directory, 'summaries-error'))) return fail(id, 'LOCAL_READ_FAILED', 'Authored stored download figures could not be read.');
     // Authored running figures (D065): one per build across its opened regions. A fresh open is at 0%; an authored
     // Download all job's present objects stand in for stored ones. stored-summary.json overrides the measured fields.
     const scripted = existsSync(path.join(directory, 'stored-summary.json')) ? JSON.parse(readFileSync(path.join(directory, 'stored-summary.json'), 'utf8')) : {};
