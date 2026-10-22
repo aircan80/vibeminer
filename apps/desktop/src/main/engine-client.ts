@@ -28,7 +28,7 @@ import { validOpen, validReadAll, catalogPageMatches, workspaceMatches, type Ope
 import { validInventoryRead, inventoryPageMatches, validInventoryFiles, validInventoryFile, inventoryFilesPageMatches, inventoryFileDetailMatches, type InventoryReadParams, type InventoryFilesParams, type InventoryFileParams } from '../shared/inventory';
 import { validTablesCatalog, validTableDefinition, tableCatalogMatches, tableDefinitionMatches, type TablesCatalogParams, type TableDefinitionParams } from '../shared/tables';
 import { validDownloadRead, downloadPageMatches, type DownloadReadParams } from '../shared/download';
-import { validSummariesParams, summariesMatch } from '../shared/download-summary';
+import { validSummariesParams, validChangesParams, summariesMatch } from '../shared/download-summary';
 import type { DownloadSummaries, DownloadSummariesParams } from '../../../../contracts/generated/discovery';
 import { validProgressStep,validItemEffectsProgress } from '../shared/progress';
 const MAX_FRAME = 1024 * 1024;
@@ -127,7 +127,8 @@ export class EngineClient extends EventEmitter {
     if ((method==='items.icons'||method.startsWith('items.icon.'))&&!this.capabilities.includes('item-icons-v1'))return Promise.reject(new EngineFailure('UNSUPPORTED','This engine does not support optional Item icons.'));
     if (method.startsWith('items.') && !this.capabilities.includes('items-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not support Items.'));
     if (method === 'download.summaries' && !validSummariesParams(params)) return Promise.reject(new EngineFailure('INVALID_REQUEST', 'Choose one to 100 distinct exact builds.'));
-    if (method === 'download.summaries' && !this.capabilities.includes('download-summary-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not report stored download figures.'));
+    if (method === 'download.changes' && !validChangesParams(params)) return Promise.reject(new EngineFailure('INVALID_REQUEST', 'Name the summary revision of the last read.'));
+    if ((method === 'download.summaries' || method === 'download.changes') && !this.capabilities.includes('download-summary-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not report stored download figures.'));
     if (method.startsWith('retention.') && !this.capabilities.includes('retention-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not support build retention.'));
     if (method === 'retention.read' && !validRetentionTarget(params) || method === 'retention.set' && !validRetentionSet(params) || method === 'retention.list' && Object.keys(params).length !== 0) return Promise.reject(new EngineFailure('INVALID_REQUEST', 'Invalid exact retention target or command.'));
     if (method.startsWith('settings.') && !this.capabilities.includes('settings-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not support settings.'));
@@ -228,6 +229,7 @@ export class EngineClient extends EventEmitter {
     if (method === 'tables.definition') return !!check('TableDefinitionSnapshot', result) && !!expectedDefinition && tableDefinitionMatches(result as TableDefinitionSnapshot, expectedDefinition);
     if (method === 'download.read') return !!check('DownloadPage', result) && !!expectedDownload && downloadPageMatches(result as DownloadPage, expectedDownload);
     if (method === 'download.summaries') return !!check('DownloadSummaries', result) && !!expectedSummaries && summariesMatch(result as DownloadSummaries, expectedSummaries);
+    if (method === 'download.changes') return !!check('DownloadChanges', result);
     if (method === 'inventory.read') return !!check('InventoryPage', result) && !!expectedInventory && inventoryPageMatches(result as InventoryPage, expectedInventory);
     if (method === 'inventory.files') return !!check('InventoryFilesPage', result) && !!expectedFiles && inventoryFilesPageMatches(result as InventoryFilesPage, expectedFiles as InventoryFilesParams);
     if (method === 'inventory.file') return !!check('InventoryFileDetail', result) && !!expectedFiles && inventoryFileDetailMatches(result as InventoryFileDetail, expectedFiles as InventoryFileParams);

@@ -32,7 +32,25 @@ public sealed class DownloadSummaryHostTests
         Assert.True(download.GetProperty("downloadAll").GetBoolean()); Assert.False(download.GetProperty("running").GetBoolean());
         Assert.Equal(["eu", "us"], download.GetProperty("sourceRegions").EnumerateArray().Select(r => r.GetString()));
         Assert.Equal(JsonValueKind.Null, summaries[1].GetProperty("download").ValueKind);
+        Assert.Equal(Revision, replies["read"].GetProperty("result").GetProperty("revision").GetString());
         Assert.Equal(1, store.Reads);
+    }
+
+    [Fact]
+    public async Task Change_waits_answer_the_revision_and_refuse_malformed_requests_before_waiting()
+    {
+        var store = new Store();
+        var replies = await Run(new(store), Request("wait", "download.changes", new { after = Revision }),
+            Request("missing", "download.changes", new { }),
+            Request("number", "download.changes", new { after = 7 }),
+            Request("shape", "download.changes", new { after = "abc" }),
+            Request("extra", "download.changes", new { after = Revision, builds = Array.Empty<object>() }));
+        Assert.Equal(Revision, replies["wait"].GetProperty("result").GetProperty("revision").GetString());
+        Assert.Single(replies["wait"].GetProperty("result").EnumerateObject());
+        Assert.All(replies.Where(r => r.Key != "wait"), frame => Assert.Equal("INVALID_REQUEST", frame.Value.GetProperty("error").GetProperty("code").GetString()));
+        Assert.Equal([Revision], store.Waits);
+        var missing = await Run(null, Request("wait", "download.changes", new { after = Revision }));
+        Assert.Equal("DOWNLOAD_SUMMARY_UNAVAILABLE", missing["wait"].GetProperty("error").GetProperty("code").GetString());
     }
 
     [Fact]
@@ -71,9 +89,14 @@ public sealed class DownloadSummaryHostTests
             .Select(line => { using var document = JsonDocument.Parse(line); return document.RootElement.Clone(); })
             .ToDictionary(frame => frame.GetProperty("id").GetString()!);
     }
+    private const string Revision = "0123456789abcdef-42";
     private sealed class Store : IDownloadSummaryStore
     {
         internal int Reads;
+        internal readonly List<string> Waits = [];
+        public string SummaryRevision => Revision;
+        public Task<string> WaitForSummaryChangeAsync(string after, TimeSpan limit, CancellationToken token)
+        { Waits.Add(after); return Task.FromResult(Revision); }
         public Task<IReadOnlyList<BuildDownloadSummary>> ReadDownloadSummariesAsync(IReadOnlyList<BuildKey> builds, CancellationToken token)
         {
             Reads++;

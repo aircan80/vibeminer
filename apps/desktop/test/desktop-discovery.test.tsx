@@ -2,12 +2,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App, checkLine, checkProblems, checkSummary, downloadedText, productProblems, regionNotes, retainedEvidence } from '../src/renderer/App';
-import { storedPercent, summariesMatch, validSummariesParams } from '../src/shared/download-summary';
+import { storedPercent, summariesMatch, validChangesParams, validSummariesParams } from '../src/shared/download-summary';
 import { ActivityTrigger, DownloadActivity } from '../src/renderer/DownloadActivity';
 import { SUMMARY_RETRY_MS } from '../src/renderer/useDownloadSummaries';
 import { summaryLine, type ActivityTask } from '../src/renderer/download-activity-state';
 import type { BridgeReply, DiscoveryBridge } from '../src/shared/bridge';
-import type { BuildDownloadSummary, BuildStoredCoverage, DiscoveryCatalogPage, DiscoveryPage, DownloadSummaries, DownloadSummariesParams, EngineProgress, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
+import type { BuildDownloadSummary, BuildStoredCoverage, DiscoveryCatalogPage, DiscoveryPage, DownloadChanges, DownloadChangesParams, DownloadSummaries, DownloadSummariesParams, EngineProgress, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
 import fixture from '../../../contracts/examples/discovery-page.json';
 import authoredSummaries from '../../../contracts/examples/download-summaries.json';
 import { catalog, notChecked, statusOf, testProducts } from './catalog-page';
@@ -42,9 +42,10 @@ function stored(patch: Partial<BuildStoredCoverage> = {}): BuildStoredCoverage {
   return { ...structuredClone(authored.summaries[0].download!), objectCount: '10', totalEncodedBytes: '1000', storedObjects: '4', storedBytes: '410', countState: 'current', countProblem: null, running: false, ...patch };
 }
 const measured = (build: { productId: string; id: string }, download: BuildStoredCoverage): BuildDownloadSummary => ({ productId: build.productId, buildIdentity: build.id, state: 'measured', download });
+const revision = (count: number) => `${'0123456789abcdef'}-${count}`;
 const summaryBridge = (bridge: DiscoveryBridge, answer: (key: { productId: string; buildIdentity: string }) => BuildDownloadSummary) => ({
   ...bridge, capabilities: vi.fn(async () => success(['retention-v1', 'download-summary-v1'])), retentionList: vi.fn(async () => success({ jobs: [] })), retentionRead: vi.fn(unavailable), retentionSet: vi.fn(unavailable),
-  downloadSummaries: vi.fn(async (params: DownloadSummariesParams) => success({ summaries: params.builds.map(answer) } as DownloadSummaries))
+  downloadSummaries: vi.fn(async (params: DownloadSummariesParams) => success({ summaries: params.builds.map(answer), revision: revision(1) } as DownloadSummaries))
 }) as DiscoveryBridge;
 
 describe('Downloaded percentage', () => {
@@ -69,15 +70,19 @@ describe('Downloaded percentage', () => {
     const params = { builds: authored.summaries.map(({ productId, buildIdentity }) => ({ productId, buildIdentity })) } as DownloadSummariesParams;
     expect(validSummariesParams(params)).toBe(true);
     expect(summariesMatch(authored, params)).toBe(true);
-    expect(summariesMatch({ summaries: [...authored.summaries].reverse() }, params)).toBe(false);
+    expect(summariesMatch({ ...authored, summaries: [...authored.summaries].reverse() }, params)).toBe(false);
+    // Every reply names the revision it was read at (D077).
+    expect(summariesMatch({ ...authored, revision: 'r1' }, params)).toBe(false);
+    expect(validChangesParams({ after: authored.revision })).toBe(true);
+    for (const bad of [{}, { after: 'r1' }, { after: authored.revision, builds: [] }, { after: `${'0'.repeat(16)}-01` }]) expect(validChangesParams(bad)).toBe(false);
     const first = authored.summaries[0];
     for (const download of [stored({ storedObjects: '11' }), stored({ storedBytes: '1001' }), stored({ storedObjects: '10', storedBytes: '999' }), stored({ storedObjects: '0' }),
       stored({ countState: 'unavailable' }), stored({ countProblem: { code: 'X', message: 'Y', retryable: true } }), stored({ sourceRegions: ['us', 'us'] }), stored({ running: true, downloadAll: false }),
       stored({ scope: 'downloadManifestAllVariants', unresolvableRootContent: '1' }), stored({ unresolvableRootContent: '-1' }),
       stored({ scopeState: 'measuring' }), stored({ scope: 'downloadManifestAllVariants', unresolvableRootContent: '0', scopeState: 'measuring', scopeProblem: null }),
       stored({ scopeProblem: { code: 'X', message: 'Y', retryable: true } })])
-      expect(summariesMatch({ summaries: [{ ...first, download }, ...authored.summaries.slice(1)] }, params)).toBe(false);
-    expect(summariesMatch({ summaries: [{ ...first, state: 'notOpened' }, ...authored.summaries.slice(1)] }, params)).toBe(false);
+      expect(summariesMatch({ ...authored, summaries: [{ ...first, download }, ...authored.summaries.slice(1)] }, params)).toBe(false);
+    expect(summariesMatch({ ...authored, summaries: [{ ...first, state: 'notOpened' }, ...authored.summaries.slice(1)] }, params)).toBe(false);
     for (const bad of [{ builds: [] }, { builds: [params.builds[0], params.builds[0]] }, { builds: Array.from({ length: 101 }, (_, i) => ({ productId: 'wow', buildIdentity: i.toString(16).padStart(64, '0') })) },
       { builds: [{ ...params.builds[0], sourceRegion: 'us' }] }, { builds: [params.builds[0]], extra: true }])
       expect(validSummariesParams(bad)).toBe(false);
@@ -142,7 +147,7 @@ describe('stored figures per build', () => {
   it('drops a reply that arrives after the window changed, and starts the next read only after it', async () => {
     const late = deferred<BridgeReply<DownloadSummaries>>(), current = deferred<BridgeReply<DownloadSummaries>>();
     const calls: DownloadSummariesParams[] = []; let inFlight = 0, most = 0;
-    const answer = (params: DownloadSummariesParams, download: BuildStoredCoverage) => success({ summaries: params.builds.map(k => measured({ productId: k.productId, id: k.buildIdentity }, download)) } as DownloadSummaries);
+    const answer = (params: DownloadSummariesParams, download: BuildStoredCoverage) => success({ summaries: params.builds.map(k => measured({ productId: k.productId, id: k.buildIdentity }, download)), revision: revision(1) } as DownloadSummaries);
     const bridge = { ...summaryBridge(bridgeMock(page, [ptr]), key => ({ ...key, state: 'notOpened', download: null })),
       downloadSummaries: vi.fn(async (params: DownloadSummariesParams) => {
         calls.push(params); most = Math.max(most, ++inFlight);
@@ -190,6 +195,46 @@ describe('stored figures per build', () => {
     await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('100%'), { timeout: 4000 });
     expect(bridge.downloadSummaries).toHaveBeenCalledTimes(2);
   });
+  it('shows an object stored after the first read without leaving Discovery, and waits on the engine instead of polling (#48)', async () => {
+    let figure = stored(), current = 1;
+    const waits: { params: DownloadChangesParams; id: string; reply: ReturnType<typeof deferred<BridgeReply<DownloadChanges>>> }[] = [];
+    const base = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id ? measured(original.builds[0], figure) : { ...key, state: 'notOpened', download: null });
+    const bridge = { ...base,
+      downloadSummaries: vi.fn(async (params: DownloadSummariesParams) => success({ summaries: params.builds.map(k => k.buildIdentity === original.builds[0].id ? measured(original.builds[0], figure) : { ...k, state: 'notOpened', download: null }), revision: revision(current) } as DownloadSummaries)),
+      downloadChanges: vi.fn((params: DownloadChangesParams, id: string) => { const reply = deferred<BridgeReply<DownloadChanges>>(); waits.push({ params, id, reply }); return reply.promise; })
+    } as DiscoveryBridge;
+    await ready(bridge);
+    const list = screen.getByRole('listbox', { name: 'Builds' });
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('41%'));
+    // Nothing moves, so one wait stands open with the revision of that read and nothing is read again meanwhile.
+    await waitFor(() => expect(waits).toHaveLength(1));
+    expect(waits[0].params).toEqual({ after: revision(1) }); expect(waits[0].id).toMatch(/^summaries_[0-9a-f-]+$/);
+    await new Promise(done => setTimeout(done, 1200));
+    expect(bridge.downloadSummaries).toHaveBeenCalledTimes(1); expect(waits).toHaveLength(1);
+    // The engine's wait runs out with no change: it is asked again, still without a read.
+    await act(async () => { waits[0].reply.resolve(success({ revision: revision(1) })); });
+    await waitFor(() => expect(waits).toHaveLength(2), { timeout: 3000 });
+    expect(waits[1].params).toEqual({ after: revision(1) }); expect(bridge.downloadSummaries).toHaveBeenCalledTimes(1);
+    // An ItemSparse Load text stores one more object while Discovery is watched.
+    figure = stored({ storedObjects: '5', storedBytes: '510' }); current = 2;
+    await act(async () => { waits[1].reply.resolve(success({ revision: revision(2) })); });
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('51%'), { timeout: 3000 });
+    expect(bridge.downloadSummaries).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(waits).toHaveLength(3));
+    expect(waits[2].params).toEqual({ after: revision(2) });
+    // Leaving the screen cancels the standing wait.
+    cleanup();
+    expect(bridge.cancel).toHaveBeenCalledWith(waits[2].id);
+  });
+  it('stops waiting on an engine that refuses the wait, and keeps the figure', async () => {
+    const base = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id ? measured(original.builds[0], stored()) : { ...key, state: 'notOpened', download: null });
+    const bridge = { ...base, downloadChanges: vi.fn(async () => ({ ok: false as const, error: { code: 'UNSUPPORTED', message: 'This engine does not report stored download figures.', retryable: false } })) } as DiscoveryBridge;
+    await ready(bridge);
+    const list = screen.getByRole('listbox', { name: 'Builds' });
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('41%'));
+    await new Promise(done => setTimeout(done, SUMMARY_RETRY_MS + 500));
+    expect(bridge.downloadChanges).toHaveBeenCalledTimes(1); expect(bridge.downloadSummaries).toHaveBeenCalledTimes(1);
+  }, SUMMARY_RETRY_MS + 5000);
   it('tries a failed read again and then shows the figure', async () => {
     let calls = 0;
     const base = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id ? measured(original.builds[0], stored()) : { ...key, state: 'notOpened', download: null });

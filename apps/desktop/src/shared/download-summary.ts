@@ -1,4 +1,4 @@
-import type { BuildDownloadSummary, BuildStoredCoverage, DownloadSummaries, DownloadSummariesParams } from '../../../../contracts/generated/discovery';
+import type { BuildDownloadSummary, BuildStoredCoverage, DownloadChangesParams, DownloadSummaries, DownloadSummariesParams } from '../../../../contracts/generated/discovery';
 
 const unsigned = /^(0|[1-9][0-9]{0,18})$/;
 const hash = /^[0-9a-f]{64}$/;
@@ -21,6 +21,14 @@ export function validSummariesParams(value: unknown): value is DownloadSummaries
     keys.add(summaryKey(build.productId, build.buildIdentity));
   }
   return keys.size === builds.length;
+}
+
+/** An engine summary revision (D077): run epoch and change count. Only compared for equality. */
+export const validRevision = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{16}-(0|[1-9][0-9]{0,18})$/.test(value);
+
+/** Exactly the revision of the last read. */
+export function validChangesParams(value: unknown): value is DownloadChangesParams {
+  return !!value && typeof value === 'object' && Object.keys(value).length === 1 && validRevision((value as DownloadChangesParams).after);
 }
 
 /** Internally consistent stored figure: never more than the scope, and all objects only with all bytes. */
@@ -51,7 +59,7 @@ export function summaryValid(s: BuildDownloadSummary): boolean {
 
 /** A reply answers exactly the requested builds, in request order. */
 export function summariesMatch(value: DownloadSummaries, params: DownloadSummariesParams): boolean {
-  return value.summaries.length === params.builds.length && value.summaries.every((s, i) =>
+  return validRevision(value.revision) && value.summaries.length === params.builds.length && value.summaries.every((s, i) =>
     s.productId === params.builds[i].productId && s.buildIdentity === params.builds[i].buildIdentity && summaryValid(s));
 }
 

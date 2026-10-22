@@ -188,6 +188,7 @@ Each context owns at most one EN lookup lease and uses the global staging budget
 - **Changes.** Up to 1024 logged changes per round, applied by exact key lookup. Each slice is fenced by the ledger's expected cursor, so a reset or failure in between writes nothing.
 - **Faults.** A fault stays with its ledger. One that is missing or fails verification, has an inconsistent saved row, or fails three rounds in a row becomes `unavailable` (`STORED_COVERAGE_FAILED` for the last) and is no longer maintained or held back from pruning; the next admission of that ledger counts it again. Only a catalog that cannot be used at all (busy, full, failing) stops the round; the loop then retries after 1 s and 4 s and waits for the next change. The loop never ends on a fault.
 - **Shutdown.** Disposal cancels the loop, awaits the running operation and closes the held ledgers.
+- **Change waits.** Every logged stored change and every ledger admission also moves the in-memory summary revision and completes the one shared signal that `download.changes` waits on ([D077](DECISIONS.md), [contract](../contracts/download-v1.md#change-waits)). A wait holds no catalog operation, answers within 25 s, and is cancellable; the desktop keeps at most one open, and only while no figure is moving.
 
 ## ROOT scope worker
 

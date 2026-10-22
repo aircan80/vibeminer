@@ -34,6 +34,30 @@ test('unknown download sizing enters honest Home and restores Discovery without 
     expect(calls.filter(call => call.method === 'discovery.refresh' || call.method === 'download.read')).toHaveLength(0);
   } finally { await session.close(); }
 });
+test('Downloaded on Discovery picks up an object stored while you watch, without leaving the screen (#48)', async () => {
+  const session = await launch(true);
+  try {
+    const { page } = session;
+    await page.locator('.build-row').first().click(); await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(session.data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
+    await page.getByRole('button', { name: /Choose build/ }).click();
+    const row = page.locator('.build-row').first(); await expect(row).toContainText('0%');
+    const calls = async (method: string) => (await readFile(path.join(session.data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(call => call.method === method);
+    // Nothing is moving: one engine wait stands open and the figures are not read again on a timer.
+    await expect.poll(async () => (await calls('download.changes')).length).toBeGreaterThan(0);
+    await page.waitForTimeout(1500);
+    const reads = (await calls('download.summaries')).length, waits = (await calls('download.changes')).length;
+    await page.waitForTimeout(2500);
+    expect((await calls('download.summaries')).length).toBe(reads);
+    expect((await calls('download.changes')).length).toBe(waits);
+    // An object lands (as a Load text would store one): the engine's revision moves and the row follows.
+    await writeFile(path.join(session.data, 'stored-summary.json'), JSON.stringify({ storedObjects: '30', storedBytes: '3000' }));
+    await expect(row).toContainText('50%');
+    expect((await calls('download.summaries')).length).toBe(reads + 1);
+    await expect.poll(async () => (await calls('download.changes')).length).toBe(waits + 1);
+  } finally { await session.close(); }
+});
 test('download object paging retains rows and keyboard anchor during local reads and recoverable failures', async () => {
   const session = await launch(true);
   try {

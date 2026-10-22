@@ -338,7 +338,15 @@ test('Download summaries keep exact counts, the three build states and a bounded
     { download: { ...measured.download, presence: { ...measured.download.presence, state: 'verified' } } }, { download: { ...measured.download, percent: '41%' } },
     { download: { ...measured.download, unresolvableRootContent: undefined } }, { download: { ...measured.download, unresolvableRootContent: 10 } }])
     assert.equal(validator('BuildDownloadSummary')({ ...measured, ...patch }), false);
-  assert.equal(validator('DownloadSummaries')({ summaries: Array(101).fill(value.summaries[4]) }), false);
+  assert.equal(validator('DownloadSummaries')({ ...value, summaries: Array(101).fill(value.summaries[4]) }), false);
+  // Every read names the revision it was taken at, and a change wait answers one (D077).
+  for (const revision of [undefined, '12', 'ABCDEF0123456789-1', '0123456789abcdef-01', '0123456789abcdef-12345678901234567890'])
+    assert.equal(validator('DownloadSummaries')({ ...value, revision }), false, String(revision));
+  validate('DownloadChanges', { revision: value.revision });
+  assert.equal(validator('DownloadChanges')({ revision: value.revision, changed: true }), false);
+  validate('EngineRequest', { protocolVersion: 1, id: 'changes', method: 'download.changes', params: { after: value.revision } });
+  for (const params of [{}, { after: '12' }, { after: value.revision, builds: [] }])
+    assert.equal(validator('EngineRequest')({ protocolVersion: 1, id: 'changes', method: 'download.changes', params }), false, JSON.stringify(params));
   const builds = value.summaries.map(({ productId, buildIdentity }) => ({ productId, buildIdentity }));
   validate('EngineRequest', { protocolVersion: 1, id: 'summaries', method: 'download.summaries', params: { builds } });
   for (const params of [{ builds: [] }, { builds: Array(101).fill(builds[0]) }, { builds: [{ ...builds[0], sourceRegion: 'us' }] }, { builds: [{ ...builds[0], buildIdentity: 'A'.repeat(64) }] }, {}])
@@ -612,6 +620,11 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.ok(!summaries.error, JSON.stringify(summaries.error));
   validate('DownloadSummaries', summaries.result);
   assert.deepEqual(summaries.result.summaries, [{ productId: 'wow', buildIdentity: 'a'.repeat(64), state: 'notOpened', download: null }]);
+  // A revision from another run answers at once with this run's current one.
+  const changes = await request('download.changes', { after: '0000000000000000-0' });
+  assert.ok(!changes.error, JSON.stringify(changes.error));
+  validate('DownloadChanges', changes.result);
+  assert.equal(changes.result.revision, summaries.result.revision);
   assert.ok(hello.result.capabilities.includes('items-v1'));
   assert.ok(hello.result.capabilities.includes('item-icons-v1'));
   assert.ok(hello.result.capabilities.includes('item-classifications-v1'));

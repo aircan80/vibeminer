@@ -109,6 +109,12 @@
     "downloadSummaries": {
       "$ref": "#/definitions/DownloadSummaries"
     },
+    "downloadChangesParams": {
+      "$ref": "#/definitions/DownloadChangesParams"
+    },
+    "downloadChanges": {
+      "$ref": "#/definitions/DownloadChanges"
+    },
     "itemsSnapshot": {
       "$ref": "#/definitions/ItemsSnapshot"
     },
@@ -1035,6 +1041,7 @@
             "inventory.file",
             "download.read",
             "download.summaries",
+            "download.changes",
             "tables.catalog",
             "tables.definition",
             "tables.prepare",
@@ -1099,6 +1106,22 @@
             "properties": {
               "params": {
                 "$ref": "#/definitions/DownloadSummariesParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "download.changes"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/DownloadChangesParams"
               }
             }
           }
@@ -5216,10 +5239,46 @@
           "items": {
             "$ref": "#/definitions/BuildDownloadSummary"
           }
+        },
+        "revision": {
+          "$ref": "#/definitions/SummaryRevision"
         }
       },
       "required": [
-        "summaries"
+        "summaries",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "SummaryRevision": {
+      "title": "SummaryRevision",
+      "description": "Opaque engine-run epoch and change count (D077). Compare for equality only.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}-(0|[1-9][0-9]{0,18})$"
+    },
+    "DownloadChangesParams": {
+      "title": "DownloadChangesParams",
+      "type": "object",
+      "properties": {
+        "after": {
+          "$ref": "#/definitions/SummaryRevision"
+        }
+      },
+      "required": [
+        "after"
+      ],
+      "additionalProperties": false
+    },
+    "DownloadChanges": {
+      "title": "DownloadChanges",
+      "type": "object",
+      "properties": {
+        "revision": {
+          "$ref": "#/definitions/SummaryRevision"
+        }
+      },
+      "required": [
+        "revision"
       ],
       "additionalProperties": false
     },

@@ -125,6 +125,16 @@ function waitForRelease(name, signal) {
     if (signal.aborted) abort(); else if (existsSync(target)) finish();
   });
 }
+// Summary revision (D077): this run's epoch plus a count that moves whenever what a summary is read from changes here:
+// an open, a retention job or the scripted stored-summary.json and retention-state.json.
+const summaryEpoch = randomBytes(8).toString('hex');
+let summaryCount = 0, summarySeen = null;
+function summaryRevision() {
+  const text = name => existsSync(path.join(directory, name)) ? readFileSync(path.join(directory, name), 'utf8') : null;
+  const seen = JSON.stringify([text('stored-summary.json'), text('retention-state.json'), [...opened.keys()], [...retentionJobs.values()]]);
+  if (seen !== summarySeen) { if (summarySeen !== null) summaryCount++; summarySeen = seen; }
+  return `${summaryEpoch}-${summaryCount}`;
+}
 function settingsSnapshot() {
   const file = path.join(directory, 'settings.json'), stored = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
   return { formatVersion: 1, file: stored ? 'read' : 'absent', problem: null, lastChangedAt: stored?.changedAt ?? null,
@@ -309,7 +319,8 @@ async function dispatch(request) {
     // Authored running figures (D065): one per build across its opened regions. A fresh open is at 0%; an authored
     // Download all job's present objects stand in for stored ones. stored-summary.json overrides the measured fields.
     const scripted = existsSync(path.join(directory, 'stored-summary.json')) ? JSON.parse(readFileSync(path.join(directory, 'stored-summary.json'), 'utf8')) : {};
-    return reply(id, { summaries: params.builds.map(({ productId, buildIdentity }) => {
+    const revision = summaryRevision();
+    return reply(id, { revision, summaries: params.builds.map(({ productId, buildIdentity }) => {
       const opens = [...opened.values()].filter(snapshot => snapshot.build.productId === productId && snapshot.build.id === buildIdentity);
       // A persisted relaunch keeps a prepared build without this session's opens: it was measured, nothing stored yet.
       if (!opens.length && saved.get(productId)?.builds.some(build => build.id === buildIdentity && build.isLocal)) {
@@ -329,6 +340,25 @@ async function dispatch(request) {
           : { state: 'notAssessed', assessedAt: null, observedObjects: '0', missingObjects: '0', corruptObjects: '0' },
         downloadAll: jobs.some(job => job.mode === 'downloadAll' && !job.paused), running: jobs.some(job => ['preparing', 'running'].includes(job.state)), sourceRegions: regions, ...scripted } };
     }) });
+  }
+  if (method === 'download.changes') {
+    // Answers once the revision differs from `after`, or after 25 s with the same one; cancellable like the engine's.
+    if (!params || Object.keys(params).length !== 1 || !/^[0-9a-f]{16}-(0|[1-9][0-9]{0,18})$/.test(params.after ?? '')) return fail(id, 'INVALID_REQUEST', 'Name the summary revision of the last read.');
+    const controller = new AbortController(); active.set(id, controller);
+    try {
+      const revision = await new Promise((resolve, reject) => {
+        let timer, watcher;
+        const finish = value => { clearTimeout(timer); watcher?.close(); controller.signal.removeEventListener('abort', abort); value instanceof Error ? reject(value) : resolve(value); };
+        const check = () => { const current = summaryRevision(); if (current !== params.after) finish(current); };
+        const abort = () => finish(new Error('canceled'));
+        controller.signal.addEventListener('abort', abort, { once: true });
+        timer = setTimeout(() => finish(summaryRevision()), 25000);
+        watcher = watch(directory, check);
+        check();
+      });
+      return reply(id, { revision });
+    } catch { return fail(id, 'CANCELED', 'Operation canceled.'); }
+    finally { active.delete(id); }
   }
   if (method === 'download.read') {
     const key = `${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;

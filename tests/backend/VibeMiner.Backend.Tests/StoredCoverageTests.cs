@@ -161,6 +161,61 @@ public sealed class StoredCoverageTests
     }
 
     [Fact]
+    public async Task An_object_stored_after_a_read_advances_the_revision_and_wakes_a_waiter()
+    {
+        // #48: a figure that is not moving must still pick up an object stored after the last read (D077).
+        await using var h = await Harness.Create();
+        var build = await h.AddBuild(1, "us");
+        await h.Open(build, "us", await h.Ledger(Rows(4)));
+        await h.Drain();
+        var service = new DownloadSummaryService(h.Catalog, TimeSpan.FromSeconds(30));
+        var read = service.Revision;
+        var idle = (await h.Summary(build)).Download!;
+        Assert.Equal((StoredCountState.Current, 0L, false), (idle.CountState, idle.StoredObjects, idle.ChangesPending));
+        Assert.Equal(read, service.Revision); // reading never moves it
+        var waiting = service.WaitAsync(read);
+        await Task.Delay(100);
+        Assert.False(waiting.IsCompleted);
+        await h.Receipt(Key(2), 102);
+        var woken = await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.NotEqual(read, woken); Assert.Equal(woken, service.Revision);
+        Assert.True(DownloadSummaryService.ValidRevision(woken));
+        await h.Drain();
+        var after = (await h.Summary(build)).Download!;
+        Assert.Equal((1L, 102L, false), (after.StoredObjects, after.StoredBytes, after.ChangesPending));
+        // A revision older than the current one answers at once; applying changes does not move it again.
+        Assert.Equal(woken, await service.WaitAsync(read).WaitAsync(TimeSpan.FromSeconds(1)));
+        Assert.Equal(woken, service.Revision);
+    }
+
+    [Fact]
+    public async Task A_change_wait_is_bounded_cancellable_and_never_matches_another_run()
+    {
+        await using var h = await Harness.Create();
+        var service = new DownloadSummaryService(h.Catalog, TimeSpan.FromMilliseconds(200));
+        var revision = service.Revision;
+        var before = await h.Snapshot();
+        // Nothing changes: the wait answers the same revision after its limit, without reading or writing the catalog.
+        Assert.Equal(revision, await service.WaitAsync(revision).WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(before, await h.Snapshot());
+        using var cancel = new CancellationTokenSource();
+        var waiting = new DownloadSummaryService(h.Catalog, TimeSpan.FromMinutes(5)).WaitAsync(revision, cancel.Token);
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting.WaitAsync(TimeSpan.FromSeconds(5)));
+        // Admitting a ledger can turn Not opened into a figure, so it moves the revision too.
+        var build = await h.AddBuild(1, "us");
+        await h.Open(build, "us", await h.Ledger(Rows(2)));
+        Assert.NotEqual(revision, service.Revision);
+        // Another engine run has its own epoch, so a revision kept from before answers at once.
+        var old = service.Revision;
+        await h.Restart();
+        var fresh = new DownloadSummaryService(h.Catalog, TimeSpan.FromMinutes(5));
+        Assert.NotEqual(old, await fresh.WaitAsync(old).WaitAsync(TimeSpan.FromSeconds(1)));
+        foreach (var bad in new[] { "", "1", new string('a', 16) + "-01", new string('A', 16) + "-1", new string('a', 15) + "-1", new string('a', 16) + "-", new string('a', 16) + "-99999999999999999999", new string('a', 16) + "--1" })
+            await Assert.ThrowsAsync<DiscoveryException>(() => fresh.WaitAsync(bad));
+    }
+
+    [Fact]
     public async Task Never_opened_and_unmeasured_builds_are_distinct_states()
     {
         await using var h = await Harness.Create();

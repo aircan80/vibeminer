@@ -327,7 +327,13 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                         RequireOnly(item, "productId", "buildIdentity");
                         return new BuildKey(RequiredString(item, "productId"), RequiredString(item, "buildIdentity"));
                     }).ToArray();
-                    result = new { summaries = (await downloadSummaries.ReadAsync(summaryKeys, request.Cancellation.Token)).Select(DownloadSummaryWire.Summary).ToArray() };
+                    var summaryRevision = downloadSummaries.Revision;
+                    result = new { summaries = (await downloadSummaries.ReadAsync(summaryKeys, request.Cancellation.Token)).Select(DownloadSummaryWire.Summary).ToArray(), revision = summaryRevision };
+                    break;
+                case "download.changes":
+                    RequireOnly(parameters, "after");
+                    if (downloadSummaries is null) throw new DiscoveryException("DOWNLOAD_SUMMARY_UNAVAILABLE", "Stored download figures are unavailable.");
+                    result = new { revision = await downloadSummaries.WaitAsync(RequiredString(parameters, "after"), request.Cancellation.Token) };
                     break;
                 case "items.classifications":
                     RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "researchLocale", "artifactId", "itemIds", "includeSubclass", "policyRevision");

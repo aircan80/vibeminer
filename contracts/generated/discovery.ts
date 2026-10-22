@@ -19,6 +19,10 @@ export type EngineRequest = EngineRequest1;
 export type WorkspaceSnapshot = WorkspaceSnapshot1;
 export type TableDefinitionSnapshot = TableDefinitionSnapshot1;
 export type ContentReceipt = ContentReceipt1;
+/**
+ * Opaque engine-run epoch and change count (D077). Compare for equality only.
+ */
+export type SummaryRevision = string;
 export type ItemName = ValidItemName | EmptyItemName | UnavailableItemName;
 export type ItemIconOutcome = ItemIconOutcome1;
 export type ItemClassificationBatch = ItemClassificationBatch1;
@@ -205,6 +209,8 @@ export interface DiscoveryContract {
   retentionList: RetentionList;
   downloadSummariesParams?: DownloadSummariesParams;
   downloadSummaries?: DownloadSummaries;
+  downloadChangesParams?: DownloadChangesParams;
+  downloadChanges?: DownloadChanges;
   itemsSnapshot: ItemsSnapshot;
   itemsReadiness: ItemsReadiness;
   itemsPage: ItemsPage;
@@ -453,6 +459,7 @@ export interface EngineRequest1 {
     | 'inventory.file'
     | 'download.read'
     | 'download.summaries'
+    | 'download.changes'
     | 'tables.catalog'
     | 'tables.definition'
     | 'tables.prepare'
@@ -1316,6 +1323,7 @@ export interface DownloadSummaries {
    * @maxItems 100
    */
   summaries: BuildDownloadSummary[];
+  revision: SummaryRevision;
 }
 export interface BuildDownloadSummary {
   productId: string;
@@ -1352,6 +1360,12 @@ export interface BuildPresenceCheck {
   observedObjects: string;
   missingObjects: string;
   corruptObjects: string;
+}
+export interface DownloadChangesParams {
+  after: SummaryRevision;
+}
+export interface DownloadChanges {
+  revision: SummaryRevision;
 }
 export interface ItemsSnapshot {
   context: ItemsContext;

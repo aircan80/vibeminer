@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Numerics;
+using System.Security.Cryptography;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
 using VibeMiner.Application;
@@ -30,6 +31,13 @@ public sealed partial class DiscoveryCatalog : IDownloadSummaryStore
     private const int StoredJobLimit = 64;
     private readonly Channel<bool> storedSignal = Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
     { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
+    // Summary revision (D077): this engine run's random epoch plus a count of events that can change a stored figure
+    // without the figure already moving (a stored change recorded, a ledger admitted). Kept in memory; the epoch makes a
+    // revision from another run never match. Waiters share one signal that is replaced only when someone waits.
+    private readonly object summaryGate = new();
+    private readonly string summaryEpoch = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+    private long summaryChanges;
+    private TaskCompletionSource summarySignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private void UpgradeStoredCoverage()
     {
@@ -58,6 +66,36 @@ public sealed partial class DiscoveryCatalog : IDownloadSummaryStore
             if (!await storedSignal.Reader.WaitToReadAsync(token)) throw new OperationCanceledException(token);
     }
 
+    /// <summary>The current summary revision. Read it before a summary read: any later change makes it differ.</summary>
+    public string SummaryRevision { get { lock (summaryGate) return Revision(); } }
+    private string Revision() => $"{summaryEpoch}-{summaryChanges.ToString(CultureInfo.InvariantCulture)}";
+
+    /// <summary>
+    /// Completes with the current revision once it differs from <paramref name="after"/>, or after <paramref name="limit"/>
+    /// with the unchanged one. It never reads the catalog. A change inside a transaction that later rolls back still wakes
+    /// waiters; their next read simply finds nothing new.
+    /// </summary>
+    public async Task<string> WaitForSummaryChangeAsync(string after, TimeSpan limit, CancellationToken token)
+    {
+        Task changed;
+        lock (summaryGate)
+        {
+            if (Revision() is var current && current != after) return current;
+            if (summarySignal.Task.IsCompleted) summarySignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            changed = summarySignal.Task;
+        }
+        try { await changed.WaitAsync(limit, token); }
+        catch (TimeoutException) { }
+        return SummaryRevision;
+    }
+
+    private void SummaryChanged()
+    {
+        TaskCompletionSource signal;
+        lock (summaryGate) { summaryChanges++; signal = summarySignal; }
+        signal.TrySetResult();
+    }
+
     private int Changed(string sql, SqliteTransaction? transaction, params (string, object?)[] parameters)
     { using var command = Command(sql, transaction, parameters); return command.ExecuteNonQuery(); }
     private long StoredSequence(SqliteTransaction? transaction) =>
@@ -68,6 +106,7 @@ public sealed partial class DiscoveryCatalog : IDownloadSummaryStore
     {
         Execute("INSERT INTO stored_changes(ekey) VALUES($k)", transaction, ("$k", encodingKey));
         storedSignal.Writer.TryWrite(true);
+        SummaryChanged();
     }
     /// <summary>Corruption is recorded by physical identity; every exact encoded alias of those bytes changes.</summary>
     private void LogStoredChangesForObject(string sha256, SqliteTransaction transaction)
@@ -109,6 +148,7 @@ public sealed partial class DiscoveryCatalog : IDownloadSummaryStore
                 ("$l", artifact.Sha256), ("$n", artifact.ObjectCount), ("$b", artifact.TotalEncodedBytes), ("$s", sequence), ("$t", now));
         else if (Convert.ToInt64(state, CultureInfo.InvariantCulture) == 1) ResetStoredCoverage(artifact.Sha256, sequence, now, null, transaction);
         storedSignal.Writer.TryWrite(true);
+        SummaryChanged();
     }
     private void ResetStoredCoverage(string ledger, long sequence, string now, string? problem, SqliteTransaction transaction)
     {
