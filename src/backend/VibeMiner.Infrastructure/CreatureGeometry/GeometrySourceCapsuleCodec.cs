@@ -341,7 +341,7 @@ internal static class GeometrySourceCapsuleCodec
         if (l.Kind is not ("loose" or "archive")) throw Invalid(); Number(l.Offset, 0, long.MaxValue); Number(l.SourceBytes, 9, long.MaxValue);
         if (l.ArchiveKey is not null) Hash(l.ArchiveKey, 32);
     }
-    private static bool SameMetadata(MetadataReceipt a, MetadataReceipt b) => ItemIconAdmissionPolicy.SameMetadata(a, b);
+    private static bool SameMetadata(MetadataReceipt a, MetadataReceipt b) => MetadataReceiptIdentity.Same(a, b);
     internal static void Hash(string? value, int length)
     { if (value is null || value.Length != length || value.Any(c => c is not (>= '0' and <= '9' or >= 'a' and <= 'f')) || value.All(c => c == '0')) throw Invalid(); }
     private static void Text(string? value, int max) { if (value is null || value.Length is < 1 || value.Length > max) throw Invalid(); }

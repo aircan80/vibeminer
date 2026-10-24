@@ -80,8 +80,8 @@ public sealed partial class DiscoveryCatalog
             GeometryAssociationShape(node.Association, node.Expectation, node.Receipt);
             if (node.Association.Request != context.Request || node.Association.ResearchLocale != context.ResearchLocale || node.Association.SourceReference != context.Opening ||
                 node.Association.Memberships.Any(member => member.Entry.FileDataId != node.FileDataId) ||
-                !ItemIconAdmissionPolicy.SameMetadata(node.Association.EncodingSource, binding.Source.Association.EncodingSource) ||
-                !ItemIconAdmissionPolicy.SameMetadata(node.Association.RootSource, binding.Source.Association.RootSource)) throw GeometryStale();
+                !MetadataReceiptIdentity.Same(node.Association.EncodingSource, binding.Source.Association.EncodingSource) ||
+                !MetadataReceiptIdentity.Same(node.Association.RootSource, binding.Source.Association.RootSource)) throw GeometryStale();
             foreach (var original in binding.Configurations)
             {
                 var actual = node.Association.Configurations.SingleOrDefault(c => c.Role == original.Role);

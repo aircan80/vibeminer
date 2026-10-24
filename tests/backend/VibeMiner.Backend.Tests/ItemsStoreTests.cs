@@ -192,9 +192,10 @@ public sealed class ItemsStoreTests(ITestOutputHelper output)
         internal bool PretendMissing;
         internal readonly List<string> PreparedTables = [];
         internal Func<TableDataRequest, CancellationToken, Task>? BeforePrepare;
-        internal static async Task<Harness> Create()
+        internal string AdmittedRootRevision = MetadataAcquirer.SourceRevision;
+        internal static async Task<Harness> Create(string admittedRootRevision = MetadataAcquirer.SourceRevision)
         {
-            var h = new Harness(); h.Catalog = await DiscoveryCatalog.OpenAsync(h.directory); h.Objects = new(h.directory);
+            var h = new Harness { AdmittedRootRevision = admittedRootRevision }; h.Catalog = await DiscoveryCatalog.OpenAsync(h.directory); h.Objects = new(h.directory);
             var versions = Fixtures.Versions($"us|{h.Fixture.BuildKey}|{h.Fixture.CdnKey}||70448|12.1.5.70448||items");
             var cdns = Encoding.UTF8.GetString(h.Fixture.Discovery.Documents.Single(d => d.Role == "cdns").Bytes);
             var discovery = await Fixtures.Attempt(versions, cdns); var generation = await h.Catalog.BeginRefreshAsync("wow", default);
@@ -228,8 +229,8 @@ public sealed class ItemsStoreTests(ITestOutputHelper output)
                 N(bytes.Encoded.Length), N(bytes.Decoded.Length), InventoryFixture.Url("data", bytes.EncodingKey), Time, Time, "content-blte-v1", new("loose", "0", N(bytes.Encoded.Length), null));
             await Catalog.RecordContentAsync(source, default);
             var entry = provider.Entries.Single(e => e.TableId == table);
-            var association = new SelectedFileAssociation(entry.Db2FileDataId!, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"), Metadata("root"),
-                [new("0", "0", source.ContentKey, "2", "0", "0", "0", "0", null)]);
+            var association = new SelectedFileAssociation(entry.Db2FileDataId!, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"),
+                Metadata("root") with { ParserRevision = AdmittedRootRevision }, [new("0", "0", source.ContentKey, "2", "0", "0", "0", "0", null)]);
             var binding = new TableArtifactBinding(source.Sha256, new('d', 64), definition.Sha256, BundledTableDefinitions.Revision, "enUS",
                 decoder ?? TableDataStore.DecoderRevision, TableRowArtifacts.SchemaSelectionKey(definition.Document, Opening.Build.Version));
             var sparse = table == ItemsProjection.SparseTable;

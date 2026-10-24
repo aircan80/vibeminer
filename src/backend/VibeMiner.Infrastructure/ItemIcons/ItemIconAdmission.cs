@@ -33,8 +33,8 @@ internal static class ItemIconAdmissionPolicy
             !Configuration(association, "buildConfig", opening.Build.BuildConfig) || !Configuration(association, "cdnConfig", opening.Build.CdnConfig))
             throw Invalid();
         foreach (var table in new[] { snapshot.ItemSource, snapshot.SparseSource })
-            if (!SameMetadata(association.EncodingSource, table.Association.EncodingSource) ||
-                !SameMetadata(association.RootSource, table.Association.RootSource)) throw Invalid();
+            if (!MetadataReceiptIdentity.Same(association.EncodingSource, table.Association.EncodingSource) ||
+                !MetadataReceiptIdentity.Same(association.RootSource, table.Association.RootSource)) throw Invalid();
         if (association.Memberships.Count is < 1 or > 4096 || association.Memberships.Any(member =>
             member is null || member.Entry is null || member.BlockOrdinal < 0 || member.EntryOrdinal < 0 || member.Entry.FileDataId != fileDataId ||
             member.Entry.ContentKey != expected.ContentKey)) throw Invalid();
@@ -58,24 +58,6 @@ internal static class ItemIconAdmissionPolicy
     private static bool Configuration(AssetSourceAssociation source, string role, string key) =>
         source.Configurations.Count(value => value is not null && value.Role == role && value.Key == key &&
             value.Sha256 is { Length: 64 } && value.ByteLength > 0) == 1;
-    internal static bool SameMetadata(MetadataReceipt a, MetadataReceipt b)
-    {
-        // DownloadCatalog.MetadataSourceLocation established legacy null as this exact loose
-        // locator. Read that representation without rewriting either original receipt.
-        if (!ComparableLocation(a, out var first) || !ComparableLocation(b, out var second)) return false;
-        return a with { VerifiedAt = "", Location = first } == b with { VerifiedAt = "", Location = second };
-    }
-    private static bool ComparableLocation(MetadataReceipt receipt, out ContentLocation? location)
-    {
-        location = receipt.Location;
-        if (location is not null) return true;
-        if (receipt.EncodingKey is not { Length: 32 } || !Uri.TryCreate(receipt.SourceUrl, UriKind.Absolute, out var uri)) return false;
-        try { OfficialSourceTransport.ValidateUri(uri); }
-        catch (DiscoveryException) { return false; }
-        var key = receipt.EncodingKey;
-        if (!uri.AbsolutePath.EndsWith($"/data/{key[..2]}/{key[2..4]}/{key}", StringComparison.Ordinal)) return false;
-        location = new("loose", "0", receipt.EncodedBytes, null); return true;
-    }
     internal static WorkspaceRequest Workspace(ItemsContext context) => new(context.ProductId, context.BuildIdentity, context.SourceRegion);
     internal static DiscoveryException Invalid() => new("ITEM_ICON_ASSOCIATION_INVALID", "The retained icon differs from its exact current feature, source membership or PNG proof.");
 }

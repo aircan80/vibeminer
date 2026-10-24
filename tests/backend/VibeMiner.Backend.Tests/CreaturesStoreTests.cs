@@ -279,6 +279,31 @@ public sealed class CreaturesStoreTests
         Assert.Empty(h.ReadTables); Assert.Empty(h.PreparedTables);
     }
     [Fact]
+    public async Task PrepareSucceedsWhenTheRootScopeSavedTheBuildsRootCopyFirst()
+    {
+        // #58: metadata_objects holds the root scope's metadata-blte-source-v1 copy; the Creature table admitted root-v1.
+        await using var h = await Harness.Create(admittedRootRevision: "root-v1");
+        var ready = await h.Store.PrepareAsync(h.Context, Progress, default);
+        Assert.Equal(ready.ArtifactId, (await h.Store.ReadAsync(h.Context, default)).Snapshot!.ArtifactId);
+        var artifact = (await h.Catalog.ReadCreaturesAdmissionAsync(h.Opening, default))!.Artifact;
+        Assert.Equal("root-v1", artifact.Binding.Source.Association.RootSource.ParserRevision);
+        await h.Catalog.ReauthorizeCreaturesAsync(h.Opening, artifact, default);
+        Assert.Equal("9", (await h.Store.AuthorizeDisplayAsync(h.Context, ready.ArtifactId, "9", default)).Summary!.Id);
+    }
+    [Theory]
+    [InlineData("encoding")] [InlineData("root")]
+    public async Task ASavedReceiptForAnotherCopyIsAReceiptMismatchNotACorruptProjection(string role)
+    {
+        await using var h = await Harness.Create(admittedRootRevision: "root-v1"); await h.Store.PrepareAsync(h.Context, Progress, default);
+        var admitted = role == "root" ? h.Binding.Source.Association.RootSource : h.Binding.Source.Association.EncodingSource;
+        await h.Sql("UPDATE metadata_objects SET receipt=$v WHERE ekey='" + admitted.EncodingKey + "'",
+            JsonSerializer.Serialize(admitted with { RetrievedAt = "2026-10-20T00:00:00Z", ParserRevision = MetadataAcquirer.SourceRevision }, CreaturesPolicy.Json));
+        var error = await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.ReadAsync(h.Context, default));
+        Assert.Equal("CREATURES_SOURCE_RECEIPT_MISMATCH", error.Code);
+        Assert.Contains(role == "root" ? "ROOT copy" : "ENCODING copy", error.Message);
+        Assert.False(error.Retryable);
+    }
+    [Fact]
     public async Task RegisteredCoreProofPreservesOriginalPreparedSourceAuthority()
     {
         await using var h = await Harness.Create(); var ready = await h.Store.PrepareAsync(h.Context, Progress, default); var artifact = (await h.Catalog.ReadCreaturesAdmissionAsync(h.Opening, default))!.Artifact;
@@ -297,10 +322,10 @@ public sealed class CreaturesStoreTests
         internal CreaturesStore Store = null!; internal TableDataService Tables = null!; internal readonly AcquisitionResources Resources = new(maximumCpu: 1, maximumBackgroundCpu: 1);
         internal readonly List<string> ReadTables = [], PreparedTables = []; internal bool Missing; internal Func<CancellationToken, Task>? BeforePrepare; internal Func<CancellationToken, Task>? BeforeRead;
         internal TableDataRequest Table => new("wow", Context.BuildIdentity, "us", CreaturesPolicy.Table, "enUS");
-        internal string Version = "12.1.5.70448";
-        internal static async Task<Harness> Create(bool missing = false, string version = "12.1.5.70448")
+        internal string Version = "12.1.5.70448", AdmittedRootRevision = MetadataAcquirer.SourceRevision;
+        internal static async Task<Harness> Create(bool missing = false, string version = "12.1.5.70448", string admittedRootRevision = MetadataAcquirer.SourceRevision)
         {
-            var h = new Harness { Version = version }; h.Catalog = await DiscoveryCatalog.OpenAsync(h.Projection.DirectoryPath); await h.RefreshOpening();
+            var h = new Harness { Version = version, AdmittedRootRevision = admittedRootRevision }; h.Catalog = await DiscoveryCatalog.OpenAsync(h.Projection.DirectoryPath); await h.RefreshOpening();
             var configs = new List<ConfigurationReceipt>(); foreach (var (role, key, bytes) in new[] { ("buildConfig", h.Fixture.BuildKey, h.Fixture.BuildConfig), ("cdnConfig", h.Fixture.CdnKey, h.Fixture.CdnConfig) })
             {
                 var sha = Convert.ToHexStringLower(SHA256.HashData(bytes)); await h.Projection.Objects.PublishAsync(bytes, sha, default);
@@ -343,7 +368,7 @@ public sealed class CreaturesStoreTests
                 InventoryFixture.Url("data", bytes.EncodingKey), CreaturesProjectionTests.Fixture.Time, CreaturesProjectionTests.Fixture.Time, "content-blte-v1", new("loose", "0", N(bytes.Encoded.Length), null));
             string path; await using (var file = await Projection.Objects.CreateStagingFileAsync(default)) { path = file.Name; await file.WriteAsync(bytes.Encoded); }
             await Projection.Objects.PublishFileAsync(path, bytes.Encoded.Length, default); await Catalog.RecordContentAsync(content, default);
-            var association = new SelectedFileAssociation(CreaturesPolicy.FileDataId, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"), Metadata("root"), [new("0", "0", content.ContentKey, "2", "0", "0", "0", "0", null)]);
+            var association = new SelectedFileAssociation(CreaturesPolicy.FileDataId, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"), Metadata("root") with { ParserRevision = AdmittedRootRevision }, [new("0", "0", content.ContentKey, "2", "0", "0", "0", "0", null)]);
             await using var source = new TableRowArtifacts(Projection.Objects); await using var target = new TableRowArtifacts(Projection.Objects);
             await using var writer = await target.CreateWriterAsync(b.Rows.Binding with { SourceSha256 = content.Sha256 }, default); await writer.HeaderAsync(b.Rows.Header, default);
             var page = await source.ReadPageAsync(b.Rows, 0, 50, null, default); foreach (var row in page.Rows) await writer.RowAsync(row, default);

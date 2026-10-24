@@ -29,6 +29,8 @@ internal sealed class BundledTableDefinitions
         new("46c66698", "SpellName", "d48ae2eb0455a30451cadda1c63627b9ad4ad4e9c4e473cd3444def1981fa667"),
         new("9f4206c9", "ItemGroupSounds", "e108620add5ef881b6189ee7f8c0bb0962c59254ec0dfe405abc889c9061f6de")
     ];
+    /// <summary>The bundled table name for an exact table ID, or null when it is not bundled.</summary>
+    internal static string? NameOf(string tableId) => Array.Find(Sources, source => source.TableId == tableId)?.Name;
     internal TableDefinitionProvider Info { get; } = new("WoWDBDefs contributors", Revision, ManifestSha256,
         "CC-BY-SA-4.0", Origin + "manifest.json");
     internal required IReadOnlyList<TableCatalogEntry> Entries { get; init; }

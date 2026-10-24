@@ -147,7 +147,7 @@ public sealed partial class DiscoveryCatalog
         foreach (var metadata in new[] { association.EncodingSource, association.RootSource })
         {
             var original = CreatureCanonical<MetadataReceipt>("metadata_objects", metadata.EncodingKey, transaction, ref budget);
-            if (!ItemIconAdmissionPolicy.SameMetadata(original, metadata)) throw CreaturesPolicy.Invalid();
+            if (!MetadataReceiptIdentity.Same(original, metadata)) throw CreaturesPolicy.ReceiptMismatch(metadata);
         }
         ValidateTableSourceAssociation(source, association, transaction);
     }

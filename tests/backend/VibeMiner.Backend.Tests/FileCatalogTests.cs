@@ -520,6 +520,29 @@ public sealed class FileCatalogTests
         Assert.False(gate.Held);
     }
 
+    [Fact]
+    public async Task A_table_admitted_after_the_file_catalog_saved_ROOT_names_the_same_ROOT_copy()
+    {
+        // #58/D082: the file catalog is another ROOT writer; its first saved copy is the plain acquisition label.
+        await using var h = await Harness.Create(InventoryFixture.Create());
+        await h.Open();
+        Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Ready, await h.Worker.PrepareNextAsync(default));
+        var saved = new Dictionary<string, MetadataReceipt>();
+        foreach (var role in new[] { "encoding", "root" })
+            saved[role] = (await h.Catalog.FindMetadataAsync(h.Data.Metadata[role].EncodingKey, default))!;
+        Assert.Equal(MetadataAcquirer.SourceRevision, saved["root"].ParserRevision);
+        using (var acquirer = new SelectedFileAcquirer(h.Catalog, h.Objects, h.Client))
+        await using (var selected = await acquirer.AcquireAsync(new("wow", h.Data.BuildIdentity, "us"), 1001, "enUS", _ => Task.CompletedTask, default))
+        {
+            // The Creatures, display, classification and effects checks compare exactly this pair.
+            Assert.Equal("root-v1", selected.Association.RootSource.ParserRevision);
+            Assert.True(MetadataReceiptIdentity.Same(saved["root"], selected.Association.RootSource));
+            Assert.True(MetadataReceiptIdentity.Same(saved["encoding"], selected.Association.EncodingSource));
+        }
+        foreach (var role in new[] { "encoding", "root" })
+            Assert.Equal(saved[role], await h.Catalog.FindMetadataAsync(h.Data.Metadata[role].EncodingKey, default));
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
         private readonly TempDirectory directory = new();
@@ -532,6 +555,7 @@ public sealed class FileCatalogTests
         internal Func<long, CancellationToken, Task>? AfterBatch;
         private int batch; private TimeProvider? clock; private TimeSpan retryDelay;
         private VerifiedObjectStore objects = null!; private HttpClient client = null!; private DownloadWorkspacePreparer preparer = null!;
+        internal VerifiedObjectStore Objects => objects; internal HttpClient Client => client;
         private readonly AcquisitionResources resources = new();
         internal static async Task<Harness> Create(InventoryFixture data, int batch = DiscoveryCatalog.FileCatalogBatchRows, TimeProvider? clock = null, TimeSpan? retryDelay = null)
         {

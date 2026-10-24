@@ -134,7 +134,7 @@ public sealed partial class CreaturesStore(DiscoveryCatalog catalog, VerifiedObj
             // One durable admission is the success point; committed success wins cancellation.
             return snapshot;
         }
-        catch (DiscoveryException error) when (error.Code is "CREATURES_STALE" or "CREATURES_PROJECTION_INVALID") { prepared.Invalidate(); throw; }
+        catch (DiscoveryException error) when (error.Code is "CREATURES_STALE" or "CREATURES_PROJECTION_INVALID" or "CREATURES_SOURCE_RECEIPT_MISMATCH") { prepared.Invalidate(); throw; }
     }
     public async Task<CreaturesPage> ReadPageAsync(CreaturesPageRequest request, CancellationToken token)
     {
@@ -147,7 +147,7 @@ public sealed partial class CreaturesStore(DiscoveryCatalog catalog, VerifiedObj
             await CreaturesResponseCounter.RequireAsync(page, token);
             await ValidateProfileAsync(saved.Artifact.Binding, token); await catalog.ReauthorizeCreaturesAsync(opening, saved.Artifact, token); return page;
         }
-        catch (DiscoveryException error) when (error.Code is "CREATURES_STALE" or "CREATURES_PROJECTION_INVALID") { borrow.Invalidate(); throw; }
+        catch (DiscoveryException error) when (error.Code is "CREATURES_STALE" or "CREATURES_PROJECTION_INVALID" or "CREATURES_SOURCE_RECEIPT_MISMATCH") { borrow.Invalidate(); throw; }
     }
     public async Task<CreatureInspectResult> InspectAsync(CreatureInspectRequest request, CancellationToken token)
     {
@@ -172,7 +172,7 @@ public sealed partial class CreaturesStore(DiscoveryCatalog catalog, VerifiedObj
             await ValidateProfileAsync(saved.Artifact.Binding, token); await catalog.ReauthorizeCreaturesAsync(opening, saved.Artifact, token);
             return result;
         }
-        catch (DiscoveryException error) when (error.Code is "CREATURES_STALE" or "CREATURES_PROJECTION_INVALID") { borrow.Invalidate(); throw; }
+        catch (DiscoveryException error) when (error.Code is "CREATURES_STALE" or "CREATURES_PROJECTION_INVALID" or "CREATURES_SOURCE_RECEIPT_MISMATCH") { borrow.Invalidate(); throw; }
     }
     // C2 may authorize a declared slot from this copied compact proof, then release all core
     // ownership before optional prerequisites. This helper performs no target work or original-row replay.
@@ -190,7 +190,7 @@ public sealed partial class CreaturesStore(DiscoveryCatalog catalog, VerifiedObj
             await catalog.ReauthorizeCreaturesAsync(opening, saved.Artifact, token);
             return new(opening, saved.Artifact, borrow.Held.Projection.Snapshot, summary);
         }
-        catch (DiscoveryException error) when (error.Code is "CREATURES_STALE" or "CREATURES_PROJECTION_INVALID") { borrow.Invalidate(); throw; }
+        catch (DiscoveryException error) when (error.Code is "CREATURES_STALE" or "CREATURES_PROJECTION_INVALID" or "CREATURES_SOURCE_RECEIPT_MISMATCH") { borrow.Invalidate(); throw; }
     }
     private async Task<(CapturedOpeningContext Opening, StoredCreaturesAdmission Saved)> RequireAsync(CreaturesContext context, string key, CancellationToken token)
     {

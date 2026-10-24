@@ -294,6 +294,29 @@ public sealed class RootScopeTests
         Assert.Equal(StoredCountState.Current, (await h.Summary()).Download!.CountState);
     }
 
+    [Fact]
+    public async Task A_table_admitted_after_the_root_scope_saved_ROOT_names_the_same_ROOT_copy()
+    {
+        // #58: the root scope saves ROOT first with the plain acquisition label; a later table admission labels its copy root-v1.
+        await using var h = await Scope.Create(InventoryFixture.Create());
+        await h.Open();
+        Assert.Equal(RootScopeWorker.RootScopeOutcome.Measured, await h.Worker.MeasureNextAsync(default));
+        var saved = new Dictionary<string, MetadataReceipt>();
+        foreach (var role in new[] { "encoding", "root" })
+            saved[role] = (await h.Catalog.FindMetadataAsync(h.Data.Metadata[role].EncodingKey, default))!;
+        Assert.Equal(MetadataAcquirer.SourceRevision, saved["root"].ParserRevision);
+        using (var acquirer = new SelectedFileAcquirer(h.Catalog, h.Objects, h.Client))
+        await using (var selected = await acquirer.AcquireAsync(new("wow", h.Data.BuildIdentity, "us"), 1001, "enUS", _ => Task.CompletedTask, default))
+        {
+            Assert.Equal("root-v1", selected.Association.RootSource.ParserRevision);
+            Assert.True(MetadataReceiptIdentity.Same(saved["root"], selected.Association.RootSource));
+            Assert.True(MetadataReceiptIdentity.Same(saved["encoding"], selected.Association.EncodingSource));
+        }
+        // The first copy stays as it was saved: nothing rewrites an original receipt.
+        foreach (var role in new[] { "encoding", "root" })
+            Assert.Equal(saved[role], await h.Catalog.FindMetadataAsync(h.Data.Metadata[role].EncodingKey, default));
+    }
+
     private sealed class Scope : IAsyncDisposable
     {
         private readonly TempDirectory directory = new();
@@ -302,7 +325,8 @@ public sealed class RootScopeTests
         internal DiscoveryCatalog Catalog { get; private set; } = null!;
         internal RootScopeWorker Worker { get; private set; } = null!;
         internal int Settled;
-        private VerifiedObjectStore objects = null!; private HttpClient client = null!; private DownloadWorkspacePreparer preparer = null!;
+        private VerifiedObjectStore objects = null!; private HttpClient client = null!;
+        internal VerifiedObjectStore Objects => objects; internal HttpClient Client => client; private DownloadWorkspacePreparer preparer = null!;
         private StoredCoverageWorker stored = null!; private readonly AcquisitionResources resources = new();
         internal static async Task<Scope> Create(InventoryFixture data)
         {

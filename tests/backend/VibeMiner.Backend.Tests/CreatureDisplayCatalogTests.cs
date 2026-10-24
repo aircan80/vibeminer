@@ -188,7 +188,20 @@ public sealed class CreatureDisplayCatalogTests
             await h.Sql("UPDATE metadata_objects SET receipt=$v WHERE ekey='" + source.Association.EncodingSource.EncodingKey + "'", JsonSerializer.Serialize(source.Association.EncodingSource with { RetrievedAt = "2026-10-20T00:00:00Z" }, CreaturesPolicy.Json));
         else
             await h.Sql("UPDATE content_objects SET receipt=$v", JsonSerializer.Serialize(source.Source with { RetrievedAt = "2026-10-20T00:00:00Z" }, CreaturesPolicy.Json));
-        Assert.Equal("CREATURE_DISPLAY_BINDING_INVALID", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Catalog.ReadCreatureDisplayTargetAsync(h.Opening, Display, default))).Code);
+        var error = await Assert.ThrowsAsync<DiscoveryException>(() => h.Catalog.ReadCreatureDisplayTargetAsync(h.Opening, Display, default));
+        Assert.Equal(metadata ? "CREATURE_DISPLAY_SOURCE_RECEIPT_MISMATCH" : "CREATURE_DISPLAY_BINDING_INVALID", error.Code);
+        if (metadata) Assert.Contains("ENCODING copy", error.Message);
+    }
+
+    [Fact]
+    public async Task DisplayTablesAdmittedWithRootV1ReadWhenTheRootScopeSavedTheBuildsRootCopyFirst()
+    {
+        // #58: metadata_objects holds the root scope's metadata-blte-source-v1 copy; the Creature and display tables admitted root-v1.
+        await using var h = await Harness.Create("root-v1");
+        Assert.All(h.Targets, target => Assert.Equal("root-v1", target.Admission.Association.RootSource.ParserRevision));
+        foreach (var target in h.Targets)
+            Assert.Equal(JsonSerializer.Serialize(target.Admission, CreaturesPolicy.Json), JsonSerializer.Serialize(await h.Catalog.ReadCreatureDisplayTargetAsync(h.Opening, target.TableId, default), CreaturesPolicy.Json));
+        await h.Catalog.ValidateCreatureDisplayCurrentAsync(h.Opening, h.Core, h.Targets, default);
     }
 
     [Fact]
@@ -242,7 +255,7 @@ public sealed class CreatureDisplayCatalogTests
         internal DiscoveryCatalog Catalog = null!; internal CapturedOpeningContext Opening = null!; internal CreaturesArtifact Core = null!;
         internal CreatureDisplayCatalogBinding[] Targets = [];
         private static string N(long value) => value.ToString(CultureInfo.InvariantCulture);
-        internal static async Task<Harness> Create()
+        internal static async Task<Harness> Create(string admittedRootRevision = MetadataAcquirer.SourceRevision)
         {
             var h = new Harness(); h.Catalog = await DiscoveryCatalog.OpenAsync(h.Projection.DirectoryPath); await h.Refresh();
             var configurations = new List<ConfigurationReceipt>();
@@ -267,7 +280,7 @@ public sealed class CreatureDisplayCatalogTests
             await using var writer = await table.CreateWriterAsync(rowsBinding, default); await writer.HeaderAsync(template.Rows.Header, default);
             foreach (var row in (await old.ReadPageAsync(template.Rows, 0, 50, null, default)).Rows) await writer.RowAsync(row, default);
             var rows = await writer.CompleteAsync(template.Rows.Completion with { ConsumedBytes = payload.Decoded.Length }, default);
-            var association = new SelectedFileAssociation(CreaturesPolicy.FileDataId, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"), Metadata("root"), [new("0", "0", source.ContentKey, "2", "0", "0", "0", "0", null)]);
+            var association = new SelectedFileAssociation(CreaturesPolicy.FileDataId, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"), Metadata("root") with { ParserRevision = admittedRootRevision }, [new("0", "0", source.ContentKey, "2", "0", "0", "0", "0", null)]);
             var binding = template with { Context = new("wow", h.Opening.Build.Id, "us", "enUS"), SourceReference = h.Opening.Reference, Configurations = configurations, Rows = rows,
                 Source = template.Source with { BuildIdentity = h.Opening.Build.Id, ArtifactId = rows.ContentKey, Source = source, Association = association } };
             await h.Catalog.RecordTableArtifactAsync(rows, default); await h.Catalog.CommitTableAdmissionAsync(h.Opening, CreaturesPolicy.Table, "enUS", source, association, rows, Time, default);

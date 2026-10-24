@@ -10,7 +10,7 @@ export type EffectsIntent={params:ItemEffectsSelectionParams;summary:ItemSummary
 export type EffectsFailure=TableFailure&{phase:EffectsPhase|'page'};
 export type EffectsView={intent:EffectsIntent;readiness:ItemEffectsReadiness|null;page:ItemEffectsPage|null;details:ItemEffectDetailsResult|null;names:ItemEffectNamesResult|null;action:Action;error:EffectsFailure|null;pageRequest:ItemEffectsPageParams|null;history:(string|undefined)[];cursor:string|undefined;reading:boolean;revision:number;pageSerial:number;sourceEpoch:{bridge:number;effect:number;name:number}};
 export type EffectsOperation={id:string;intent:EffectsIntent;phase:EffectsPhase;status:'pending'|'stopping'|'succeeded'|'failed'|'canceled';progress:EngineProgress|null;error:TableFailure|null};
-const parentFailures=new Set(['ITEMS_ARTIFACT_STALE','ITEMS_NOT_PREPARED','ITEMS_PROJECTION_INVALID','ITEMS_SOURCE_INVALID']);
+const parentFailures=new Set(['ITEMS_ARTIFACT_STALE','ITEMS_NOT_PREPARED','ITEMS_PROJECTION_INVALID','ITEMS_SOURCE_INVALID','ITEMS_SOURCE_RECEIPT_MISMATCH']);
 const indexFailures=new Set(['ITEM_EFFECTS_BRIDGE_STALE','ITEM_EFFECTS_NOT_PREPARED','ITEM_EFFECTS_INDEX_INVALID']);
 const phases:EffectsPhase[]=['links','inputs','names'];
 export const effectsKey=(p:ItemEffectsSelectionParams)=>JSON.stringify([p.productId,p.buildIdentity,p.sourceRegion,p.researchLocale,p.itemsArtifactId,p.itemId]);

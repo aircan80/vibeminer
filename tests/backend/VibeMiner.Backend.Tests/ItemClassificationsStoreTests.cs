@@ -41,6 +41,32 @@ public sealed class ItemClassificationsStoreTests
         Assert.Equal("Weapon", reopened.Outcomes[0].Class.Text); Assert.Empty(h.PreparedTables);
     }
     [Fact]
+    public async Task LabelsPrepareAndReopenWhenTheRootScopeSavedTheBuildsRootCopyFirst()
+    {
+        // #58: metadata_objects holds the root scope's metadata-blte-source-v1 copy; Items and ItemClass admitted root-v1.
+        await using var h = await Harness.Create(admittedRootRevision: "root-v1"); var request = await Request(h);
+        var batch = await h.Labels.PrepareBatchAsync(request, Progress, default);
+        Assert.Equal(ItemClassificationState.Ready, batch.Sources[0].State); Assert.Equal("Weapon", batch.Outcomes[0].Class.Text);
+        var saved = (await h.Catalog.ReadItemClassificationAdmissionAsync(h.Opening, "enUS", ItemClassificationKind.Class, default))!;
+        Assert.Equal("root-v1", saved.Artifact.Binding.Source.Association.RootSource.ParserRevision);
+        await h.Catalog.ReauthorizeItemClassificationTargetAsync(h.Opening, saved.Artifact, default);
+        await h.Labels.DisposeAsync(); h.Labels = new(h.Catalog, h.Objects, h.Store, h.Tables, h.Resources);
+        var reopened = await h.Labels.PrepareBatchAsync(request, Progress, default);
+        Assert.Equal(batch.Sources[0].IndexArtifactId, reopened.Sources[0].IndexArtifactId); Assert.Equal("Weapon", reopened.Outcomes[0].Class.Text);
+    }
+    [Fact]
+    public async Task ASavedRootReceiptForAnotherCopyIsAReceiptMismatchNotACorruptIndex()
+    {
+        await using var h = await Harness.Create(admittedRootRevision: "root-v1"); var request = await Request(h);
+        await h.Labels.PrepareBatchAsync(request, Progress, default);
+        var saved = (await h.Catalog.ReadItemClassificationAdmissionAsync(h.Opening, "enUS", ItemClassificationKind.Class, default))!;
+        var root = saved.Artifact.Binding.Source.Association.RootSource;
+        await h.Sql("UPDATE metadata_objects SET receipt=$v WHERE ekey='" + root.EncodingKey + "'",
+            JsonSerializer.Serialize(root with { RetrievedAt = "2026-10-20T00:00:00Z" }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var error = await Assert.ThrowsAsync<DiscoveryException>(() => h.Catalog.ReauthorizeItemClassificationTargetAsync(h.Opening, saved.Artifact, default));
+        Assert.Equal("ITEM_CLASSIFICATION_SOURCE_RECEIPT_MISMATCH", error.Code); Assert.Contains("ROOT copy", error.Message);
+    }
+    [Fact]
     public async Task PublicSubclassSourceKeepsDeclaredReferencesWithoutRewritingRetainedIndexes()
     {
         await using var h = await Harness.Create();
@@ -356,9 +382,10 @@ public sealed class ItemClassificationsStoreTests
 
         internal readonly List<string> PreparedTables = [];
         internal Func<TableDataRequest, CancellationToken, Task>? BeforePrepare;
-        internal static async Task<Harness> Create(bool missing = false, bool subMissing = false)
+        internal string AdmittedRootRevision = MetadataAcquirer.SourceRevision;
+        internal static async Task<Harness> Create(bool missing = false, bool subMissing = false, string admittedRootRevision = MetadataAcquirer.SourceRevision)
         {
-            var h = new Harness(); h.Catalog = await DiscoveryCatalog.OpenAsync(h.directory); h.Objects = new(h.directory);
+            var h = new Harness { AdmittedRootRevision = admittedRootRevision }; h.Catalog = await DiscoveryCatalog.OpenAsync(h.directory); h.Objects = new(h.directory);
             var versions = Fixtures.Versions($"us|{h.Fixture.BuildKey}|{h.Fixture.CdnKey}||70448|12.1.5.70448||items");
             var cdns = Encoding.UTF8.GetString(h.Fixture.Discovery.Documents.Single(d => d.Role == "cdns").Bytes);
             var discovery = await Fixtures.Attempt(versions, cdns); var generation = await h.Catalog.BeginRefreshAsync("wow", default);
@@ -390,6 +417,7 @@ public sealed class ItemClassificationsStoreTests
                 Convert.ToHexStringLower(SHA256.HashData(source.Encoded)), N(source.Encoded.Length), N(source.Decoded.Length),
                 InventoryFixture.Url("data", source.EncodingKey), Time, Time, MetadataAcquirer.SourceRevision);
         }
+        private MetadataReceipt AdmittedRoot() => Metadata("root") with { ParserRevision = AdmittedRootRevision };
         internal async Task<SourceFixture> Source(string table, InventoryFixture.FixtureObject bytes, string? decoder = null)
         {
             var provider = await TablesCatalog.Provider.Value; var definition = provider.Definitions[table];
@@ -397,7 +425,7 @@ public sealed class ItemClassificationsStoreTests
                 N(bytes.Encoded.Length), N(bytes.Decoded.Length), InventoryFixture.Url("data", bytes.EncodingKey), Time, Time, "content-blte-v1", new("loose", "0", N(bytes.Encoded.Length), null));
             await Catalog.RecordContentAsync(source, default);
             var entry = provider.Entries.Single(e => e.TableId == table);
-            var association = new SelectedFileAssociation(entry.Db2FileDataId!, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"), Metadata("root"),
+            var association = new SelectedFileAssociation(entry.Db2FileDataId!, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"), AdmittedRoot(),
                 [new("0", "0", source.ContentKey, "2", "0", "0", "0", "0", null)]);
             var binding = new TableArtifactBinding(source.Sha256, new('d', 64), definition.Sha256, BundledTableDefinitions.Revision, "enUS",
                 decoder ?? TableDataStore.DecoderRevision, TableRowArtifacts.SchemaSelectionKey(definition.Document, Opening.Build.Version));
@@ -431,7 +459,7 @@ public sealed class ItemClassificationsStoreTests
             string path; await using (var file = await Objects.CreateStagingFileAsync(default)) { path = file.Name; await file.WriteAsync(bytes.Encoded); }
             await Objects.PublishFileAsync(path, bytes.Encoded.Length, default);
             await Catalog.RecordContentAsync(source, default);
-            var association = new SelectedFileAssociation(subclass ? ClassificationPolicy.SubclassFile : ClassificationPolicy.ClassFile, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"), Metadata("root"),
+            var association = new SelectedFileAssociation(subclass ? ClassificationPolicy.SubclassFile : ClassificationPolicy.ClassFile, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"), AdmittedRoot(),
                 [new("0", "0", source.ContentKey, "2", "0", "0", "0", "0", null)]);
             var binding = new TableArtifactBinding(source.Sha256, new('d', 64), definition.Sha256, BundledTableDefinitions.Revision, "enUS",
                 TableDataStore.DecoderRevision, TableRowArtifacts.SchemaSelectionKey(definition.Document, Opening.Build.Version));
@@ -506,6 +534,12 @@ public sealed class ItemClassificationsStoreTests
             await using var command = connection.CreateCommand();
             command.CommandText = "UPDATE item_classification_artifacts SET descriptor=$d WHERE content_key=$k";
             command.Parameters.AddWithValue("$d", json); command.Parameters.AddWithValue("$k", key); await command.ExecuteNonQueryAsync();
+        }
+        internal async Task Sql(string sql, string value)
+        {
+            await using var connection = new SqliteConnection("Data Source=" + Path.Combine(directory, "discovery-v1.sqlite3"));
+            await connection.OpenAsync(); await using var command = connection.CreateCommand();
+            command.CommandText = sql; command.Parameters.AddWithValue("$v", value); await command.ExecuteNonQueryAsync();
         }
         private static string N(long value) => value.ToString(CultureInfo.InvariantCulture);
         public async ValueTask DisposeAsync()

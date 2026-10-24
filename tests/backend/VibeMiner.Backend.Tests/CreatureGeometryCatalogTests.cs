@@ -86,6 +86,16 @@ public sealed class CreatureGeometryCatalogTests
     }
 
     [Fact]
+    public async Task Asset_resolution_root_v1_copy_reads_against_the_root_scopes_saved_copy()
+    {
+        // #58: asset resolution labels its ROOT copy and resolver source root-v1; metadata_objects keeps the root scope's metadata-blte-source-v1 copy.
+        await using var h = await Harness.Create(); var root = h.Association.RootSource with { ParserRevision = "root-v1" };
+        Assert.Equal(MetadataAcquirer.SourceRevision, (await h.Catalog.FindMetadataAsync(root.EncodingKey, default))!.ParserRevision);
+        await h.Sql("DELETE FROM resolver_artifacts WHERE role='root'"); await h.Catalog.RecordResolverArtifactAsync(h.Root with { Source = root }, default);
+        Assert.Equal(h.Receipt, (await h.Catalog.ReadGeometryOriginalSourcesAsync(h.Association with { RootSource = root }, h.Expectation, h.Receipt, default)).Receipt);
+    }
+
+    [Fact]
     public async Task Full_candidate_is_inserted_atomically_only_after_all_canonical_proofs_qualify()
     {
         await using var h = await Harness.Create();

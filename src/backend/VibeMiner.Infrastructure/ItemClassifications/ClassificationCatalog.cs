@@ -187,13 +187,16 @@ public sealed partial class DiscoveryCatalog
             !ClassificationPolicy.SameAuthority(Deserialize<SelectedFileAssociation>(reader.GetString(2)), b.Source.Association) ||
             Serialize(Deserialize<TableRowsArtifact>(reader.GetString(3))) != Serialize(b.Rows)) throw ClassificationPolicy.Stale();
         reader.Close();
-        ValidateTableSourceAssociation(b.Source.Source, b.Source.Association, transaction);
-        var canonical = Scalar("SELECT receipt FROM content_objects WHERE ekey=$k", transaction, ("$k", b.Source.Source.EncodingKey)) as string;
-        if (canonical is null || !ClassificationPolicy.SameAuthority(Deserialize<ContentReceipt>(canonical), b.Source.Source)) throw ClassificationPolicy.Invalid();
+        // Another saved copy of encoding or ROOT is a precise mismatch, checked before the generic table association integrity.
         foreach (var metadata in new[] { b.Source.Association.EncodingSource, b.Source.Association.RootSource })
         {
             var original = Scalar("SELECT receipt FROM metadata_objects WHERE ekey=$k", transaction, ("$k", metadata.EncodingKey)) as string;
-            if (original is null || !ItemIconAdmissionPolicy.SameMetadata(Deserialize<MetadataReceipt>(original), metadata)) throw ClassificationPolicy.Invalid();
+            if (original is null) throw ClassificationPolicy.Invalid();
+            if (!MetadataReceiptIdentity.Same(Deserialize<MetadataReceipt>(original), metadata))
+                throw MetadataReceiptIdentity.Mismatch("ITEM_CLASSIFICATION_SOURCE_RECEIPT_MISMATCH", "An Item classification table", metadata);
         }
+        ValidateTableSourceAssociation(b.Source.Source, b.Source.Association, transaction);
+        var canonical = Scalar("SELECT receipt FROM content_objects WHERE ekey=$k", transaction, ("$k", b.Source.Source.EncodingKey)) as string;
+        if (canonical is null || !ClassificationPolicy.SameAuthority(Deserialize<ContentReceipt>(canonical), b.Source.Source)) throw ClassificationPolicy.Invalid();
     }
 }

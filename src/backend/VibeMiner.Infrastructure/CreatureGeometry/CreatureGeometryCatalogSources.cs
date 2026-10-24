@@ -132,7 +132,7 @@ public sealed partial class DiscoveryCatalog
         if (reader.GetInt64(4) != 32) throw GeometryInvalid();
         var original = GeometryDecode<MetadataReceipt>(Encoding.UTF8.GetBytes(reader.GetString(0)));
         ValidateDownloadReceiptFacts(original);
-        if (original.ContentKey != reader.GetString(2) || DownloadNumber(original.EncodedBytes) != reader.GetInt64(3) || !ItemIconAdmissionPolicy.SameMetadata(original, expected)) throw GeometryStale(); return original;
+        if (original.ContentKey != reader.GetString(2) || DownloadNumber(original.EncodedBytes) != reader.GetInt64(3) || !MetadataReceiptIdentity.Same(original, expected)) throw GeometryStale(); return original;
     }
 
     private ResolverArtifact GeometryResolver(MetadataReceipt source, string revision, SqliteTransaction transaction, ref int budget)
@@ -145,7 +145,7 @@ public sealed partial class DiscoveryCatalog
         if (reader.GetInt64(4) != 64) throw GeometryInvalid();
         var result = new ResolverArtifact(GeometryDecode<MetadataReceipt>(Encoding.UTF8.GetBytes(reader.GetString(0))), revision, reader.GetString(1), reader.GetInt64(2));
         ValidateResolverArtifact(result);
-        if (!ItemIconAdmissionPolicy.SameMetadata(result.Source, source)) throw GeometryStale(); return result;
+        if (!MetadataReceiptIdentity.Same(result.Source, source)) throw GeometryStale(); return result;
     }
 
     private ContentReceipt? GeometryContent(string key, SqliteTransaction transaction, ref int budget)

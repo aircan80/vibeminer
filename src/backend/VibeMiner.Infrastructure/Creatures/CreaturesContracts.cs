@@ -29,6 +29,7 @@ internal static class CreaturesPolicy
     internal static readonly string[] FactNames = ["Classification", "CreatureType", "CreatureFamily", "StartAnimState"];
     internal static string N(long value) => value.ToString(CultureInfo.InvariantCulture);
     internal static DiscoveryException Invalid() => new("CREATURES_PROJECTION_INVALID", "The Creature projection or its exact source binding is invalid.");
+    internal static DiscoveryException ReceiptMismatch(MetadataReceipt admitted) => MetadataReceiptIdentity.Mismatch("CREATURES_SOURCE_RECEIPT_MISMATCH", "The Creature table", admitted);
     internal static DiscoveryException Unsupported() => new("CREATURES_SCHEMA_UNSUPPORTED", "The exact selected Creature profile does not qualify names, numeric facts and four declared slots.");
     internal static DiscoveryException Limit() => new("CREATURES_PROJECTION_LIMIT", "Creature projection bytes, metadata, names or rows exceed the bounded feature budget.");
     internal static DiscoveryException Stale() => new("CREATURES_STALE", "The current Creature source or exact opening changed. Refresh the Creature browser.", true);

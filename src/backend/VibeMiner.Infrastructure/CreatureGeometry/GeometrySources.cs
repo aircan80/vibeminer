@@ -144,8 +144,8 @@ internal sealed partial class GeometrySourceClosure
             association.Configurations[1].Key != context.CdnConfigurationKey || association.Configurations[1].Sha256 != context.CdnConfigurationSha256 ||
             association.Memberships.Any(m => m.Entry.FileDataId != id || m.Entry.ContentKey != expected.ContentKey)) throw GeometrySourceCapsuleCodec.Invalid();
         var coreAssociation = selection.Original.Core.Artifact.Binding.Source.Association;
-        if (!ItemIconAdmissionPolicy.SameMetadata(coreAssociation.EncodingSource, association.EncodingSource) ||
-            !ItemIconAdmissionPolicy.SameMetadata(coreAssociation.RootSource, association.RootSource)) throw GeometrySourceCapsuleCodec.Invalid();
+        if (!MetadataReceiptIdentity.Same(coreAssociation.EncodingSource, association.EncodingSource) ||
+            !MetadataReceiptIdentity.Same(coreAssociation.RootSource, association.RootSource)) throw GeometrySourceCapsuleCodec.Invalid();
         return result with { Association = association, Expectation = expected with { } };
     }
     private static GeometrySourceContextIdentity Context(GeometryDisplayAuthorization authorization)

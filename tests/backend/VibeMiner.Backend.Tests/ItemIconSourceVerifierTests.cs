@@ -67,7 +67,8 @@ public sealed class ItemIconSourceVerifierTests
     [Theory]
     [InlineData("equivalent", true)][InlineData("offset", false)][InlineData("length", false)]
     [InlineData("archive-key", false)][InlineData("archive", false)][InlineData("archive-url", false)]
-    [InlineData("pinned-url", false)][InlineData("unofficial-url", false)][InlineData("date", false)][InlineData("parser", false)]
+    [InlineData("pinned-url", false)][InlineData("unofficial-url", false)][InlineData("date", false)][InlineData("sha", false)]
+    [InlineData("role", false)][InlineData("root-v1", true)][InlineData("download-v1", true)]
     public void Legacy_metadata_location_compatibility_is_exact_and_preserves_source_receipts(string kind, bool expected)
     {
         var key = new string('a', 32); var other = new string('b', 32);
@@ -84,10 +85,14 @@ public sealed class ItemIconSourceVerifierTests
             case "pinned-url": current = current with { SourceUrl = $"https://eu.cdn.blizzard.com/tpr/wow/data/aa/aa/{key}" }; break;
             case "unofficial-url": original = original with { SourceUrl = $"https://example.com/tpr/wow/data/aa/aa/{key}" }; current = current with { SourceUrl = original.SourceUrl }; break;
             case "date": current = current with { RetrievedAt = "2026-10-20T00:00:00Z" }; break;
-            case "parser": current = current with { ParserRevision = "encoding-v1" }; break;
+            case "sha": current = current with { Sha256 = new('d', 64) }; break;
+            case "role": current = current with { Role = "root" }; break;
+            // D082: the writer's parser revision labels a copy; it is not the copy's identity.
+            case "root-v1": current = current with { ParserRevision = "root-v1" }; break;
+            case "download-v1": current = current with { ParserRevision = "download-v1" }; break;
         }
-        Assert.Equal(expected, ItemIconAdmissionPolicy.SameMetadata(original, current));
-        Assert.Equal(expected, ItemIconAdmissionPolicy.SameMetadata(current, original));
+        Assert.Equal(expected, MetadataReceiptIdentity.Same(original, current));
+        Assert.Equal(expected, MetadataReceiptIdentity.Same(current, original));
         Assert.Null(original.Location); Assert.NotNull(current.Location);
     }
     private sealed class Harness : IAsyncDisposable

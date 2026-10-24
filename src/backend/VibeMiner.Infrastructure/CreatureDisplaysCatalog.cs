@@ -109,7 +109,7 @@ public sealed partial class DiscoveryCatalog
         {
             var canonical = DisplayCanonical<MetadataReceipt>("metadata_objects", metadata.EncodingKey, transaction, ref budget);
             ValidateDownloadReceiptFacts(canonical);
-            if (!ItemIconAdmissionPolicy.SameMetadata(canonical, metadata)) throw DisplayInvalid();
+            if (!MetadataReceiptIdentity.Same(canonical, metadata)) throw MetadataReceiptIdentity.Mismatch("CREATURE_DISPLAY_SOURCE_RECEIPT_MISMATCH", "A Creature display table", metadata);
         }
         return result;
     }

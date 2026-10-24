@@ -23,6 +23,24 @@ public sealed class ItemEffectsCatalogTests
         Assert.Equal(h.Item.Rows.ContentKey,actual.Item.Artifact.ContentKey); Assert.Equal(h.Sparse.Rows.ContentKey,actual.Sparse.Artifact.ContentKey);
         Assert.Equal(2,actual.Configurations.Count); Assert.All(actual.Configurations,c=>Assert.Equal(Harness.Time,c.RetrievedAt));
     }
+    [Fact]
+    public async Task ItemsAuthorityReadsWhenTheRootScopeSavedTheBuildsRootCopyFirst()
+    {
+        // #58: metadata_objects holds the root scope's metadata-blte-source-v1 copy; Item and ItemSparse admitted root-v1.
+        await using var h = await Harness.Create("root-v1"); var snapshot = await h.Store.PrepareAsync(h.Request, _=>Task.CompletedTask, default);
+        var actual = await h.Catalog.ReadItemEffectsItemsAuthorityAsync(h.Opening,"enUS",snapshot.ArtifactId,default);
+        Assert.Equal("root-v1",actual.Item.Association.RootSource.ParserRevision);
+        Assert.Equal(h.Item.Rows.ContentKey,actual.Item.Artifact.ContentKey); Assert.Equal(h.Sparse.Rows.ContentKey,actual.Sparse.Artifact.ContentKey);
+    }
+    [Fact]
+    public async Task ASavedRootReceiptForAnotherCopyIsAReceiptMismatchNotInvalidAuthority()
+    {
+        await using var h = await Harness.Create("root-v1"); var snapshot = await h.Store.PrepareAsync(h.Request, _=>Task.CompletedTask, default);
+        var root = h.Item.Association.RootSource;
+        await Sql(h,"UPDATE metadata_objects SET receipt=$v WHERE ekey='"+root.EncodingKey+"'",JsonSerializer.Serialize(root with { RetrievedAt="2026-10-20T00:00:00Z" },Json));
+        var error = await Assert.ThrowsAsync<DiscoveryException>(()=>h.Catalog.ReadItemEffectsItemsAuthorityAsync(h.Opening,"enUS",snapshot.ArtifactId,default));
+        Assert.Equal("ITEMS_SOURCE_RECEIPT_MISMATCH",error.Code); Assert.StartsWith("The Item table was read with a ROOT copy",error.Message);
+    }
     [Theory]
     [InlineData("feature")] [InlineData("source")] [InlineData("association")] [InlineData("rows")] [InlineData("content")] [InlineData("metadata")]
     public async Task OversizedRawEvidenceFailsBeforeMalformedEvidenceCanBecomeAuthority(string field)
@@ -102,6 +120,16 @@ public sealed class ItemEffectsCatalogTests
         var result=await f.H.Catalog.ReauthorizeItemEffectsAsync(f.Items,f.Bridge,f.Targets,default);
         Assert.Equal(new[]{"ITEM_EFFECTS_SOURCE_CORRUPT","ITEM_EFFECTS_LIMIT"},result.Select(v=>v.Problem!.Code));Assert.All(result,v=>Assert.False(v.Problem!.Retryable));
         Assert.Equal("ITEM_EFFECTS_LIMIT",(await Assert.ThrowsAsync<DiscoveryException>(()=>f.H.Catalog.ReadItemEffectsSourceAsync(f.H.Opening,ItemEffectsSourceRole.Name,default))).Code);
+    }
+    [Theory]
+    [InlineData(ItemEffectsSourceRole.Bridge,"00cb674f","ItemXItemEffect")] [InlineData(ItemEffectsSourceRole.Effect,"4002a5b1","ItemEffect")] [InlineData(ItemEffectsSourceRole.Name,"46c66698","SpellName")]
+    public async Task AnEffectsSourceAdmittedWithAnotherRootCopyNamesItsOwnTable(ItemEffectsSourceRole role,string table,string name)
+    {
+        await using var f=await EffectsFixture.Create();
+        var association=f.H.Item.Association with{RootSource=f.H.Item.Association.RootSource with{RetrievedAt="2026-10-20T00:00:00Z"}};
+        await Sql(f.H,"UPDATE table_admissions SET association=json_set($v,'$.fileDataId',json_extract(association,'$.fileDataId')) WHERE table_id='"+table+"'",JsonSerializer.Serialize(association,Json));
+        var error=await Assert.ThrowsAsync<DiscoveryException>(()=>f.H.Catalog.ReadItemEffectsSourceAsync(f.H.Opening,role,default));
+        Assert.Equal("ITEMS_SOURCE_RECEIPT_MISMATCH",error.Code); Assert.StartsWith("The "+name+" table was read with a ROOT copy",error.Message);
     }
     [Fact]
     public async Task SameKeySourceReadmissionKeepsFirstIndexDescriptorAndCompactTimeButFencesFreshGeneration()

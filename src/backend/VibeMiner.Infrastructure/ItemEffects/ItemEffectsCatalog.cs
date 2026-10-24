@@ -427,10 +427,12 @@ public sealed partial class DiscoveryCatalog
             var canonical = EffectsDecode<ContentReceipt>(raw.Content); ValidateContentReceipt(canonical);
             var encoding = EffectsDecode<MetadataReceipt>(raw.Encoding); var root = EffectsDecode<MetadataReceipt>(raw.Root);
             ValidateDownloadReceiptFacts(encoding); ValidateDownloadReceiptFacts(root);
-            if (!EffectsAuthority(source,canonical) || !EffectsAuthority(association.EncodingSource,encoding) || !EffectsAuthority(association.RootSource,root)) throw EffectsItemsInvalid();
+            if (!EffectsAuthority(source,canonical)) throw EffectsItemsInvalid();
+            foreach (var (admitted,saved) in new[]{(association.EncodingSource,encoding),(association.RootSource,root)})
+                if (!MetadataReceiptIdentity.Same(saved,admitted)) throw MetadataReceiptIdentity.Mismatch("ITEMS_SOURCE_RECEIPT_MISMATCH",$"The {BundledTableDefinitions.NameOf(tableId)??tableId} table",admitted);
             return new(rows,source,association,at);
         }
-        catch (DiscoveryException error) when (error.Code is not "ITEM_EFFECTS_LIMIT") { throw EffectsItemsInvalid(); }
+        catch (DiscoveryException error) when (error.Code is not ("ITEM_EFFECTS_LIMIT" or "ITEMS_SOURCE_RECEIPT_MISMATCH")) { throw EffectsItemsInvalid(); }
         catch (Exception error) when (error is NullReferenceException or FormatException or OverflowException or ArgumentException) { throw EffectsItemsInvalid(); }
     }
 
