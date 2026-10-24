@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BufferAttribute, BufferGeometry, Camera, LineBasicMaterial, LineSegments, Scene, SRGBColorSpace, NoToneMapping } from 'three';
-import { createGeometryScene, createGeometrySceneForTests, type GeometryGraphics, type GeometrySceneIdentity } from '../src/renderer/geometry-scene';
+import { createGeometryScene, createGeometrySceneForTests, geometryBackingSize, geometryCanvasBudgetBytes, geometryCanvasBytesPerPixel, type GeometryGraphics, type GeometrySceneIdentity } from '../src/renderer/geometry-scene';
 import { validateGeometry } from '../src/renderer/geometry-vmg';
 import { geometryCSharpGolden, geometryFixture } from './geometry-fixtures';
 
@@ -283,5 +283,35 @@ describe('bounded Three diagnostic scene owner', () => {
     expect(get).toHaveBeenCalledExactlyOnceWith('webgl2', { alpha: false, depth: true, stencil: false, antialias: false, preserveDrawingBuffer: false });
     expect(result).toMatchObject({ state: 'refused', code: 'webglUnsupported' }); expect(lose).toHaveBeenCalledOnce();
     expect(canvas.width).toBe(0); expect(canvas.height).toBe(0);
+  });
+});
+
+describe('backing store follows the displayed size (#59)', () => {
+  it('is displayed size × devicePixelRatio at 4:3, clamped to the 8 MiB canvas share', () => {
+    expect(geometryBackingSize(512, 384, 1)).toEqual({ width: 512, height: 384 });
+    expect(geometryBackingSize(400, 300, 2)).toEqual({ width: 800, height: 600 });
+    expect(geometryBackingSize(1022, 766.5, 1)).toEqual({ width: 836, height: 627 });
+    expect(geometryBackingSize(1022, 766.5, 2)).toEqual({ width: 836, height: 627 });
+    expect(geometryBackingSize(0, 0, 1)).toEqual({ width: 588, height: 441 });
+    expect(geometryBackingSize(10, 7.5, 1)).toEqual({ width: 64, height: 48 });
+    expect(836 * 627 * geometryCanvasBytesPerPixel).toBeLessThanOrEqual(geometryCanvasBudgetBytes);
+  });
+  it('resizes only the drawing buffer, redraws with the unchanged camera, and refuses an over-budget size', async () => {
+    const h = harness(), input = await geometry();
+    h.renderer.setSize = vi.fn((width: number, height: number) => { h.canvas.width = width; h.canvas.height = height; h.gl.drawingBufferWidth = width; h.gl.drawingBufferHeight = height; });
+    expect(h.owner.mount(input, h.identity, h.ack)).toEqual({ state: 'mounted' }); h.frame();
+    const projection = [...h.getSeen()!.camera.projectionMatrix.elements], view = [...h.getSeen()!.camera.matrixWorldInverse.elements];
+    expect(h.owner.resize!({ width: 800, height: 600 })).toEqual({ state: 'resized' });
+    expect(h.renderer.setSize).toHaveBeenLastCalledWith(800, 600, false); expect(h.frames.size).toBe(1); h.frame();
+    expect([...h.getSeen()!.camera.projectionMatrix.elements]).toEqual(projection); expect([...h.getSeen()!.camera.matrixWorldInverse.elements]).toEqual(view);
+    expect(h.owner.resize!({ width: 900, height: 675 })).toEqual({ state: 'refused', code: 'resourceLimit' });
+    expect(h.owner.resize!({ width: 800, height: 500 })).toEqual({ state: 'refused', code: 'resourceLimit' });
+    expect(h.renderer.setSize).toHaveBeenCalledTimes(1); expect(h.status).not.toHaveBeenCalledWith({ code: 'renderFailed' });
+  });
+  it('retires the view when the driver does not provide the requested drawing buffer', async () => {
+    const h = harness(), input = await geometry();
+    expect(h.owner.mount(input, h.identity, h.ack)).toEqual({ state: 'mounted' }); h.frame();
+    expect(h.owner.resize!({ width: 800, height: 600 })).toEqual({ state: 'refused', code: 'renderFailed' });
+    expect(h.status).toHaveBeenLastCalledWith({ code: 'renderFailed' }); expect(h.renderer.dispose).toHaveBeenCalled();
   });
 });

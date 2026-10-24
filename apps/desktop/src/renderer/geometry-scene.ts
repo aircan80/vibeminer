@@ -17,10 +17,29 @@ export interface GeometrySceneOptions {
   // Trusted composition port: the caller already awaited the actual main-owned retirement result.
   readonly confirmRetirement: (identity: GeometrySceneIdentity, result: GeometryBodyRetired) => boolean;
   readonly onStatus: (status: GeometrySceneStatus) => void;
+  // Backing-store pixels from geometryBackingSize; the default is the original fixed 588×441.
+  readonly size?: GeometryBackingSize;
+}
+export type GeometryBackingSize = Readonly<{ width: number; height: number }>;
+// Canvas accounting: 16 bytes per backing pixel (two colour buffers, depth, one compositor copy) within the 8 MiB canvas share.
+export const geometryCanvasBytesPerPixel = 16, geometryCanvasBudgetBytes = 8 * 1024 * 1024;
+const maxBackingWidth = 836, minBackingWidth = 64; // 836×627×16 = 8,386,752 bytes.
+/** Displayed CSS size × devicePixelRatio, at the camera's fixed 4:3 aspect, clamped to the canvas budget. */
+export function geometryBackingSize(cssWidth: number, cssHeight: number, devicePixelRatio: number): GeometryBackingSize {
+  const ratio = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  const wanted = Number.isFinite(cssWidth) && Number.isFinite(cssHeight) && cssWidth > 0 && cssHeight > 0 ? Math.min(cssWidth, cssHeight * 4 / 3) * ratio : 588;
+  const width = Math.max(minBackingWidth, Math.min(maxBackingWidth, Math.floor(wanted / 4) * 4));
+  return Object.freeze({ width, height: width * 3 / 4 });
+}
+function validBackingSize(size: GeometryBackingSize): boolean {
+  return Number.isSafeInteger(size.width) && Number.isSafeInteger(size.height) && size.width % 4 === 0 && size.height === size.width * 3 / 4
+    && size.width >= minBackingWidth && size.width <= maxBackingWidth && size.width * size.height * geometryCanvasBytesPerPixel <= geometryCanvasBudgetBytes;
 }
 export interface GeometrySceneOwner {
   mount(geometry: ValidatedGeometry, identity: GeometrySceneIdentity, retired: GeometryBodyRetired): Readonly<{ state: 'mounted' }> | Refused;
   move(action: GeometryCameraAction): Readonly<{ state: 'moved' }> | Refused;
+  // Changes only the backing store to follow the displayed size; the camera and scene are unchanged.
+  resize?(size: GeometryBackingSize): Readonly<{ state: 'resized' }> | Refused;
   // Caller supplies its observed current grant identity, including a failed/unmounted fetch.
   disposeScene(identity: GeometrySceneIdentity|null): Disposed;
   disposeView(identity: GeometrySceneIdentity|null): Disposed;
@@ -39,7 +58,7 @@ export interface GeometryGraphics {
 }
 interface Frames { request(callback: FrameRequestCallback): number; cancel(id: number): void }
 type Factory = (parameters: WebGLRendererParameters) => GeometryGraphics;
-const width = 588, height = 441;
+const defaultSize: GeometryBackingSize = Object.freeze({ width: 588, height: 441 });
 const rotation = new Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1);
 const refused = (code: Refusal): Refused => ({ state: 'refused', code });
 const lowerId = /^[a-f0-9]{32}$/, artifactId = /^[a-f0-9]{64}$/;
@@ -91,13 +110,15 @@ export function createGeometrySceneForTests(canvas: HTMLCanvasElement, options: 
 function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factory: Factory, frames: Frames,
   acquireContext?: () => WebGL2RenderingContext|null): GeometrySceneCreation {
   if (!lowerId.test(options.viewId) || !Number.isSafeInteger(options.viewGeneration) || options.viewGeneration < 1) return refused('invalidIdentity');
+  const initial = options.size ?? defaultSize;
+  if (!validBackingSize(initial)) return refused('resourceLimit');
   if (heldCanvases.has(canvas)) return refused('busy');
   heldCanvases.add(canvas);
   const viewId = options.viewId, viewGeneration = options.viewGeneration;
   let graphics: GeometryGraphics|null = null, constructingContext: WebGL2RenderingContext|null = null, mounted: Mounted|null = null, debt: Mounted|null = null;
   let pendingFrame: number|null = null, pointer: { id: number; x: number; y: number }|null = null;
   let disposed = false, disposing = false, retiringScene = false, mounting = false, cleanupFailed = false, observerFailed = false, shaderFailed = false;
-  let consumedToken: string|null = null, lastStatus: GeometrySceneStatus['code']|null = null;
+  let consumedToken: string|null = null, lastStatus: GeometrySceneStatus['code']|null = null, size = initial;
   let controls: (() => void)[] = [], lossListener = false;
   const attempt = (action: () => void): boolean => { try { action(); return true; } catch { cleanupFailed = true; return false; } };
   const isCurrent = () => { try { return options.isCurrent(); } catch { return false; } };
@@ -193,6 +214,20 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
     mounted.camera.copy(candidate, false); mounted.cameraState = result.value; schedule();
     return disposed ? refused(cleanupFailed ? 'cleanupFailed' : 'renderFailed') : { state: 'moved' };
   }
+  function resize(next: GeometryBackingSize): Readonly<{ state: 'resized' }> | Refused {
+    if (disposed) return refused('disposed'); if (cleanupFailed) return refused('cleanupFailed'); if (!graphics || mounting || disposing || retiringScene) return refused('busy');
+    if (!validBackingSize(next)) return refused('resourceLimit');
+    if (next.width === size.width && next.height === size.height) return { state: 'resized' };
+    if (!isCurrent()) { retireView(); notify('stale'); return refused('stale'); }
+    const renderer = graphics;
+    try {
+      renderer.setSize(next.width, next.height, false);
+      const gl = renderer.getContext();
+      if (gl.drawingBufferWidth !== next.width || gl.drawingBufferHeight !== next.height || canvas.width !== next.width || canvas.height !== next.height) throw new Error('Geometry backing size unavailable');
+    } catch { retireView(); notify(cleanupFailed ? 'cleanupFailed' : 'renderFailed'); return refused(cleanupFailed ? 'cleanupFailed' : 'renderFailed'); }
+    size = Object.freeze({ width: next.width, height: next.height }); schedule();
+    return disposed ? refused(cleanupFailed ? 'cleanupFailed' : 'renderFailed') : { state: 'resized' };
+  }
   function bindControls() {
     const interactable = () => {
       if (disposed || mounted === null) return false;
@@ -271,6 +306,7 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
       } finally { mounting = false; }
     },
     move,
+    resize,
     disposeScene(identity: GeometrySceneIdentity|null) {
       if (disposing || retiringScene) return refused('busy');
       const mismatch = !validIdentity(identity) || mounted !== null && (identity === null || !same(identity, mounted.identity));
@@ -287,12 +323,12 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
     graphics = factory({ canvas, ...(constructingContext ? { context: constructingContext } : {}),
       alpha: false, depth: true, stencil: false, antialias: false, preserveDrawingBuffer: false });
     constructingContext = null; // The constructed renderer now owns the exact context.
-    graphics.setPixelRatio(1); graphics.setSize(width, height, false); graphics.setClearColor('#fffefa', 1);
+    graphics.setPixelRatio(1); graphics.setSize(size.width, size.height, false); graphics.setClearColor('#fffefa', 1);
     graphics.outputColorSpace = SRGBColorSpace; graphics.toneMapping = NoToneMapping; graphics.sortObjects = false; graphics.shadowMap.enabled = false;
     const context = graphics.getContext(), attributes = context.getContextAttributes();
     if (!attributes || attributes.antialias || attributes.preserveDrawingBuffer || attributes.stencil || attributes.alpha || !attributes.depth
       || context.isContextLost() || !/^WebGL 2\.0(?:\s|$)/.test(String(context.getParameter(context.VERSION)))) throw new Error('Unsupported geometry context');
-    if (context.drawingBufferWidth !== width || context.drawingBufferHeight !== height || canvas.width !== width || canvas.height !== height) {
+    if (context.drawingBufferWidth !== size.width || context.drawingBufferHeight !== size.height || canvas.width !== size.width || canvas.height !== size.height) {
       retireView(); return { state: 'refused', code: cleanupFailed ? 'cleanupFailed' : 'resourceLimit', ...(cleanupFailed ? { owner } : {}) };
     }
     graphics.debug.checkShaderErrors = true; graphics.debug.onShaderError = () => { shaderFailed = true; };

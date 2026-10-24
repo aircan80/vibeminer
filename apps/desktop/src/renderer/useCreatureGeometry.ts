@@ -9,11 +9,11 @@ export interface GeometryActions{
  enter(intent:GeometryIntent):void;retry():void;stopPreparation(requestId?:string):void;
  leave(reason:'return'|'navigation'|'source'|'unmount'):Promise<void>;
  attachCanvas(generation:number,canvas:HTMLCanvasElement):()=>void;
- iconsHiddenCommitted(generation:number):void;move(action:GeometryCameraAction):void;sectionPage(offset:number):void;dismissActivity():void;
+ iconsHiddenCommitted(generation:number):void;resizeCanvas(generation:number):void;move(action:GeometryCameraAction):void;sectionPage(offset:number):void;dismissActivity():void;
  shutdown(reason:'documentReplaced'|'bridgeClosing'|'applicationExit'):Promise<void>;
 }
 export function geometryActions(current:()=>GeometrySession|null):GeometryActions{
- return Object.freeze({enter:(intent:GeometryIntent)=>{current()?.enter(intent);},retry:()=>{current()?.retry();},stopPreparation:(id?:string)=>{current()?.stopPreparation(id);},leave:(reason:'return'|'navigation'|'source'|'unmount')=>current()?.leave(reason)??Promise.resolve(),attachCanvas:(generation:number,canvas:HTMLCanvasElement)=>current()?.attachCanvas(generation,canvas)??(()=>{}),iconsHiddenCommitted:(generation:number)=>{current()?.iconsHiddenCommitted(generation);},move:(action:GeometryCameraAction)=>{current()?.move(action);},sectionPage:(offset:number)=>{current()?.sectionPage(offset);},dismissActivity:()=>{current()?.dismissActivity();},shutdown:(reason:'documentReplaced'|'bridgeClosing'|'applicationExit')=>current()?.shutdown(reason)??Promise.resolve()});
+ return Object.freeze({enter:(intent:GeometryIntent)=>{current()?.enter(intent);},retry:()=>{current()?.retry();},stopPreparation:(id?:string)=>{current()?.stopPreparation(id);},leave:(reason:'return'|'navigation'|'source'|'unmount')=>current()?.leave(reason)??Promise.resolve(),attachCanvas:(generation:number,canvas:HTMLCanvasElement)=>current()?.attachCanvas(generation,canvas)??(()=>{}),iconsHiddenCommitted:(generation:number)=>{current()?.iconsHiddenCommitted(generation);},resizeCanvas:(generation:number)=>{current()?.resizeCanvas(generation);},move:(action:GeometryCameraAction)=>{current()?.move(action);},sectionPage:(offset:number)=>{current()?.sectionPage(offset);},dismissActivity:()=>{current()?.dismissActivity();},shutdown:(reason:'documentReplaced'|'bridgeClosing'|'applicationExit')=>current()?.shutdown(reason)??Promise.resolve()});
 }
 export type GeometryFlow=Readonly<{snapshot:GeometrySnapshot;session:GeometryActions}>;
 /** One owner above build/area routes. The body-bearing manager lives solely in an imperative ref. */

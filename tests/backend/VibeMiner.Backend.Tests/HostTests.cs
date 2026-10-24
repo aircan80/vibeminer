@@ -165,6 +165,49 @@ public sealed class HostTests
         Assert.Equal(0, process.ExitCode); Assert.Equal("", await stderr);
         Assert.Null(await process.StandardOutput.ReadLineAsync());
     }
+    [Fact]
+    public async Task RealProcessComposesSourceGeometryAdvertisesItAndDispatchesEveryMethod()
+    {
+        // Regression for #59: Program.cs composed no geometry service, so every route answered CREATURE_GEOMETRY_UNAVAILABLE.
+        using var directory = new TempDirectory();
+        var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+        var executable = dotnetRoot is null ? "dotnet" : Path.Combine(dotnetRoot, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+        var start = new ProcessStartInfo(executable) { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        start.ArgumentList.Add(typeof(ProtocolHost).Assembly.Location); start.ArgumentList.Add("--data-dir"); start.ArgumentList.Add(directory.Path);
+        using var process = Process.Start(start)!;
+        var stderr = process.StandardError.ReadToEndAsync();
+        async Task<JsonElement> Call(string id, string method, object parameters)
+        {
+            await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { protocolVersion = 1, id, method, @params = parameters }));
+            await process.StandardInput.FlushAsync();
+            var line = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            using var reply = JsonDocument.Parse(line!); Assert.Equal(id, reply.RootElement.GetProperty("id").GetString());
+            return reply.RootElement.Clone();
+        }
+        var capabilities = (await Call("hello", "hello", new { })).GetProperty("result").GetProperty("capabilities").EnumerateArray().Select(c => c.GetString()).ToArray();
+        Assert.Contains("creatures-v1", capabilities); Assert.Contains("creature-display-metadata-v1", capabilities);
+        Assert.Contains("creature-source-geometry-v1", capabilities);
+        var scope = new Dictionary<string, object?>
+        {
+            ["productId"] = "wow", ["buildIdentity"] = new string('a', 64), ["sourceRegion"] = "us", ["researchLocale"] = "enUS",
+            ["artifactId"] = new string('b', 64), ["creatureId"] = "7", ["slot"] = 0
+        };
+        var read = new Dictionary<string, object?>(scope) { ["expectedGeometryArtifactId"] = null };
+        var open = new Dictionary<string, object?>(scope) { ["geometryArtifactId"] = new string('4', 64) };
+        foreach (var (id, method, parameters) in new[] { ("read", "creatures.geometry.read", read), ("prepare", "creatures.geometry.prepare", scope), ("open", "creatures.geometry.open", open) })
+        {
+            // No workspace is open, so the real service refuses authority. It must not be the missing-composition refusal.
+            var error = (await Call(id, method, parameters)).GetProperty("error").GetProperty("code").GetString();
+            Assert.NotEqual("CREATURE_GEOMETRY_UNAVAILABLE", error); Assert.NotEqual("INVALID_REQUEST", error);
+        }
+        Assert.True((await Call("close", "creatures.geometry.close", new { leaseId = new string('7', 32) })).GetProperty("result").GetProperty("closed").GetBoolean());
+        await process.StandardInput.WriteLineAsync("{\"protocolVersion\":1,\"id\":\"stop\",\"method\":\"shutdown\",\"params\":{}}");
+        await process.StandardInput.FlushAsync();
+        using (var stop = JsonDocument.Parse((await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)))!))
+            Assert.True(stop.RootElement.GetProperty("result").GetProperty("stopping").GetBoolean());
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(0, process.ExitCode); Assert.Equal("", await stderr);
+    }
     [Theory]
     [InlineData("DROP TABLE catalog_lineage; PRAGMA user_version=14;", 3, "CATALOG_RESET_REQUIRED", "fresh catalog")]
     [InlineData("UPDATE catalog_lineage SET revision='build-identity-v2'; PRAGMA user_version=15;", 3, "CATALOG_RESET_REQUIRED", "fresh catalog")]

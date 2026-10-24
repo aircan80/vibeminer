@@ -2,7 +2,7 @@ import type {CreatureGeometryResult,EngineProgress} from '../../../../contracts/
 import type {BridgeReply,DiscoveryBridge} from '../shared/bridge';
 import {creatureGeometryMatches,geometrySelectionKey,sameGeometryManifest,validGeometryProgress,validGeometryRetirement,validGeometryToken,type GeometryBodyGrant,type GeometryBodyRetired,type GeometrySceneIdentity} from '../shared/creature-geometry';
 import {fitGeometryCamera,type GeometryCameraAction} from './geometry-camera';
-import {createGeometryScene,type GeometrySceneOwner,type GeometrySceneStatus} from './geometry-scene';
+import {createGeometryScene,geometryBackingSize,type GeometrySceneOwner,type GeometrySceneStatus} from './geometry-scene';
 import {validateGeometry,type GeometryValidationResult} from './geometry-vmg';
 import {geometryAnchorMatches,sameGeometryAnchor,geometryIntentKey,geometryOutcome,ownGeometryIntent,ownGeometryValue,type GeometryFailure,type GeometryIntent,type GeometryLongAdmission,type GeometryOperation,type GeometrySnapshot,type GeometryViewState} from './geometry-state';
 
@@ -16,6 +16,8 @@ export interface GeometrySessionDependencies{
 }
 const unavailable:GeometryFailure=Object.freeze({code:'ENGINE_UNAVAILABLE',message:'Geometry could not finish. Retained source metadata remains usable.',retryable:true});
 const failure=(code:string,message:string,retryable=false):GeometryFailure=>Object.freeze({code,message,retryable});
+/** Displayed canvas size × devicePixelRatio; an unlaid-out canvas keeps the original default. */
+function backingSize(canvas:HTMLCanvasElement){const r=canvas.getBoundingClientRect();return geometryBackingSize(r.width,r.height,canvas.ownerDocument.defaultView?.devicePixelRatio??1);}
 function unwrap<T>(reply:BridgeReply<T>):T{if(!reply.ok)throw reply.error;return reply.value;}
 function errorValue(error:unknown):GeometryFailure{
  if(error&&typeof error==='object'&&'code'in error&&'message'in error&&typeof error.code==='string'&&typeof error.message==='string')return failure(error.code.slice(0,64),error.message.slice(0,512),'retryable'in error&&error.retryable===true);
@@ -55,7 +57,9 @@ export class GeometrySession{
    if(v.observedToken!==undefined&&v.observedToken!==n.operationToken){v.debt=true;}
    v.observedToken=n.operationToken;
    if(v.revoked)return;
-   this.viewState(v,{phase:'outcome',canMount:false,error:failure('GEOMETRY_SOURCE_CHANGED','This geometry presentation is no longer current. Return to the selected metadata and reassess its source.',true),message:'Geometry presentation is no longer current'});
+   // The notice's reason is the cause; an engine exit is never reported as a source change.
+   const stopped=n.reason==='engineUnavailable'||n.reason==='shutdown';
+   this.viewState(v,{phase:'outcome',canMount:false,error:stopped?failure(n.reason==='shutdown'?'ENGINE_STOPPING':'ENGINE_EXITED',n.reason==='shutdown'?'VibeMiner is closing. Geometry was not prepared.':'The local engine stopped. Restart VibeMiner to reconnect.',false):failure('GEOMETRY_SOURCE_CHANGED','This geometry presentation is no longer current. Return to the selected metadata and reassess its source.',true),message:stopped?'The local engine stopped':'Geometry presentation is no longer current'});
    this.remember(v.intent,{kind:'failed',error:this.state.view?.error??null});void this.retire(v);
   });}
  private detachIfIdle(){if(this.listeners.size||this.active||this.operation&&['pending','stopping'].includes(this.operation.snapshot.status))return;this.offProgress?.();this.offProgress=null;this.offRetirement?.();this.offRetirement=null;}
@@ -191,7 +195,7 @@ export class GeometrySession{
   if(!this.current(v)||!v.validated||!v.ack||!v.identity)return;
   v.inSceneCall=true;
   try{
-   const created=this.createScene(canvas,{viewId:v.identity.viewId,viewGeneration:v.generation,isCurrent:()=>this.current(v),confirmRetirement:(identity,reply)=>{if(v.confirmed||reply!==v.ack||!v.identity||!this.sameIdentity(v.identity,identity)||!this.current(v))return false;v.confirmed=true;return true;},onStatus:status=>{v.sceneStatus=status;if(!v.inSceneCall)this.sceneStatus(v,status);}});
+   const created=this.createScene(canvas,{size:backingSize(canvas),viewId:v.identity.viewId,viewGeneration:v.generation,isCurrent:()=>this.current(v),confirmRetirement:(identity,reply)=>{if(v.confirmed||reply!==v.ack||!v.identity||!this.sameIdentity(v.identity,identity)||!this.current(v))return false;v.confirmed=true;return true;},onStatus:status=>{v.sceneStatus=status;if(!v.inSceneCall)this.sceneStatus(v,status);}});
    v.owner=created.state==='available'?created.owner:created.owner??null;v.mountedCanvas=v.owner?canvas:null;
    if(created.state!=='available'){if(created.code==='cleanupFailed')v.debt=true;throw failure('GEOMETRY_SCENE_'+created.code.toUpperCase(),'Geometry could not be drawn safely.',created.code!=='cleanupFailed');}
    if(!this.current(v)||v.sceneStatus&&['contextLost','stale','renderFailed','cleanupFailed'].includes(v.sceneStatus.code)){if(v.sceneStatus?.code==='cleanupFailed')v.debt=true;throw failure('GEOMETRY_SCENE_RETIRED','The graphics owner retired during creation.',true);}
@@ -207,6 +211,8 @@ export class GeometrySession{
   if(status.code==='cleanupFailed')v.debt=true;
   this.failView(v,failure('GEOMETRY_'+status.code.toUpperCase(),status.code==='contextLost'?'The graphics context was lost. Source metadata remains available.':'The geometry presentation needs attention.',status.code!=='cleanupFailed'));void this.retire(v);
  }
+ /** Follows the displayed canvas size; only the backing store changes, never the camera. */
+ resizeCanvas(generation:number){const v=this.active;if(!v||v.generation!==generation||!this.current(v)||!v.mountedCanvas)return;v.owner?.resize?.(backingSize(v.mountedCanvas));/* Failures arrive through the scene status. */}
  move(action:GeometryCameraAction){const v=this.active;if(v&&this.current(v)&&this.state.view?.phase==='ready')v.owner?.move(action);}
  sectionPage(offset:number){const v=this.active;if(!v||!this.current(v)||!v.validated||this.state.view?.phase!=='ready'||!Number.isSafeInteger(offset)||offset<0||offset>=v.validated.manifest.sectionCount)return;this.viewState(v,{sections:ownGeometryValue(v.validated.sectionPage(offset,16)),sectionOffset:offset});}
  private retire(v:View):Promise<void>{

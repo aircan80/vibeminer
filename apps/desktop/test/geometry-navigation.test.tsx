@@ -24,3 +24,10 @@ it('refuses focus and scroll restoration into hidden cached metadata even with a
 it('focuses a deliberate same-key reentry after a mounted null route, then ignores async phase changes',()=>{
  const value=flow(),{rerender}=render(<><button>Outside</button><CreatureGeometryView flow={value} onReturn={()=>{}}/></>);rerender(<><button>Outside</button><CreatureGeometryView flow={{...value,snapshot:{...value.snapshot,view:null}}} onReturn={()=>{}}/></>);screen.getByRole('button',{name:'Outside'}).focus();const intent={...value.snapshot.view!.intent},next={...value.snapshot.view!,intent,generation:2,phase:'entering' as const,canMount:false};rerender(<><button>Outside</button><CreatureGeometryView flow={{...value,snapshot:{...value.snapshot,view:next}}} onReturn={()=>{}}/></>);expect(screen.getByRole('heading',{name:'Diagnostic source geometry'})).toHaveFocus();screen.getByRole('button',{name:'Outside'}).focus();rerender(<><button>Outside</button><CreatureGeometryView flow={{...value,snapshot:{...value.snapshot,view:{...next,phase:'ready',canMount:true}}}} onReturn={()=>{}}/></>);expect(screen.getByRole('button',{name:'Outside'})).toHaveFocus();
 });
+it('scrolls the view top into place on deliberate entry only, never on later renders (#59)',()=>{
+ const scroll=vi.fn();Element.prototype.scrollIntoView=scroll;try{
+  const value=flow(),{rerender}=render(<CreatureGeometryView flow={value} onReturn={()=>{}}/>);
+  expect(scroll).toHaveBeenCalledTimes(1);expect(scroll).toHaveBeenCalledWith({block:'start'});expect(scroll.mock.contexts[0]).toBe(document.querySelector('.creature-geometry'));
+  rerender(<CreatureGeometryView flow={{...value,snapshot:{...value.snapshot,view:{...value.snapshot.view!,message:'A later source stage'}}}} onReturn={()=>{}}/>);expect(scroll).toHaveBeenCalledTimes(1);
+ }finally{delete (Element.prototype as Partial<Element>).scrollIntoView;}
+});

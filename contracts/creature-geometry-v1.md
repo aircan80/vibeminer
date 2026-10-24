@@ -2,7 +2,7 @@
 
 Capability `creature-source-geometry-v1` turns one explicitly selected Creature display slot into a verified [VMG1 geometry artifact](geometry-vmg1-v1.md): the model's native vertex positions and the triangle edges of its main SKIN, as a line set. It is a diagnostic source-geometry view, not an appearance. Material, pose, visibility and appearance are always `notEvaluated`.
 
-**Not wired into the app.** The Host, store, lease registry, main transport, renderer scene and React view exist, but `Program.cs` does not compose a `CreatureGeometryService`, so the capability is never advertised, and no route renders `CreatureGeometryView`. Requests to an ordinary Host return `CREATURE_GEOMETRY_UNAVAILABLE`.
+The Host composes the geometry service in `Program.cs` and the Creatures area offers it as a Geometry step on resolved slot metadata ([D083](../docs/DECISIONS.md)).
 
 Prerequisites: `creatures-v1` and `creature-display-metadata-v1`. The Host advertises this capability only when Creatures, display metadata, the geometry service and the lease registry are all composed. The desktop additionally requires every geometry bridge method.
 
@@ -119,7 +119,7 @@ Flow:
 
 Body request rules: GET only; `Range` → 416; credential headers → 403; no query, fragment or aliases. Response: `application/octet-stream`, exact `Content-Length`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Access-Control-Allow-Origin: null`, `Vary: Origin`. Scheme privileges: standard, secure, `supportFetchAPI`, `corsEnabled`; no CSP bypass or service workers.
 
-Desktop presentation budget: 16 MiB of reachable app buffers and graphics reservations (8 MiB canvas surfaces + 2 MiB each for snapshot, response, received buffer and margin while fetching). It is accounting, not a Chromium or driver memory cap.
+Desktop presentation budget: 16 MiB of reachable app buffers and graphics reservations (8 MiB canvas surfaces + 2 MiB each for snapshot, response, received buffer and margin while fetching). It is accounting, not a Chromium or driver memory cap. The canvas backing store is its displayed size × devicePixelRatio at the camera's fixed 4:3, between 64×48 and 836×627 pixels, so 16 bytes per pixel (two colour buffers, depth, one compositor copy) stays within the 8 MiB canvas share. Resizing changes only the backing store; the camera fit is unchanged.
 
 ### Electron 44 provenance gotchas
 

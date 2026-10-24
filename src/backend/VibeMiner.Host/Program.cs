@@ -39,6 +39,10 @@ try
     await using var iconStore = new ItemIconsStore(catalog, objects, itemsStore, assetSessions, acquisition, resources, iconArtifacts);
     await using var itemIcons = new ItemIconsService(iconStore);
     await using var iconLeases = new ItemIconLeases(itemIcons);
+    // Diagnostic source geometry (D052/D055): same shared asset sessions and acquisition pipeline as icons.
+    await using var geometryStore = new CreatureGeometryStore(catalog, objects, creatureDisplayStore, assetSessions, acquisition, resources);
+    await using var creatureGeometry = new CreatureGeometryService(geometryStore);
+    await using var geometryLeases = new CreatureGeometryLeases(creatureGeometry);
     var retentionDriver = new BuildRetentionDriver(catalog, objects, acquisition, sourcePlans, client, resources);
     await using var storedCoverage = new StoredCoverageWorker(catalog, objects, resources);
     // Every file ROOT lists is measured after Open, in the background; Download all waits for it (D066).
@@ -55,7 +59,8 @@ try
         await retention.RestoreAsync();
         storedCoverage.Start(); rootScopes.Start(); fileCatalogs.Start();
         var host = new ProtocolHost(new DiscoveryService(source, catalog), workspace, new InventoryService(catalog),
-            new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects, settings: settings,
+            new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects,
+            creatureGeometry: creatureGeometry, geometryLeases: geometryLeases, settings: settings,
             downloadSummaries: new DownloadSummaryService(catalog),
             referenceText: new TableReferenceTextService(tableStore), follow: new TableFollowService(tableStore));
         await host.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());

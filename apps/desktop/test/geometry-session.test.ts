@@ -84,6 +84,15 @@ describe('owned geometry presentation',()=>{
  it('retains cleanupFailed returned owner/debt and blocks another selection without a false ACK',async()=>{
   const h=setup();h.expectDebt();h.scene.mockImplementation((_,options)=>{options.onStatus({code:'cleanupFailed'});return{state:'refused',code:'cleanupFailed',owner:h.owner} as never;});h.start();await until(h.session,()=>!!h.session.snapshot().view?.canMount);h.session.attachCanvas(1,document.createElement('canvas'));await until(h.session,()=>h.session.snapshot().retirement?.phase==='blocked');expect(h.bridge.geometryViewSceneDisposed).not.toHaveBeenCalled();expect(h.session.snapshot().iconsSuspended).toBe(true);h.session.enter({...h.intent,selection:{...h.intent.selection,slot:1}});await Promise.resolve();expect(h.bridge.geometryViewEnter).toHaveBeenCalledTimes(1);
  });
+ it.each([['engineUnavailable','ENGINE_EXITED','The local engine stopped. Restart VibeMiner to reconnect.'],['shutdown','ENGINE_STOPPING','VibeMiner is closing. Geometry was not prepared.'],['sourceChanged','GEOMETRY_SOURCE_CHANGED','This geometry presentation is no longer current. Return to the selected metadata and reassess its source.']] as const)('a %s notice during Prepare reports %s, not another cause (#59)',async(reason,code,message)=>{
+  const h=setup(),prepared=h.hold<BridgeReply<CreatureGeometryResult>>(ok(h.result));vi.mocked(h.bridge.creatureGeometryRead!).mockResolvedValue(ok(h.missing));vi.mocked(h.bridge.creatureGeometryPrepare!).mockReturnValue(prepared.promise);
+  h.start();await until(h.session,()=>h.session.snapshot().view?.phase==='preparing');
+  h.retirement({viewId:'a'.repeat(32),viewGeneration:1,operationToken:null,reason});
+  expect(h.session.snapshot().view?.error).toEqual({code,message,retryable:reason==='sourceChanged'});
+  prepared.resolve({ok:false,error:{code:'ENGINE_EXITED',message:'The local engine stopped. Restart VibeMiner to reconnect.',retryable:true}});
+  await until(h.session,()=>h.session.snapshot().operation?.status==='failed'&&!h.session.snapshot().retirement);
+  expect(h.session.snapshot().view?.error?.code).toBe(code);expect(h.session.snapshot().operation?.error?.code).toBe('ENGINE_EXITED');
+ });
  it('coalesces matching repeated retirement notices and ignores unrelated generations',async()=>{
   const h=setup();h.start();await mount(h);h.retirement({viewId:'a'.repeat(32),viewGeneration:2,operationToken:'b'.repeat(32),reason:'sourceChanged'});expect(h.owner.disposeView).not.toHaveBeenCalled();
   const n={viewId:'a'.repeat(32),viewGeneration:1,operationToken:'b'.repeat(32),reason:'sourceChanged' as const};h.retirement(n);h.retirement(n);await until(h.session,()=>!h.session.snapshot().retirement);expect(h.owner.disposeView).toHaveBeenCalledTimes(1);expect(h.bridge.geometryViewSceneDisposed).toHaveBeenCalledTimes(1);expect(h.bridge.geometryViewRelease).toHaveBeenCalledTimes(1);
