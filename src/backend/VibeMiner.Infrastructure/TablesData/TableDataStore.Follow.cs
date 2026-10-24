@@ -105,7 +105,7 @@ public sealed partial class TableDataStore : ITableFollowStore
     // The declared width and sign of a non-ID target column in the admitted layout. Null when the definition gives none.
     private static (Int128 Minimum, Int128 Maximum)? DeclaredRange(DbdDocument definition, string buildVersion, string layoutHash, string name, CancellationToken token)
     {
-        var block = definition.SelectBuild(buildVersion, layoutHash, token).Blocks.Single();
+        var block = definition.SelectFile(buildVersion, layoutHash, token).Blocks.Single();
         var field = block.Fields.SingleOrDefault(f => f.Column.Name == name && f.ArrayLength == 1);
         if (field?.IntegerBits is not (>= 1 and <= 64) || field.Unsigned is not { } unsigned) return null;
         var bits = field.IntegerBits.Value;

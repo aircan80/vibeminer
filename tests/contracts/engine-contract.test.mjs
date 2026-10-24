@@ -290,6 +290,16 @@ test('A narrowed table column says it keeps the low 8 or 16 of 32 stored bits an
     assert.equal(validator('TableDataColumn')({ ...column, narrowing: value }), false, JSON.stringify(value));
 });
 
+test('A table snapshot says when its definition was matched by layout only, never that the build was verified', async () => {
+  const readiness = JSON.parse(await readFile(path.join(root, 'contracts/examples/table-data-layout-only.json'), 'utf8'));
+  validate('TableDataReadiness', readiness);
+  assert.equal(readiness.snapshot.schemaMatch, 'layoutOnly');
+  const { schemaMatch, ...exact } = readiness.snapshot;
+  validate('TableDataSnapshot', exact);
+  for (const value of ['build', 'exactBuild', 'verified', null, ''])
+    assert.equal(validator('TableDataSnapshot')({ ...exact, schemaMatch: value }), false, String(value));
+});
+
 test('Reference text keeps exact keys, closed states, the actual text source and bound page shape', async () => {
   const page = JSON.parse(await readFile(path.join(root, 'contracts/examples/table-reference-text.json'), 'utf8'));
   validate('TableReferenceTextPage', page);

@@ -44,7 +44,10 @@ public sealed class TablesCatalog(DiscoveryCatalog catalog) : ITablesCatalog
         else
         {
             var selection = definition.Document.SelectBuild(context.Build.Version, token: token);
-            var layouts = selection.Blocks.SelectMany(block => block.LayoutHashes.Select(hash => (Hash: hash, Block: block)))
+            var listed = selection.Blocks.Count > 0;
+            // An unlisted build previews the layouts a file could open by on its version line (D080).
+            var layouts = (listed ? selection.Blocks.SelectMany(block => block.LayoutHashes.Select(hash => (Hash: hash, Block: block)))
+                    : definition.Document.LayoutCandidates(context.Build.Version, token).Select(value => (Hash: value.LayoutHash, value.Block)))
                 .GroupBy(value => value.Hash, StringComparer.Ordinal).OrderBy(group => group.Key, StringComparer.Ordinal).ToArray();
             if (layouts.Length > 16) throw new DiscoveryException("DEFINITION_LIMIT", "The exact build has too many layout candidates for a bounded definition preview.");
             var conflicting = false;
@@ -59,8 +62,10 @@ public sealed class TablesCatalog(DiscoveryCatalog catalog) : ITablesCatalog
             }
             info = new(definition.Sha256, definition.SourceUrl,
                 Array.AsReadOnly(definition.Document.Columns.Select(Column).ToArray()), candidates.AsReadOnly());
-            problem = selection.Blocks.Count == 0
-                ? new("SCHEMA_BUILD_NOT_LISTED", "The pinned definition does not list this exact build; no nearby or latest definition was substituted.")
+            problem = !listed && layouts.Length == 0
+                ? new("SCHEMA_BUILD_NOT_LISTED", "The pinned definition does not list this exact build or any layout on its version line; no nearby or latest definition was substituted.")
+                : !listed
+                ? new("SCHEMA_BUILD_NOT_LISTED", "The pinned definition does not list this exact build. Data can open only if the file's layout hash matches one of its candidate layouts; that match is by layout, and the build stays unverified.")
                 : selection.Status == "ambiguous" || conflicting || layouts.Length != 1 || selection.Blocks.Any(block => block.LayoutHashes.Count == 0)
                     ? new("SCHEMA_LAYOUT_UNVERIFIED", "The build has multiple or unspecified layout interpretations. Actual source headers are required before selecting a readable schema.")
                     : null;

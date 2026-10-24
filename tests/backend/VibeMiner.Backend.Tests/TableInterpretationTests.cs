@@ -49,4 +49,20 @@ public sealed class TableInterpretationTests
         Assert.Equal("DB2_SCHEMA_AMBIGUOUS", Assert.Throws<DiscoveryException>(() => TableDataStore.ValidateInterpretation(artifact, definition, "1.2.3.5")).Code);
         Assert.Equal("DB2_SCHEMA_MISSING", Assert.Throws<DiscoveryException>(() => TableDataStore.ValidateInterpretation(artifact with { Header = artifact.Header with { LayoutHash = "11223344" } }, definition, "1.2.3.4")).Code);
     }
+    [Fact]
+    public void An_unlisted_build_keys_retained_rows_by_its_layout_choice()
+    {
+        // D080: 1.2.3.10 is nearest the u8 block, 1.2.3.90 the u16 block; neither build is listed.
+        var definition = DbdDefinitionReader.Parse(Encoding.UTF8.GetBytes("COLUMNS\nint ID\nint Value\n\nLAYOUT 01020304\nBUILD 1.2.3.4\n$noninline,id$ID<u32>\nValue<u8>\n\nLAYOUT 01020304\nBUILD 1.2.3.100\n$noninline,id$ID<u32>\nValue<u16>\n"));
+        var near = TableRowArtifacts.SchemaSelectionKey(definition, "1.2.3.10");
+        Assert.Equal(near, TableRowArtifacts.SchemaSelectionKey(definition, "1.2.3.11"));
+        Assert.NotEqual(near, TableRowArtifacts.SchemaSelectionKey(definition, "1.2.3.90"));
+        Assert.NotEqual(near, TableRowArtifacts.SchemaSelectionKey(definition, "1.2.3.4"));
+        var binding = new TableArtifactBinding(new('a', 64), new('b', 64), new('c', 64), "provider", "enUS", "reader", near);
+        var artifact = new TableRowsArtifact(TableRowArtifacts.ContentKey(binding), new('d', 64), 1000, binding,
+            new(5, "11223344", "01020304", 1, 0, 4, [new("ID", "integer", true), new("Value", "integer", false)]), new(1, 1, 0, 0, 0, 0, "complete", 100));
+        TableDataStore.ValidateInterpretation(artifact, definition, "1.2.3.10");
+        Assert.Equal("DB2_SCHEMA_MISSING", Assert.Throws<DiscoveryException>(() => TableDataStore.ValidateInterpretation(artifact with { Header = artifact.Header with { LayoutHash = "11223344" } }, definition, "1.2.3.10")).Code);
+        Assert.True(TableDataStore.OpensBuild(definition, "1.2.3.10", default)); Assert.False(TableDataStore.OpensBuild(definition, "2.0.0.1", default));
+    }
 }

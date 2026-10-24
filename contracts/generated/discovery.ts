@@ -1126,6 +1126,10 @@ export interface TableDataSnapshot {
   coverage: TableDataCoverage;
   rowCount: string;
   textIssueCount?: string;
+  /**
+   * layoutOnly: no definition block lists this build; the file's layout hash chose the block (D080). Omitted: a block lists the exact build and layout.
+   */
+  schemaMatch?: 'layoutOnly';
 }
 export interface ContentReceipt1 {
   contentKey: string;

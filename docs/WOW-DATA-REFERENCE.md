@@ -136,7 +136,8 @@ Interpretation rules for the DBD reader:
 
 - `?` marks an unverified name, not nullable data. `$noninline$` means outside the inline record. `$id$` is the identity. `$relation$` is a storage annotation, separate from a COLUMNS foreign-target declaration, and is not always noninline.
 - A declared `int32` says nothing about physical storage; pallet, bitpacked and common storage are decoder facts.
-- Builds are compared as four numeric components. No match means "no definition for this build". Several matching layout blocks are an ambiguity, never "take the first". No nearest-build or latest-build fallback.
+- Builds are compared as four numeric components. Several matching layout blocks are an ambiguity, never "take the first". No latest-build fallback.
+- A listed build uses exact build and layout. A build no block lists can still open by the file's layout hash, but only from blocks on its version line (same major version); several such blocks go to the one with a listed build number nearest the file's, and a tie between different field sets is ambiguous. The field checks still run, and the result says "matched by layout, build not listed" (D080).
 - Current reader support is WDC5 only, header flags 0/4/5/6/7. Limits: 256 MiB decoded source, 1,000,000 physical + copy rows, 256 fields, 512 flattened columns, 128 sections.
 
 Table relationship rules (Tables explorer):

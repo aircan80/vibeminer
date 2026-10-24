@@ -4482,6 +4482,13 @@
         "textIssueCount": {
           "type": "string",
           "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "schemaMatch": {
+          "description": "layoutOnly: no definition block lists this build; the file's layout hash chose the block (D080). Omitted: a block lists the exact build and layout.",
+          "type": "string",
+          "enum": [
+            "layoutOnly"
+          ]
         }
       },
       "required": [

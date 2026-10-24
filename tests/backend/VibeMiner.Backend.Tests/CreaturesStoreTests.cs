@@ -114,6 +114,14 @@ public sealed class CreaturesStoreTests
         await h.RefreshOpening(); Assert.Equal("CREATURES_STALE", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Catalog.ReauthorizeCreaturesAsync(h.Opening, old, default))).Code);
     }
     [Fact]
+    public async Task AnUnlistedBuildFailsBeforeAnyCreatureDownload()
+    {
+        // D080 lets Tables open an unlisted build by layout; Creatures still needs a listed build and must not download first.
+        await using var h = await Harness.Create(missing: true, version: "12.1.5.70575");
+        Assert.Equal("SCHEMA_BUILD_NOT_LISTED", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Context, Progress, default))).Code);
+        Assert.Empty(h.ReadTables); Assert.Empty(h.PreparedTables);
+    }
+    [Fact]
     public async Task PreparationNeverRetargetsDiscoveryDuringSharedPrerequisite()
     {
         await using var h = await Harness.Create(missing: true);
@@ -289,9 +297,10 @@ public sealed class CreaturesStoreTests
         internal CreaturesStore Store = null!; internal TableDataService Tables = null!; internal readonly AcquisitionResources Resources = new(maximumCpu: 1, maximumBackgroundCpu: 1);
         internal readonly List<string> ReadTables = [], PreparedTables = []; internal bool Missing; internal Func<CancellationToken, Task>? BeforePrepare; internal Func<CancellationToken, Task>? BeforeRead;
         internal TableDataRequest Table => new("wow", Context.BuildIdentity, "us", CreaturesPolicy.Table, "enUS");
-        internal static async Task<Harness> Create(bool missing = false)
+        internal string Version = "12.1.5.70448";
+        internal static async Task<Harness> Create(bool missing = false, string version = "12.1.5.70448")
         {
-            var h = new Harness(); h.Catalog = await DiscoveryCatalog.OpenAsync(h.Projection.DirectoryPath); await h.RefreshOpening();
+            var h = new Harness { Version = version }; h.Catalog = await DiscoveryCatalog.OpenAsync(h.Projection.DirectoryPath); await h.RefreshOpening();
             var configs = new List<ConfigurationReceipt>(); foreach (var (role, key, bytes) in new[] { ("buildConfig", h.Fixture.BuildKey, h.Fixture.BuildConfig), ("cdnConfig", h.Fixture.CdnKey, h.Fixture.CdnConfig) })
             {
                 var sha = Convert.ToHexStringLower(SHA256.HashData(bytes)); await h.Projection.Objects.PublishAsync(bytes, sha, default);
@@ -305,7 +314,7 @@ public sealed class CreaturesStoreTests
         }
         internal async Task RefreshOpening()
         {
-            var versions = Fixtures.Versions($"us|{Fixture.BuildKey}|{Fixture.CdnKey}||70448|12.1.5.70448||creatures");
+            var versions = Fixtures.Versions($"us|{Fixture.BuildKey}|{Fixture.CdnKey}||{Version.Split('.')[3]}|{Version}||creatures");
             var cdns = Encoding.UTF8.GetString(Fixture.Discovery.Documents.Single(d => d.Role == "cdns").Bytes);
             var discovery = await Fixtures.Attempt(versions, cdns); var generation = await Catalog.BeginRefreshAsync("wow", default);
             var page = await Catalog.CommitAsync("wow", generation, discovery, CreaturesProjectionTests.Fixture.Time, default); Context = new("wow", page.Builds.Single().Id, "us", "enUS");

@@ -127,8 +127,8 @@ public sealed partial class TableDataStore
         var entry = provider.Entries.SingleOrDefault(e => e.TableId == rule.TextTableId);
         if (entry?.Db2FileDataId is null || !provider.Definitions.TryGetValue(rule.TextTableId, out var definition))
             return Fail(S.NoDefinition, "DEFINITION_NOT_BUNDLED", $"The {rule.TextTable} definition is not bundled.");
-        if (definition.Document.SelectBuild(context.Build.Version, token: token).Blocks.Count == 0)
-            return Fail(S.Unsupported, "SCHEMA_BUILD_NOT_LISTED", $"The pinned {rule.TextTable} definition does not list this exact build.");
+        if (!OpensBuild(definition.Document, context.Build.Version, token))
+            return Fail(S.Unsupported, "SCHEMA_BUILD_NOT_LISTED", $"The pinned {rule.TextTable} definition does not list this exact build or any layout on its version line.");
         var admission = await catalog.ReadTableAdmissionAsync(context, rule.TextTableId, locale, token);
         if (admission is null) { target.State = S.NotPrepared; return target; }
         try

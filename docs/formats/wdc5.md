@@ -193,7 +193,8 @@ Definitions come from pinned WoWDBDefs (CC BY-SA 4.0) and are read by our own bo
 - Version blocks: `LAYOUT` hashes, `BUILD` selectors (exact four-part builds or inclusive ranges, compared numerically), optional `COMMENT`, then fields.
 - Field: optional annotations `$id$`, `$noninline$`, `$relation$` (comma-separated, no repeats), name, optional `<N>` or `<uN>` with N in 8/16/32/64, optional `[N]` array length.
 - A DBD integer width is a candidate interpretation. It says nothing about physical storage width; pallet, common and bitpacked storage are separate facts.
-- Selection needs the exact build **and** the actual layout hash: exactly one matching block, else `DB2_SCHEMA_MISSING` or `DB2_SCHEMA_AMBIGUOUS`. No nearest-build or latest fallback.
+- Selection needs the exact build **and** the actual layout hash: exactly one matching block, else `DB2_SCHEMA_MISSING` or `DB2_SCHEMA_AMBIGUOUS`. No latest fallback.
+- Layout-only selection (D080): when no block lists the build at all, the actual layout hash selects among blocks that list a build with the same major version. Several such blocks: the one whose listed build number is nearest the file's wins; equally near blocks with different fields are `DB2_SCHEMA_AMBIGUOUS`. A listed build never falls back to another block's layout. Field count, widths, arrays and storage are still checked against the header, so a changed layout or field set fails as usual. `DbdDocument.SelectFile` is the one selector; `LayoutCandidates` lists the layouts an unlisted build can open by.
 - A `<Table::Column>` reference names a column, not necessarily the target's ID. `Item.ClassID` targets `ItemClass.ClassID`, not `ItemClass.ID`.
 - Limits: 1 MiB, 16,384 lines of 16,384 characters, 512 columns, 4,096 blocks, 256 fields per block, 100,000 selectors, arrays up to 4,096, comments up to 2,000 characters.
 

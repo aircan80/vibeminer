@@ -38,6 +38,7 @@ public sealed class TableAdmissionRevisionTests
         var rebuilt = await h.Store.PrepareAsync(h.Request, stage => { progress.Add(stage); return Task.CompletedTask; }, default);
         Assert.Contains("Updating retained table interpretation", progress);
         Assert.Equal(TableDataStore.ProjectionDecoderRevision, rebuilt.DecoderRevision);
+        Assert.Null(rebuilt.SchemaMatch); Assert.DoesNotContain("schemaMatch", JsonSerializer.Serialize(rebuilt, Json));
         Assert.Equal(oldRequests, h.Handler.Requests); Assert.NotEqual(h.OldArtifact.ContentKey, rebuilt.ArtifactId);
         Assert.Equal(h.Source.SourceUrl, rebuilt.Source.SourceUrl); Assert.Equal(h.Source.RetrievedAt, rebuilt.Source.RetrievedAt);
         Assert.Equal(h.Source.Projection!.IdentitySha256, rebuilt.Source.Projection!.IdentitySha256);
@@ -112,6 +113,23 @@ public sealed class TableAdmissionRevisionTests
         await Assert.ThrowsAsync<DiscoveryException>(() => h.Catalog.ReadTableAdmissionAsync(h.Context, "50238ec2", "enUS", default));
     }
 
+    [Fact]
+    public async Task A_build_the_definition_does_not_list_admits_rows_by_layout_and_says_so()
+    {
+        // D080: 1.60.1.70500 is in no BUILD line; the file's 9A2A4834 layout picks the 1.60.1 block.
+        const string unlisted = "1.60.1.70500";
+        var provider = await TablesCatalog.Provider.Value;
+        Assert.False(provider.Definitions["50238ec2"].Document.ListsBuild(unlisted));
+        await using var h = await Harness.Create(V7, unlisted); h.Handler.Offline = true;
+        var snapshot = await h.Store.PrepareAsync(h.Request, _ => Task.CompletedTask, default);
+        Assert.Equal(TableSchemaMatch.LayoutOnly, snapshot.SchemaMatch); Assert.Equal("9A2A4834", snapshot.LayoutHash);
+        Assert.Equal(TableDataStore.ProjectionDecoderRevision, snapshot.DecoderRevision);
+        Assert.Contains("\"schemaMatch\":\"layoutOnly\"", JsonSerializer.Serialize(snapshot, Json));
+        Assert.Equal(TableSchemaMatch.LayoutOnly, (await h.Store.ReadAsync(h.Request, default)).Snapshot!.SchemaMatch);
+        var rows = await h.Store.ReadRowsAsync(new("wow", h.Request.BuildIdentity, "us", "50238ec2", "enUS", snapshot.ArtifactId), default);
+        Assert.Equal("1", Assert.Single(rows.Rows).Id);
+    }
+
     private const string Now = "2026-10-19T00:00:00Z", Version = "1.60.1.70450";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static string N(long n) => n.ToString(CultureInfo.InvariantCulture);
@@ -134,18 +152,18 @@ public sealed class TableAdmissionRevisionTests
         internal ContentReceipt Source { get; private set; } = null!;
         internal SelectedFileAssociation Association { get; private set; } = null!;
         internal TableRowsArtifact OldArtifact { get; private set; } = null!;
-        internal static async Task<Harness> Create(string revision)
+        internal static async Task<Harness> Create(string revision, string version = Version)
         {
             var h = new Harness(); var baseFixture = InventoryFixture.Create();
             var provider = await TablesCatalog.Provider.Value; var definition = provider.Definitions["50238ec2"];
-            var fields = definition.Document.SelectBuild(Version, "9A2A4834").Blocks.Single().Fields.Where(f => !f.NonInline).ToArray();
+            var fields = definition.Document.SelectFile(version, "9A2A4834").Blocks.Single().Fields.Where(f => !f.NonInline).ToArray();
             var payload = Table(fields.Length); var root = Root(payload.ContentKey); var en = Encoding([payload, root]);
             var config = System.Text.Encoding.UTF8.GetBytes($"root = {root.ContentKey}\nencoding = {en.ContentKey} {en.EncodingKey}\nencoding-size = {en.Decoded.Length} {en.Encoded.Length}\n");
             var configKey = Md5(config); var responses = new Dictionary<string, byte[]>(StringComparer.Ordinal)
             { [InventoryFixture.Url("config", configKey)] = config, [InventoryFixture.Url("config", baseFixture.CdnKey)] = baseFixture.CdnConfig };
             foreach (var obj in new[] { payload, root, en }) responses.Add(InventoryFixture.Url("data", obj.EncodingKey), obj.Encoded);
             var prior = baseFixture.Discovery.Documents.Single(d => d.Role == "versions");
-            var bytes = System.Text.Encoding.UTF8.GetBytes(System.Text.Encoding.UTF8.GetString(prior.Bytes).Replace(baseFixture.BuildKey, configKey, StringComparison.Ordinal).Replace("1.2.3.12345", Version, StringComparison.Ordinal));
+            var bytes = System.Text.Encoding.UTF8.GetBytes(System.Text.Encoding.UTF8.GetString(prior.Bytes).Replace(baseFixture.BuildKey, configKey, StringComparison.Ordinal).Replace("1.2.3.12345", version, StringComparison.Ordinal));
             var row = MetadataParser.Parse(bytes).Rows.Single(); var identity = BuildIdentity.Create("wow", row.Fields);
             var discovery = baseFixture.Discovery with { Documents = [prior with { Bytes = bytes, Sha256 = Sha(bytes) }, baseFixture.Discovery.Documents.Single(d => d.Role == "cdns")],
                 Observations = [baseFixture.Discovery.Observations.Single() with { Identity = identity, OriginalFields = row.Fields }] };
@@ -160,9 +178,9 @@ public sealed class TableAdmissionRevisionTests
             {
                 h.Source = selected.Receipt; h.Association = selected.Association;
                 var binding = new TableArtifactBinding(h.Source.Sha256, h.Source.Projection!.IdentitySha256, definition.Sha256,
-                    provider.Info.Revision, "enUS", revision, TableRowArtifacts.SchemaSelectionKey(definition.Document, Version));
+                    provider.Info.Revision, "enUS", revision, TableRowArtifacts.SchemaSelectionKey(definition.Document, version));
                 await using var rows = new TableRowArtifacts(h.objects);
-                h.OldArtifact = await rows.BuildAsync(selected.Decoded, definition.Document, Version, binding, _ => Task.CompletedTask, default,
+                h.OldArtifact = await rows.BuildAsync(selected.Decoded, definition.Document, version, binding, _ => Task.CompletedTask, default,
                     new Wdc5Limits(AllowPartialEncryptedSections: true));
                 await h.Catalog.RecordTableArtifactAsync(h.OldArtifact, default);
             }

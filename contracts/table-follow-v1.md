@@ -10,7 +10,7 @@ The engine checks, in order:
 
 - The source artifact is the current admission for this exact build, source and locale (`TABLE_NOT_PREPARED`, `TABLE_ARTIFACT_STALE`).
 - The source column is an integer column whose pinned definition declares a reference (`TABLE_FOLLOW_NOT_DECLARED`). Columns with a raw physical interpretation declare none.
-- The target table is the provider entry with exactly the declared table name (`TABLE_FOLLOW_TARGET_MISMATCH`), with a bundled definition that lists the build (`DEFINITION_NOT_BUNDLED`, `SCHEMA_BUILD_NOT_LISTED`).
+- The target table is the provider entry with exactly the declared table name (`TABLE_FOLLOW_TARGET_MISMATCH`), with a bundled definition that lists the build or has layouts on its version line (`DEFINITION_NOT_BUNDLED`, `SCHEMA_BUILD_NOT_LISTED`). A target admitted by layout only (D080) can be followed.
 - The target artifact is the target's current admission (`TABLE_NOT_PREPARED`, `TABLE_ARTIFACT_STALE`).
 
 The read is local. It never downloads or prepares anything; the desktop prepares the target through the ordinary `tables.prepare` flow first.

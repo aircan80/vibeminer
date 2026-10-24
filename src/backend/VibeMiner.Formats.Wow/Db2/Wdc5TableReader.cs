@@ -86,8 +86,11 @@ public static partial class Wdc5TableReader
         if(charged>limits.MaxIndexBytes)throw Fail("LIMIT","DB2 ID/copy/auxiliary work exceeds its index-memory reservation.");
         if(U(180)>recordSize)throw Fail("INVALID","The packed-data byte offset exceeds its physical record.");
         var storage=metadataOnlyEmpty?[]:ReadStorage(metadata,sectionCount,fieldCount,recordSize,U(180),limits,token);
-        var selection=definition.SelectBuild(buildVersion,U(156).ToString("X8",CultureInfo.InvariantCulture),token);
-        if(selection.Blocks.Count!=1)throw Fail(selection.Blocks.Count==0?"SCHEMA_MISSING":"SCHEMA_AMBIGUOUS","The actual layout and exact build do not select one definition block.");
+        // An unlisted build may select by layout alone (D080); BindFields still checks every field against the file.
+        var selection=definition.SelectFile(buildVersion,U(156).ToString("X8",CultureInfo.InvariantCulture),token);
+        if(selection.Blocks.Count!=1)throw Fail(selection.Blocks.Count==0?"SCHEMA_MISSING":"SCHEMA_AMBIGUOUS",selection.Match=="layout"
+            ?"The build is not listed and the actual layout does not select one definition block on its version line."
+            :"The actual layout and exact build do not select one definition block.");
         var fields=BindFields(selection.Blocks[0],storage,flags,idIndex,recordSize,limits,token,metadataOnlyEmpty?fieldCount:null);
         ApplyRawIntegerRules(fields,storage,U(152),U(156),limits.DefinitionSha256,rawRules,token);
         ValidateRelationshipSchema(fields,U(184),records==0&&copies==0);

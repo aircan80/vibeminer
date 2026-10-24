@@ -40,9 +40,94 @@ public sealed record DbdBuildRange(DbdBuildVersion First, DbdBuildVersion Last)
 }
 public sealed record DbdBlock(IReadOnlyList<string> LayoutHashes, IReadOnlyList<DbdBuildRange> Builds,
     IReadOnlyList<DbdField> Fields, string? Comment);
-public sealed record DbdSelection(string Status, IReadOnlyList<DbdBlock> Blocks);
+/// <summary>Match is "build" when a block lists the exact build, or "layout" when no block lists it and
+/// the file's layout hash chose the block (D080). A layout match never verifies the build.</summary>
+public sealed record DbdSelection(string Status, IReadOnlyList<DbdBlock> Blocks, string Match = "build");
 public sealed record DbdDocument(IReadOnlyList<DbdColumn> Columns, IReadOnlyList<DbdBlock> Blocks)
 {
+    public bool ListsBuild(string buildVersion, CancellationToken token = default) =>
+        SelectBuild(buildVersion, token: token).Blocks.Count > 0;
+
+    // Selection for an actual file (D080). A listed build keeps exact build+layout selection, so a listed build
+    // whose file has another layout still fails. Only an unlisted build falls back to the file's layout hash,
+    // and only to blocks on the same version line (major version). If several such blocks carry the layout,
+    // the one with a listed build number nearest the file's build wins; a tie between different field sets
+    // is ambiguous. Field count, widths and arrays are still checked against the file by the reader.
+    public DbdSelection SelectFile(string buildVersion, string actualLayoutHash, CancellationToken token = default)
+    {
+        ArgumentNullException.ThrowIfNull(actualLayoutHash);
+        if (ListsBuild(buildVersion, token)) return SelectBuild(buildVersion, actualLayoutHash, token);
+        if (!DbdDefinitionReader.IsLayout(actualLayoutHash)) throw DbdDefinitionReader.Error("DBD_INVALID", "A complete eight-hex layout is required.");
+        return SelectByLayout(DbdBuildVersion.Parse(buildVersion), actualLayoutHash, token);
+    }
+
+    private DbdSelection SelectByLayout(DbdBuildVersion build, string actualLayoutHash, CancellationToken token)
+    {
+        var ranked = new List<(DbdBlock Block, ulong Distance)>();
+        foreach (var block in Blocks)
+        {
+            token.ThrowIfCancellationRequested();
+            if (block.LayoutHashes.Contains(actualLayoutHash, StringComparer.OrdinalIgnoreCase) && LineDistance(block, build) is { } distance)
+                ranked.Add((block, distance));
+        }
+        return Choose(ranked);
+    }
+
+    /// <summary>For a build no block lists: every layout on its version line that selects exactly one block,
+    /// ordered by layout hash. Empty for a listed build. These are the only layouts a file can open by.</summary>
+    public IReadOnlyList<(string LayoutHash, DbdBlock Block)> LayoutCandidates(string buildVersion, CancellationToken token = default)
+    {
+        if (ListsBuild(buildVersion, token)) return [];
+        var build = DbdBuildVersion.Parse(buildVersion);
+        // One pass builds a layout-to-blocks index, so the work stays linear in the definition size,
+        // including untrusted fetched definitions (#55).
+        var index = new Dictionary<string, List<(DbdBlock Block, ulong Distance)>>(StringComparer.Ordinal);
+        foreach (var block in Blocks)
+        {
+            token.ThrowIfCancellationRequested();
+            if (LineDistance(block, build) is not { } distance) continue;
+            foreach (var layout in block.LayoutHashes)
+            {
+                if (!index.TryGetValue(layout, out var ranked)) index[layout] = ranked = [];
+                ranked.Add((block, distance));
+            }
+        }
+        var result = new List<(string, DbdBlock)>();
+        foreach (var (layout, ranked) in index.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            token.ThrowIfCancellationRequested();
+            var selected = Choose(ranked);
+            if (selected.Blocks.Count == 1) result.Add((layout, selected.Blocks[0]));
+        }
+        return result.AsReadOnly();
+    }
+
+    // The nearest block wins; equally near blocks must have identical fields, else the layout is ambiguous.
+    private static DbdSelection Choose(List<(DbdBlock Block, ulong Distance)> ranked)
+    {
+        if (ranked.Count == 0) return new("missing", Array.Empty<DbdBlock>(), "layout");
+        var nearest = ranked.Min(value => value.Distance);
+        var tied = ranked.Where(value => value.Distance == nearest).Select(value => value.Block).ToArray();
+        return tied.All(block => block.Fields.SequenceEqual(tied[0].Fields))
+            ? new("candidate", Array.AsReadOnly(new[] { tied[0] }), "layout")
+            : new("ambiguous", Array.AsReadOnly(tied), "layout");
+    }
+
+    // Smallest build-number gap between the file's build and a listed build of this block with the same major
+    // version; null when the block lists nothing on that line.
+    private static ulong? LineDistance(DbdBlock block, DbdBuildVersion build)
+    {
+        ulong? best = null;
+        foreach (var range in block.Builds)
+            foreach (var bound in new[] { range.First, range.Last })
+                if (bound.Major == build.Major)
+                {
+                    var gap = bound.Build > build.Build ? (ulong)bound.Build - build.Build : (ulong)build.Build - bound.Build;
+                    if (best is null || gap < best) best = gap;
+                }
+        return best;
+    }
+
     // A build-only result is candidate metadata. An actual layout still requires independently
     // acquired/header-verified source bytes; this selector makes no readability claim.
     public DbdSelection SelectBuild(string buildVersion, string? actualLayoutHash = null, CancellationToken token = default)

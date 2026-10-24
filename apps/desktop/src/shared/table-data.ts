@@ -67,6 +67,8 @@ function verifiedRawAdmission(s:TableDataSnapshot,fieldOrdinal:number,column:Tab
 export function tableDataMatches(value: TableDataSnapshot, p: TableDataParams, definition?: TableDefinitionSnapshot): boolean {
  if (value.productId !== p.productId || value.buildIdentity !== p.buildIdentity || value.sourceRegion !== p.sourceRegion || value.tableId !== p.tableId || value.researchLocale !== p.researchLocale || value.association.researchLocale !== p.researchLocale) return false;
  if (!validScopedAdmissionRevision(value) || !validTableSourceProof(value.source)) return false;
+ // D080: present only when the file's layout chose the block because no block lists the build.
+ if (value.schemaMatch !== undefined && value.schemaMatch !== 'layoutOnly') return false;
  const textIssueCount=value.textIssueCount??'0';
  if (value.textIssueCount===null || !decimal.test(textIssueCount) || !decimal.test(value.rowCount) || BigInt(textIssueCount)>BigInt(value.rowCount)*BigInt(value.columns.filter(column=>column.family==='string'&&!column.isId).length)) return false;
  const c = value.coverage;
@@ -78,6 +80,8 @@ export function tableDataMatches(value: TableDataSnapshot, p: TableDataParams, d
  if (!value.columns.every(validRawInterpretation) || !value.columns.every(validNarrowing) || new Set(value.columns.map(x => x.name)).size !== value.columns.length) return false;
  if (definition) {
   const candidate = definition.definition?.candidates.find(x => x.layoutHash === value.layoutHash);
+  // A layout-only snapshot needs a definition that doesn't list the build, and an exact one a definition that does.
+  if ((value.schemaMatch === 'layoutOnly') !== (definition.problem?.code === 'SCHEMA_BUILD_NOT_LISTED')) return false;
   if (!candidate || value.definitionSha256 !== definition.definition?.sha256 || value.providerRevision !== definition.provider.revision || value.association.fileDataId !== definition.entry.db2FileDataId || candidate.fields.reduce((sum,f)=>sum+f.arrayLength,0) !== value.columns.length) return false;
   if (!candidate.fields.flatMap((f,fieldOrdinal) => Array.from({length:f.arrayLength},(_,i)=>({...f,fieldOrdinal,name:f.arrayLength>1?`${f.name}[${i}]`:f.name}))).every((f,i) => {const col=value.columns[i]; return f.name===col.name && (f.family==='int'?'integer':f.family==='float'?'float':'string')===col.family && f.isId===col.isId && (col.interpretation ? f.family==='int' && (!f.verifiedName || f.arrayLength===1&&!f.relationStorage&&!f.nonInline&&verifiedRawAdmission(value,f.fieldOrdinal,col)) && !f.isId && col.interpretation.candidateBits===(f.integerBits??32) && col.interpretation.candidateUnsigned===(f.unsigned??false) && col.reference===null : f.reference?.table===col.reference?.table && f.reference?.column===col.reference?.column) && (!col.narrowing || f.family==='int' && f.verifiedName && !f.isId && !f.relationStorage && (f.integerBits??32)===col.narrowing.usedBits);})) return false;
  }

@@ -38,6 +38,12 @@ internal sealed class TableRowArtifacts(VerifiedObjectStore objects) : IAsyncDis
     internal static string SchemaSelectionKey(DbdDocument definition, string buildVersion, CancellationToken token = default)
     {
         var selected = definition.SelectBuild(buildVersion, token: token);
+        if (selected.Blocks.Count == 0)
+        {
+            // An unlisted build opens by layout (D080): the key is every layout-to-block choice for this build.
+            var choices = definition.LayoutCandidates(buildVersion, token).Select(value => new { layout = value.LayoutHash, fields = value.Block.Fields }).ToArray();
+            return Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { match = "layout", choices }, Json)));
+        }
         // Build selectors establish eligibility; only the selected interpretations form the reusable key.
         var interpretations = selected.Blocks.Select(block => JsonSerializer.Serialize(new
             { layouts = block.LayoutHashes.OrderBy(hash => hash, StringComparer.Ordinal).ToArray(), fields = block.Fields }, Json))

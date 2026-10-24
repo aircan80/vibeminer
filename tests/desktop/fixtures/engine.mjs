@@ -287,6 +287,9 @@ async function dispatch(request) {
         Object.assign(value,{productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion});
         if (existsSync(path.join(directory,'table-partial'))) {value.coverage={scope:'unencryptedSections',declaredRecords:'70',declaredCopyRecords:'2',physicalRows:'60',copyRows:'0',excludedPhysicalRecords:'10',excludedCopyRecords:'2',excludedDeclaredRecords:'12',excludedKeyedSections:'1'};}
         if(existsSync(path.join(directory,'table-text-issue')))value.textIssueCount='1';
+        if(existsSync(path.join(directory,'table-layout-only')))value.schemaMatch='layoutOnly';
+        // D079 (#53): the authored ClassID came from a 32-bit pallet and keeps its low 8 bits.
+        if(existsSync(path.join(directory,'table-narrowing'))){const c=value.columns.find(c=>c.name==='ClassID');c.narrowing={storedBits:32,usedBits:8};}
         tableData.set(key,value);return reply(id,value);
       } catch { if(existsSync(path.join(directory,'hold-table-cancel'))&&!shutdown.signal.aborted){try{await waitForRelease('finish-table-cancel',shutdown.signal);}catch{}}return fail(id,'CANCELED','Authored table load stopped after cleanup.'); }
       finally {active.delete(id);}
@@ -337,6 +340,10 @@ async function dispatch(request) {
     if (value.definition && existsSync(path.join(directory, 'definition-no-candidate'))) {
       value.definition.candidates = []; value.problem = { code: 'SCHEMA_BUILD_NOT_LISTED', message: 'The exact authored build has no matching candidate; no nearby layout was substituted.' };
     }
+    // D080: the authored build is not listed, so its candidates can only match a loaded file by layout.
+    if (value.definition && existsSync(path.join(directory, 'table-layout-only'))) value.problem = { code: 'SCHEMA_BUILD_NOT_LISTED', message: 'The authored definition does not list this build. Data can open only if the file’s layout hash matches one of its candidate layouts.' };
+    // A second authored layout on the same version line, so the candidate selector appears.
+    if (value.definition?.candidates.length && existsSync(path.join(directory, 'table-layout-two'))) value.definition.candidates.push({ ...structuredClone(value.definition.candidates[0]), layoutHash: '0A0B0C0D' });
     Object.assign(value, { productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion, buildVersion: openedSnapshot.build.version });
     return reply(id, value);
   }

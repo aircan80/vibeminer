@@ -300,10 +300,43 @@ public sealed class TablesCatalogTests
         var unbundled = page.Entries.First(entry => entry.DefinitionState == "notBundled");
         var missing = await h.Tables.ReadDefinitionAsync(new("wow", h.Id, "us", unbundled.TableId), default);
         Assert.Null(missing.Definition); Assert.Equal("DEFINITION_NOT_BUNDLED", missing.Problem!.Code);
+        // D080: 1.2.3.12345 is not listed, so the preview offers only the layouts a 1.x file could open by.
         var candidate = await h.Tables.ReadDefinitionAsync(new("wow", h.Id, "us", "50238ec2"), default);
-        Assert.NotNull(candidate.Definition); Assert.Empty(candidate.Definition.Candidates);
-        Assert.Equal("SCHEMA_BUILD_NOT_LISTED", candidate.Problem!.Code);
+        Assert.NotNull(candidate.Definition); Assert.Equal("SCHEMA_BUILD_NOT_LISTED", candidate.Problem!.Code);
+        Assert.Contains("matches one of its candidate layouts", candidate.Problem.Message);
+        var document = (await TablesCatalog.Provider.Value).Definitions["50238ec2"].Document;
+        Assert.Equal(document.LayoutCandidates("1.2.3.12345").Select(value => value.LayoutHash), candidate.Definition.Candidates.Select(value => value.LayoutHash));
+        Assert.NotEmpty(candidate.Definition.Candidates);
         await Assert.ThrowsAsync<DiscoveryException>(() => h.Tables.ReadDefinitionAsync(new("wow", h.Id, "us", "deadbeef"), default));
+    }
+
+    [Fact]
+    public async Task A_build_on_a_version_line_no_block_lists_offers_no_layout_candidates()
+    {
+        await using var h = await Harness.Create("99.0.0.1");
+        var definition = await h.Tables.ReadDefinitionAsync(new("wow", h.Id, "us", "50238ec2"), default);
+        Assert.Empty(definition.Definition!.Candidates); Assert.Equal("SCHEMA_BUILD_NOT_LISTED", definition.Problem!.Code);
+        Assert.Contains("any layout on its version line", definition.Problem.Message);
+    }
+
+    [Theory]
+    [InlineData("12.1.5.70575")]
+    [InlineData("5.5.4.70579")]
+    public async Task Newer_unlisted_retail_and_Classic_builds_preview_layout_only_candidates_for_every_bundled_table(string version)
+    {
+        await using var h = await Harness.Create(version);
+        var provider = await TablesCatalog.Provider.Value;
+        foreach (var (tableId, bundled) in provider.Definitions)
+        {
+            var definition = await h.Tables.ReadDefinitionAsync(new("wow", h.Id, "us", tableId), default);
+            Assert.Equal("SCHEMA_BUILD_NOT_LISTED", definition.Problem!.Code);
+            Assert.Equal(bundled.Document.LayoutCandidates(version).Select(value => value.LayoutHash), definition.Definition!.Candidates.Select(value => value.LayoutHash));
+            Assert.All(definition.Definition.Candidates, value => Assert.NotEmpty(value.Fields));
+            // Every bundled table has retail 12.x blocks; ItemXItemEffect has no 5.x block at all.
+            if (version.StartsWith("12.", StringComparison.Ordinal) || bundled.Document.Blocks.Any(block => block.Builds.Any(range => range.Last.Major == 5)))
+                Assert.NotEmpty(definition.Definition.Candidates);
+            else Assert.Contains("any layout on its version line", definition.Problem.Message);
+        }
     }
 
     [Fact]

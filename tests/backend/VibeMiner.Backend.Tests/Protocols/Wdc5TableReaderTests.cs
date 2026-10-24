@@ -177,6 +177,26 @@ public sealed class Wdc5TableReaderTests
     }
 
     [Fact]
+    public async Task An_unlisted_build_reads_by_layout_but_still_checks_every_field_against_the_file()
+    {
+        // D080: no block lists 1.2.9.9, so the file's layout picks the block on its version line.
+        var fixture=ScalarFixture();
+        const string columns="COLUMNS\nint ID\nint Small\nfloat Weight\nstring Name\nint Wide\n\n";
+        var layoutOnly=DbdDefinitionReader.Parse(Encoding.UTF8.GetBytes(columns+"LAYOUT 01020304\nBUILD 1.2.3.4\n$noninline,id$ID<u32>\nSmall<8>\nWeight\nName\nWide<u64>\n"));
+        var sink=new Sink();
+        await Wdc5TableReader.ReadAsync(new AsyncInput(fixture.Bytes),layoutOnly,"1.2.9.9",new(),sink);
+        Assert.Equal("01020304",sink.Header!.LayoutHash);Assert.Equal(["1","-1","1.25","café","18446744073709551615"],sink.Rows[0].Values);
+        // Same layout hash but a different field set: the field checks fail as they do for a listed build.
+        var narrower=DbdDefinitionReader.Parse(Encoding.UTF8.GetBytes(columns+"LAYOUT 01020304\nBUILD 1.2.3.4\n$noninline,id$ID<u32>\nSmall<8>\nWeight\nName\n"));
+        Assert.Equal("DB2_SCHEMA_MISMATCH",(await Assert.ThrowsAsync<DiscoveryException>(()=>Wdc5TableReader.ReadAsync(new AsyncInput(fixture.Bytes),narrower,"1.2.9.9",new(),new Sink()))).Code);
+        // An unknown layout still fails clearly, and a block on another version line is never used.
+        var bytes=(byte[])fixture.Bytes.Clone();bytes[156]^=1;
+        var unknown=await Assert.ThrowsAsync<DiscoveryException>(()=>Wdc5TableReader.ReadAsync(new AsyncInput(bytes),layoutOnly,"1.2.9.9",new(),new Sink()));
+        Assert.Equal("DB2_SCHEMA_MISSING",unknown.Code);Assert.Contains("not listed",unknown.Message);
+        Assert.Equal("DB2_SCHEMA_MISSING",(await Assert.ThrowsAsync<DiscoveryException>(()=>Wdc5TableReader.ReadAsync(new AsyncInput(fixture.Bytes),layoutOnly,"2.0.0.9",new(),new Sink()))).Code);
+    }
+
+    [Fact]
     public async Task Invalid_UTF8_relative_pointer_and_unterminated_strings_fail_without_repairs()
     {
         var fixture=ScalarFixture();var bytes=(byte[])fixture.Bytes.Clone();var stringsAt=204+40+4*28+2*17;bytes[stringsAt+1]=255;

@@ -110,6 +110,10 @@ public sealed partial class CreaturesStore(DiscoveryCatalog catalog, VerifiedObj
         }
         await catalog.ReadCreatureSourceAsync(opening, token); // Guard before shared prerequisite work.
         var originalConfigurations = await catalog.ReadCreatureConfigurationsAsync(opening, token);
+        // Creatures needs a listed build; Tables alone may open an unlisted one by layout (D080). Fail before any download.
+        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
+        if (!provider.Definitions.TryGetValue(CreaturesPolicy.Table, out var definition) || !definition.Document.ListsBuild(opening.Build.Version, token))
+            throw new DiscoveryException("SCHEMA_BUILD_NOT_LISTED", "The pinned Creature definition does not list this exact build.");
         await PrerequisiteAsync(context, progress, token); // No feature slot, reader or registry lock is held here.
         var currentOpening = await catalog.ResolveOpeningAsync(Workspace(context), token);
         if (currentOpening.Reference != opening.Reference) throw CreaturesPolicy.Stale();

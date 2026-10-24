@@ -17,7 +17,15 @@ public sealed record TableDataSnapshot(string ProductId, string BuildIdentity, s
     string TableId, string ResearchLocale, string ArtifactId, string PreparedAt,
     string LayoutHash, string DefinitionSha256, string ProviderRevision, string DecoderRevision,
     ContentReceipt Source, SelectedFileAssociation Association, IReadOnlyList<TableDataColumn> Columns,
-    TableDataCoverage Coverage, string RowCount, string TextIssueCount = "0");
+    TableDataCoverage Coverage, string RowCount, string TextIssueCount = "0",
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? SchemaMatch = null);
+/// <summary>How the definition block was chosen (D080). Omitted means a block lists the exact build and layout.</summary>
+public static class TableSchemaMatch
+{
+    /// <summary>No block lists the build; the file's layout hash chose the block. The build is not verified.</summary>
+    public const string LayoutOnly = "layoutOnly";
+}
 public sealed record TableTextIssue(int ColumnIndex, string Code, string RawBytesHex);
 public sealed record TableDataRow(string Id, bool IsCopy, string? CopySourceId, IReadOnlyList<string> Values,
     IReadOnlyList<TableTextIssue>? TextIssues = null);

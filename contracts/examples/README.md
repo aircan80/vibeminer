@@ -8,6 +8,8 @@ These JSON documents are synthetic contract fixtures, not acquired Blizzard meta
 
 `table-catalog-page.json` and `table-definition.json` model provider definition metadata with unchecked selected-build source and unavailable rows. The pinned community structure facts are attributed WoWDBDefs data; no game records are included.
 
+`table-data-layout-only.json` is one authored ItemClass `tables.data` reply whose build no definition block lists, so the file's layout hash chose the block (`schemaMatch: layoutOnly`, D080). Values and receipts are synthetic.
+
 `table-reference-text.json` is one authored Item page of reference text: a resolved, empty, several-match, not-found, out-of-range and unreadable ClassID value, plus a bundled target with no reviewed text column and an unbundled target. Its IDs and labels are synthetic.
 
 `table-follow.json` is one authored [follow](../table-follow-v1.md): Item.ClassID = 7 followed to the two ItemClass rows whose ClassID is 7. Its IDs and labels are synthetic.

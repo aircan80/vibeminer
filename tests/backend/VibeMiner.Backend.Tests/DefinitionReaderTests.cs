@@ -56,6 +56,110 @@ public sealed class DefinitionReaderTests
         Assert.NotEqual(selected.Blocks[0].Fields.Count, selected.Blocks[1].Fields.Count);
     }
 
+    // D080 fixture: AAAA0001 is shared by a Classic 5.5 block and two retail 12.x blocks with different field sets.
+    private const string Lines = """
+        COLUMNS
+        int ID
+        int Value
+        int Extra
+
+        LAYOUT AAAA0001
+        BUILD 5.5.0.62518-5.5.4.70449
+        $id$ID<32>
+        Value<u8>
+
+        LAYOUT AAAA0001, BBBB0002
+        BUILD 12.0.0.65655-12.0.7.68974
+        $id$ID<32>
+        Value<u16>
+
+        LAYOUT AAAA0001
+        BUILD 12.1.7.70424
+        $id$ID<32>
+        Value<u32>
+
+        LAYOUT CCCC0003
+        BUILD 12.1.5.70448
+        $id$ID<32>
+        Extra<u32>
+        """;
+
+    [Fact]
+    public void A_listed_build_keeps_exact_build_and_layout_selection_without_a_layout_fallback()
+    {
+        var document = Parse(Lines);
+        var listed = document.SelectFile("12.1.5.70448", "CCCC0003");
+        Assert.Equal(("candidate", "build"), (listed.Status, listed.Match));
+        Assert.Equal("Extra", Assert.Single(listed.Blocks).Fields[1].Column.Name);
+        // The build is listed, so another block's layout is not borrowed even though AAAA0001 exists.
+        var other = document.SelectFile("12.1.5.70448", "AAAA0001");
+        Assert.Equal(("missing", "build"), (other.Status, other.Match));
+        Assert.Empty(document.LayoutCandidates("12.1.5.70448"));
+        Assert.True(document.ListsBuild("12.1.5.70448")); Assert.False(document.ListsBuild("12.1.5.70575"));
+    }
+
+    [Fact]
+    public void An_unlisted_build_uses_the_block_whose_layout_matches_the_file()
+    {
+        var selected = Parse(Lines).SelectFile("12.1.5.70575", "bbbb0002");
+        Assert.Equal(("candidate", "layout"), (selected.Status, selected.Match));
+        Assert.Equal(16, Assert.Single(selected.Blocks).Fields[1].IntegerBits);
+    }
+
+    [Fact]
+    public void A_layout_shared_across_version_lines_prefers_the_nearest_block_on_the_files_line()
+    {
+        var document = Parse(Lines);
+        // Retail 70575 is 151 builds from 12.1.7.70424 and 1601 from 12.0.7.68974.
+        Assert.Equal(32, Assert.Single(document.SelectFile("12.1.5.70575", "AAAA0001").Blocks).Fields[1].IntegerBits);
+        Assert.Equal(16, Assert.Single(document.SelectFile("12.0.7.69000", "AAAA0001").Blocks).Fields[1].IntegerBits);
+        // Classic 5.5.4.70579 shares a build counter with retail but only its own line counts.
+        Assert.Equal(8, Assert.Single(document.SelectFile("5.5.4.70579", "AAAA0001").Blocks).Fields[1].IntegerBits);
+        // No block on the 1.x line: the layout is not taken from another line.
+        var other = document.SelectFile("1.15.8.70000", "AAAA0001");
+        Assert.Equal(("missing", "layout"), (other.Status, other.Match));
+        Assert.Empty(document.LayoutCandidates("1.15.8.70000"));
+        Assert.Equal(["AAAA0001", "BBBB0002", "CCCC0003"], document.LayoutCandidates("12.1.5.70575").Select(value => value.LayoutHash));
+        Assert.Equal(["AAAA0001"], document.LayoutCandidates("5.5.4.70579").Select(value => value.LayoutHash));
+    }
+
+    [Fact]
+    public void Equally_near_blocks_with_different_fields_are_ambiguous_and_identical_ones_are_not()
+    {
+        var tie = Parse("COLUMNS\nint ID\nint Value\n\nLAYOUT AAAA0001\nBUILD 12.0.0.100\n$id$ID<32>\nValue<u8>\n\nLAYOUT AAAA0001\nBUILD 12.0.0.300\n$id$ID<32>\nValue<u16>\n");
+        var selected = tie.SelectFile("12.0.0.200", "AAAA0001");
+        Assert.Equal(("ambiguous", "layout"), (selected.Status, selected.Match)); Assert.Equal(2, selected.Blocks.Count);
+        Assert.Empty(tie.LayoutCandidates("12.0.0.200"));
+        Assert.Equal(8, Assert.Single(tie.SelectFile("12.0.0.150", "AAAA0001").Blocks).Fields[1].IntegerBits);
+        var same = Parse("COLUMNS\nint ID\nint Value\n\nLAYOUT AAAA0001\nBUILD 12.0.0.100\n$id$ID<32>\nValue<u8>\n\nLAYOUT AAAA0001\nBUILD 12.0.0.300\n$id$ID<32>\nValue<u8>\n");
+        Assert.Equal("candidate", same.SelectFile("12.0.0.200", "AAAA0001").Status);
+    }
+
+    [Fact]
+    public void Layout_candidates_agree_with_per_file_selection_at_the_block_limit()
+    {
+        var document = Parse(Lines);
+        foreach (var (layout, block) in document.LayoutCandidates("12.1.5.70575"))
+            Assert.Same(block, Assert.Single(document.SelectFile("12.1.5.70575", layout).Blocks));
+        // 4,000 blocks with distinct layouts (near the line bound), as a fetched definition (#55) could carry.
+        var source = new StringBuilder("COLUMNS\nint ID\n");
+        for (var i = 0; i < 4000; i++) source.Append(System.Globalization.CultureInfo.InvariantCulture, $"\nLAYOUT {i:X8}\nBUILD 12.0.0.{i + 1}\n$id$ID<32>\n");
+        var large = Parse(source.ToString());
+        var candidates = large.LayoutCandidates("12.1.5.70575");
+        Assert.Equal(4000, candidates.Count); Assert.Equal("00000F9F", candidates[^1].LayoutHash);
+    }
+
+    [Fact]
+    public void An_unknown_layout_on_an_unlisted_build_fails_clearly()
+    {
+        var document = Parse(Lines);
+        var unknown = document.SelectFile("12.1.5.70575", "DEADBEEF");
+        Assert.Equal(("missing", "layout"), (unknown.Status, unknown.Match)); Assert.Empty(unknown.Blocks);
+        Assert.Equal("DBD_INVALID", Assert.Throws<DiscoveryException>(() => document.SelectFile("12.1.5.70575", "XYZ")).Code);
+        using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+        Assert.ThrowsAny<OperationCanceledException>(() => document.SelectFile("12.1.5.70575", "AAAA0001", cancellation.Token));
+    }
+
     [Fact]
     public void Legacy_build_only_blocks_remain_metadata_without_an_invented_layout()
     {

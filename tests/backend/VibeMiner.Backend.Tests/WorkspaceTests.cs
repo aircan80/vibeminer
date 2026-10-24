@@ -415,7 +415,8 @@ public sealed class WorkspaceTests
             var item = definition.RootElement.GetProperty("result");
             Assert.Equal("Item", item.GetProperty("entry").GetProperty("name").GetString());
             Assert.Equal("notChecked", item.GetProperty("entry").GetProperty("sourceState").GetString());
-            Assert.Empty(item.GetProperty("definition").GetProperty("candidates").EnumerateArray());
+            // D080: the unlisted 1.2.3.12345 build previews the layouts a 1.x file could open by.
+            Assert.NotEmpty(item.GetProperty("definition").GetProperty("candidates").EnumerateArray());
             Assert.Equal("SCHEMA_BUILD_NOT_LISTED", item.GetProperty("problem").GetProperty("code").GetString());
             var classField = Assert.Single(item.GetProperty("definition").GetProperty("columns").EnumerateArray(), field => field.GetProperty("name").GetString() == "ClassID");
             Assert.Equal("ItemClass", classField.GetProperty("reference").GetProperty("table").GetString());

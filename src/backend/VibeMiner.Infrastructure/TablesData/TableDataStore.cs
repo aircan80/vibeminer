@@ -71,7 +71,7 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
             if (retained is not null)
             {
                 await rows.ReadPageAsync(retained.Artifact, 0, 1, null, token);
-                return Snapshot(request, retained, definition);
+                return Snapshot(request, retained, definition, context.Build.Version);
             }
             await progress("Updating retained table interpretation");
         }
@@ -108,7 +108,7 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
         await catalog.CommitTableAdmissionAsync(context, request.TableId, request.ResearchLocale,
             selected.Receipt, selected.Association, artifact, preparedAt, token);
         // Durable success wins a subsequent cancellation; publication and SQL are separate resources.
-        return Snapshot(request, admission, definition);
+        return Snapshot(request, admission, definition, context.Build.Version);
     }
 
     public async Task<TableDataReadiness> ReadAsync(TableDataRequest request, CancellationToken token)
@@ -120,7 +120,7 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
         try { Validate(admission, entry, definition, context.Build.Version); }
         catch (DiscoveryException failure) when (failure.Code == "TABLE_INTERPRETATION_STALE") { return new(null); }
         await rows.ReadPageAsync(admission.Artifact, 0, 1, null, token);
-        return new(Snapshot(request, admission, definition));
+        return new(Snapshot(request, admission, definition, context.Build.Version));
     }
 
     public async Task<TableDataPage> ReadRowsAsync(TableRowsRequest request, CancellationToken token)
@@ -154,10 +154,13 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
             throw new DiscoveryException("DEFINITION_NOT_BUNDLED", "This table's definition is not bundled yet.");
         if (entry.Db2FileDataId is null)
             throw new DiscoveryException("TABLE_FILE_ID_UNKNOWN", "The pinned provider does not identify this table's DB2 FileDataID.");
-        if (definition.Document.SelectBuild(context.Build.Version, token: token).Blocks.Count == 0)
-            throw new DiscoveryException("SCHEMA_BUILD_NOT_LISTED", "The pinned definition does not list this exact build.");
+        // An unlisted build can still open when the acquired file's layout selects a block on its version line (D080).
+        if (!OpensBuild(definition.Document, context.Build.Version, token))
+            throw new DiscoveryException("SCHEMA_BUILD_NOT_LISTED", "The pinned definition does not list this exact build or any layout on its version line.");
         return (context, provider, entry, definition);
     }
+    internal static bool OpensBuild(DbdDocument definition, string buildVersion, CancellationToken token) =>
+        definition.ListsBuild(buildVersion, token) || definition.LayoutCandidates(buildVersion, token).Count > 0;
     private async Task ValidateSourceAsync(CapturedOpeningContext context, SelectedFileAssociation association, CancellationToken token) =>
         ValidateSourceAssociation(await ReadBuildConfigurationAsync(context, token), association);
     private async Task<TactConfiguration> ReadBuildConfigurationAsync(CapturedOpeningContext context, CancellationToken token)
@@ -192,21 +195,22 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
     }
     internal static void ValidateInterpretation(TableRowsArtifact artifact, DbdDocument definition, string buildVersion)
     {
-        var selection = definition.SelectBuild(buildVersion, artifact.Header.LayoutHash);
+        var selection = definition.SelectFile(buildVersion, artifact.Header.LayoutHash);
         if (selection.Blocks.Count != 1)
             throw new DiscoveryException(selection.Blocks.Count == 0 ? "DB2_SCHEMA_MISSING" : "DB2_SCHEMA_AMBIGUOUS",
                 "The actual layout and exact build do not select one definition block.");
     }
-    private static TableDataSnapshot Snapshot(TableDataRequest request, StoredTableAdmission admission, BundledTableDefinition definition)
+    private static TableDataSnapshot Snapshot(TableDataRequest request, StoredTableAdmission admission, BundledTableDefinition definition, string buildVersion)
     {
         var a = admission.Artifact; var c = a.Completion;
+        var match = definition.Document.SelectFile(buildVersion, a.Header.LayoutHash).Match == "layout" ? TableSchemaMatch.LayoutOnly : null;
         var columns = a.Header.Columns.Select(column => ProjectColumn(column, definition.Document)).ToArray();
         return new(request.ProductId, request.BuildIdentity, request.SourceRegion, request.TableId, request.ResearchLocale,
             a.ContentKey, admission.PreparedAt, a.Header.LayoutHash.ToUpperInvariant(), a.Binding.DefinitionSha256,
             a.Binding.ProviderRevision, a.Binding.DecoderRevision, admission.Source, admission.Association, Array.AsReadOnly(columns),
             new(c.Scope, N(c.DeclaredRecords), N(c.PhysicalRows), N(c.CopyRows), N(c.ExcludedEncryptedSections),
                 N(checked(c.ExcludedPhysicalRecords + c.ExcludedCopyRecords)), N(a.Header.DeclaredCopyRecords),
-                N(c.ExcludedPhysicalRecords), N(c.ExcludedCopyRecords)), N(checked(c.PhysicalRows + c.CopyRows)), N(c.TextIssueCount));
+                N(c.ExcludedPhysicalRecords), N(c.ExcludedCopyRecords)), N(checked(c.PhysicalRows + c.CopyRows)), N(c.TextIssueCount), match);
     }
     // Public table metadata is one projection of the exact pinned definition. Feature
     // indexes may retain older internal descriptors without rewriting their immutable bytes.
