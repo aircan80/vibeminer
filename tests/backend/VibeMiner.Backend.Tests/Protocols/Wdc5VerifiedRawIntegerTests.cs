@@ -9,11 +9,12 @@ namespace VibeMiner.Backend.Tests.Protocols;
 public sealed class Wdc5VerifiedRawIntegerTests
 {
     [Fact]
-    public async Task Verified_palette_width_mismatch_is_strict_by_default_and_explicitly_whole_column_evidence_when_requested()
+    public async Task Verified_palette_width_mismatch_keeps_low_bits_by_default_and_explicitly_whole_column_evidence_when_requested()
     {
-        var f=Fixture(3,32,[300,400],"<8>");var strict=new Sink();
-        Assert.Equal("DB2_SCHEMA_MISMATCH",(await Assert.ThrowsAsync<DiscoveryException>(()=>Read(f,strict))).Code);Assert.Empty(strict.Rows);
-        var evidence=new Sink();await Read(f,evidence,Evidence(f));
+        var f=Fixture(3,32,[300,400],"<8>");var narrowed=new Sink();await Read(f,narrowed);
+        Assert.Equal(new[]{"44","-112"},narrowed.Rows.Select(r=>r.Values[1]));Assert.Equal(new Db2ValueNarrowing(32,8),narrowed.Header!.Columns[1].Narrowing);
+        Assert.Null(narrowed.Header.Columns[1].Interpretation);
+        var evidence=new Sink();await Read(f,evidence,Evidence(f));Assert.Null(evidence.Header!.Columns[1].Narrowing);
         Assert.Equal(new[]{"300","400"},evidence.Rows.Select(r=>r.Values[1]));
         var interpretation=evidence.Header!.Columns[1].Interpretation!;
         Assert.Equal("raw-physical-integer-v1",interpretation.Policy);Assert.Equal(32,interpretation.PhysicalBits);Assert.False(interpretation.PhysicalSigned);
@@ -85,7 +86,7 @@ public sealed class Wdc5VerifiedRawIntegerTests
     [Theory]
     [InlineData("context")][InlineData("sha")][InlineData("table")][InlineData("layout")][InlineData("ordinal")]
     [InlineData("name")][InlineData("kind")][InlineData("physical")][InlineData("candidate")][InlineData("unsigned")]
-    public async Task Any_mismatching_exact_scope_leaves_verified_column_strict(string mismatch)
+    public async Task Any_mismatching_exact_scope_leaves_the_verified_column_to_low_bit_narrowing(string mismatch)
     {
         var f=Fixture(3,32,[300],"<8>");var limits=Evidence(f);var rule=limits.VerifiedRawIntegerRules![0];
         rule=mismatch switch
@@ -96,8 +97,8 @@ public sealed class Wdc5VerifiedRawIntegerTests
             "unsigned"=>rule with{CandidateUnsigned=true},_=>rule
         };
         limits=limits with{DefinitionSha256=mismatch=="context"?new('b',64):limits.DefinitionSha256,VerifiedRawIntegerRules=[rule]};
-        var sink=new Sink();Assert.Equal("DB2_SCHEMA_MISMATCH",(await Assert.ThrowsAsync<DiscoveryException>(()=>Read(f,sink,limits))).Code);
-        Assert.Null(sink.Header!.Columns[1].Interpretation);Assert.Empty(sink.Rows);
+        var sink=new Sink();await Read(f,sink,limits);
+        Assert.Null(sink.Header!.Columns[1].Interpretation);Assert.Equal(new Db2ValueNarrowing(32,8),sink.Header.Columns[1].Narrowing);Assert.Equal("44",Assert.Single(sink.Rows).Values[1]);
     }
 
     [Fact]
@@ -120,7 +121,8 @@ public sealed class Wdc5VerifiedRawIntegerTests
         var mutable=new List<Wdc5RawIntegerRule>{rule};using var stream=new MutationSource(f.Bytes,()=>mutable[0]=rule with{FieldName="Changed"});var sink=new Sink();
         await Wdc5TableReader.ReadAsync(stream,f.Definition,"1.2.3.4",baseline with{VerifiedRawIntegerRules=mutable},sink);
         Assert.NotNull(sink.Header!.Columns[1].Interpretation);Assert.Equal("300",sink.Rows.Single().Values[1]);Assert.True(stream.CanRead);
-        var noContext=new Sink();Assert.Equal("DB2_SCHEMA_MISMATCH",(await Assert.ThrowsAsync<DiscoveryException>(()=>Read(f,noContext,baseline with{DefinitionSha256=null}))).Code);
+        var noContext=new Sink();await Read(f,noContext,baseline with{DefinitionSha256=null});
+        Assert.Null(noContext.Header!.Columns[1].Interpretation);Assert.NotNull(noContext.Header.Columns[1].Narrowing);
     }
     private sealed class ChangingCountRules(Wdc5RawIntegerRule rule):IReadOnlyList<Wdc5RawIntegerRule>
     {
@@ -139,15 +141,15 @@ public sealed class Wdc5VerifiedRawIntegerTests
         {if(first){first=false;mutate();}return base.ReadAsync(buffer,token);}
     }
 
-    private sealed record TestFixture(byte[] Bytes,DbdDocument Definition,string DefinitionSha256);
-    private static Wdc5Limits Evidence(TestFixture f)
+    internal sealed record TestFixture(byte[] Bytes,DbdDocument Definition,string DefinitionSha256);
+    internal static Wdc5Limits Evidence(TestFixture f)
     {
         var field=f.Definition.Blocks.Single().Fields.Last();var at=248;var kind=BinaryPrimitives.ReadUInt32LittleEndian(f.Bytes.AsSpan(at+8));
         var physical=kind==0?32-BinaryPrimitives.ReadInt16LittleEndian(f.Bytes.AsSpan(244)):kind is 1 or 5?BinaryPrimitives.ReadUInt16LittleEndian(f.Bytes.AsSpan(at+2)):32;
         return new(DefinitionSha256:f.DefinitionSha256,VerifiedRawIntegerRules:[new(f.DefinitionSha256,"11223344","01020304",f.Definition.Blocks.Single().Fields.Count-1,field.Column.Name,kind,physical,field.IntegerBits??32,field.Unsigned==true)]);
     }
     // Authored independently: a compact scalar/palette array/Common fixture, never copied game payloads.
-    private static TestFixture Fixture(uint kind,int width,ulong[] values,string schema,int array=1,string family="int",bool relation=false,bool idOnly=false,bool unverified=false)
+    internal static TestFixture Fixture(uint kind,int width,ulong[] values,string schema,int array=1,string family="int",bool relation=false,bool idOnly=false,bool unverified=false)
     {
         var rows=kind==4?values.Length/array:values.Length;var recordSize=kind is 0 or 1 or 5?(width+7)/8:1;
         var aux=kind is 3 or 4?values.SelectMany(v=>Word((uint)v)).ToArray():kind==2?Word(2).Concat(Word((uint)values[^1])).ToArray():[];
@@ -167,8 +169,8 @@ public sealed class Wdc5VerifiedRawIntegerTests
     private static byte[] Word(uint value){var b=new byte[4];P(b,0,value);return b;}
     private static void P(byte[] b,int at,uint value)=>BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(at),value);
     private static void H(byte[] b,int at,ushort value)=>BinaryPrimitives.WriteUInt16LittleEndian(b.AsSpan(at),value);
-    private static async Task Read(TestFixture f,Sink sink,Wdc5Limits? limits=null)
+    internal static async Task Read(TestFixture f,Sink sink,Wdc5Limits? limits=null)
     {using var input=new MemoryStream(f.Bytes);await Wdc5TableReader.ReadAsync(input,f.Definition,"1.2.3.4",limits??new(),sink);}
-    private sealed class Sink:IWdc5Consumer
-    {public Wdc5TableHeader? Header;public List<Db2Row> Rows=[];public bool AnnotatedBeforeRows;public ValueTask HeaderAsync(Wdc5TableHeader h,CancellationToken t){Header=h;AnnotatedBeforeRows=h.Columns.Any(c=>c.Interpretation is not null);return ValueTask.CompletedTask;}public ValueTask RowAsync(Db2Row r,CancellationToken t){Rows.Add(r);return ValueTask.CompletedTask;}}
+    internal sealed class Sink:IWdc5Consumer
+    {public Wdc5TableHeader? Header;public List<Db2Row> Rows=[];public bool AnnotatedBeforeRows,NarrowedBeforeRows;public ValueTask HeaderAsync(Wdc5TableHeader h,CancellationToken t){Header=h;AnnotatedBeforeRows=h.Columns.Any(c=>c.Interpretation is not null);NarrowedBeforeRows=Rows.Count==0&&h.Columns.Any(c=>c.Narrowing is not null);return ValueTask.CompletedTask;}public ValueTask RowAsync(Db2Row r,CancellationToken t){Rows.Add(r);return ValueTask.CompletedTask;}}
 }

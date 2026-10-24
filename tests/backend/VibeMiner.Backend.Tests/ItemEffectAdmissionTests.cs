@@ -200,7 +200,7 @@ public sealed class ItemEffectAdmissionTests
 
     [Theory]
     [InlineData("layout", "DB2_SCHEMA_MISSING")]
-    [InlineData("table", "DB2_SCHEMA_MISMATCH")]
+    [InlineData("table", "TABLE_IDENTITY_MISMATCH")] // Without the rule the values narrow (D079); the header still isn't this table.
     [InlineData("kind", "DB2_SCHEMA_MISMATCH")]
     [InlineData("palette", "DB2_INVALID")]
     public async Task Actual_production_profile_does_not_relax_unmatched_or_malformed_metadata(string defect, string code)
@@ -211,22 +211,24 @@ public sealed class ItemEffectAdmissionTests
     }
 
     [Fact]
-    public async Task Original_pure_reader_remains_strict_with_real_bundled_candidate_and_canonical_signed_cases()
+    public async Task Original_pure_reader_narrows_without_the_adapter_rule_and_keeps_canonical_signed_cases()
     {
         await using var h = await Harness.Create(false);
         var sink = new Sink(); var strictBytes = h.Payload.Decoded.ToArray();
         var start = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(strictBytes.AsSpan(212)));
-        Put(strictBytes, start + 8, 2); // First row chooses the authored noncanonical Charges palette entry.
+        Put(strictBytes, start + 8, 2); // First row chooses the authored noncanonical Charges palette entry 65536.
         using var input = new MemoryStream(strictBytes);
-        var failure = await Assert.ThrowsAsync<DiscoveryException>(() => Wdc5TableReader.ReadAsync(input, h.Definition.Document, Version, new(), sink));
-        Assert.Equal("DB2_SCHEMA_MISMATCH", failure.Code); Assert.Contains("'Charges'", failure.Message); Assert.Empty(sink.Rows);
+        // Without the exact retail rule D079 keeps the low 16 bits, and says so on the column.
+        await Wdc5TableReader.ReadAsync(input, h.Definition.Document, Version, new(), sink);
+        Assert.Equal("0", sink.Rows[0].Values[3]);
+        Assert.Equal(new Db2ValueNarrowing(32, 16), sink.Header!.Columns[3].Narrowing); Assert.Null(sink.Header.Columns[3].Interpretation);
         // The adapter opt-in preserves even canonical-negative bits as raw uint32, tested above.
         // A separate strict all-fit source proves the unchanged candidate signed16 decoding path.
         var payload = Table(h.Definition, Effect, "4CA77678", false, true, null);
         input.SetLength(0); await input.WriteAsync(payload.Decoded); input.Position = 0; sink = new();
         await Wdc5TableReader.ReadAsync(input, h.Definition.Document, Version, new(), sink);
         Assert.Equal(new[] { "-1", "-1", "1", "2", "3", "-1" }, sink.Rows.Select(r => r.Values[3]));
-        Assert.Null(sink.Header!.Columns[3].Interpretation);
+        Assert.Null(sink.Header!.Columns[3].Interpretation); Assert.Null(sink.Header.Columns[3].Narrowing);
     }
 
     [Fact]

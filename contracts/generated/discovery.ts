@@ -1108,6 +1108,7 @@ export interface TableDataColumn {
   isId: boolean;
   reference: TableReference | null;
   interpretation?: TableColumnInterpretation | null;
+  narrowing?: TableColumnNarrowing;
 }
 export interface TableColumnInterpretation {
   policy: 'raw-physical-integer-v1';
@@ -1116,6 +1117,13 @@ export interface TableColumnInterpretation {
   candidateBits: number;
   candidateUnsigned: boolean;
   warning: string;
+}
+/**
+ * D079: the column's 32-bit pallet or common values are wider than its definition, and each value keeps its low usedBits bits, signed or unsigned per the definition.
+ */
+export interface TableColumnNarrowing {
+  storedBits: 32;
+  usedBits: 8 | 16;
 }
 export interface TableDataCoverage {
   scope: 'complete' | 'unencryptedSections';

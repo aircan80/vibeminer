@@ -60,6 +60,7 @@ public sealed class Wdc5TableReaderTests
         var (bytes,definition)=NumericFixture(kind,width,raw,schema);var sink=new Sink();
         await Read(new AsyncInput(bytes),definition,sink);
         Assert.Equal(expected,Assert.Single(sink.Rows).Values[1]);
+        Assert.Null(sink.Header!.Columns[1].Narrowing); // A canonical sign extension fits, so nothing was narrowed.
     }
 
     [Theory]
@@ -70,14 +71,24 @@ public sealed class Wdc5TableReaderTests
     [InlineData(5, 12, 3967ul, "<u8>")]
     [InlineData(5, 12, 3967ul, "<8>")]
     [InlineData(5, 12, 256ul, "<8>")]
-    [InlineData(2, 32, 65535ul, "<8>")]
-    [InlineData(3, 32, 256ul, "<u8>")]
     public async Task Noncanonical_high_bits_never_disappear_into_plausible_narrowed_cells(
         uint kind,int width,ulong raw,string schema)
     {
         var (bytes,definition)=NumericFixture(kind,width,raw,schema);var sink=new Sink();
         Assert.Equal("DB2_SCHEMA_MISMATCH",(await Assert.ThrowsAsync<DiscoveryException>(()=>Read(new AsyncInput(bytes),definition,sink))).Code);
         Assert.Empty(sink.Rows);
+    }
+
+    // D079: pallet and common values are 32 bits whatever the field, so their high bits are dropped visibly instead.
+    [Theory]
+    [InlineData(2, 32, 65535ul, "<8>", "-1")]
+    [InlineData(3, 32, 256ul, "<u8>", "0")]
+    public async Task Noncanonical_pallet_and_common_high_bits_are_dropped_with_a_column_marker(
+        uint kind,int width,ulong raw,string schema,string expected)
+    {
+        var (bytes,definition)=NumericFixture(kind,width,raw,schema);var sink=new Sink();
+        await Read(new AsyncInput(bytes),definition,sink);
+        Assert.Equal(expected,Assert.Single(sink.Rows).Values[1]);Assert.Equal(new Db2ValueNarrowing(32,8),sink.Header!.Columns[1].Narrowing);
     }
 
     [Fact]

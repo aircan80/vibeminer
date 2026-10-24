@@ -20,6 +20,7 @@ public static partial class Wdc5TableReader
         public uint[] Palette=[];
         public Dictionary<uint,uint>? Common;
         public bool VerifiedRawEvidence;
+        public bool KeepsLowBits;
     }
     private sealed record Location(long Offset,int Section,int GlobalIndex,int LocalIndex,uint PhysicalId);
     private sealed record BoundField(DbdField Field,int StorageIndex,FieldSource Source=FieldSource.Physical);
@@ -103,6 +104,8 @@ public static partial class Wdc5TableReader
         }
         var aux=await ReadAt(decoded,descriptorEnd,paletteBytes+commonBytes,token);
         LoadAuxiliary(storage,aux,paletteBytes,commonBytes,limits,ref charged,token);
+        // Narrowing depends on the pallet and common values, so it is selected once they are loaded, still before Header.
+        if(SelectLowBitNarrowing(fields,storage,token))columns=Columns(fields,storage,limits);
         var encryptedIds=new HashSet<uint>();long prefixEnd=auxiliaryEnd;
         foreach(var section in sections.Where(section=>section.Key!=0))
         {
@@ -294,8 +297,9 @@ public static partial class Wdc5TableReader
         {
             var field=binding.Field;var kind=field.Column.Family switch{"int"=>"integer","float"=>"float","string" or "locstring"=>"string",_=>throw Fail("UNSUPPORTED","Unknown scalar definition family.")};
             var interpretation=binding.StorageIndex<0?null:RawInterpretation(storage[binding.StorageIndex],field);
+            var narrowing=binding.StorageIndex<0?null:LowBitNarrowing(storage[binding.StorageIndex],field);
             for(var i=0;i<field.ArrayLength;i++)
-            {if(columns.Count>=limits.MaxColumns)throw Fail("LIMIT","Flattened columns exceed policy.");columns.Add(new(field.ArrayLength==1?field.Column.Name:field.Column.Name+"["+i.ToString(CultureInfo.InvariantCulture)+"]",kind,field.IsId,interpretation));}
+            {if(columns.Count>=limits.MaxColumns)throw Fail("LIMIT","Flattened columns exceed policy.");columns.Add(new(field.ArrayLength==1?field.Column.Name:field.Column.Name+"["+i.ToString(CultureInfo.InvariantCulture)+"]",kind,field.IsId,interpretation,narrowing));}
         }
         return columns.AsReadOnly();
     }

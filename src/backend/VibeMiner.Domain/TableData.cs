@@ -2,8 +2,14 @@ namespace VibeMiner.Domain;
 
 public sealed record TableColumnInterpretation(string Policy, int PhysicalBits, bool PhysicalSigned,
     int CandidateBits, bool CandidateUnsigned, string Warning);
+/// <summary>D079: the column's 32-bit pallet or common values are wider than its definition; each value keeps its low
+/// <see cref="UsedBits"/> bits, signed or unsigned per the definition.</summary>
+public sealed record TableColumnNarrowing(int StoredBits, int UsedBits);
+// Narrowing is left off the wire when null, so every other column keeps its exact shape.
 public sealed record TableDataColumn(string Name, string Family, bool IsId, TableReference? Reference,
-    TableColumnInterpretation? Interpretation = null);
+    TableColumnInterpretation? Interpretation = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    TableColumnNarrowing? Narrowing = null);
 public sealed record TableDataCoverage(string Scope, string DeclaredRecords, string PhysicalRows,
     string CopyRows, string ExcludedKeyedSections, string ExcludedDeclaredRecords,
     string DeclaredCopyRecords, string ExcludedPhysicalRecords, string ExcludedCopyRecords);

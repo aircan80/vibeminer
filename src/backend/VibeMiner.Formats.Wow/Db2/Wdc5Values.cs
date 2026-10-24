@@ -55,10 +55,11 @@ public static partial class Wdc5TableReader
                 // Admit narrowing only when the discarded high bits are a canonical
                 // signed representation. Kind5 remains explicitly signed even when
                 // the selected schema renders the target integer as unsigned.
+                // A pallet/common column selected for low-bit narrowing (D079) keeps its low bits.
                 var sourceWidth=storage.Kind switch{0=>NoneWidth(storage),1=>storage.Width,5=>64,_=>32};
                 var canonical=unchecked((ulong)Signed(raw&mask,width));
                 if(sourceWidth<64)canonical&=(1UL<<sourceWidth)-1;
-                if(field.Unsigned==true&&storage.Kind!=5||raw!=canonical)
+                if(!storage.KeepsLowBits&&(field.Unsigned==true&&storage.Kind!=5||raw!=canonical))
                     throw Fail("SCHEMA_MISMATCH",$"Field '{field.Column.Name}' uses storage kind {storage.Kind} with {sourceWidth} physical bits and cannot be represented by its selected {(field.Unsigned==true?"unsigned":"signed")}{width}-bit schema width.");
             }
             raw&=mask;

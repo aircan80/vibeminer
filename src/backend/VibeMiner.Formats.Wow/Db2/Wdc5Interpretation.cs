@@ -16,6 +16,36 @@ public static partial class Wdc5TableReader
             storage.VerifiedRawEvidence
                 ?"Candidate integer width is narrower than the physical value width. Explicit raw evidence preserves this entire column without narrowing; semantic references and calculations are not admitted."
                 :"Unverified provider field: values preserve the physical integer without narrowing to the candidate schema. Names, relationships and semantic meaning are unverified.");
+
+    // D079: pallet and common values are always stored as 32 bits. When a verified integer field is narrower and some stored
+    // value doesn't fit it (not even as a sign extension), the whole column keeps the low bits at the definition's width.
+    // Inline None/bitpacked storage stays strict: its width is the record's own, so a value that doesn't fit is corruption.
+    // IDs and relationship keys stay strict too, and raw evidence (unverified names, exact rules) wins over narrowing.
+    private static bool NarrowsToLowBits(Storage storage,DbdField field)=>storage.Kind is 2 or 3 or 4&&field.Column.Family=="int"
+        &&!field.IsId&&!field.RelationStorage&&(field.IntegerBits??32)<32&&!UsesRawPhysical(storage,field);
+    private static bool FitsDefinition(uint value,int width,bool unsigned)
+    {
+        var mask=(1u<<width)-1;if(value<=mask)return true;
+        return !unsigned&&value==unchecked((uint)Signed(value&mask,width));
+    }
+    // Selected once the pallet and common values are loaded and before Header, never from the rows that happen to be read.
+    private static bool SelectLowBitNarrowing(IReadOnlyList<BoundField> fields,Storage[] storage,CancellationToken token)
+    {
+        var any=false;
+        foreach(var bound in fields)
+        {
+            if(bound.Source!=FieldSource.Physical||bound.StorageIndex<0)continue;
+            var column=storage[bound.StorageIndex];var field=bound.Field;
+            if(!NarrowsToLowBits(column,field))continue;
+            var width=field.IntegerBits??32;var unsigned=field.Unsigned==true;var seen=0;
+            bool Misfit(uint value){if((++seen&4095)==0)token.ThrowIfCancellationRequested();return !FitsDefinition(value,width,unsigned);}
+            column.KeepsLowBits=column.Kind==2?Misfit(column.P1)||column.Common!.Values.Any(Misfit):column.Palette.Any(Misfit);
+            any|=column.KeepsLowBits;
+        }
+        return any;
+    }
+    private static Db2ValueNarrowing? LowBitNarrowing(Storage storage,DbdField field)=>
+        storage.KeepsLowBits?new(32,field.IntegerBits??32):null;
     private static Wdc5RawIntegerRule[] SnapshotRawIntegerRules(Wdc5Limits limits,CancellationToken token)
     {
         static bool Hex(string? value,int length,bool upper)=>value is not null&&value.Length==length

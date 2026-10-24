@@ -29,14 +29,23 @@ public sealed class Wdc5RawIntegerTests
     }
 
     [Theory]
-    [InlineData(0,32,256ul)][InlineData(1,12,511ul)][InlineData(2,32,256ul)]
-    [InlineData(3,1,65537ul)][InlineData(4,1,65537ul)][InlineData(5,12,3967ul)]
-    public async Task Verified_columns_still_reject_lossy_narrowing_instead_of_using_raw_policy(uint kind,int bits,ulong raw)
+    [InlineData(0,32,256ul)][InlineData(1,12,511ul)][InlineData(5,12,3967ul)]
+    public async Task Verified_inline_columns_still_reject_lossy_narrowing_instead_of_using_raw_policy(uint kind,int bits,ulong raw)
     {
         var sink=new Sink();var error=await Assert.ThrowsAsync<DiscoveryException>(()=>Read(Fixture(kind,bits,raw),Definition(verified:true),sink));
         Assert.Equal("DB2_SCHEMA_MISMATCH",error.Code);Assert.Empty(sink.Rows);
         Assert.Contains("'Value'",error.Message);Assert.Contains("storage kind "+kind.ToString(CultureInfo.InvariantCulture),error.Message);
         Assert.Contains("unsigned8-bit",error.Message);Assert.DoesNotContain(raw.ToString(CultureInfo.InvariantCulture),error.Message);
+    }
+
+    [Theory]
+    [InlineData(2,32,256ul,"0")][InlineData(3,1,65537ul,"1")][InlineData(4,1,65537ul,"1")]
+    public async Task Verified_pallet_and_common_columns_keep_the_low_bits_and_say_so(uint kind,int bits,ulong raw,string expected)
+    {
+        var sink=new Sink();await Read(Fixture(kind,bits,raw),Definition(verified:true),sink);
+        Assert.Equal(["7",expected],Assert.Single(sink.Rows).Values);
+        Assert.Null(sink.Header!.Columns[1].Interpretation);Assert.Equal(new Db2ValueNarrowing(32,8),sink.Header.Columns[1].Narrowing);
+        Assert.Null(sink.Header.Columns[0].Narrowing);
     }
 
     [Fact]

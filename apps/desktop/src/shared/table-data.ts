@@ -38,6 +38,11 @@ function validRawInterpretation(column:TableDataColumn):boolean {
  const i=column.interpretation;
  return !i || i.policy==='raw-physical-integer-v1' && column.family==='integer' && !column.isId && column.reference===null && Number.isInteger(i.physicalBits) && i.physicalBits>=1 && i.physicalBits<=64 && Number.isInteger(i.candidateBits) && i.candidateBits>=1 && i.candidateBits<=64 && i.physicalBits>i.candidateBits && typeof i.physicalSigned==='boolean' && typeof i.candidateUnsigned==='boolean' && typeof i.warning==='string' && i.warning.length<=400 && !!i.warning.trim();
 }
+// D079: a 32-bit pallet/common column narrower in its definition keeps the low bits; raw columns never narrow.
+function validNarrowing(column:TableDataColumn):boolean {
+ const n=column.narrowing;
+ return n===undefined || column.family==='integer' && !column.isId && !column.interpretation && n.storedBits===32 && (n.usedBits===8||n.usedBits===16);
+}
 const itemEffectRevision='wdc5-values-v7+table-admission-v4',itemEffectProjectionRevision='wdc5-values-v7+table-admission-projection-v4';
 function itemEffectScope(s:TableDataSnapshot):boolean {
  return s.tableId==='4002a5b1'&&s.definitionSha256==='7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c'
@@ -70,11 +75,11 @@ export function tableDataMatches(value: TableDataSnapshot, p: TableDataParams, d
  if (BigInt(value.rowCount) !== BigInt(c.physicalRows)+BigInt(c.copyRows) || BigInt(c.declaredRecords) !== BigInt(c.physicalRows)+BigInt(c.excludedPhysicalRecords) || BigInt(c.declaredCopyRecords) !== BigInt(c.copyRows)+BigInt(c.excludedCopyRecords) || c.excludedDeclaredRecords === null || !decimal.test(c.excludedDeclaredRecords) || BigInt(c.excludedDeclaredRecords) !== BigInt(c.excludedPhysicalRecords)+BigInt(c.excludedCopyRecords)) return false;
  if (c.scope === 'complete' && [c.excludedPhysicalRecords,c.excludedCopyRecords,c.excludedKeyedSections].some(x => x !== '0')) return false;
  if (value.association.encodingSource.role !== 'encoding' || value.association.rootSource.role !== 'root' || !value.association.memberships.length || value.association.memberships.some(m => m.contentKey !== value.source.contentKey)) return false;
- if (!value.columns.every(validRawInterpretation) || new Set(value.columns.map(x => x.name)).size !== value.columns.length) return false;
+ if (!value.columns.every(validRawInterpretation) || !value.columns.every(validNarrowing) || new Set(value.columns.map(x => x.name)).size !== value.columns.length) return false;
  if (definition) {
   const candidate = definition.definition?.candidates.find(x => x.layoutHash === value.layoutHash);
   if (!candidate || value.definitionSha256 !== definition.definition?.sha256 || value.providerRevision !== definition.provider.revision || value.association.fileDataId !== definition.entry.db2FileDataId || candidate.fields.reduce((sum,f)=>sum+f.arrayLength,0) !== value.columns.length) return false;
-  if (!candidate.fields.flatMap((f,fieldOrdinal) => Array.from({length:f.arrayLength},(_,i)=>({...f,fieldOrdinal,name:f.arrayLength>1?`${f.name}[${i}]`:f.name}))).every((f,i) => {const col=value.columns[i]; return f.name===col.name && (f.family==='int'?'integer':f.family==='float'?'float':'string')===col.family && f.isId===col.isId && (col.interpretation ? f.family==='int' && (!f.verifiedName || f.arrayLength===1&&!f.relationStorage&&!f.nonInline&&verifiedRawAdmission(value,f.fieldOrdinal,col)) && !f.isId && col.interpretation.candidateBits===(f.integerBits??32) && col.interpretation.candidateUnsigned===(f.unsigned??false) && col.reference===null : f.reference?.table===col.reference?.table && f.reference?.column===col.reference?.column);})) return false;
+  if (!candidate.fields.flatMap((f,fieldOrdinal) => Array.from({length:f.arrayLength},(_,i)=>({...f,fieldOrdinal,name:f.arrayLength>1?`${f.name}[${i}]`:f.name}))).every((f,i) => {const col=value.columns[i]; return f.name===col.name && (f.family==='int'?'integer':f.family==='float'?'float':'string')===col.family && f.isId===col.isId && (col.interpretation ? f.family==='int' && (!f.verifiedName || f.arrayLength===1&&!f.relationStorage&&!f.nonInline&&verifiedRawAdmission(value,f.fieldOrdinal,col)) && !f.isId && col.interpretation.candidateBits===(f.integerBits??32) && col.interpretation.candidateUnsigned===(f.unsigned??false) && col.reference===null : f.reference?.table===col.reference?.table && f.reference?.column===col.reference?.column) && (!col.narrowing || f.family==='int' && f.verifiedName && !f.isId && !f.relationStorage && (f.integerBits??32)===col.narrowing.usedBits);})) return false;
  }
  return true;
 }

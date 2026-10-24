@@ -38,6 +38,8 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
     // Each observed candidate-width inconsistency is evidence-only. The parser
     // additionally matches actual table/layout/field/storage metadata before Header.
     // Changing this fixed production profile requires a new admission revision.
+    // D079 kept these rules: they win over low-bit narrowing, so these exact retail layouts keep their whole-column raw
+    // values and the Item effect evidence built on them. Every other verified pallet/common width mismatch narrows instead.
     private static Wdc5Limits AdmissionLimits(BundledTableDefinition definition) => new(
         AllowPartialEncryptedSections: true, AllowRawTextEvidence: true,
         DefinitionSha256: definition.Sha256,
@@ -215,7 +217,8 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
         return new(column.Name, column.Kind, column.IsId,
             column.Interpretation is null && declared?.Reference is { } reference ? new(reference.Table, reference.Column) : null,
             column.Interpretation is { } interpretation ? new(interpretation.Policy, interpretation.PhysicalBits,
-                interpretation.PhysicalSigned, interpretation.CandidateBits, interpretation.CandidateUnsigned, interpretation.Warning) : null);
+                interpretation.PhysicalSigned, interpretation.CandidateBits, interpretation.CandidateUnsigned, interpretation.Warning) : null,
+            column.Narrowing is { } narrowing ? new(narrowing.StoredBits, narrowing.UsedBits) : null);
     }
 
     private static string N(long value) => value.ToString(CultureInfo.InvariantCulture);

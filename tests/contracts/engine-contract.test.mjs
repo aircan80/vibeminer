@@ -253,6 +253,17 @@ test('Table data pages preserve exact values and bound rows, cells and explicit 
     validate('EngineRequest', { protocolVersion: 1, id: method, method, params: {} });
 });
 
+test('A narrowed table column says it keeps the low 8 or 16 of 32 stored bits and nothing else (D079)', () => {
+  const column = { name: 'ItemGroupSoundsID', family: 'integer', isId: false, reference: { table: 'ItemGroupSounds', column: 'ID' },
+    interpretation: null, narrowing: { storedBits: 32, usedBits: 8 } };
+  validate('TableDataColumn', column);
+  validate('TableDataColumn', { ...column, narrowing: { storedBits: 32, usedBits: 16 } });
+  const { narrowing, ...plain } = column; validate('TableDataColumn', plain);
+  for (const value of [null, { storedBits: 16, usedBits: 8 }, { storedBits: 32, usedBits: 32 }, { storedBits: 32 },
+    { storedBits: 32, usedBits: 8, signed: true }])
+    assert.equal(validator('TableDataColumn')({ ...column, narrowing: value }), false, JSON.stringify(value));
+});
+
 test('Reference text keeps exact keys, closed states, the actual text source and bound page shape', async () => {
   const page = JSON.parse(await readFile(path.join(root, 'contracts/examples/table-reference-text.json'), 'utf8'));
   validate('TableReferenceTextPage', page);

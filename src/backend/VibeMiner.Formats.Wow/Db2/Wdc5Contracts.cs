@@ -9,7 +9,12 @@ public sealed record Wdc5RawIntegerRule(string ExpectedDefinitionSha256,string T
     string FieldName,uint StorageKind,int PhysicalBits,int CandidateBits,bool CandidateUnsigned);
 public sealed record Db2ValueInterpretation(string Policy,int PhysicalBits,bool PhysicalSigned,
     int CandidateBits,bool CandidateUnsigned,string Warning);
-public sealed record Db2Column(string Name,string Kind,bool IsId,Db2ValueInterpretation? Interpretation=null);
+/// <summary>D079: a verified integer field whose 32-bit pallet or common values don't all fit its definition width keeps the low
+/// <see cref="UsedBits"/> bits of each value, signed or unsigned per the definition.</summary>
+public sealed record Db2ValueNarrowing(int StoredBits,int UsedBits);
+// Narrowing is omitted when null so descriptors written before D079 serialize to the same bytes.
+public sealed record Db2Column(string Name,string Kind,bool IsId,Db2ValueInterpretation? Interpretation=null,
+    [property:System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]Db2ValueNarrowing? Narrowing=null);
 public sealed record Db2TextIssue(int ColumnIndex,string Code,string RawBytesHex);
 public sealed record Db2Row(uint Id,bool IsCopy,uint? CopySourceId,IReadOnlyList<string> Values,IReadOnlyList<Db2TextIssue>? TextIssues=null);
 public sealed record Wdc5TableHeader(uint SchemaVersion,string TableHash,string LayoutHash,long DeclaredRecords,

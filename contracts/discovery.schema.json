@@ -3852,6 +3852,9 @@
               "type": "null"
             }
           ]
+        },
+        "narrowing": {
+          "$ref": "#/definitions/TableColumnNarrowing"
         }
       },
       "required": [
@@ -3859,6 +3862,27 @@
         "family",
         "isId",
         "reference"
+      ],
+      "additionalProperties": false
+    },
+    "TableColumnNarrowing": {
+      "title": "TableColumnNarrowing",
+      "description": "D079: the column's 32-bit pallet or common values are wider than its definition, and each value keeps its low usedBits bits, signed or unsigned per the definition.",
+      "type": "object",
+      "properties": {
+        "storedBits": {
+          "const": 32
+        },
+        "usedBits": {
+          "enum": [
+            8,
+            16
+          ]
+        }
+      },
+      "required": [
+        "storedBits",
+        "usedBits"
       ],
       "additionalProperties": false
     },
