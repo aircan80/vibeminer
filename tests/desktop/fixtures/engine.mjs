@@ -75,7 +75,7 @@ function retentionSnapshot(target){
 const shutdown = new AbortController();
 const send = value => process.stdout.write(JSON.stringify({ protocolVersion: 1, ...value }) + '\n');
 const reply = (id, result) => send({ id, result });
-const fail = (id, code, message) => send({ id, error: { code, message, retryable: true } });
+const fail = (id, code, message, retryable = true) => send({ id, error: { code, message, retryable } });
 function pageFor(productId, filter = 'all', limit = 50) {
   const page = structuredClone(saved.get(productId) || { ...seed, productId, builds: [], lastCheckedAt: null, checkedRegions: [], errors: [], hasSavedHistory: false, connection: 'notChecked' });
   page.builds = page.builds.filter(b => filter === 'all' || filter === 'local' && b.isLocal || filter === 'advertised' && b.isAdvertised).slice(0, limit);
@@ -162,10 +162,15 @@ function ledgerRows(snapshot, measured) {
   return rows.map((row, index) => ({ id: String(index + 1), encodingKey: row.key, encodedBytes: '100', verifiedAtAssessment: row.verified, checkedAtOpen: row.open,
     check: row.open || !measured || !downloadCheck ? null : downloadCheck.found[row.key] ?? 'notStored' }));
 }
+// D081: an authored definition fetched from WoWDBDefs. The revision is a sample, not an upstream commit.
+const FETCHED = { revision: 'a50ca6ffbcfe17d604327c9078993675f7ae831f', fetchedAt: '2026-10-23T12:00:00Z' }, FETCHED_SHA = 'ab'.repeat(32);
+const fetchEnabled = () => settingsSnapshot().fetchTableDefinitions.value;
 function settingsSnapshot() {
   const file = path.join(directory, 'settings.json'), stored = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
+  const saved = name => stored?.values?.[name] ?? (name === 'communityBuildHistory' ? stored?.value : undefined);
+  const value = (name, defaultValue) => ({ value: saved(name) ?? defaultValue, defaultValue, source: saved(name) === undefined ? 'default' : 'saved', problem: null });
   return { formatVersion: 1, file: stored ? 'read' : 'absent', problem: null, lastChangedAt: stored?.changedAt ?? null,
-    communityBuildHistory: { value: stored?.value ?? false, defaultValue: false, source: stored ? 'saved' : 'default', problem: null },
+    communityBuildHistory: value('communityBuildHistory', false), fetchTableDefinitions: value('fetchTableDefinitions', true),
     storage: { dataDirectory: path.join(directory, 'catalog') }, downloadLimits: { parallelDownloads: 4, backgroundDownloads: 2, bandwidthCapBytesPerSecond: null, adjustable: false } };
 }
 async function dispatch(request) {
@@ -239,8 +244,12 @@ async function dispatch(request) {
   // Authored settings: kept in the control directory; a settings-write-fail file makes the next write fail.
   if (method === 'settings.read') return reply(id, settingsSnapshot());
   if (method === 'settings.set') {
+    // hold-settings-set keeps the save open until release-settings-set, as a slow write would.
+    if (existsSync(path.join(directory, 'hold-settings-set'))) await waitForRelease('release-settings-set', shutdown.signal);
     if (existsSync(path.join(directory, 'settings-write-fail'))) return fail(id, 'SETTINGS_WRITE_FAILED', 'The engine couldn’t write the settings file. Nothing else changed.', true);
-    writeFileSync(path.join(directory, 'settings.json'), JSON.stringify({ value: params.value, changedAt: new Date().toISOString() }));
+    const file = path.join(directory, 'settings.json'), before = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+    const values = { ...(before.value === undefined ? {} : { communityBuildHistory: before.value }), ...before.values, [params.name]: params.value };
+    writeFileSync(file, JSON.stringify({ values, changedAt: new Date().toISOString() }));
     return reply(id, settingsSnapshot());
   }
   if (method === 'settings.storage.measure') { const now = new Date().toISOString(); return reply(id, { bytes: '51749982208', files: '1204', skipped: '0', startedAt: now, measuredAt: now }); }
@@ -303,11 +312,13 @@ async function dispatch(request) {
   if (['tables.prepare','tables.data','tables.rows'].includes(method)) {
     const contextKey=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`, key=`${contextKey}|${params.tableId}|${params.researchLocale}`;
     if (!opened.has(contextKey)) return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
-    if (method === 'tables.data') return reply(id,{snapshot:tableData.get(key)??null});
+    if (method === 'tables.data') { const rows = tableData.get(key) ?? null; return reply(id, { snapshot: rows && existsSync(path.join(directory, 'table-fetched-exact')) && params.tableId === 'b977271e' && !!rows.fetchedDefinition !== fetchEnabled() ? null : rows }); }
     if (method === 'tables.prepare') {
       const controller=new AbortController();active.set(id,controller);
       send({type:'progress',requestId:id,sequence:1,stage:'Locating selected table content',region:params.sourceRegion,completed:existsSync(path.join(directory,'known-table-progress'))?25:null,total:existsSync(path.join(directory,'known-table-progress'))?100:null,unit:existsSync(path.join(directory,'known-table-progress'))?'bytes':null});
       writeFileSync(path.join(directory,'waiting-table'),id);
+      const fetchAtStart=fetchEnabled(),exactFetch=existsSync(path.join(directory,'table-fetched-exact'))&&params.tableId==='b977271e';
+      if(exactFetch&&fetchAtStart)send({type:'progress',requestId:id,sequence:2,stage:'Checking WoWDBDefs for the newest ItemClass definition',region:params.sourceRegion,completed:null,total:null,unit:null});
       try {
         if (existsSync(path.join(directory,`hold-table-${params.tableId}`))) await waitForRelease(`release-table-${params.tableId}`,controller.signal);
         await waitForRelease('release-table',controller.signal);
@@ -319,6 +330,17 @@ async function dispatch(request) {
         if (existsSync(path.join(directory,'table-partial'))) {value.coverage={scope:'unencryptedSections',declaredRecords:'70',declaredCopyRecords:'2',physicalRows:'60',copyRows:'0',excludedPhysicalRecords:'10',excludedCopyRecords:'2',excludedDeclaredRecords:'12',excludedKeyedSections:'1'};}
         if(existsSync(path.join(directory,'table-text-issue')))value.textIssueCount='1';
         if(existsSync(path.join(directory,'table-layout-only')))value.schemaMatch='layoutOnly';
+        if(exactFetch){
+          if(fetchAtStart){Object.assign(value,{artifactId:'ef'.repeat(32),definitionSha256:FETCHED_SHA,providerRevision:FETCHED.revision,fetchedDefinition:FETCHED,fetchedBecause:'exactBuild',bundledFallback:true});}
+          else value.schemaMatch='layoutOnly';
+        }
+        if(existsSync(path.join(directory,'table-fetched'))&&params.tableId==='b977271e'){
+          if(!fetchEnabled())return fail(id,'SCHEMA_BUILD_NOT_LISTED',`The pinned ItemClass definition doesn’t list build ${opened.get(contextKey).build.version} or any layout on its version line. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest ItemClass definition. Tables the bundled definitions cover still open.`,false);
+          send({type:'progress',requestId:id,sequence:2,stage:'Checking WoWDBDefs for the newest ItemClass definition',region:params.sourceRegion,completed:null,total:null,unit:null});
+          if(existsSync(path.join(directory,'table-fetch-error.json'))){const e=JSON.parse(readFileSync(path.join(directory,'table-fetch-error.json'),'utf8'));return fail(id,e.code,e.message,e.retryable);}
+          if(existsSync(path.join(directory,'table-fetch-offline')))return fail(id,'DEFINITION_FETCH_OFFLINE',`VibeMiner couldn’t reach WoWDBDefs on GitHub to fetch a newer ItemClass definition. The pinned ItemClass definition doesn’t list build ${opened.get(contextKey).build.version} or any layout on its version line, so this table can’t open. Tables the bundled definitions cover still open. Check the connection, then use Retry table data, or turn off Fetch newer table definitions in Settings.`,true);
+          Object.assign(value,{definitionSha256:FETCHED_SHA,providerRevision:FETCHED.revision,fetchedDefinition:FETCHED,fetchedBecause:value.schemaMatch==='layoutOnly'?'layoutMatch':existsSync(path.join(directory,'table-fetched-layout'))?'layoutNotBundled':'exactBuild',bundledFallback:false});
+        }
         // D079 (#53): the authored ClassID came from a 32-bit pallet and keeps its low 8 bits.
         if(existsSync(path.join(directory,'table-narrowing'))){const c=value.columns.find(c=>c.name==='ClassID');c.narrowing={storedBits:32,usedBits:8};}
         tableData.set(key,value);return reply(id,value);
@@ -370,6 +392,18 @@ async function dispatch(request) {
     const value = tableDefinitions[params.tableId] ? structuredClone(tableDefinitions[params.tableId]) : { provider: tablesProvider, entry, definition: null, problem: { code: 'DEFINITION_NOT_BUNDLED', message: 'This provider entry is listed, but its definition is not bundled.' } };
     if (value.definition && existsSync(path.join(directory, 'definition-no-candidate'))) {
       value.definition.candidates = []; value.problem = { code: 'SCHEMA_BUILD_NOT_LISTED', message: 'The exact authored build has no matching candidate; no nearby layout was substituted.' };
+    }
+    if (value.definition && existsSync(path.join(directory, 'table-fetched-exact')) && params.tableId === 'b977271e') {
+      const rows = tableData.get(`${key}|b977271e|enUS`);
+      value.definitionFetch = fetchEnabled() ? 'on' : 'off';
+      if (rows?.fetchedDefinition && fetchEnabled() && !existsSync(path.join(directory, 'table-definition-stale'))) Object.assign(value.definition, { sha256: FETCHED_SHA, sourceUrl: `https://raw.githubusercontent.com/wowdev/WoWDBDefs/${FETCHED.revision}/definitions/ItemClass.dbd`, fetched: FETCHED });
+      else value.problem = { code: 'SCHEMA_BUILD_NOT_LISTED', message: 'The pinned definition does not list this exact build. Data can open only if the file’s layout hash matches one of its candidate layouts.' };
+    }
+    if (value.definition && existsSync(path.join(directory, 'table-fetched')) && params.tableId === 'b977271e') {
+      const rows = tableData.get(`${key}|b977271e|enUS`);
+      value.definitionFetch = fetchEnabled() ? 'on' : 'off';
+      if (rows?.fetchedDefinition && fetchEnabled()) Object.assign(value.definition, { sha256: FETCHED_SHA, sourceUrl: `https://raw.githubusercontent.com/wowdev/WoWDBDefs/${FETCHED.revision}/definitions/ItemClass.dbd`, fetched: FETCHED });
+      else { value.definition.candidates = []; value.problem = { code: 'SCHEMA_BUILD_NOT_LISTED', message: fetchEnabled() ? 'The pinned definition does not list this exact build or any layout on its version line. Opening its data first fetches the newest WoWDBDefs definition for this table.' : 'The pinned definition does not list this exact build or any layout on its version line, so this table can’t open. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest definition for this table.' }; }
     }
     // D080: the authored build is not listed, so its candidates can only match a loaded file by layout.
     if (value.definition && existsSync(path.join(directory, 'table-layout-only'))) value.problem = { code: 'SCHEMA_BUILD_NOT_LISTED', message: 'The authored definition does not list this build. Data can open only if the file’s layout hash matches one of its candidate layouts.' };

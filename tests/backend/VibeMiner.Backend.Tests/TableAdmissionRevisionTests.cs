@@ -133,11 +133,11 @@ public sealed class TableAdmissionRevisionTests
     private const string Now = "2026-10-19T00:00:00Z", Version = "1.60.1.70450";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static string N(long n) => n.ToString(CultureInfo.InvariantCulture);
-    private static string Md5(byte[] bytes) => Convert.ToHexStringLower(MD5.HashData(bytes));
-    private static string Sha(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+    internal static string Md5(byte[] bytes) => Convert.ToHexStringLower(MD5.HashData(bytes));
+    internal static string Sha(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
     private static void Put(byte[] b, int at, uint n) => BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(at), n);
-    private sealed record SourceObject(string Role, string ContentKey, string EncodingKey, byte[] Decoded, byte[] Encoded);
-    private static SourceObject Raw(string role, byte[] decoded)
+    internal sealed record SourceObject(string Role, string ContentKey, string EncodingKey, byte[] Decoded, byte[] Encoded);
+    internal static SourceObject Raw(string role, byte[] decoded)
     { byte[] encoded = [.. "BLTE"u8.ToArray(), 0, 0, 0, 0, (byte)'N', .. decoded]; return new(role, Md5(decoded), Md5(encoded), decoded, encoded); }
 
     private sealed class Harness : IAsyncDisposable
@@ -200,11 +200,11 @@ public sealed class TableAdmissionRevisionTests
         { using var db = new SqliteConnection("Data Source=" + Path.Combine(directory, "discovery-v1.sqlite3") + ";Pooling=False"); await db.OpenAsync(); using var c = db.CreateCommand(); c.CommandText = sql; foreach (var value in values) c.Parameters.AddWithValue(value.Name, value.Value); await c.ExecuteNonQueryAsync(); }
         public async ValueTask DisposeAsync() { if (Store is not null) await Store.DisposeAsync(); client.Dispose(); await objects.DisposeAsync(); await Catalog.DisposeAsync(); Directory.Delete(directory, true); }
     }
-    private static SourceObject Table(int count)
+    internal static SourceObject Table(int count, uint layout = 0x9a2a4834)
     {
         var recordSize = count * 4; var start = 204 + 80 + count * 28 + 8; var clearEnd = start + recordSize + 4;
         var body = new byte[clearEnd + recordSize + 4]; "WDC5"u8.CopyTo(body); Put(body, 4, 5); "authored"u8.CopyTo(body.AsSpan(8));
-        Put(body, 136, 2); Put(body, 140, (uint)count); Put(body, 144, (uint)recordSize); Put(body, 152, 0x50238ec2); Put(body, 156, 0x9a2a4834);
+        Put(body, 136, 2); Put(body, 140, (uint)count); Put(body, 144, (uint)recordSize); Put(body, 152, 0x50238ec2); Put(body, 156, layout);
         BinaryPrimitives.WriteUInt16LittleEndian(body.AsSpan(172), 4); Put(body, 176, (uint)count); Put(body, 188, (uint)count * 24); Put(body, 200, 2);
         Put(body, 212, (uint)start); Put(body, 216, 1); Put(body, 228, 4);
         BinaryPrimitives.WriteUInt64LittleEndian(body.AsSpan(244), 1); Put(body, 252, (uint)clearEnd); Put(body, 256, 1); Put(body, 268, 4);
@@ -221,14 +221,14 @@ public sealed class TableAdmissionRevisionTests
         { BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(at), (uint)chunk.Length); BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(at + 4), (uint)length); MD5.HashData(chunk).CopyTo(header, at + 8); }
         return new("table", Md5(body), Md5(header), body, [.. header, .. clear, .. encrypted]);
     }
-    private static SourceObject Root(string key)
+    internal static SourceObject Root(string key)
     {
         using var stream = new MemoryStream(); using var w = new BinaryWriter(stream);
         w.Write("TSFM"u8); w.Write(24u); w.Write(2u); w.Write(1u); w.Write(0u); w.Write(0u);
         w.Write(1u); w.Write(2u); w.Write(0x10000000u); w.Write(0u); w.Write((byte)0); w.Write(841626u); w.Write(Convert.FromHexString(key));
         return Raw("root", stream.ToArray());
     }
-    private static SourceObject Encoding(SourceObject[] entries)
+    internal static SourceObject Encoding(SourceObject[] entries)
     {
         var contents = entries.OrderBy(e => e.ContentKey, StringComparer.Ordinal).ToArray(); var encodings = entries.OrderBy(e => e.EncodingKey, StringComparer.Ordinal).ToArray();
         var cp = new byte[1024]; var ep = new byte[1024];
@@ -239,7 +239,7 @@ public sealed class TableAdmissionRevisionTests
         return Raw("encoding", [.. header, .. Convert.FromHexString(contents[0].ContentKey), .. MD5.HashData(cp), .. cp, .. Convert.FromHexString(encodings[0].EncodingKey), .. MD5.HashData(ep), .. ep]);
     }
     private static void Put40(Span<byte> target, int n) { target[0] = 0; BinaryPrimitives.WriteUInt32BigEndian(target[1..], (uint)n); }
-    private sealed class Handler(IReadOnlyDictionary<string, byte[]> responses) : HttpMessageHandler
+    internal sealed class Handler(IReadOnlyDictionary<string, byte[]> responses) : HttpMessageHandler
     {
         internal bool Offline; internal int Requests;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)

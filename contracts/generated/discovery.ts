@@ -29,6 +29,7 @@ export type WorkspaceSnapshot = WorkspaceSnapshot1;
  */
 export type FileCatalogStatus = FileCatalogStatus1;
 export type TableDefinitionSnapshot = TableDefinitionSnapshot1;
+export type SettingsTimestamp = string;
 export type ContentReceipt = ContentReceipt1;
 /**
  * Opaque engine-run epoch and change count (D077). Compare for equality only.
@@ -216,7 +217,6 @@ export type CreatureGeometryTextureState =
  */
 export type CreatureGeometryAppearance = CreatureGeometryAppearance1;
 export type CreatureGeometryResult = CreatureGeometryResult1;
-export type SettingsTimestamp = string;
 
 export interface DiscoveryContract {
   product: Product;
@@ -1028,6 +1028,10 @@ export interface TableDefinitionSnapshot1 {
   entry: TableCatalogEntry;
   definition: TableDefinitionInfo | null;
   problem: TablesProblem | null;
+  /**
+   * on: the Tables view may fetch a newer definition from WoWDBDefs when its data is prepared, exact build first (D081). off: the Settings switch is off or unreadable. Absent when the table has no bundled definition.
+   */
+  definitionFetch?: 'on' | 'off';
 }
 export interface TableDefinitionInfo {
   sha256: string;
@@ -1189,6 +1193,7 @@ export interface TableDefinitionInfo {
         TableLayoutCandidate,
         TableLayoutCandidate
       ];
+  fetched?: TableDefinitionFetched;
 }
 export interface TableDefinitionField {
   name: string;
@@ -1213,6 +1218,13 @@ export interface TableLayoutCandidate {
    * @maxItems 256
    */
   fields: TableDefinitionField[];
+}
+/**
+ * Present when this definition was fetched from WoWDBDefs; sha256 and sourceUrl are then those of the fetched file. Absent: the bundled definition at the provider revision.
+ */
+export interface TableDefinitionFetched {
+  revision: string;
+  fetchedAt: SettingsTimestamp;
 }
 export interface TablesProblem {
   code: string;
@@ -1243,6 +1255,15 @@ export interface TableDataSnapshot {
    * layoutOnly: no definition block lists this build; the file's layout hash chose the block (D080). Omitted: a block lists the exact build and layout.
    */
   schemaMatch?: 'layoutOnly';
+  fetchedDefinition?: TableDefinitionFetched1;
+  /**
+   * With fetchedDefinition, which rule chose it (D081). exactBuild: it lists the build and the bundled definition doesn't. layoutNotBundled: the bundled definition lists the build but has no block for the file's layout, and the fetched one has one. layoutMatch: neither lists the build and only the fetched block matches the file's layout (schemaMatch layoutOnly).
+   */
+  fetchedBecause?: 'exactBuild' | 'layoutNotBundled' | 'layoutMatch';
+  /**
+   * With fetchedDefinition: true when the bundled definition alone would still open this file by layout, so turning fetching off keeps the table open.
+   */
+  bundledFallback?: boolean;
 }
 export interface ContentReceipt1 {
   contentKey: string;
@@ -1336,6 +1357,13 @@ export interface TableDataCoverage {
   declaredCopyRecords: string;
   excludedPhysicalRecords: string;
   excludedCopyRecords: string;
+}
+/**
+ * Present when the rows were read with a definition fetched from WoWDBDefs (D081); providerRevision is then its commit.
+ */
+export interface TableDefinitionFetched1 {
+  revision: string;
+  fetchedAt: SettingsTimestamp;
 }
 export interface TableDataReadiness {
   snapshot: TableDataSnapshot | null;
@@ -3491,6 +3519,15 @@ export interface SettingsSnapshot {
     source: 'default' | 'saved' | 'unreadable';
     problem: SettingsProblem | null;
   };
+  /**
+   * Fetch newer table definitions from WoWDBDefs for the Tables view, exact build first (D081). On by default; an unreadable value reads as off.
+   */
+  fetchTableDefinitions: {
+    value: boolean;
+    defaultValue: true;
+    source: 'default' | 'saved' | 'unreadable';
+    problem: SettingsProblem | null;
+  };
   storage: {
     dataDirectory: string;
   };
@@ -3507,7 +3544,7 @@ export interface SettingsProblem {
   retryable: boolean;
 }
 export interface SettingsSetParams {
-  name: 'communityBuildHistory';
+  name: 'communityBuildHistory' | 'fetchTableDefinitions';
   value: boolean;
 }
 export interface StorageMeasurement {

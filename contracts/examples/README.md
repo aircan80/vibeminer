@@ -10,6 +10,8 @@ These JSON documents are synthetic contract fixtures, not acquired Blizzard meta
 
 `table-data-layout-only.json` is one authored ItemClass `tables.data` reply whose build no definition block lists, so the file's layout hash chose the block (`schemaMatch: layoutOnly`, D080). Values and receipts are synthetic.
 
+`table-data-fetched.json` is the same authored ItemClass reply read with a definition fetched from WoWDBDefs (D081): `providerRevision` is the sample commit, `fetchedDefinition` says when it was fetched , `fetchedBecause` that it lists the exact build and `bundledFallback` that the bundled definition would still open it by layout. The commit and SHA-256 are samples.
+
 `table-reference-text.json` is one authored Item page of reference text: a resolved, empty, several-match, not-found, out-of-range and unreadable ClassID value, plus a bundled target with no reviewed text column and an unbundled target. Its IDs and labels are synthetic.
 
 `table-follow.json` is one authored [follow](../table-follow-v1.md): Item.ClassID = 7 followed to the two ItemClass rows whose ClassID is 7. Its IDs and labels are synthetic.
@@ -20,7 +22,7 @@ These JSON documents are synthetic contract fixtures, not acquired Blizzard meta
 
 `item-effects-readiness.json`, `item-effects-page.json`, `item-effect-details.json` and `item-effect-names.json` are authored selected-Item effects wire fixtures. They preserve a partial Bridge with separate index/source ordinals and a copy occurrence, partial Effect copy evidence with all nine strict/raw/unverified fields, and complete Name evidence for zero IDs. Repeated effect/spell values remain distinct edge keys. These establish wire shape and controlled App/Host behavior, not native source qualification or enabled production capabilities.
 
-`settings-snapshot.json` is an authored [settings](../settings-v1.md) read: a settings file that was read, with one saved value the engine doesn't understand, so Community build history uses its default and says so. The folder path and time are samples.
+`settings-snapshot.json` is an authored [settings](../settings-v1.md) read: a settings file that was read, with one saved value the engine doesn't understand, so Community build history uses its default and says so. Fetch newer table definitions is saved off. The folder path and time are samples.
 `inventory-files-page.json` and `inventory-file-detail.json` are authored Files wire fixtures ([inventory-v1](../inventory-v1.md#files)): one ROOT FileDataID with two memberships, one of them unresolved (no EKey or encoded size), and one install name. They show shape only. A legacy full catalog resolves every ROOT/install membership before it is sealed; a file catalog prepared after Open keeps unresolved ones explicit ([D071](../../docs/DECISIONS.md)).
 
 `file-catalog-status.json` lists one authored `inventory.catalog` reply per state ([inventory-v1](../inventory-v1.md#file-catalog-after-open)): pending while writing, pending after a failed attempt and waiting for another build, paused with the build's Download all, stopped, ready with exact counts, failed after three attempts with its cause, unsupported, a build never opened through that region, and one freed from Settings (`removed`, D085).

@@ -265,6 +265,91 @@ public sealed class SettingsTests
     }
 
     [Fact]
+    public async Task Fetching_table_definitions_is_on_by_default_and_saves_like_any_switch()
+    {
+        using var directory = new TempDirectory(); Directory.CreateDirectory(directory.Path);
+        var service = Service(directory.Path);
+        Assert.Equal(new BooleanSetting(true, true, SettingSource.Default, null), (await service.ReadAsync()).FetchTableDefinitions);
+        Assert.True(await service.FetchEnabledAsync(default));
+        var off = await service.SetAsync(SettingsService.FetchTableDefinitions, false);
+        Assert.Equal(new BooleanSetting(false, true, SettingSource.Saved, null), off.FetchTableDefinitions);
+        // The other switch keeps having no saved value: a change writes only what it changes.
+        Assert.Equal(SettingSource.Default, off.CommunityBuildHistory.Source);
+        Assert.False(await Service(directory.Path).FetchEnabledAsync(default));
+        using var saved = JsonDocument.Parse(await File.ReadAllBytesAsync(SettingsFile(directory)));
+        var values = saved.RootElement.GetProperty("values");
+        Assert.Equal(1, saved.RootElement.GetProperty("version").GetInt32());
+        Assert.False(values.GetProperty("fetchTableDefinitions").GetBoolean());
+        Assert.False(values.TryGetProperty("communityBuildHistory", out _));
+    }
+
+    [Fact]
+    public async Task A_file_from_before_the_switch_reads_it_as_on_and_a_change_keeps_every_other_value()
+    {
+        using var directory = new TempDirectory(); Directory.CreateDirectory(directory.Path);
+        // A settings-v1 file the #8 engine wrote, plus a bad value of the other switch and an unknown one.
+        await File.WriteAllTextAsync(SettingsFile(directory),
+            "{\"version\":1,\"changedAt\":\"2026-10-18T12:02:00.0000000+00:00\",\"values\":{\"communityBuildHistory\":\"yes\",\"laterSetting\":[1,2]},\"later\":true}");
+        var service = Service(directory.Path);
+        var before = await service.ReadAsync();
+        Assert.Equal(new BooleanSetting(true, true, SettingSource.Default, null), before.FetchTableDefinitions);
+        Assert.True(await service.FetchEnabledAsync(default));
+        Assert.Equal(SettingSource.Unreadable, before.CommunityBuildHistory.Source);
+        var committed = await service.SetAsync(SettingsService.FetchTableDefinitions, false);
+        Assert.Equal(SettingSource.Unreadable, committed.CommunityBuildHistory.Source);
+        using var saved = JsonDocument.Parse(await File.ReadAllBytesAsync(SettingsFile(directory)));
+        var values = saved.RootElement.GetProperty("values");
+        Assert.Equal("yes", values.GetProperty("communityBuildHistory").GetString());
+        Assert.Equal("[1,2]", values.GetProperty("laterSetting").GetRawText());
+        Assert.False(values.GetProperty("fetchTableDefinitions").GetBoolean());
+        Assert.True(saved.RootElement.GetProperty("later").GetBoolean());
+        // Switching the other one replaces only its own bad value and keeps this one.
+        var community = await service.SetAsync(SettingsService.CommunityBuildHistory, true);
+        Assert.True(community.CommunityBuildHistory.Value); Assert.False(community.FetchTableDefinitions.Value);
+    }
+
+    [Fact]
+    public async Task Switching_one_setting_in_a_damaged_file_saves_the_others_as_shown()
+    {
+        using var directory = new TempDirectory(); Directory.CreateDirectory(directory.Path);
+        await File.WriteAllTextAsync(SettingsFile(directory), "{broken");
+        var service = Service(directory.Path);
+        Assert.False((await service.ReadAsync()).FetchTableDefinitions.Value);
+        var committed = await service.SetAsync(SettingsService.CommunityBuildHistory, true);
+        // Fetching was shown Off while the file was damaged; turning Community on never turns fetching back on.
+        Assert.Equal(new BooleanSetting(false, true, SettingSource.Saved, null), committed.FetchTableDefinitions);
+        Assert.False(await service.FetchEnabledAsync(default));
+        using var saved = JsonDocument.Parse(await File.ReadAllBytesAsync(SettingsFile(directory)));
+        Assert.False(saved.RootElement.GetProperty("values").GetProperty("fetchTableDefinitions").GetBoolean());
+        // A missing file keeps the other switch at its default, unsaved.
+        File.Delete(SettingsFile(directory));
+        var fresh = await service.SetAsync(SettingsService.CommunityBuildHistory, true);
+        Assert.Equal(SettingSource.Default, fresh.FetchTableDefinitions.Source);
+    }
+
+    [Theory]
+    [InlineData("{\"version\":1,\"values\":{\"fetchTableDefinitions\":\"off\"}}", "SETTING_UNREADABLE")]
+    [InlineData("{\"version\":2,\"values\":{\"fetchTableDefinitions\":false}}", "SETTINGS_VERSION")]
+    [InlineData("{broken", "SETTINGS_UNREADABLE")]
+    public async Task An_unreadable_fetch_value_or_newer_file_reads_as_off_and_fetches_nothing(string content, string code)
+    {
+        using var directory = new TempDirectory(); Directory.CreateDirectory(directory.Path);
+        await File.WriteAllTextAsync(SettingsFile(directory), content);
+        var service = Service(directory.Path);
+        var snapshot = await service.ReadAsync();
+        Assert.Equal(SettingSource.Unreadable, snapshot.FetchTableDefinitions.Source);
+        Assert.False(snapshot.FetchTableDefinitions.Value); Assert.True(snapshot.FetchTableDefinitions.DefaultValue);
+        Assert.Equal(code, snapshot.FetchTableDefinitions.Problem!.Code);
+        Assert.False(await service.FetchEnabledAsync(default));
+        if (code == "SETTINGS_VERSION")
+        {
+            Assert.Equal("SETTINGS_VERSION", (await Assert.ThrowsAsync<DiscoveryException>(() => service.SetAsync(SettingsService.FetchTableDefinitions, true))).Code);
+            Assert.Equal(content, await File.ReadAllTextAsync(SettingsFile(directory)));
+        }
+        else Assert.False((await service.SetAsync(SettingsService.FetchTableDefinitions, false)).FetchTableDefinitions.Value);
+    }
+
+    [Fact]
     public async Task A_newer_settings_version_is_reported_and_never_overwritten()
     {
         using var directory = new TempDirectory(); Directory.CreateDirectory(directory.Path);
@@ -411,6 +496,11 @@ public sealed class SettingsTests
         Assert.False(community.GetProperty("value").GetBoolean());
         Assert.False(community.GetProperty("defaultValue").GetBoolean());
         Assert.Equal("default", community.GetProperty("source").GetString());
+        var fetch = read.GetProperty("fetchTableDefinitions");
+        Assert.True(fetch.GetProperty("value").GetBoolean());
+        Assert.True(fetch.GetProperty("defaultValue").GetBoolean());
+        Assert.Equal("default", fetch.GetProperty("source").GetString());
+        Assert.Equal(JsonValueKind.Null, fetch.GetProperty("problem").ValueKind);
         Assert.Equal(Path.GetFullPath(directory.Path), read.GetProperty("storage").GetProperty("dataDirectory").GetString());
         var limits = read.GetProperty("downloadLimits");
         Assert.Equal(4, limits.GetProperty("parallelDownloads").GetInt32());
@@ -430,6 +520,10 @@ public sealed class SettingsTests
         Assert.True(committed.GetProperty("communityBuildHistory").GetProperty("value").GetBoolean());
         Assert.Equal("saved", committed.GetProperty("communityBuildHistory").GetProperty("source").GetString());
         Assert.EndsWith("+00:00", committed.GetProperty("lastChangedAt").GetString());
+        var off = (await Run(Service(directory.Path), Request("off", "settings.set", new { name = SettingsService.FetchTableDefinitions, value = false })))["off"].GetProperty("result");
+        Assert.False(off.GetProperty("fetchTableDefinitions").GetProperty("value").GetBoolean());
+        Assert.Equal("saved", off.GetProperty("fetchTableDefinitions").GetProperty("source").GetString());
+        Assert.True(off.GetProperty("communityBuildHistory").GetProperty("value").GetBoolean());
     }
 
     [Fact]

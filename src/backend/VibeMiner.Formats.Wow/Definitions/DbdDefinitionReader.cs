@@ -8,7 +8,11 @@ namespace VibeMiner.Formats.Wow;
 
 public sealed record DbdLimits(int MaxBytes = 1 << 20, int MaxLines = 16_384, int MaxLineCharacters = 16_384,
     int MaxColumns = 512, int MaxBlocks = 4096, int MaxFieldsPerBlock = 256, int MaxSelectors = 100_000,
-    int MaxArrayLength = 4096, int MaxCommentCharacters = 2000);
+    int MaxArrayLength = 4096, int MaxCommentCharacters = 2000, int MaxLayouts = 8192, long MaxSelectionBytes = 4L << 20);
+// MaxLayouts bounds layout hashes across all blocks. MaxSelectionBytes caps an approximate measure of layout-selection
+// work: every block's fields once per layout hash (TableRowArtifacts). The measure isn't exact, but the cap keeps the
+// total work bounded.
+// Every WoWDBDefs master definition the reader accepted on 2026-10-24 stays below both: at most 37 layouts and 1.3 MiB.
 public sealed record DbdReference(string Table, string Column);
 public sealed record DbdColumn(string Name, string Family, bool VerifiedName, string? Comment, DbdReference? Reference);
 public sealed record DbdField(DbdColumn Column, int? IntegerBits, bool? Unsigned, int ArrayLength,
@@ -45,6 +49,9 @@ public sealed record DbdBlock(IReadOnlyList<string> LayoutHashes, IReadOnlyList<
 public sealed record DbdSelection(string Status, IReadOnlyList<DbdBlock> Blocks, string Match = "build");
 public sealed record DbdDocument(IReadOnlyList<DbdColumn> Columns, IReadOnlyList<DbdBlock> Blocks)
 {
+    /// <summary>The approximate layout-selection work over this definition, <see cref="DbdDefinitionReader.EstimateSelection"/>,
+    /// as measured at parse time and capped by <see cref="DbdLimits.MaxSelectionBytes"/>.</summary>
+    public long SelectionCost { get; init; }
     public bool ListsBuild(string buildVersion, CancellationToken token = default) =>
         SelectBuild(buildVersion, token: token).Blocks.Count > 0;
 
@@ -160,7 +167,8 @@ public static class DbdDefinitionReader
     {
         limits ??= new();
         if (limits.MaxBytes < 1 || limits.MaxLines < 1 || limits.MaxLineCharacters < 1 || limits.MaxColumns < 1 || limits.MaxBlocks < 1 ||
-            limits.MaxFieldsPerBlock < 1 || limits.MaxSelectors < 1 || limits.MaxArrayLength < 1 || limits.MaxCommentCharacters < 1)
+            limits.MaxFieldsPerBlock < 1 || limits.MaxSelectors < 1 || limits.MaxArrayLength < 1 || limits.MaxCommentCharacters < 1 ||
+            limits.MaxLayouts < 1 || limits.MaxSelectionBytes < 1)
             throw new ArgumentOutOfRangeException(nameof(limits));
         token.ThrowIfCancellationRequested();
         if (bytes.Length > limits.MaxBytes) throw Error("DBD_LIMIT", "The definition exceeds its byte limit.");
@@ -212,11 +220,13 @@ public static class DbdDefinitionReader
             if (columns.Count > limits.MaxColumns) throw Error("DBD_LIMIT", "The definition exceeds its column bound.");
         }
         if (columns.Count == 0) throw Error("DBD_INVALID", "The COLUMNS section is empty.");
-        var blocks = new List<DbdBlock>(); var selectors = 0;
+        var blocks = new List<DbdBlock>(); var selectors = 0; var layoutTotal = 0; long selectionBytes = 0;
         foreach (var lines in groups.Skip(1))
         {
             token.ThrowIfCancellationRequested();
-            var layouts = new List<string>(); var builds = new List<DbdBuildRange>(); var fields = new List<DbdField>();
+            // The set keeps a long LAYOUT line linear: untrusted fetched definitions are parsed here too (#55).
+            var layouts = new List<string>(); var layoutSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var builds = new List<DbdBuildRange>(); var fields = new List<DbdField>();
             var seen = new HashSet<string>(StringComparer.Ordinal); var hasLayoutLine = false; string? blockComment = null;
             foreach (var (body, lineComment) in lines)
             {
@@ -240,7 +250,7 @@ public static class DbdDefinitionReader
                         var value = raw.Trim();
                         if (isLayout)
                         {
-                            if (!IsLayout(value) || layouts.Contains(value, StringComparer.OrdinalIgnoreCase))
+                            if (!IsLayout(value) || !layoutSet.Add(value))
                                 throw Error("DBD_INVALID", "A layout selector is malformed or repeated.");
                             layouts.Add(value.ToUpperInvariant());
                         }
@@ -281,12 +291,44 @@ public static class DbdDefinitionReader
                 if (fields.Count > limits.MaxFieldsPerBlock) throw Error("DBD_LIMIT", "A definition block exceeds its field bound.");
             }
             if (builds.Count == 0 || fields.Count == 0) throw Error("DBD_INVALID", "Every definition block requires BUILD selectors and fields.");
+            // Bound the work layout selection can do over this definition before any of it happens.
+            layoutTotal += layouts.Count;
+            if (layoutTotal > limits.MaxLayouts) throw Error("DBD_LIMIT", "The definition exceeds its layout bound.");
+            long fieldBytes = 0;
+            foreach (var field in fields)
+                fieldBytes += SelectionBytes(field);
+            selectionBytes += Math.Max(1, layouts.Count) * fieldBytes;
+            if (selectionBytes > limits.MaxSelectionBytes) throw Error("DBD_LIMIT", "The definition exceeds its layout selection bound.");
             blocks.Add(new(layouts.AsReadOnly(), builds.AsReadOnly(), fields.AsReadOnly(), blockComment));
         }
         if (blocks.Count == 0) throw Error("DBD_INVALID", "A definition requires at least one version block.");
         token.ThrowIfCancellationRequested();
-        return new(new ReadOnlyCollection<DbdColumn>(columns.Values.ToArray()), blocks.AsReadOnly());
+        return new(new ReadOnlyCollection<DbdColumn>(columns.Values.ToArray()), blocks.AsReadOnly()) { SelectionCost = selectionBytes };
     }
     internal static bool IsLayout(string value) => value.Length == 8 && value.All(char.IsAsciiHexDigit);
+    // An approximate size of one field's JSON in a layout selection key: fixed property names and values, plus every
+    // string the field serializes (its own comment and its column's name, family, comment and reference) at 6 bytes per
+    // character, what the default encoder spends on an escaped one.
+    public static long SelectionBytes(DbdField field) => checked(320 + 6L * ((long)field.Column.Name.Length + field.Column.Family.Length +
+        (field.Column.Comment?.Length ?? 0) + (field.Comment?.Length ?? 0) +
+        (field.Column.Reference is { } reference ? reference.Table.Length + reference.Column.Length : 0)));
+    /// <summary>The same measure the parser caps, computed from the blocks themselves, so it holds for a document the
+    /// parser didn't build too.</summary>
+    public static long EstimateSelection(DbdDocument document)
+    {
+        try
+        {
+            long total = 0;
+            foreach (var block in document.Blocks)
+            {
+                long fields = 0;
+                foreach (var field in block.Fields) fields = checked(fields + SelectionBytes(field));
+                total = checked(total + checked(Math.Max(1, block.LayoutHashes.Count) * fields));
+            }
+            return total;
+        }
+        // A measure too large to count is over any cap.
+        catch (OverflowException) { return long.MaxValue; }
+    }
     internal static DiscoveryException Error(string code, string message) => new(code, message);
 }

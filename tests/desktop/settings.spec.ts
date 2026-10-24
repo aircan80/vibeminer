@@ -18,6 +18,7 @@ async function realEngine(data: string) {
 async function size(app: ElectronApplication, width: number, height: number) { await app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s.width, s.height), { width, height }); }
 async function text(page: Page, scale: number) { await page.evaluate(font => { document.documentElement.style.fontSize = `${font}px`; }, 15 * scale); }
 const community = (page: Page) => page.getByRole('switch', { name: /Community build history/ });
+const fetchSwitch = (page: Page) => page.getByRole('switch', { name: 'Fetch newer table definitions from WoWDBDefs' });
 // The window never scrolls; the status bar stays at the bottom and nothing overflows sideways.
 async function fixedWindow(page: Page, app: ElectronApplication, state: string) {
   const directory = path.join(root, 'artifacts/desktop-settings'); await mkdir(directory, { recursive: true });
@@ -67,6 +68,16 @@ test('the real engine saves Community build history in its data folder and it su
       await expect(community(page)).toBeFocused();
       await expect(page.locator('#settings-community-save')).toContainText('Saved');
       expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({ version: 1, values: { communityBuildHistory: true } });
+      // Fetch newer table definitions (#55) is on by default, saves on its own and keeps the other value.
+      await expect(fetchSwitch(page)).toHaveAttribute('aria-checked', 'true');
+      await expect(page.locator('#settings-row-fetch')).toContainText('Default: On');
+      await page.keyboard.press('Tab');
+      await expect(fetchSwitch(page)).toBeFocused();
+      await page.keyboard.press('Space');
+      await expect(fetchSwitch(page)).toHaveAttribute('aria-checked', 'false');
+      await expect(page.locator('#settings-fetch-save')).toContainText('Saved');
+      expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({ version: 1, values: { communityBuildHistory: true, fetchTableDefinitions: false } });
+      await fixedWindow(page, app, 'fetch-off');
       await page.keyboard.press('Escape');
       await expect(page.getByRole('heading', { name: 'Builds', level: 1 })).toBeVisible();
       await expect(page.locator('.dv-toolbar').getByRole('button', { name: 'Settings' })).toBeFocused();
@@ -77,6 +88,7 @@ test('the real engine saves Community build history in its data folder and it su
       await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeFocused();
       await expect(community(page)).toHaveAttribute('aria-checked', 'true');
       await expect(community(page)).toHaveText('On');
+      await expect(fetchSwitch(page)).toHaveAttribute('aria-checked', 'false');
     } finally { await app.close(); }
     // A value VibeMiner doesn't understand falls back to the default and says so; switching replaces it.
     await writeFile(file, JSON.stringify({ version: 1, values: { communityBuildHistory: 'yes' } }));
@@ -85,7 +97,7 @@ test('the real engine saves Community build history in its data folder and it su
       await page.keyboard.press('Control+Comma');
       await expect(community(page)).toHaveAttribute('aria-checked', 'false');
       await expect(page.getByText('Default: Off · in use now')).toBeVisible();
-      await expect(page.getByRole('note')).toContainText('(SETTING_UNREADABLE)');
+      await expect(page.locator('#settings-row-community').getByRole('note')).toContainText('(SETTING_UNREADABLE)');
       await expect(page.getByText('1 setting is using its default')).toBeVisible();
       await fixedWindow(page, app, 'unreadable');
       // A failed write leaves the saved file as it was and is never replayed on its own.
@@ -112,8 +124,9 @@ test('the real engine saves Community build history in its data folder and it su
     try {
       await page.keyboard.press('Control+Comma');
       await expect(community(page)).toHaveAttribute('aria-disabled', 'true');
-      await expect(page.getByRole('note')).toContainText('Saved by a newer VibeMiner. Using the default, Off.');
-      await expect(page.getByText('Can’t be changed here: saved by a newer VibeMiner.')).toBeVisible();
+      await expect(page.locator('#settings-row-community').getByRole('note')).toContainText('Saved by a newer VibeMiner. Using the default, Off.');
+      for (const line of ['#settings-community-save', '#settings-fetch-save']) await expect(page.locator(line)).toHaveText('Can’t be changed here: saved by a newer VibeMiner.');
+      await expect(fetchSwitch(page)).toHaveAttribute('aria-disabled', 'true');
       await community(page).click({ force: true });
       await expect(page.getByRole('alert')).toHaveCount(0);
       // The disabled switch keeps full opacity with muted text; only the track fades.
@@ -127,10 +140,10 @@ test('the real engine saves Community build history in its data folder and it su
     try {
       await page.keyboard.press('Control+Comma');
       await expect(community(page)).toHaveAttribute('aria-disabled', 'true');
-      await expect(page.getByRole('note')).toContainText('Settings file not read. Using the default, Off.');
+      await expect(page.locator('#settings-row-community').getByRole('note')).toContainText('Settings file not read. Using the default, Off.');
       await expect(page.locator('.st-side')).toContainText('Not known');
       await expect(page.getByText(/Your choice is saved now/)).toHaveCount(0);
-      const again = page.getByRole('note').getByRole('button', { name: 'Read again' });
+      const again = page.locator('#settings-row-community').getByRole('note').getByRole('button', { name: 'Read again' });
       // The reference button height, with a gap above it.
       const box = await again.evaluate(el => ({ height: parseFloat(getComputedStyle(el).height), gap: getComputedStyle(el).marginTop }));
       expect(box.height).toBeCloseTo(26.6, 1);

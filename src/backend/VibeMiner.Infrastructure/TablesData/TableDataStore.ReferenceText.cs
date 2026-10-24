@@ -50,12 +50,13 @@ public sealed partial class TableDataStore
         try
         {
             ObjectDisposedException.ThrowIf(referenceClosed, this);
-            var dataRequest = new TableDataRequest(request.ProductId, request.BuildIdentity, request.SourceRegion, request.TableId, request.ResearchLocale);
-            var (context, provider, entry, definition) = await ResolveAsync(dataRequest, token);
+            var dataRequest = new TableDataRequest(request.ProductId, request.BuildIdentity, request.SourceRegion, request.TableId, request.ResearchLocale, FetchedDefinitions: true);
+            var (context, provider, entry, bundled, fetchEnabled) = await ResolveAsync(dataRequest, token);
             var admission = await catalog.ReadTableAdmissionAsync(context, request.TableId, request.ResearchLocale, token)
                 ?? throw new DiscoveryException("TABLE_NOT_PREPARED", "Load this exact table and research locale before reading its records.");
             var configuration = await ReadBuildConfigurationAsync(context, token);
             ValidateSourceAssociation(configuration, admission.Association);
+            var definition = await definitions.ForRowsAsync(entry, bundled, context.Build.Version, admission.Artifact, fetchEnabled, token);
             Validate(admission, entry, definition, context.Build.Version);
             if (request.ArtifactId != admission.Artifact.ContentKey)
                 throw new DiscoveryException("TABLE_ARTIFACT_STALE", "This row page belongs to a different table interpretation. Reopen the table data.");
@@ -77,8 +78,8 @@ public sealed partial class TableDataStore
                 if (rule is null)
                 {
                     // Number only. Say whether the target is a bundled table without a reviewed text column or has no definition.
-                    var bundled = provider.Entries.Any(e => e.Name == reference.Table && provider.Definitions.ContainsKey(e.TableId));
-                    columns.Add(new(index, column.Name, reference, bundled ? S.NoTextRule : S.NoDefinition, null, null));
+                    var targetBundled = provider.Entries.Any(e => e.Name == reference.Table && provider.Definitions.ContainsKey(e.TableId));
+                    columns.Add(new(index, column.Name, reference, targetBundled ? S.NoTextRule : S.NoDefinition, null, null));
                     continue;
                 }
                 if (column.Family != "integer")
@@ -89,7 +90,7 @@ public sealed partial class TableDataStore
                     continue;
                 }
                 if (!targets.TryGetValue(rule.TextTableId, out var target))
-                    targets[rule.TextTableId] = target = await OpenTextTargetAsync(rule, context, provider, configuration, request.ResearchLocale, token);
+                    targets[rule.TextTableId] = target = await OpenTextTargetAsync(rule, context, provider, configuration, request.ResearchLocale, fetchEnabled, token);
                 if (target.State != S.Ready)
                 {
                     columns.Add(new(index, column.Name, reference, target.State, target.Source(), target.Problem));
@@ -120,21 +121,21 @@ public sealed partial class TableDataStore
     }
 
     private async Task<TextTarget> OpenTextTargetAsync(TableReferenceTextRule rule, CapturedOpeningContext context,
-        BundledTableDefinitions provider, TactConfiguration configuration, string locale, CancellationToken token)
+        BundledTableDefinitions provider, TactConfiguration configuration, string locale, bool fetchEnabled, CancellationToken token)
     {
         var target = new TextTarget { Rule = rule };
         TextTarget Fail(string state, string code, string message) { target.State = state; target.Problem = new(code, message); return target; }
         var entry = provider.Entries.SingleOrDefault(e => e.TableId == rule.TextTableId);
-        if (entry?.Db2FileDataId is null || !provider.Definitions.TryGetValue(rule.TextTableId, out var definition))
+        if (entry?.Db2FileDataId is null || !provider.Definitions.TryGetValue(rule.TextTableId, out var bundled))
             return Fail(S.NoDefinition, "DEFINITION_NOT_BUNDLED", $"The {rule.TextTable} definition is not bundled.");
-        if (!OpensBuild(definition.Document, context.Build.Version, token))
+        if (!fetchEnabled && !OpensBuild(bundled.Document, context.Build.Version, token))
             return Fail(S.Unsupported, "SCHEMA_BUILD_NOT_LISTED", $"The pinned {rule.TextTable} definition does not list this exact build or any layout on its version line.");
         var admission = await catalog.ReadTableAdmissionAsync(context, rule.TextTableId, locale, token);
         if (admission is null) { target.State = S.NotPrepared; return target; }
         try
         {
             ValidateSourceAssociation(configuration, admission.Association);
-            Validate(admission, entry, definition, context.Build.Version);
+            Validate(admission, entry, await definitions.ForRowsAsync(entry, bundled, context.Build.Version, admission.Artifact, fetchEnabled, token), context.Build.Version);
         }
         catch (DiscoveryException failure) when (failure.Code == "TABLE_INTERPRETATION_STALE") { target.State = S.NotPrepared; return target; }
         catch (DiscoveryException failure) when (failure.Code == "TABLE_SOURCE_CONTEXT_MISMATCH") { return Fail(S.Unreadable, failure.Code, failure.Message); }

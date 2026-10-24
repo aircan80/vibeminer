@@ -21,12 +21,13 @@ public sealed partial class TableDataStore : ITableFollowStore
         try
         {
             ObjectDisposedException.ThrowIf(referenceClosed, this);
-            var sourceRequest = new TableDataRequest(request.ProductId, request.BuildIdentity, request.SourceRegion, request.TableId, request.ResearchLocale);
-            var (context, provider, entry, definition) = await ResolveAsync(sourceRequest, token);
+            var sourceRequest = new TableDataRequest(request.ProductId, request.BuildIdentity, request.SourceRegion, request.TableId, request.ResearchLocale, FetchedDefinitions: true);
+            var (context, provider, entry, bundled, fetchEnabled) = await ResolveAsync(sourceRequest, token);
             var admission = await catalog.ReadTableAdmissionAsync(context, request.TableId, request.ResearchLocale, token)
                 ?? throw new DiscoveryException("TABLE_NOT_PREPARED", "Load this exact table and research locale before following its references.");
             var configuration = await ReadBuildConfigurationAsync(context, token);
             ValidateSourceAssociation(configuration, admission.Association);
+            var definition = await definitions.ForRowsAsync(entry, bundled, context.Build.Version, admission.Artifact, fetchEnabled, token);
             Validate(admission, entry, definition, context.Build.Version);
             if (request.ArtifactId != admission.Artifact.ContentKey)
                 throw new DiscoveryException("TABLE_ARTIFACT_STALE", "This row belongs to a different table interpretation. Reopen the table data.");
@@ -40,10 +41,11 @@ public sealed partial class TableDataStore : ITableFollowStore
             var targetEntry = provider.Entries.SingleOrDefault(e => e.TableId == request.TargetTableId);
             if (targetEntry is null || !string.Equals(targetEntry.Name, reference.Table, StringComparison.Ordinal))
                 throw new DiscoveryException("TABLE_FOLLOW_TARGET_MISMATCH", $"{column.Name} declares {reference.Table}.{reference.Column}, not this table.");
-            var (_, _, resolvedTarget, targetDefinition) = await ResolveAsync(sourceRequest with { TableId = request.TargetTableId }, token);
+            var (_, _, resolvedTarget, targetBundled, _) = await ResolveAsync(sourceRequest with { TableId = request.TargetTableId }, token);
             var target = await catalog.ReadTableAdmissionAsync(context, request.TargetTableId, request.ResearchLocale, token)
                 ?? throw new DiscoveryException("TABLE_NOT_PREPARED", $"Load {reference.Table} before following {column.Name}.");
             ValidateSourceAssociation(configuration, target.Association);
+            var targetDefinition = await definitions.ForRowsAsync(resolvedTarget, targetBundled, context.Build.Version, target.Artifact, fetchEnabled, token);
             Validate(target, resolvedTarget, targetDefinition, context.Build.Version);
             if (request.TargetArtifactId != target.Artifact.ContentKey)
                 throw new DiscoveryException("TABLE_ARTIFACT_STALE", $"The {reference.Table} rows changed. Reopen its table data.");

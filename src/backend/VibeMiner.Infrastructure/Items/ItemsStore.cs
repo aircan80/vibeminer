@@ -79,6 +79,11 @@ public sealed class ItemsStore(DiscoveryCatalog catalog, VerifiedObjectStore obj
             ?? throw new DiscoveryException("ITEMS_PREREQUISITE_STALE", "The Item admission changed before feature preparation.");
         var sparseAdmission = await catalog.ReadTableAdmissionAsync(opening, ItemsProjection.SparseTable, context.ResearchLocale, token)
             ?? throw new DiscoveryException("ITEMS_PREREQUISITE_STALE", "The Sparse admission changed before feature preparation.");
+        // Items reads bundled definitions only (D081): rows Tables read with a fetched WoWDBDefs definition never feed it.
+        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
+        foreach (var (table, rows) in new[] { (ItemsProjection.ItemTable, itemAdmission.Artifact), (ItemsProjection.SparseTable, sparseAdmission.Artifact) })
+            if (rows.Binding.ProviderRevision != BundledTableDefinitions.Revision || !provider.Definitions.TryGetValue(table, out var own) || rows.Binding.DefinitionSha256 != own.Sha256)
+                throw new DiscoveryException("ITEMS_PREREQUISITE_STALE", "An Items table was read with a definition that isn’t bundled. Load Items again.", true);
         var binding = new ItemsProjectionBinding(context, item, sparse, itemAdmission.Artifact, sparseAdmission.Artifact);
         ItemsProjection.ValidateBinding(binding);
         var artifact = await catalog.FindItemsArtifactAsync(ItemsProjection.ContentKey(binding), token);

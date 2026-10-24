@@ -27,6 +27,14 @@ public static partial class Wdc5TableReader
     private static readonly UTF8Encoding Utf8=new(false,true);
     private static DiscoveryException Fail(string code,string message)=>new("DB2_"+code,message);
 
+    /// <summary>The layout hash of a WDC5 header, as eight upper-case hex digits, or null when the bytes are not a
+    /// WDC5 schema-5 header. Only picks which definition to try (#55); the full reader still checks everything.</summary>
+    public static string? LayoutHash(ReadOnlySpan<byte> header)
+    {
+        if(header.Length<204||!header[..4].SequenceEqual("WDC5"u8)||BinaryPrimitives.ReadUInt32LittleEndian(header.Slice(4,4))!=5)return null;
+        return BinaryPrimitives.ReadUInt32LittleEndian(header.Slice(156,4)).ToString("X8",CultureInfo.InvariantCulture);
+    }
+
     public static async Task<Wdc5Completion> ReadAsync(Stream decoded,DbdDocument definition,string buildVersion,
         Wdc5Limits limits,IWdc5Consumer consumer,CancellationToken token=default)
     {

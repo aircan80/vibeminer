@@ -19,6 +19,15 @@ src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/ and in
 packages under resources/legal/third-party/WoWDBDefs/. Application parsing code
 is original.
 
+When the "Fetch newer table definitions from WoWDBDefs" setting is on (the
+default), VibeMiner may download individual definition files from the WoWDBDefs
+repository (https://github.com/wowdev/WoWDBDefs) at runtime and keep them in its
+storage folder. Those files are also community data by WoWDBDefs contributors
+under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). They are
+used unmodified, recorded with their commit, URL and SHA-256, and shown as
+"Definition from WoWDBDefs" wherever they are used. They describe column layouts
+only; all game data still comes from Blizzard's CDN.
+
 Three.js 0.186.1 is a graphics runtime under the MIT License, copyright
 2010-2026 three.js authors. Its unmodified license and dependency attribution
 are retained in docs/third-party/three/ and copied to

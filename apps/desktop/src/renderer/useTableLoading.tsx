@@ -2,7 +2,7 @@ import {ActivityLink,useDownloadActivity} from './DownloadActivity';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { EngineProgress, TableDataSnapshot, TableDefinitionSnapshot, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
-import { tableDataMatches } from '../shared/table-data';
+import { definitionChanged, tableDataMatches } from '../shared/table-data';
 export type TableFailure = {code:string;message:string;retryable:boolean};
 export type TableLatch = {kind:'stopped'|'failed';error:TableFailure|null};
 export type TableOperation = { id: string; definition: TableDefinitionSnapshot; status: 'pending'|'stopping'|'succeeded'|'failed'|'canceled'; progress: EngineProgress|null; result: TableDataSnapshot|null; error: TableFailure|null };
@@ -32,7 +32,8 @@ export function useTableLoading(bridge: DiscoveryBridge,enabled=true) {
   const id=`table_${crypto.randomUUID()}`,op:TableOperation={id,definition,status:'pending',progress:null,result:null,error:null};publish(op);
   const params={productId:definition.productId,buildIdentity:definition.buildIdentity,sourceRegion:definition.sourceRegion,tableId:definition.entry.tableId,researchLocale:'enUS' as const};
   void(async()=>{let result:TableDataSnapshot|null=null,error:TableFailure|null=null;
-   try{const reply=await bridge.tablePrepare(params,id);if(reply.ok){if(tableDataMatches(reply.value,params,definition))result=reply.value;else error={code:'TABLE_DATA_CONTEXT_MISMATCH',message:'The admitted table does not match this exact source and pinned definition. No records were accepted.',retryable:false};}else error=reply.error;}
+   try{const reply=await bridge.tablePrepare(params,id);if(reply.ok){// D081: rows read with another definition (a newer fetched one) are checked against it once the view reads it.
+   if(definitionChanged(reply.value,definition)?tableDataMatches(reply.value,params):tableDataMatches(reply.value,params,definition))result=reply.value;else error={code:'TABLE_DATA_CONTEXT_MISMATCH',message:'The admitted table does not match this exact source and pinned definition. No records were accepted.',retryable:false};}else error=reply.error;}
    catch{error={code:'ENGINE_UNAVAILABLE',message:'Table preparation could not complete. Previously verified content is preserved.',retryable:true};}
    if(!alive.current||current.current?.id!==id)return;
    terminalFocus.current=!!cancelButton.current&&document.activeElement===cancelButton.current;

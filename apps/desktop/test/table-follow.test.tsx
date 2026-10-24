@@ -95,10 +95,12 @@ function setup(options: { follow?: (p: TableFollowParams) => Promise<BridgeReply
  const classSnapshot: TableDataSnapshot = { ...itemClass, ...(options.partialClass ? { coverage: partialCoverage } : {}), columns: options.selfReference ? itemClass.columns.map(c => c.name === 'ClassID' ? { ...c, reference: selfReference } : c) : itemClass.columns };
  const classScope = classSnapshot.coverage.scope;
  const onOpenFile = vi.fn();
+ // Like the engine, local readiness reports a table once its preparation has admitted it.
+ let admittedClass: TableDataSnapshot | null = null;
  const bridge = {
-  onProgress: vi.fn(() => () => {}), tablePrepare: vi.fn((p: { tableId: string }) => options.classPrepare && p.tableId === itemClass.tableId ? options.classPrepare : options.materialFails && p.tableId === 'a4c11069' ? Promise.resolve({ ok: false, error: { code: 'TABLE_DATA_UNAVAILABLE', message: 'Authored Material failure.', retryable: true } }) : new Promise(() => {})), cancel: vi.fn(async () => ok({ requested: true })),
+  onProgress: vi.fn(() => () => {}), tablePrepare: vi.fn((p: { tableId: string }) => options.classPrepare && p.tableId === itemClass.tableId ? options.classPrepare.then(reply => { if (reply.ok) admittedClass = reply.value; return reply; }) : options.materialFails && p.tableId === 'a4c11069' ? Promise.resolve({ ok: false, error: { code: 'TABLE_DATA_UNAVAILABLE', message: 'Authored Material failure.', retryable: true } }) : new Promise(() => {})), cancel: vi.fn(async () => ok({ requested: true })),
   capabilities: vi.fn(async () => ok(options.capabilities ?? ['tables-follow-v1'])),
-  tableData: vi.fn(async (p: { tableId: string }) => ok({ snapshot: p.tableId === item.tableId ? item : p.tableId === itemClass.tableId && !options.classPrepare ? classSnapshot : null })),
+  tableData: vi.fn(async (p: { tableId: string }) => ok({ snapshot: p.tableId === item.tableId ? item : p.tableId === itemClass.tableId ? options.classPrepare ? admittedClass : classSnapshot : null })),
   tableRows: vi.fn(async (p: TableRowsParams) => { const all = p.tableId === item.tableId ? Array.from({ length: 60 }, (_, i) => itemRow(i)) : Array.from({ length: 60 }, (_, i) => classRow(i, String(i))), filtered = p.recordId === undefined ? all : all.filter(r => r.id === p.recordId), after = Number(p.after ?? 0), rows = filtered.slice(after, after + (p.limit ?? 50)); return ok({ ...p, rows, totalCount: String(filtered.length), nextCursor: after + rows.length < filtered.length ? String(after + rows.length) : null }); }),
   tableFollow: vi.fn(options.follow ?? (async (p: TableFollowParams) => ok({ ...followReply(p), scope: classScope }))),
   tablesCatalog: vi.fn(async (p: TablesCatalogParams) => ok(catalog(p))),

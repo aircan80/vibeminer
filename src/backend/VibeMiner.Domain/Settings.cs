@@ -8,7 +8,7 @@ public enum SettingSource { Default, Saved, Unreadable }
 
 public sealed record SettingsProblem(string Code, string Message, bool Retryable);
 
-/// <summary>A switch setting. An unreadable saved value is never used; the default applies and says so.</summary>
+/// <summary>A switch setting. An unreadable saved value is never used: Value is the safe value (Off), and the setting says so.</summary>
 public sealed record BooleanSetting(bool Value, bool DefaultValue, SettingSource Source, SettingsProblem? Problem);
 
 /// <summary>The engine's current download limits. They are fixed in this version.</summary>
@@ -16,7 +16,8 @@ public sealed record DownloadLimitSettings(int ParallelDownloads, int Background
 
 /// <summary>One read of the settings, for every product and build.</summary>
 public sealed record SettingsSnapshot(int FormatVersion, SettingsFileState File, SettingsProblem? Problem,
-    DateTimeOffset? LastChangedAt, BooleanSetting CommunityBuildHistory, string DataDirectory, DownloadLimitSettings DownloadLimits);
+    DateTimeOffset? LastChangedAt, BooleanSetting CommunityBuildHistory, string DataDirectory, DownloadLimitSettings DownloadLimits,
+    BooleanSetting FetchTableDefinitions);
 
 /// <summary>
 /// The parsed settings file. A null value means the file has no value for that setting.
@@ -33,6 +34,12 @@ public sealed record SettingsDocument(SettingsFileState File, SettingsProblem? P
     public bool Replaceable { get; init; } = true;
     /// <summary>Top-level fields other than version, changedAt and values, kept as raw JSON so a write never drops them.</summary>
     public IReadOnlyList<KeyValuePair<string, string>> UnknownFields { get; init; } = [];
+    /// <summary>Fetch newer table definitions from WoWDBDefs (#55). Null when the file has no value for it.</summary>
+    public bool? FetchTableDefinitions { get; init; }
+    public SettingsProblem? FetchTableDefinitionsProblem { get; init; }
+    /// <summary>Known settings whose saved value VibeMiner doesn't understand, as raw JSON. Changing another setting
+    /// keeps them as written; only switching that setting replaces its value.</summary>
+    public IReadOnlyList<KeyValuePair<string, string>> UnreadableValues { get; init; } = [];
 }
 
 /// <summary>

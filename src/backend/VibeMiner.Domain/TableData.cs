@@ -19,7 +19,28 @@ public sealed record TableDataSnapshot(string ProductId, string BuildIdentity, s
     ContentReceipt Source, SelectedFileAssociation Association, IReadOnlyList<TableDataColumn> Columns,
     TableDataCoverage Coverage, string RowCount, string TextIssueCount = "0",
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? SchemaMatch = null);
+    string? SchemaMatch = null,
+    // Set only when the rows were read with a definition fetched from WoWDBDefs (D081); then ProviderRevision is its commit.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    TableDefinitionFetched? FetchedDefinition = null,
+    // With FetchedDefinition: which rule chose it over the bundled definition (TableFetchedBecause).
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? FetchedBecause = null,
+    // With FetchedDefinition: true when the bundled definition alone would still open this file by layout, so turning
+    // fetching off in Settings keeps the table open.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    bool? BundledFallback = null);
+/// <summary>Why rows were read with a fetched WoWDBDefs definition rather than the bundled one (D081).</summary>
+public static class TableFetchedBecause
+{
+    /// <summary>It lists the exact build and the bundled definition doesn't: exact build first.</summary>
+    public const string ExactBuild = "exactBuild";
+    /// <summary>The bundled definition lists the build but has no block for the file's layout; the fetched one has
+    /// one, by build or by layout.</summary>
+    public const string LayoutNotBundled = "layoutNotBundled";
+    /// <summary>Neither lists the build; only its block matches the file's layout on the version line (D080).</summary>
+    public const string LayoutMatch = "layoutMatch";
+}
 /// <summary>How the definition block was chosen (D080). Omitted means a block lists the exact build and layout.</summary>
 public static class TableSchemaMatch
 {

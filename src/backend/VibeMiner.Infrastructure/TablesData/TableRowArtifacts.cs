@@ -35,7 +35,23 @@ internal sealed class TableRowArtifacts(VerifiedObjectStore objects) : IAsyncDis
     private sealed record Metadata(TableArtifactBinding Binding, Wdc5TableHeader Header, Wdc5Completion Completion);
     private readonly record struct Entry(uint Id, bool Copy, uint Source, int Length, long Offset, long Ordinal);
 
+    // Definitions are long-lived (bundled, or one verified fetched copy per table), and the key is read on every row
+    // page, so it is computed once per definition and build.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DbdDocument, System.Collections.Concurrent.ConcurrentDictionary<string, string>> Keys = new();
+
     internal static string SchemaSelectionKey(DbdDocument definition, string buildVersion, CancellationToken token = default)
+    {
+        var keys = Keys.GetValue(definition, _ => new(StringComparer.Ordinal));
+        if (keys.TryGetValue(buildVersion, out var known)) return known;
+        // Measured from the blocks, not taken from the parser, so no definition gets an unbounded key.
+        if (DbdDefinitionReader.EstimateSelection(definition) > new DbdLimits().MaxSelectionBytes)
+            throw new DiscoveryException("DEFINITION_LIMIT", "This definition is too large to select a layout from.");
+        var key = ComputeSelectionKey(definition, buildVersion, token);
+        if (keys.Count < 64) keys.TryAdd(buildVersion, key);
+        return key;
+    }
+
+    private static string ComputeSelectionKey(DbdDocument definition, string buildVersion, CancellationToken token)
     {
         var selected = definition.SelectBuild(buildVersion, token: token);
         if (selected.Blocks.Count == 0)

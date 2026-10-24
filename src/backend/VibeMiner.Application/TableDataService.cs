@@ -3,8 +3,10 @@ using VibeMiner.Domain;
 
 namespace VibeMiner.Application;
 
+/// <summary>FetchedDefinitions is true only for the Tables view (D081): it may fetch and read with definitions from
+/// WoWDBDefs. Feature prerequisites leave it false and use bundled definitions only, with no network.</summary>
 public sealed record TableDataRequest(string ProductId, string BuildIdentity, string SourceRegion,
-    string TableId, string ResearchLocale);
+    string TableId, string ResearchLocale, bool FetchedDefinitions = false);
 public sealed record TableRowsRequest(string ProductId, string BuildIdentity, string SourceRegion,
     string TableId, string ResearchLocale, string ArtifactId, int Limit = 50, string? After = null,
     string? RecordId = null);

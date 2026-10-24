@@ -496,6 +496,22 @@
 .desktop-home .dh-data>*{flex:none}
 .desktop-home .dh-data>.dh-grid-scroll,.desktop-home .dh-data>.dh-pane-scroll{flex:1 1 auto;min-height:5.6rem}
 .desktop-home .dh-records>.dh-pane-scroll{flex:1 1 auto}
+/* Enlarged text: a table that can't load keeps its state box and actions (View task, Retry, Open Settings) reachable.
+   The state pane shrinks with its box and scrolls instead of overflowing it, and the definition problem above Data
+   takes one line; its whole message stays in the title, the state box, Structure and the inspector. */
+.desktop-home.dh-compact .dh-data>.dh-pane-scroll{min-height:0}
+/* D081: why the rows were re-read after a reopening, after the row count. */
+.desktop-home .dh-pane-foot .dh-reread{order:1;min-width:0;color:var(--muted)}
+.desktop-home .dh-data>.dh-notice.fetched-definition .fetched-short{margin-right:.373333rem}
+/* One line with a fetched definition: the detail is a row of its own, so the code stays whole and only the short
+   reason shortens with an ellipsis. */
+.desktop-home .dh-data>.dh-notice.fetched-definition.dh-tight .dh-detail{display:flex;align-items:center;overflow:visible}
+.desktop-home .dh-data>.dh-notice.fetched-definition.dh-tight .fetched-short{display:block;flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Enlarged text: the short source label (date and commit) never shrinks; the short reason takes the rest of the line. */
+.desktop-home.dh-compact .dh-data>.dh-notice.fetched-definition .dh-text>strong{flex:none}
+.desktop-home.dh-compact .dh-def-problem.dh-on-data{padding-top:.28rem;padding-bottom:.28rem}
+.desktop-home.dh-compact .dh-def-problem.dh-on-data .dh-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.desktop-home.dh-compact .dh-def-problem.dh-on-data .dh-text>strong{display:inline;margin-right:.56rem}
 .desktop-home .dh-idfilter input{height:2.006667rem}
 .desktop-home .dh-idfilter form{display:contents}
 .desktop-home .dh-field-error{color:#8a3a26;font-size:var(--fs-s);margin:.28rem .802667rem 0}

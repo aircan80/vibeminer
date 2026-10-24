@@ -1,4 +1,4 @@
-import type { TableDataSnapshot, TableDataPage, TableDefinitionSnapshot, ContentReceipt, TableDataColumn, TableDataRow } from '../../../../contracts/generated/discovery';
+import type { TableDataSnapshot, TableDataPage, TableDefinitionSnapshot, TableDefinitionFetched, ContentReceipt, TableDataColumn, TableDataRow } from '../../../../contracts/generated/discovery';
 import { validTableDefinition, type TableDefinitionParams } from './tables';
 export type TableDataParams = TableDefinitionParams & { researchLocale: 'enUS' };
 export type TableRowsParams = TableDataParams & { artifactId: string; after?: string; recordId?: string; limit?: number };
@@ -64,11 +64,25 @@ function verifiedRawAdmission(s:TableDataSnapshot,fieldOrdinal:number,column:Tab
   &&((fieldOrdinal===3&&column.name==='Charges'&&!i.candidateUnsigned)||((fieldOrdinal===6&&column.name==='SpellCategoryID')||(fieldOrdinal===8&&column.name==='ChrSpecializationID'))&&i.candidateUnsigned);
  return effect&&revision===(isPartialSource(s.source)?itemEffectProjectionRevision:itemEffectRevision)||subclass&&['wdc5-values-v7+table-admission-v2','wdc5-values-v7+table-admission-projection-v2','wdc5-values-v7+table-admission-v3','wdc5-values-v7+table-admission-projection-v3'].includes(revision)||creature&&['wdc5-values-v7+table-admission-v3','wdc5-values-v7+table-admission-projection-v3'].includes(revision);
 }
+export const sameFetch = (a?: TableDefinitionFetched, b?: TableDefinitionFetched) => a === b || !!a && !!b && a.revision === b.revision && Date.parse(a.fetchedAt) === Date.parse(b.fetchedAt);
+/** True when the rows were read with another definition than the one shown: the engine fetched a newer one (D081) or
+ * the shown one is no longer used. The view reads the definition again instead of calling the rows a mismatch. */
+export const definitionChanged = (value: TableDataSnapshot, definition: TableDefinitionSnapshot) =>
+ value.definitionSha256 !== definition.definition?.sha256 || !sameFetch(value.fetchedDefinition, definition.definition?.fetched);
 export function tableDataMatches(value: TableDataSnapshot, p: TableDataParams, definition?: TableDefinitionSnapshot): boolean {
  if (value.productId !== p.productId || value.buildIdentity !== p.buildIdentity || value.sourceRegion !== p.sourceRegion || value.tableId !== p.tableId || value.researchLocale !== p.researchLocale || value.association.researchLocale !== p.researchLocale) return false;
  if (!validScopedAdmissionRevision(value) || !validTableSourceProof(value.source)) return false;
  // D080: present only when the file's layout chose the block because no block lists the build.
  if (value.schemaMatch !== undefined && value.schemaMatch !== 'layoutOnly') return false;
+ // D081: rows read with a definition fetched from WoWDBDefs name its commit as their provider revision.
+ const fetched = value.fetchedDefinition;
+ if (fetched !== undefined && (!fetched || !/^[0-9a-f]{40}$/.test(fetched.revision) || fetched.revision !== value.providerRevision || Number.isNaN(Date.parse(fetched.fetchedAt)))) return false;
+ // The rule that chose it comes with it, and only a layout match is matched by layout.
+ const because = value.fetchedBecause;
+ if ((because !== undefined) !== (fetched !== undefined) || because !== undefined && (!['exactBuild','layoutNotBundled','layoutMatch'].includes(because) ||
+  because === 'layoutMatch' && value.schemaMatch !== 'layoutOnly' || because === 'exactBuild' && value.schemaMatch === 'layoutOnly')) return false;
+ // Whether bundled alone would still open the file comes with it, and never when bundled lacks the layout.
+ if ((value.bundledFallback !== undefined) !== (fetched !== undefined) || value.bundledFallback !== undefined && (typeof value.bundledFallback !== 'boolean' || value.bundledFallback && because !== 'exactBuild')) return false;
  const textIssueCount=value.textIssueCount??'0';
  if (value.textIssueCount===null || !decimal.test(textIssueCount) || !decimal.test(value.rowCount) || BigInt(textIssueCount)>BigInt(value.rowCount)*BigInt(value.columns.filter(column=>column.family==='string'&&!column.isId).length)) return false;
  const c = value.coverage;
@@ -82,7 +96,10 @@ export function tableDataMatches(value: TableDataSnapshot, p: TableDataParams, d
   const candidate = definition.definition?.candidates.find(x => x.layoutHash === value.layoutHash);
   // A layout-only snapshot needs a definition that doesn't list the build, and an exact one a definition that does.
   if ((value.schemaMatch === 'layoutOnly') !== (definition.problem?.code === 'SCHEMA_BUILD_NOT_LISTED')) return false;
-  if (!candidate || value.definitionSha256 !== definition.definition?.sha256 || value.providerRevision !== definition.provider.revision || value.association.fileDataId !== definition.entry.db2FileDataId || candidate.fields.reduce((sum,f)=>sum+f.arrayLength,0) !== value.columns.length) return false;
+  // Fetched rows need the same fetched definition, and bundled rows the bundled one.
+  const used = definition.definition?.fetched;
+  if (!sameFetch(fetched, used)) return false;
+  if (!candidate || value.definitionSha256 !== definition.definition?.sha256 || value.providerRevision !== (used?.revision ?? definition.provider.revision) || value.association.fileDataId !== definition.entry.db2FileDataId || candidate.fields.reduce((sum,f)=>sum+f.arrayLength,0) !== value.columns.length) return false;
   if (!candidate.fields.flatMap((f,fieldOrdinal) => Array.from({length:f.arrayLength},(_,i)=>({...f,fieldOrdinal,name:f.arrayLength>1?`${f.name}[${i}]`:f.name}))).every((f,i) => {const col=value.columns[i]; return f.name===col.name && (f.family==='int'?'integer':f.family==='float'?'float':'string')===col.family && f.isId===col.isId && (col.interpretation ? f.family==='int' && (!f.verifiedName || f.arrayLength===1&&!f.relationStorage&&!f.nonInline&&verifiedRawAdmission(value,f.fieldOrdinal,col)) && !f.isId && col.interpretation.candidateBits===(f.integerBits??32) && col.interpretation.candidateUnsigned===(f.unsigned??false) && col.reference===null : f.reference?.table===col.reference?.table && f.reference?.column===col.reference?.column) && (!col.narrowing || f.family==='int' && f.verifiedName && !f.isId && !f.relationStorage && (f.integerBits??32)===col.narrowing.usedBits);})) return false;
  }
  return true;

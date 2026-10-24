@@ -6,8 +6,9 @@ using VibeMiner.Formats.Wow;
 namespace VibeMiner.Infrastructure;
 
 /// <summary>Local pinned provider metadata. Entry/navigation performs no table acquisition.</summary>
-public sealed class TablesCatalog(DiscoveryCatalog catalog) : ITablesCatalog
+public sealed class TablesCatalog(DiscoveryCatalog catalog, TableDefinitionSources? sources = null) : ITablesCatalog
 {
+    private readonly TableDefinitionSources definitions = sources ?? new();
     internal static readonly Lazy<Task<BundledTableDefinitions>> Provider = new(() => Task.Run(BundledTableDefinitions.LoadAsync));
 
     public async Task<TableCatalogPage> ReadCatalogAsync(TableCatalogRequest request, CancellationToken token)
@@ -38,11 +39,16 @@ public sealed class TablesCatalog(DiscoveryCatalog catalog) : ITablesCatalog
         var provider = await Provider.Value.WaitAsync(token);
         var entry = provider.Entries.SingleOrDefault(entry => entry.TableId == request.TableId)
             ?? throw new DiscoveryException("TABLE_NOT_IN_PROVIDER", "This exact table identity is not listed by the pinned definition provider.");
-        TableDefinitionInfo? info = null; TablesProblem? problem;
-        if (!provider.Definitions.TryGetValue(entry.TableId, out var definition))
+        TableDefinitionInfo? info = null; TablesProblem? problem; string? fetch = null;
+        if (!provider.Definitions.TryGetValue(entry.TableId, out var bundled))
             problem = new("DEFINITION_NOT_BUNDLED", "This provider entry is listed, but its definition data is not bundled in this application yet.");
         else
         {
+            // Local only (D081): the fetched definition the admitted rows were read with, or a cached one for a build line
+            // the bundled definition doesn't cover. Fetching itself happens when the table's data is prepared.
+            var fetchEnabled = await definitions.FetchEnabledAsync(token);
+            fetch = fetchEnabled ? "on" : "off";
+            var definition = await ChooseAsync(context, entry, bundled, fetchEnabled, token);
             var selection = definition.Document.SelectBuild(context.Build.Version, token: token);
             var listed = selection.Blocks.Count > 0;
             // An unlisted build previews the layouts a file could open by on its version line (D080).
@@ -61,16 +67,36 @@ public sealed class TablesCatalog(DiscoveryCatalog catalog) : ITablesCatalog
                 candidates.Add(new(layout.Key, conflict ? Array.Empty<TableDefinitionField>() : Array.AsReadOnly(first.Select(Field).ToArray())));
             }
             info = new(definition.Sha256, definition.SourceUrl,
-                Array.AsReadOnly(definition.Document.Columns.Select(Column).ToArray()), candidates.AsReadOnly());
+                Array.AsReadOnly(definition.Document.Columns.Select(Column).ToArray()), candidates.AsReadOnly(), definition.Fetched?.Info);
+            var noun = definition.Fetched is null ? "The pinned definition" : "The " + definition.Described;
             problem = !listed && layouts.Length == 0
-                ? new("SCHEMA_BUILD_NOT_LISTED", "The pinned definition does not list this exact build or any layout on its version line; no nearby or latest definition was substituted.")
+                ? new("SCHEMA_BUILD_NOT_LISTED", definition.Fetched is null && fetchEnabled
+                    ? "The pinned definition does not list this exact build or any layout on its version line. Opening its data first fetches the newest WoWDBDefs definition for this table."
+                    : !fetchEnabled
+                    ? "The pinned definition does not list this exact build or any layout on its version line, so this table can’t open. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest definition for this table."
+                    : $"{noun} does not list this exact build or any layout on its version line; no nearby or latest definition was substituted.")
                 : !listed
-                ? new("SCHEMA_BUILD_NOT_LISTED", "The pinned definition does not list this exact build. Data can open only if the file's layout hash matches one of its candidate layouts; that match is by layout, and the build stays unverified.")
+                ? new("SCHEMA_BUILD_NOT_LISTED", $"{noun} does not list this exact build. Data can open only if the file's layout hash matches one of its candidate layouts; that match is by layout, and the build stays unverified." +
+                    (definition.Fetched is null && fetchEnabled ? " Opening its data first checks WoWDBDefs for a definition that lists this build." : ""))
                 : selection.Status == "ambiguous" || conflicting || layouts.Length != 1 || selection.Blocks.Any(block => block.LayoutHashes.Count == 0)
                     ? new("SCHEMA_LAYOUT_UNVERIFIED", "The build has multiple or unspecified layout interpretations. Actual source headers are required before selecting a readable schema.")
                     : null;
         }
-        return new(request.ProductId, request.BuildIdentity, request.SourceRegion, context.Build.Version, provider.Info, entry, info, problem);
+        return new(request.ProductId, request.BuildIdentity, request.SourceRegion, context.Build.Version, provider.Info, entry, info, problem, fetch);
+    }
+
+    private async Task<TableDefinition> ChooseAsync(CapturedOpeningContext context, TableCatalogEntry entry, BundledTableDefinition bundled,
+        bool fetchEnabled, CancellationToken token)
+    {
+        if (!fetchEnabled) return TableDefinition.Bundled(bundled);
+        StoredTableAdmission? admission = null;
+        // Tables data has one research locale in this version. A damaged admission is reported by Data, not here.
+        try { admission = await catalog.ReadTableAdmissionAsync(context, entry.TableId, "enUS", token); }
+        catch (DiscoveryException) { admission = null; }
+        // The definition Data reads the file's layout with now; rows read with another are refreshed by Data.
+        return admission is not null
+            ? await definitions.ForRowsAsync(entry, bundled, context.Build.Version, admission.Artifact, fetchEnabled, token)
+            : await definitions.BeforeFileAsync(entry, bundled, context.Build.Version, fetchEnabled, token);
     }
 
     private async Task<CapturedOpeningContext> Context(WorkspaceRequest request, CancellationToken token)

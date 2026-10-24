@@ -37,4 +37,4 @@ Only the latest `main` and the latest release get fixes.
 Good-faith research is welcome. Don't hammer Blizzard's CDN while testing, and don't publish game content as part of a report.
 
 ## What isn't there
-VibeMiner has no accounts, no Battle.net login, no stored credentials and no server. It talks only to Blizzard's official public version service and CDN, and keeps everything in local app storage.
+VibeMiner has no accounts, no Battle.net login, no stored credentials and no server. It talks to Blizzard's official public version service and CDN for all game data, and keeps everything in local app storage. The one other source is the WoWDBDefs repository on GitHub (`api.github.com`, `raw.githubusercontent.com`), for single table-definition text files when no bundled definition covers a table, while the Settings switch for it is on. Hostile or malformed definition files are in scope as untrusted downloaded bytes.

@@ -4166,6 +4166,10 @@
           "items": {
             "$ref": "#/definitions/TableLayoutCandidate"
           }
+        },
+        "fetched": {
+          "description": "Present when this definition was fetched from WoWDBDefs; sha256 and sourceUrl are then those of the fetched file. Absent: the bundled definition at the provider revision.",
+          "$ref": "#/definitions/TableDefinitionFetched"
         }
       },
       "required": [
@@ -4173,6 +4177,26 @@
         "sourceUrl",
         "columns",
         "candidates"
+      ],
+      "additionalProperties": false
+    },
+    "TableDefinitionFetched": {
+      "title": "TableDefinitionFetched",
+      "description": "A definition fetched from the WoWDBDefs repository at runtime (D081), never bundled or verified: the commit that last changed its file and when these exact bytes were first fetched.",
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "string",
+          "maxLength": 40,
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "fetchedAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        }
+      },
+      "required": [
+        "revision",
+        "fetchedAt"
       ],
       "additionalProperties": false
     },
@@ -4242,6 +4266,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "definitionFetch": {
+          "description": "on: the Tables view may fetch a newer definition from WoWDBDefs when its data is prepared, exact build first (D081). off: the Settings switch is off or unreadable. Absent when the table has no bundled definition.",
+          "enum": [
+            "on",
+            "off"
           ]
         }
       },
@@ -4769,6 +4800,22 @@
           "enum": [
             "layoutOnly"
           ]
+        },
+        "fetchedDefinition": {
+          "description": "Present when the rows were read with a definition fetched from WoWDBDefs (D081); providerRevision is then its commit.",
+          "$ref": "#/definitions/TableDefinitionFetched"
+        },
+        "fetchedBecause": {
+          "description": "With fetchedDefinition, which rule chose it (D081). exactBuild: it lists the build and the bundled definition doesn't. layoutNotBundled: the bundled definition lists the build but has no block for the file's layout, and the fetched one has one. layoutMatch: neither lists the build and only the fetched block matches the file's layout (schemaMatch layoutOnly).",
+          "enum": [
+            "exactBuild",
+            "layoutNotBundled",
+            "layoutMatch"
+          ]
+        },
+        "bundledFallback": {
+          "description": "With fetchedDefinition: true when the bundled definition alone would still open this file by layout, so turning fetching off keeps the table open.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -17457,6 +17504,42 @@
           ],
           "additionalProperties": false
         },
+        "fetchTableDefinitions": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean"
+            },
+            "defaultValue": {
+              "const": true
+            },
+            "source": {
+              "enum": [
+                "default",
+                "saved",
+                "unreadable"
+              ]
+            },
+            "problem": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SettingsProblem"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "defaultValue",
+            "source",
+            "problem"
+          ],
+          "additionalProperties": false,
+          "description": "Fetch newer table definitions from WoWDBDefs for the Tables view, exact build first (D081). On by default; an unreadable value reads as off."
+        },
         "storage": {
           "type": "object",
           "properties": {
@@ -17514,6 +17597,7 @@
         "problem",
         "lastChangedAt",
         "communityBuildHistory",
+        "fetchTableDefinitions",
         "storage",
         "downloadLimits"
       ],
@@ -17556,7 +17640,10 @@
       "type": "object",
       "properties": {
         "name": {
-          "const": "communityBuildHistory"
+          "enum": [
+            "communityBuildHistory",
+            "fetchTableDefinitions"
+          ]
         },
         "value": {
           "type": "boolean"

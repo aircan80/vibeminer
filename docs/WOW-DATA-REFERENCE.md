@@ -139,6 +139,7 @@ Interpretation rules for the DBD reader:
 - A declared `int32` says nothing about physical storage; pallet, bitpacked and common storage are decoder facts.
 - Builds are compared as four numeric components. Several matching layout blocks are an ambiguity, never "take the first". No latest-build fallback.
 - A listed build uses exact build and layout. A build no block lists can still open by the file's layout hash, but only from blocks on its version line (same major version); several such blocks go to the one with a listed build number nearest the file's, and a tie between different field sets is ambiguous. The field checks still run, and the result says "matched by layout, build not listed" (D080).
+- With fetching on, the Tables view uses exact build first (D081): a definition that lists the build wins, bundled before one fetched from WoWDBDefs, and only then the layout match above, bundled first. Rows read with a fetched definition say "Definition from WoWDBDefs (fetched <date>, <commit>)". Items, Creatures and the other feature views use bundled definitions only.
 - Current reader support is WDC5 only, header flags 0/4/5/6/7. Limits: 256 MiB decoded source, 1,000,000 physical + copy rows, 256 fields, 512 flattened columns, 128 sections.
 
 Table relationship rules (Tables explorer):

@@ -22,7 +22,15 @@ try
     await using var acquisition = new AcquisitionCoordinator(encodedProducer);
     using var preparation = new DownloadWorkspacePreparer(catalog, objects, client, acquisition, resources);
     await using var workspace = new WorkspaceService(preparation);
-    await using var tableStore = new TableDataStore(catalog, objects, client, acquisition, resources);
+    var settings = new SettingsService(new JsonSettingsStore(dataDirectory), new DataDirectoryMeasurer(dataDirectory),
+        new VibeMiner.Domain.DownloadLimitSettings(resources.MaximumHttp, resources.MaximumBackgroundHttp, null, false));
+    // Table definitions from WoWDBDefs on GitHub (D081) use their own client, so they never share the CDN's connections.
+    using var definitionHandler = new SocketsHttpHandler { AllowAutoRedirect = false, MaxConnectionsPerServer = 2,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5), ConnectTimeout = TimeSpan.FromSeconds(10),
+        AutomaticDecompression = System.Net.DecompressionMethods.None };
+    using var definitionClient = new HttpClient(definitionHandler) { Timeout = Timeout.InfiniteTimeSpan };
+    var definitionSources = new TableDefinitionSources(new WoWDBDefsDefinitions(dataDirectory, definitionClient), settings);
+    await using var tableStore = new TableDataStore(catalog, objects, client, acquisition, resources, definitionSources);
     await using var tableData = new TableDataService(tableStore);
     await using var creaturesStore = new CreaturesStore(catalog, objects, tableData, resources);
     await using var creatures = new CreaturesService(creaturesStore);
@@ -52,14 +60,12 @@ try
     // The ROOT and install memberships Files lists are prepared after Open, in the background (D071).
     await using var fileCatalogs = new FileCatalogWorker(catalog, objects, client, acquisition, resources, metadataPasses);
     var retention = new RetentionService(catalog, retentionDriver);
-    var settings = new SettingsService(new JsonSettingsStore(dataDirectory), new DataDirectoryMeasurer(dataDirectory),
-        new VibeMiner.Domain.DownloadLimitSettings(resources.MaximumHttp, resources.MaximumBackgroundHttp, null, false));
     try
     {
         await retention.RestoreAsync();
         storedCoverage.Start(); rootScopes.Start(); fileCatalogs.Start();
         var host = new ProtocolHost(new DiscoveryService(source, catalog), workspace, new InventoryService(catalog),
-            new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects,
+            new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog, definitionSources)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects,
             creatureGeometry: creatureGeometry, geometryLeases: geometryLeases, settings: settings,
             downloadSummaries: new DownloadSummaryService(catalog),
             referenceText: new TableReferenceTextService(tableStore), follow: new TableFollowService(tableStore),

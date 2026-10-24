@@ -13,6 +13,12 @@
       "retryable": false
     }
   },
+  "fetchTableDefinitions": {
+    "value": false,
+    "defaultValue": true,
+    "source": "saved",
+    "problem": null
+  },
   "storage": {
     "dataDirectory": "/home/example/.config/VibeMiner/engine-v1"
   },

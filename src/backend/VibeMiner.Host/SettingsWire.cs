@@ -16,15 +16,8 @@ internal static class SettingsWire
         },
         problem = Problem(value.Problem),
         value.LastChangedAt,
-        communityBuildHistory = new
-        {
-            value.CommunityBuildHistory.Value, value.CommunityBuildHistory.DefaultValue,
-            source = value.CommunityBuildHistory.Source switch
-            {
-                SettingSource.Saved => "saved", SettingSource.Default => "default", _ => "unreadable",
-            },
-            problem = Problem(value.CommunityBuildHistory.Problem),
-        },
+        communityBuildHistory = Switch(value.CommunityBuildHistory),
+        fetchTableDefinitions = Switch(value.FetchTableDefinitions),
         storage = new { value.DataDirectory },
         downloadLimits = new
         {
@@ -37,6 +30,13 @@ internal static class SettingsWire
     internal static object Measurement(StorageMeasurement value) => new
     {
         bytes = N(value.Bytes), files = N(value.Files), skipped = N(value.Skipped), value.StartedAt, value.MeasuredAt,
+    };
+
+    private static object Switch(BooleanSetting setting) => new
+    {
+        setting.Value, setting.DefaultValue,
+        source = setting.Source switch { SettingSource.Saved => "saved", SettingSource.Default => "default", _ => "unreadable" },
+        problem = Problem(setting.Problem),
     };
 
     private static object? Problem(SettingsProblem? problem) => problem is null ? null : new { problem.Code, problem.Message, problem.Retryable };

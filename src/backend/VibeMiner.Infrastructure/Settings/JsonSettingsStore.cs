@@ -6,7 +6,7 @@ using VibeMiner.Domain;
 namespace VibeMiner.Infrastructure;
 
 /// <summary>
-/// settings-v1.json in the engine data folder: {"version":1,"changedAt":"…","values":{"communityBuildHistory":false}}.
+/// settings-v1.json in the engine data folder: {"version":1,"changedAt":"…","values":{"communityBuildHistory":false,"fetchTableDefinitions":true}}.
 /// Reads are bounded and never throw for bad content. Writes go to a temporary file, are flushed, then replace the file.
 /// </summary>
 public sealed class JsonSettingsStore(string dataDirectory) : ISettingsStore
@@ -85,22 +85,31 @@ public sealed class JsonSettingsStore(string dataDirectory) : ISettingsStore
             var changedAt = ChangedAt(root);
             if (!root.TryGetProperty("values", out var values)) return new(SettingsFileState.Read, null, changedAt, null, null, []) { UnknownFields = fields };
             if (values.ValueKind != JsonValueKind.Object) return Unreadable("The settings file has no readable values.");
-            bool? community = null;
-            SettingsProblem? communityProblem = null;
+            bool? community = null, fetch = null;
+            SettingsProblem? communityProblem = null, fetchProblem = null;
             var unknown = new List<KeyValuePair<string, string>>();
+            var unreadable = new List<KeyValuePair<string, string>>();
             var valueNames = new HashSet<string>(StringComparer.Ordinal);
             foreach (var property in values.EnumerateObject())
             {
                 if (!valueNames.Add(property.Name)) return Unreadable("The settings file repeats a setting.");
-                if (property.Name == SettingsService.CommunityBuildHistory)
+                if (property.Name is SettingsService.CommunityBuildHistory or SettingsService.FetchTableDefinitions)
                 {
-                    if (property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) community = property.Value.GetBoolean();
-                    else communityProblem = new("SETTING_UNREADABLE", "The saved value for Community build history isn’t one VibeMiner understands.", false);
+                    bool? value = property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False ? property.Value.GetBoolean() : null;
+                    SettingsProblem? problem = null;
+                    if (value is null)
+                    {
+                        problem = new("SETTING_UNREADABLE", $"The saved value for {(property.Name == SettingsService.CommunityBuildHistory ? "Community build history" : "Fetch newer table definitions")} isn’t one VibeMiner understands.", false);
+                        unreadable.Add(new(property.Name, property.Value.GetRawText()));
+                    }
+                    if (property.Name == SettingsService.CommunityBuildHistory) { community = value; communityProblem = problem; }
+                    else { fetch = value; fetchProblem = problem; }
                 }
                 // Every value this version doesn't know is kept; the 64 KiB file bound is the only limit.
                 else unknown.Add(new(property.Name, property.Value.GetRawText()));
             }
-            return new(SettingsFileState.Read, null, changedAt, community, communityProblem, unknown) { UnknownFields = fields };
+            return new(SettingsFileState.Read, null, changedAt, community, communityProblem, unknown)
+                { UnknownFields = fields, FetchTableDefinitions = fetch, FetchTableDefinitionsProblem = fetchProblem, UnreadableValues = unreadable };
         }
         catch (JsonException) { return Unreadable("The settings file isn’t valid JSON."); }
         // Invalid UTF-8 or a lone surrogate escape in a name or string surfaces only when it is decoded.
@@ -129,10 +138,10 @@ public sealed class JsonSettingsStore(string dataDirectory) : ISettingsStore
 
     private static bool IsPositiveInteger(string text) => text.Length > 0 && text[0] is >= '1' and <= '9' && text.All(char.IsAsciiDigit);
 
-    public async Task WriteAsync(bool communityBuildHistory, DateTimeOffset changedAt, IReadOnlyList<KeyValuePair<string, string>> unknownValues,
+    public async Task WriteAsync(IReadOnlyList<KeyValuePair<string, string>> values, DateTimeOffset changedAt,
         IReadOnlyList<KeyValuePair<string, string>> unknownFields, CancellationToken token)
     {
-        var bytes = Serialize(communityBuildHistory, changedAt, unknownValues, unknownFields);
+        var bytes = Serialize(values, changedAt, unknownFields);
         if (bytes.Length > MaxFileBytes) throw new DiscoveryException("SETTINGS_WRITE_FAILED", "The settings file would be larger than VibeMiner allows. Nothing was changed.");
         try
         {
@@ -154,7 +163,7 @@ public sealed class JsonSettingsStore(string dataDirectory) : ISettingsStore
         }
     }
 
-    private static byte[] Serialize(bool communityBuildHistory, DateTimeOffset changedAt, IReadOnlyList<KeyValuePair<string, string>> unknownValues,
+    private static byte[] Serialize(IReadOnlyList<KeyValuePair<string, string>> values, DateTimeOffset changedAt,
         IReadOnlyList<KeyValuePair<string, string>> unknownFields)
     {
         using var buffer = new MemoryStream();
@@ -164,8 +173,7 @@ public sealed class JsonSettingsStore(string dataDirectory) : ISettingsStore
             writer.WriteNumber("version", SettingsService.FormatVersion);
             writer.WriteString("changedAt", changedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
             writer.WriteStartObject("values");
-            writer.WriteBoolean(SettingsService.CommunityBuildHistory, communityBuildHistory);
-            foreach (var (name, raw) in unknownValues)
+            foreach (var (name, raw) in values)
             {
                 writer.WritePropertyName(name);
                 // Raw text from the parsed file is valid JSON; revalidating would apply the writer's default depth limit.

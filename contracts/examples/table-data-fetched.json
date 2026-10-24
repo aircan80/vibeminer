@@ -1,0 +1,124 @@
+{
+  "snapshot": {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "tableId": "b977271e",
+    "researchLocale": "enUS",
+    "artifactId": "5555555555555555555555555555555555555555555555555555555555555555",
+    "preparedAt": "2026-10-19T12:00:00Z",
+    "layoutHash": "35680EB8",
+    "definitionSha256": "abababababababababababababababababababababababababababababababab",
+    "providerRevision": "1111111111111111111111111111111111111111",
+    "decoderRevision": "authored-wdc5-v1",
+    "source": {
+      "contentKey": "66666666666666666666666666666666",
+      "encodingKey": "77777777777777777777777777777777",
+      "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+      "encodedBytes": "402",
+      "decodedBytes": "755",
+      "sourceUrl": "https://fixture.invalid/authored-table",
+      "retrievedAt": "2026-10-19T11:00:00Z",
+      "verifiedAt": "2026-10-19T12:00:00Z",
+      "verifierRevision": "content-blte-v1",
+      "location": {
+        "kind": "archive",
+        "offset": "100",
+        "sourceBytes": "402",
+        "archiveKey": "99999999999999999999999999999999"
+      }
+    },
+    "association": {
+      "fileDataId": "1140189",
+      "researchLocale": "enUS",
+      "variantPolicy": "All matching enUS memberships",
+      "encodingSource": {
+        "role": "encoding",
+        "contentKey": "11111111111111111111111111111111",
+        "encodingKey": "22222222222222222222222222222222",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "encodedBytes": "50",
+        "decodedBytes": "100",
+        "sourceUrl": "https://fixture.invalid/data/download",
+        "retrievedAt": "2026-10-18T12:00:01Z",
+        "verifiedAt": "2026-10-18T12:00:01Z",
+        "parserRevision": "download-v1"
+      },
+      "rootSource": {
+        "role": "root",
+        "contentKey": "33333333333333333333333333333333",
+        "encodingKey": "44444444444444444444444444444444",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "encodedBytes": "50",
+        "decodedBytes": "100",
+        "sourceUrl": "https://fixture.invalid/data/download",
+        "retrievedAt": "2026-10-18T12:00:01Z",
+        "verifiedAt": "2026-10-18T12:00:01Z",
+        "parserRevision": "download-v1"
+      },
+      "memberships": [
+        {
+          "blockOrdinal": "0",
+          "entryOrdinal": "0",
+          "contentKey": "66666666666666666666666666666666",
+          "localeFlags": "2",
+          "contentFlags": "0",
+          "rawFirst": "0",
+          "rawSecond": "0",
+          "rawThird": "0",
+          "nameHash": null
+        }
+      ]
+    },
+    "columns": [
+      {
+        "name": "ID",
+        "family": "integer",
+        "isId": true,
+        "reference": null
+      },
+      {
+        "name": "ClassName_lang",
+        "family": "string",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "ClassID",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "PriceModifier",
+        "family": "float",
+        "isId": false,
+        "reference": null
+      },
+      {
+        "name": "Flags",
+        "family": "integer",
+        "isId": false,
+        "reference": null
+      }
+    ],
+    "coverage": {
+      "scope": "complete",
+      "declaredRecords": "60",
+      "physicalRows": "60",
+      "copyRows": "0",
+      "excludedKeyedSections": "0",
+      "excludedDeclaredRecords": "0",
+      "declaredCopyRecords": "0",
+      "excludedPhysicalRecords": "0",
+      "excludedCopyRecords": "0"
+    },
+    "rowCount": "60",
+    "fetchedDefinition": {
+      "revision": "1111111111111111111111111111111111111111",
+      "fetchedAt": "2026-10-23T12:00:00Z"
+    },
+    "fetchedBecause": "exactBuild",
+    "bundledFallback": true
+  }
+}

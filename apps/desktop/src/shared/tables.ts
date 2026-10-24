@@ -1,4 +1,4 @@
-import type { TableCatalogPage, TableDefinitionProvider, TableDefinitionSnapshot, TableDefinitionField } from '../../../../contracts/generated/discovery';
+import type { TableCatalogPage, TableDefinitionProvider, TableDefinitionSnapshot, TableDefinitionField, TableDefinitionFetched } from '../../../../contracts/generated/discovery';
 import type { OpenParams } from './bridge';
 export type TablesCatalogParams = OpenParams & { query?: string; limit?: number; after?: string };
 export type TableDefinitionParams = OpenParams & { tableId: string };
@@ -15,6 +15,15 @@ export function validTableDefinition(value: unknown): value is TableDefinitionPa
   if (!value || typeof value !== 'object') return false;
   const p = value as TableDefinitionParams;
   return context(p) && typeof p.tableId === 'string' && hash.test(p.tableId) && Object.keys(p).length === 4 && Object.keys(p).every(key => ['productId', 'buildIdentity', 'sourceRegion', 'tableId'].includes(key));
+}
+export const fetchedDefinitionUrl = (revision: string, table: string) => `https://raw.githubusercontent.com/wowdev/WoWDBDefs/${revision}/definitions/${table}.dbd`;
+/** "Definition from WoWDBDefs (fetched Oct 23, 2026, a50ca6f)": never mixed up with a bundled or verified one. */
+export function fetchedLabel(fetched: TableDefinitionFetched): string {
+  return `Definition from WoWDBDefs (fetched ${new Date(fetched.fetchedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}, ${fetched.revision.slice(0, 7)})`;
+}
+/** The same source in one short line for enlarged text: "WoWDBDefs · Oct 23, 2026 · a50ca6f". */
+export function fetchedCompactLabel(fetched: TableDefinitionFetched): string {
+  return `WoWDBDefs · ${new Date(fetched.fetchedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })} · ${fetched.revision.slice(0, 7)}`;
 }
 export function sameProvider(a: TableDefinitionProvider, b: TableDefinitionProvider): boolean { return a.name === b.name && a.revision === b.revision && a.manifestSha256 === b.manifestSha256 && a.license === b.license && a.sourceUrl === b.sourceUrl; }
 export function tableCatalogMatches(value: TableCatalogPage, p: TablesCatalogParams, provider?: TableDefinitionProvider): boolean {
@@ -34,8 +43,13 @@ function fieldsValid(fields: TableDefinitionField[]): boolean {
 }
 export function tableDefinitionMatches(value: TableDefinitionSnapshot, p: TableDefinitionParams, buildVersion?: string, provider?: TableDefinitionProvider): boolean {
   if (value.productId !== p.productId || value.buildIdentity !== p.buildIdentity || value.sourceRegion !== p.sourceRegion || value.entry.tableId !== p.tableId || value.entry.sourceState !== 'notChecked' || value.entry.rowsState !== 'notPrepared' || buildVersion !== undefined && value.buildVersion !== buildVersion || provider && !sameProvider(value.provider, provider)) return false;
+  if (value.definitionFetch !== undefined && value.definitionFetch !== 'on' && value.definitionFetch !== 'off') return false;
   if (!value.definition) return !!value.problem?.code.trim() && !!value.problem.message.trim();
   if (value.entry.definitionState !== 'bundled' || !fieldsValid(value.definition.columns)) return false;
+  // D081: a fetched definition comes only from the fixed WoWDBDefs address for its commit and table, and only while fetching is on.
+  const fetched = value.definition.fetched;
+  if (fetched !== undefined && (!fetched || value.definitionFetch !== 'on' || !value.entry.name || !/^[0-9a-f]{40}$/.test(fetched.revision) || Number.isNaN(Date.parse(fetched.fetchedAt)) ||
+    value.definition.sourceUrl !== fetchedDefinitionUrl(fetched.revision, value.entry.name))) return false;
   const columns = new Map(value.definition.columns.map(field => [field.name, field])), layouts = new Set<string>();
   for (const candidate of value.definition.candidates) {
     if (layouts.has(candidate.layoutHash) || !fieldsValid(candidate.fields)) return false;

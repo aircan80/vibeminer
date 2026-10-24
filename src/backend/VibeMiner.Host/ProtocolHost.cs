@@ -248,7 +248,8 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "tableId", "researchLocale");
                     if (tableData is null) throw new DiscoveryException("TABLE_DATA_UNAVAILABLE", "Table data loading is unavailable.");
                     var dataRequest = new TableDataRequest(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"),
-                        RequiredString(parameters, "sourceRegion"), RequiredString(parameters, "tableId"), RequiredString(parameters, "researchLocale"));
+                        RequiredString(parameters, "sourceRegion"), RequiredString(parameters, "tableId"), RequiredString(parameters, "researchLocale"),
+                        FetchedDefinitions: true); // The Tables view only (D081).
                     long dataSequence = 0;
                     result = method == "tables.data"
                         ? await tableData.ReadAsync(dataRequest, request.Cancellation.Token)

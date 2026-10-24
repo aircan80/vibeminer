@@ -313,6 +313,26 @@ test('A table snapshot says when its definition was matched by layout only, neve
     assert.equal(validator('TableDataSnapshot')({ ...exact, schemaMatch: value }), false, String(value));
 });
 
+test('A table read with a definition fetched from WoWDBDefs says so with its commit and fetch time (D081)', async () => {
+  const readiness = JSON.parse(await readFile(path.join(root, 'contracts/examples/table-data-fetched.json'), 'utf8'));
+  validate('TableDataReadiness', readiness);
+  const fetched = readiness.snapshot.fetchedDefinition;
+  assert.equal(fetched.revision, readiness.snapshot.providerRevision);
+  assert.equal(readiness.snapshot.fetchedBecause, 'exactBuild'); assert.equal(readiness.snapshot.bundledFallback, true);
+  for (const value of ['true', 1, null])
+    assert.equal(validator('TableDataSnapshot')({ ...readiness.snapshot, bundledFallback: value }), false, String(value));
+  for (const value of ['exact', 'bundled', null, ''])
+    assert.equal(validator('TableDataSnapshot')({ ...readiness.snapshot, fetchedBecause: value }), false, String(value));
+  for (const value of [null, {}, { revision: fetched.revision }, { ...fetched, revision: 'b9a6309' }, { ...fetched, fetchedAt: '2026-10-23 12:00' },
+    { ...fetched, sourceUrl: 'https://example.invalid/Item.dbd' }])
+    assert.equal(validator('TableDataSnapshot')({ ...readiness.snapshot, fetchedDefinition: value }), false, JSON.stringify(value));
+  const definition = JSON.parse(await readFile(path.join(root, 'contracts/examples/table-definition.json'), 'utf8'));
+  validate('TableDefinitionSnapshot', { ...definition, definition: { ...definition.definition, fetched }, definitionFetch: 'on' });
+  validate('TableDefinitionSnapshot', { ...definition, definitionFetch: 'off' });
+  for (const value of ['yes', true, null])
+    assert.equal(validator('TableDefinitionSnapshot')({ ...definition, definitionFetch: value }), false, String(value));
+});
+
 test('Reference text keeps exact keys, closed states, the actual text source and bound page shape', async () => {
   const page = JSON.parse(await readFile(path.join(root, 'contracts/examples/table-reference-text.json'), 'utf8'));
   validate('TableReferenceTextPage', page);
@@ -394,8 +414,9 @@ test('Settings keep unreadable values apart from saved ones and take only a know
   for (const patch of [{ file: 'missing' }, { formatVersion: 2 }, { lastChangedAt: '2026-10-18 12:02' }, { lastChangedAt: '2026-10-18T12:02:00' },
     { communityBuildHistory: { ...community, source: 'guessed' } }, { communityBuildHistory: { ...community, defaultValue: true } },
     { communityBuildHistory: { ...community, value: 'false' } }, { storage: { dataDirectory: '' } }, { storage: { dataDirectory: '/x', size: '1' } },
-    { downloadLimits: { ...snapshot.downloadLimits, bandwidthCapBytesPerSecond: 1024 } }, { downloadLimits: { ...snapshot.downloadLimits, parallelDownloads: 0 } }, { extra: true }])
-    assert.equal(validator('SettingsSnapshot')({ ...snapshot, ...patch }), false, JSON.stringify(patch));
+    { downloadLimits: { ...snapshot.downloadLimits, bandwidthCapBytesPerSecond: 1024 } }, { downloadLimits: { ...snapshot.downloadLimits, parallelDownloads: 0 } }, { extra: true },
+    { fetchTableDefinitions: undefined }, { fetchTableDefinitions: { ...snapshot.fetchTableDefinitions, defaultValue: false } }])
+    assert.equal(validator('SettingsSnapshot')(JSON.parse(JSON.stringify({ ...snapshot, ...patch }))), false, JSON.stringify(patch));
   const measurement = { bytes: '51749982208', files: '1204', skipped: '0', startedAt: '2026-10-20T13:12:00.1234567+00:00', measuredAt: '2026-10-20T13:12:04Z' };
   validate('StorageMeasurement', measurement);
   for (const patch of [{ bytes: 51749982208 }, { bytes: '01' }, { skipped: '-1' }, { measuredAt: null }, { path: '/x' }])
@@ -404,6 +425,7 @@ test('Settings keep unreadable values apart from saved ones and take only a know
   validate('EngineRequest', request('settings.read', {}));
   validate('EngineRequest', request('settings.storage.measure', {}));
   validate('EngineRequest', request('settings.set', { name: 'communityBuildHistory', value: true }));
+  validate('EngineRequest', request('settings.set', { name: 'fetchTableDefinitions', value: false }));
   for (const params of [{}, { name: 'communityBuildHistory' }, { name: 'communityBuildHistory', value: 'true' }, { name: 'bandwidthCap', value: true },
     { name: 'communityBuildHistory', value: true, path: '/tmp' }])
     assert.equal(validator('EngineRequest')(request('settings.set', params)), false, JSON.stringify(params));

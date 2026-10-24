@@ -18,6 +18,7 @@ These are the engine's current bounds. Code is the source of truth: [Acquisition
 | Resource | Bound |
 | --- | --- |
 | HTTP permits | 4 total, at most 2 background |
+| WoWDBDefs definition fetches (D081) | Own HTTP client, not the CDN permits; 2 at once, one per table; 1 MiB file, 256 KiB commit answer, 30 s per fetch; a covering cache refreshes after 24 h, a non-covering one at most every 15 min; Tables view only; cancelled with the `tables.prepare` request |
 | CPU permits | 2 total, at most 1 background |
 | Staging (temporary disk) | 2 GiB total, at most 512 MiB background |
 | Shared physical producers | 128 total; at most 32 pending background; 32 admissions reserved for interactive work |

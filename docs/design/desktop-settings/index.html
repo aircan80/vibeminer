@@ -524,6 +524,24 @@ function communityHtml(){
     ${extra}
   </div>`;
 }
+// #55 (D081): fetching newer WoWDBDefs definitions, on by default. Shown idle; it saves like Community build history.
+function fetchHtml(){
+  const on=fetchOn;
+  return `<div class="setting" id="row-fetch">
+    <div class="text">
+      <h3 id="fetch-name">Fetch newer table definitions from WoWDBDefs</h3>
+      <p id="fetch-desc">A new game build can change a table’s layout before VibeMiner is updated. This fetches the newest community definition for just that table, so it can still open.</p>
+      <dl class="effects">
+        <dt>When on</dt><dd>When no bundled definition lists a build, opening a table’s data in Tables fetches that one table’s newest definition, a small text file, from the WoWDBDefs project on GitHub. A definition that lists the exact build is used first, bundled before fetched; otherwise the bundled match by layout. It is kept in the storage folder, checked again at most once a day (sooner when it doesn’t list the build yet), and works offline after that. Definitions only describe columns; all game data still comes from Blizzard’s CDN. Such tables say <strong>Definition from WoWDBDefs</strong>.</dd>
+        <dt>When off</dt><dd>Only the definitions bundled with VibeMiner, matched by build or by layout. VibeMiner doesn’t contact GitHub, and a table they don’t cover can’t open.</dd>
+        <dt>Takes effect</dt><dd>The next time a table’s data opens. Nothing is fetched when you switch.</dd>
+        <dt>Source</dt><dd>WoWDBDefs contributors, <span class="mono">github.com/wowdev/WoWDBDefs</span>, CC BY-SA 4.0.</dd>
+      </dl>
+    </div>
+    <div class="ctl"><button class="switch" role="switch" id="fetch-switch" aria-checked="${on}" aria-labelledby="fetch-name" aria-describedby="fetch-desc fetch-save"><span class="track" aria-hidden="true"></span><span>${on?'On':'Off'}</span></button><span class="dflt">Default: On</span><span class="save-line" id="fetch-save" role="status"></span></div>
+  </div>`;
+}
+let fetchOn=true;
 function storageHtml(){
   const reading=S.storage.phase==='reading';
   return `<div class="setting" id="row-storage">
@@ -584,6 +602,7 @@ function renderSettings(){
   const list=$('s-list'),had=document.activeElement,id=had&&$('set').contains(had)?had.id:null,sc=$('set-main').scrollTop,lsc=list.scrollTop;
   $('s-back').textContent=backLabel();
   list.innerHTML=`<section aria-labelledby="g-builds"><h2 class="label group-h" id="g-builds">Builds</h2>${communityHtml()}</section>
+    <section aria-labelledby="g-tables"><h2 class="label group-h" id="g-tables">Tables</h2>${fetchHtml()}</section>
     <section aria-labelledby="g-storage"><h2 class="label group-h" id="g-storage">Storage</h2>${storageHtml()}</section>
     <section aria-labelledby="g-downloads"><h2 class="label group-h" id="g-downloads">Downloads</h2>${limitsHtml()}</section>`;
   $('s-side').innerHTML=sideHtml();
@@ -600,6 +619,7 @@ function wireSettings(){
   const sw=$('community-switch');
   if(sw)sw.onclick=()=>{const c=S.community;if(c.phase==='saving')return;c.target=!c.value;save('community',()=>{c.value=c.target;});};
   const r=$('community-retry');if(r)r.onclick=()=>{const c=S.community;c.target=true;save('community',()=>{c.value=true;});};
+  const fs=$('fetch-switch');if(fs)fs.onclick=()=>{fetchOn=!fetchOn;lastChange=T_SAVED;renderSettings();};
   $('storage-copy').onclick=()=>{try{navigator.clipboard?.writeText($('storage-path').textContent);}catch(e){}S.storage.note='Path copied';renderSettings();};
   $('storage-show').onclick=()=>{S.storage.note='Mockup: opens the folder in the file manager';renderSettings();};
   [['limits-parallel','parallel'],['limits-cap','cap']].forEach(([id,k])=>{const el=$(id);if(!el)return;

@@ -160,7 +160,7 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
   const [settings, setSettings] = useState<{ origin: SettingsOrigin; trigger: HTMLElement | null; scroll: [HTMLElement, number, number][] } | null>(null);
   const settingsState = useRef(settings); settingsState.current = settings;
   const settingsEntries = useRef(new Map<HTMLElement, () => SettingsOrigin>()), returning = useRef<NonNullable<typeof settings> | null>(null);
-  const settingsApi = useMemo(() => ({
+  const settingsApi = useMemo(() => { const api = {
     register: (element: HTMLElement, origin: () => SettingsOrigin) => { settingsEntries.current.set(element, origin); return () => { settingsEntries.current.delete(element); }; },
     open: (origin: SettingsOrigin, trigger: HTMLElement | null) => {
       if (settingsState.current) return;
@@ -168,7 +168,13 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
       const scroll = view ? [...view.querySelectorAll<HTMLElement>('*')].filter(el => el.scrollTop || el.scrollLeft).map((el): [HTMLElement, number, number] => [el, el.scrollTop, el.scrollLeft]) : [];
       setSettings({ origin, trigger, scroll });
     },
-  }), []);
+    // A link inside a screen (D081: turn fetching back on) opens Settings as that screen's own entry would, and
+    // Back returns focus to the link.
+    openHere: (trigger: HTMLElement) => {
+      const entry = [...settingsEntries.current].find(([element]) => element.isConnected && !element.closest('[hidden],[inert]'));
+      if (entry) api.open(entry[1](), trigger);
+    },
+  }; return api; }, []);
   const closeSettings = useCallback(() => { returning.current = settingsState.current; setSettings(null); }, []);
   useLayoutEffect(() => {
     const back = returning.current; if (settings || !back) return; returning.current = null;

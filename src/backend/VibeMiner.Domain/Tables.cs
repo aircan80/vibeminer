@@ -13,9 +13,18 @@ public sealed record TableDefinitionField(string Name, string Family, int? Integ
     int ArrayLength, bool IsId, bool NonInline, bool RelationStorage, bool VerifiedName,
     string? Comment, TableReference? Reference);
 public sealed record TableLayoutCandidate(string LayoutHash, IReadOnlyList<TableDefinitionField> Fields);
+/// <summary>A definition fetched from the WoWDBDefs repository at runtime (D081): its commit and when these bytes were
+/// first fetched. It is never bundled or verified, and it describes column layouts only, never game data.</summary>
+public sealed record TableDefinitionFetched(string Revision, DateTimeOffset FetchedAt);
 public sealed record TableDefinitionInfo(string Sha256, string SourceUrl,
-    IReadOnlyList<TableDefinitionField> Columns, IReadOnlyList<TableLayoutCandidate> Candidates);
+    IReadOnlyList<TableDefinitionField> Columns, IReadOnlyList<TableLayoutCandidate> Candidates,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    TableDefinitionFetched? Fetched = null);
 public sealed record TablesProblem(string Code, string Message);
+/// <summary>DefinitionFetch is "on" when a table this build's bundled definitions don't cover may fetch a newer
+/// definition from WoWDBDefs when its data opens (D081), "off" when the setting is off.</summary>
 public sealed record TableDefinitionSnapshot(string ProductId, string BuildIdentity, string SourceRegion,
     string BuildVersion, TableDefinitionProvider Provider, TableCatalogEntry Entry,
-    TableDefinitionInfo? Definition, TablesProblem? Problem);
+    TableDefinitionInfo? Definition, TablesProblem? Problem,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? DefinitionFetch = null);

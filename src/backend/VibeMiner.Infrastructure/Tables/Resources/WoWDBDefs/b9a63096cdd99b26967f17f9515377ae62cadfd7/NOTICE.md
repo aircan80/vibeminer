@@ -33,6 +33,13 @@ qualification, not observed associations, game rows, evaluated effects, spell
 descriptions or tooltip calculations. SpellName is a distinct source table from
 Spell; definition availability does not establish target or text coverage.
 
+With the Settings switch "Fetch newer table definitions from WoWDBDefs" on (the
+default), VibeMiner may also download one of these tables' definition files from
+https://github.com/wowdev/WoWDBDefs at runtime when no bundled definition covers a
+file's layout (decision D081). Fetched files are WoWDBDefs contributors' data under
+the same CC BY-SA 4.0 terms, used unmodified, kept with their commit, URL and
+SHA-256 in the app's storage folder, and labelled "Definition from WoWDBDefs".
+
 This catalogue is community-provided interpretation metadata, not an inventory of
 any selected game build and not Blizzard game data or endorsement. Definitions do
 not prove file availability, observed layout, decoded records or relationship uniqueness.
