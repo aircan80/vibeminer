@@ -368,6 +368,15 @@
 .desktop-home.dh-shell-scroll[data-area="home"] .dh-area{grid-template-rows:auto;min-height:10rem}
 .desktop-home.dh-shell-scroll[data-area="home"] .dh-home{grid-template-rows:auto auto}
 .desktop-home.dh-shell-scroll[data-area="home"] .dh-home-grid{overflow:visible}
+/* Tables and Files lay out the same way, so the pane heads, titles and footers are never squeezed out of a 10rem area (#66). Their
+   lists keep their own scroller, because the sticky column header and Record ID column only stick inside it, but take their natural
+   height up to the shell's visible height (the window less the shell's scroll padding, which clears the status bar), so they show
+   several whole rows and any row revealed in them fits whole (D092). */
+.desktop-home.dh-shell-scroll:is([data-area="tables"],[data-area="files"]) .dh-app{display:block}
+.desktop-home.dh-shell-scroll:is([data-area="tables"],[data-area="files"]) .dh-area{grid-template-rows:auto;min-height:10rem}
+.desktop-home.dh-shell-scroll .dh-tables,.desktop-home.dh-shell-scroll .dh-files{grid-template-rows:auto auto}
+.desktop-home.dh-shell-scroll :is(.dh-tables,.dh-files) :is(.dh-pane,.dh-inspector,.dh-data){overflow:visible}
+.desktop-home.dh-shell-scroll :is(.dh-tables,.dh-files) :is(.dh-cat-list,.dh-grid-scroll,.dh-list-scroll){flex:none;min-height:0;max-height:calc(100vh - 2.7rem - 1px)}
 .desktop-home .dh-area{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;min-width:0;outline:none}
 .desktop-home .dh-area>*{grid-area:1/1;min-height:0;min-width:0}
 .desktop-home .dh-area>.dh-home{display:grid}
@@ -415,6 +424,14 @@
    the summary is visually hidden but stays in its accessible name (#64). */
 :root:has(.desktop-home.dh-shell-scroll) .download-activity-floating{inline-size:auto;max-width:calc(100vw - 2rem);bottom:calc(2.633333rem + 1px);padding:.35rem .7rem;white-space:nowrap}
 :root:has(.desktop-home.dh-shell-scroll) .download-activity-floating>span{display:block;position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+/* While it shows, the shell's bottom scroll padding clears it as well as the status bar, so a focused control, row or active option the
+   shell or its lists scroll into view stays above it (#66): 2.633333rem + 1px to its bottom, one 1.5 line of .8rem text, .35rem padding
+   and a 1px border, then the shell's usual .533333rem gap. */
+:root:has(.desktop-home.dh-shell-scroll) .download-activity-floating strong{line-height:1.5}
+:root:has(.download-activity-floating) .desktop-home.dh-shell-scroll .dh-app{scroll-padding-bottom:calc(5.066667rem + 3px)}
+/* The areas that take their natural height end with that much room again, less the status bar's share, so their last controls (a
+   pager on the right) can scroll above the entry too. */
+:root:has(.download-activity-floating) .desktop-home.dh-shell-scroll:is([data-area="home"],[data-area="tables"],[data-area="files"]) .dh-area{padding-bottom:calc(2.9rem + 2px)}
 
 /* Activity panel docked after the entry: below the header, above the status bar, over the side column or inspector. */
 .desktop-home aside.download-activity-panel{top:var(--dh-panel-top,5.5rem);bottom:var(--dh-panel-bottom,1.633333rem);right:var(--dh-panel-right,0);left:auto;width:var(--panel-w);border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:-8px 0 24px rgba(36,59,58,.08);font-size:var(--fs-m);z-index:3}

@@ -43,17 +43,34 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   // Only the shell moves, by the least amount (the scroll-padding margin included), and only while it overflows.
   const inPanel=(el:Element|null)=>!!el?.closest('#download-activity-panel');
   const focused=()=>{const el=document.activeElement as HTMLElement|null;return el&&shell.current?.contains(el)&&!inPanel(el)?el:null;};
-  const shown=(el:HTMLElement|null)=>{const app=shell.current;if(!app||!el)return false;const box=app.getBoundingClientRect(),r=el.getBoundingClientRect(),bar=statusBar.current&&getComputedStyle(statusBar.current).position==='sticky'?statusBar.current.offsetHeight:0;return r.top>=box.top-1&&r.bottom<=box.top+app.clientHeight-bar+1;};
-  const reveal=(el:HTMLElement|null)=>{const app=shell.current;if(!app||!el||app.scrollHeight<=app.clientHeight+1)return;const style=getComputedStyle(app),box=app.getBoundingClientRect(),r=el.getBoundingClientRect(),top=box.top+(parseFloat(style.scrollPaddingTop)||0),bottom=box.top+app.clientHeight-(parseFloat(style.scrollPaddingBottom)||0);if(r.top<top)app.scrollTop-=top-r.top;else if(r.bottom>bottom)app.scrollTop+=Math.min(r.bottom-bottom,r.top-top);};
+  // What the reader sees of a focused control: a listbox's active option, cut to the inner scrollers that hold it (a Records grid
+  // region or the Files list is taller than its scroller), so the shell reveals that part and not the scrolled-away rest (#66). A control
+  // scrolled out of its own scroller is not shown, whatever the shell does.
+  const box=(el:HTMLElement)=>{const app=shell.current,id=el.getAttribute('aria-activedescendant'),option=id?document.getElementById(id):null,target=option&&el.contains(option)?option:el,r=target.getBoundingClientRect();let top=r.top,bottom=r.bottom;
+   for(let up=target.parentElement;up&&up!==app;up=up.parentElement){if(!/auto|scroll|hidden|clip/.test(getComputedStyle(up).overflowY))continue;const s=up.getBoundingClientRect();top=Math.max(top,s.top);bottom=Math.min(bottom,s.bottom);}
+   return bottom>top?{top,bottom,hidden:false}:{top:r.top,bottom:r.bottom,hidden:true};};
+  // The shell's bottom scroll padding clears what covers the bottom of its view (the sticky status bar, and the floating activity entry
+  // while it shows) plus the same gap as at the top, so that covered band, without the gap, is where a control counts as hidden.
+  const shown=(el:HTMLElement|null)=>{const app=shell.current;if(!app||!el)return false;const style=getComputedStyle(app),frame=app.getBoundingClientRect(),r=box(el),covered=Math.max(0,(parseFloat(style.scrollPaddingBottom)||0)-(parseFloat(style.scrollPaddingTop)||0));return !r.hidden&&r.top>=frame.top-1&&r.bottom<=frame.top+app.clientHeight-covered+1;};
+  const reveal=(el:HTMLElement|null)=>{const app=shell.current;if(!app||!el||app.scrollHeight<=app.clientHeight+1)return;const style=getComputedStyle(app),frame=app.getBoundingClientRect(),r=box(el),top=frame.top+(parseFloat(style.scrollPaddingTop)||0),bottom=frame.top+app.clientHeight-(parseFloat(style.scrollPaddingBottom)||0);if(r.top<top)app.scrollTop-=top-r.top;else if(r.bottom>bottom)app.scrollTop+=Math.min(r.bottom-bottom,r.top-top);};
   // Focus that was in view stays in view when the header or area changes size under it (the activity entry appearing grows the header).
-  // Scrolling away from it on purpose clears that, so a resize never pulls the reader back.
-  let focusShown=false;
-  const onFocus=(event:FocusEvent)=>{const el=event.target as HTMLElement;if(!inPanel(el))reveal(el);focusShown=shown(focused());};
-  const onScroll=()=>{place(true);focusShown=shown(focused());};
-  const onResize=()=>{place();const el=focused();if(focusShown&&el&&!shown(el))reveal(el);focusShown=shown(el);};
+  // Scrolling away from it on purpose clears that, so a resize never pulls the reader back. A scroll event can also come from layout
+  // (the browser clamping the scroll after the area shrank, delivered after content above the focus grew): when the focused control
+  // moved within the shell's content or the content height changed, it is handled as a resize, not as the reader scrolling away (#66).
+  // Inner scrollers (the Records grid, the lists) are heard in the capture phase: wheeling a grid moves its focused row on purpose, so
+  // the shell scroll that wheel chains into next is never taken for a layout shift and never pulls the row back.
+  let focusShown=false,focusAt=0,contentHeight=0;
+  const at=(el:HTMLElement|null)=>{const app=shell.current;return app&&el?box(el).top-app.getBoundingClientRect().top+app.scrollTop:0;};
+  const note=()=>{const el=focused();focusShown=shown(el);focusAt=at(el);contentHeight=shell.current?.scrollHeight??0;};
+  const keep=()=>{const el=focused();if(focusShown&&el&&!shown(el))reveal(el);note();};
+  // A control just focused is wanted in view even when the shell can't scroll far enough yet (a short pane clamps it), so the resize that
+  // follows finishes the reveal.
+  const onFocus=(event:FocusEvent)=>{const el=event.target as HTMLElement;if(!inPanel(el))reveal(el);note();if(focused())focusShown=true;};
+  const onScroll=(event:Event)=>{if(event.target!==shell.current){note();return;}place(true);const el=focused();if(el&&(Math.abs(at(el)-focusAt)>1||shell.current?.scrollHeight!==contentHeight))keep();else note();};
+  const onResize=()=>{place();keep();};
   revealer.current=reveal;
-  place();const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(onResize);for(const el of[toolbar.current,statusBar.current,areaNode.current,shell.current])if(el)observer?.observe(el);window.addEventListener('resize',onResize);const app=shell.current;app?.addEventListener('scroll',onScroll,{passive:true});app?.addEventListener('focusin',onFocus);
-  return()=>{observer?.disconnect();window.removeEventListener('resize',onResize);app?.removeEventListener('scroll',onScroll);app?.removeEventListener('focusin',onFocus);};
+  place();const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(onResize);for(const el of[toolbar.current,statusBar.current,areaNode.current,shell.current])if(el)observer?.observe(el);window.addEventListener('resize',onResize);const app=shell.current;app?.addEventListener('scroll',onScroll,{passive:true,capture:true});app?.addEventListener('focusin',onFocus);
+  return()=>{observer?.disconnect();window.removeEventListener('resize',onResize);app?.removeEventListener('scroll',onScroll,{capture:true});app?.removeEventListener('focusin',onFocus);};
  },[]);
  const ui=useDownloadActivity(),expanded=!!ui?.expanded,wasExpanded=useRef(expanded);
  // Opening the panel never moves the shell. Closing it puts the shell back where it was opened when focus returns to the invoker, so the
