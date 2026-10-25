@@ -96,8 +96,10 @@ test('Settings frees the real engine’s file list and Files prepares it again',
     await expect(note).toBeVisible();
     // At 600×480 and 200% the action, which names the build, wraps inside the note.
     await size(session.app, 600, 480); await text(page, 2);
-    const [box, again] = await Promise.all([note.boundingBox(), note.getByRole('button', { name: /^Prepare file list again/ }).boundingBox()]);
-    expect(again!.x + again!.width).toBeLessThanOrEqual(box!.x + box!.width + 0.5);
+    // The note re-renders for the compact layout after the text-size change, so wait for its button before measuring.
+    const prepare = note.getByRole('button', { name: /^Prepare file list again/ });
+    await expect(prepare).toBeVisible();
+    await expect.poll(async () => { const [box, again] = await Promise.all([note.boundingBox(), prepare.boundingBox()]); return !!box && !!again && again.x + again.width <= box.x + box.width + 0.5; }).toBe(true);
     await text(page, 1); await size(session.app, 1280, 800);
     await note.getByRole('button', { name: /^Prepare file list again/ }).click();
     await page.getByRole('button', { name: 'Show file list' }).click({ timeout: 30000 });

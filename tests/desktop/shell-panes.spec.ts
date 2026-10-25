@@ -220,3 +220,47 @@ test('one click on a visible Files row selects it at 600x480 and 200% text (#78)
     await text(page, 1);
   } finally { await session.close(); }
 });
+
+// #83: a right-click or middle-click on a row of an unfocused Files list moves nothing: the shell, the list and its active row stay.
+test('right-click and middle-click on a Files row never scroll the shell at 600x480 and 200% text (#83)', async () => {
+  test.setTimeout(90_000);
+  const session = await launch(true, false, false, false, false, false, false, false, false, false, false, true);
+  try {
+    const { page, app, data } = session;
+    await size(app, 1280, 800);
+    await page.locator('.build-row').first().click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeFocused();
+    await size(app, 600, 480); await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([600, 480]);
+    await text(page, 2);
+    await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-compact.dh-shell-scroll'));
+    await page.getByRole('navigation', { name: 'Build areas' }).getByRole('button', { name: 'Files', exact: true }).click();
+    const heading = page.getByRole('heading', { name: 'Files', exact: true });
+    await expect(heading).toBeFocused();
+    const pane = page.locator('.dh-files .dh-pane.dh-list');
+    await expect(pane.getByText('Object 1', { exact: true })).toBeVisible();
+    for (const button of ['right', 'middle'] as const) {
+      // The list isn't focused and its active row (the first) is scrolled out of its scroller, with the list in the shell's view.
+      await heading.focus(); await settle(page);
+      const target = await page.evaluate(() => {
+        const scroller = [...document.querySelectorAll<HTMLElement>('.dh-files .dh-list-scroll')].find(el => el.getClientRects().length > 0)!;
+        const app = document.querySelector<HTMLElement>('.dh-app')!, options = [...scroller.querySelectorAll<HTMLElement>('[role=option]')];
+        const head = scroller.querySelector<HTMLElement>('.dh-fthead')!.getBoundingClientRect().height;
+        scroller.scrollTop += options[6].getBoundingClientRect().top - scroller.getBoundingClientRect().top - head;
+        app.scrollTop += scroller.getBoundingClientRect().top - app.getBoundingClientRect().top - (parseFloat(getComputedStyle(app).scrollPaddingTop) || 0);
+        const r = options[6].getBoundingClientRect();
+        return { x: r.left + r.width / 3, y: (r.top + r.bottom) / 2, hidden: options[0].getBoundingClientRect().bottom <= scroller.getBoundingClientRect().top + head + 1 };
+      });
+      expect(target.hidden, `${button}: the active first row is scrolled out of the list`).toBe(true);
+      await settle(page);
+      const where = () => page.evaluate(() => { const scroller = [...document.querySelectorAll<HTMLElement>('.dh-files .dh-list-scroll')].find(el => el.getClientRects().length > 0)!; return { shell: Math.round(document.querySelector<HTMLElement>('.dh-app')!.scrollTop), list: Math.round(scroller.scrollTop), selected: scroller.querySelector('[role=option][aria-selected=true]')?.id ?? null }; });
+      const before = await where();
+      await page.mouse.click(target.x, target.y, { button });
+      await settle(page); await page.waitForTimeout(150); await settle(page);
+      expect.soft(await where(), `${button}-click moved the shell, the list or the selection`).toEqual(before);
+    }
+    await text(page, 1);
+  } finally { await session.close(); }
+});
+

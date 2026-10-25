@@ -243,7 +243,9 @@ export function useListbox<T>(entries: readonly T[], key: (entry: T) => string) 
     picked: () => picked.current,
     /** A new destination, such as a FileDataID followed from Tables: forget the earlier pick too. */
     reset: () => { picked.current = false; latest.current = null; setSelected(null); },
-    props: { role: 'listbox', tabIndex: 0, 'aria-activedescendant': entries.length ? optionId(active) : undefined, onKeyDown },
+    // A right or middle press doesn't take focus: focusing the list would make the shell reveal its active row, which can be scrolled
+    // far from the row under the pointer (#83). The context menu event still follows.
+    props: { role: 'listbox', tabIndex: 0, 'aria-activedescendant': entries.length ? optionId(active) : undefined, onKeyDown, onMouseDown: (event: MouseEvent) => { if (event.button !== 0) event.preventDefault(); } },
     // A row is picked on mousedown, as in a native list box. React commits it before the list takes focus (the default action
     // that follows the event), so the shell reveals the row under the pointer rather than scrolling to the earlier active row
     // and moving another row under the pointer before mouseup (#78).
