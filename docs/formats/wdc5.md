@@ -133,7 +133,9 @@ Supported Sparse profile: flags 5 or 7, external IDs, no separate string table, 
 - The real record length comes from the map, not the header record size. The header record size is nominal: one Retail ItemSparse had 321 nominal field bytes and a 328-byte header size.
 - Fields are byte-aligned None storage with contiguous nominal offsets in DBD order. Strings are inline NUL-terminated strict UTF-8.
 - Fields are read with a cursor. After an inline string, nominal offsets no longer locate the next field.
-- A record ends exactly where the fields end, or has 0–3 zero bytes padding it to a multiple of 4 (the DBCD writer calls `ResizeToMultiple(4)`). Anything else is unsupported.
+- A record ends exactly where the fields end, or has the minimal zero padding to a multiple of its alignment ([D084](../DECISIONS.md)). The alignment is 8 bytes when any stored field is 64 bits wide, otherwise 4 (the DBCD writer calls `ResizeToMultiple(4)`). It is chosen once from the field storage, never from rows. Anything else is unsupported, and the error names the record ID, the leftover byte count and the alignment.
+- A 64-bit field after an inline string is unsupported, refused before the header with both field names. The cursor doesn't model padding inside a record, which such a field might have, so it could be misread silently. None has been seen; `ABF517CD` stores `AllowableRace` before every string.
+- Observed: wow_beta 12.0.1.66220 ItemSparse (layout `ABF517CD`, 64-bit `AllowableRace`) pads all 170,865 readable records to 8 with 0–7 zero bytes. Retail 12.1.5.70575 (`1C17D17F`) and Classic 5.5.4.67849 (`B51F7C79`) have no 64-bit field and pad to 4.
 
 ### Invalid text
 

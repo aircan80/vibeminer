@@ -95,7 +95,7 @@ public static partial class Wdc5TableReader
         ApplyRawIntegerRules(fields,storage,U(152),U(156),limits.DefinitionSha256,rawRules,token);
         ValidateRelationshipSchema(fields,U(184),records==0&&copies==0);
         charged=ReserveRelationships(sections,limits,charged,fields.Any(f=>f.Field.RelationStorage));
-        if(sparse)ValidateSparseFields(fields,storage,token);
+        var sparseAlignment=sparse?ValidateSparseFields(fields,storage,token):0;
         var columns=Columns(fields,storage,limits);
         if(metadataOnlyEmpty)
         {
@@ -137,7 +137,7 @@ public static partial class Wdc5TableReader
         foreach(var section in populated)
         {await VerifyGap(decoded,gapStart,section.Offset,token);gapStart=section.End;}
         if(sparse)return await ReadSparse(decoded,sections,fields,storage,columns,encryptedIds,schema,U(152),U(156),records,copies,
-            recordSize,excludedSections,excluded,excludedCopies,length,limits,consumer,token,flags);
+            recordSize,excludedSections,excluded,excludedCopies,length,limits,consumer,token,flags,sparseAlignment);
         var locations=new Dictionary<uint,Location>();var copyMap=new Dictionary<uint,uint>();long global=0;
         for(var sectionIndex=0;sectionIndex<sections.Count;sectionIndex++)
         {

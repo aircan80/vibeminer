@@ -92,6 +92,52 @@ public sealed class Wdc5SparseTests
         Assert.Equal("DB2_UNSUPPORTED",(await Assert.ThrowsAsync<DiscoveryException>(()=>Read(new AsyncSource(fixture.Bytes),sink))).Code);Assert.Empty(sink.Rows);
     }
 
+    // #57: wow_beta 12.0.1.66220 ItemSparse (layout ABF517CD) has a 64-bit field and
+    // pads every record to eight bytes. Its 64-bit AllowableRace precedes every
+    // string, as in this fixture. Authored values only; no game content.
+    [Theory]
+    [InlineData("")][InlineData("a")][InlineData("ab")][InlineData("abc")][InlineData("abcd")][InlineData("abcde")][InlineData("abcdef")][InlineData("abcdefg")]
+    public async Task Records_with_a_64_bit_field_admit_only_minimal_zero_padding_to_eight_bytes(string name)
+    {
+        var record=WideRecord(name);var padding=(-record.Length)&7;var padded=record.Concat(new byte[padding]).ToArray();
+        var fixture=Build([new([padded],[7],[(8,7)])],layout:"wideFirst");var sink=new Sink();var done=await ReadWide(new AsyncSource(fixture.Bytes),sink,"1.2.3.6");
+        Assert.Equal(1,done.PhysicalRows);Assert.Equal(1,done.CopyRows);Assert.Equal("complete",done.Scope);
+        Assert.Equal(["7","-9223372036854775807",name,"2","1.5","-1","200"],sink.Rows[0].Values);Assert.Equal(sink.Rows[0].Values.Skip(1),sink.Rows[1].Values.Skip(1));
+        Assert.Equal("Wide",sink.Header!.Columns[1].Name);Assert.Null(sink.Header.Columns[1].Interpretation);
+        if(padding>0)
+        {
+            padded[^1]=1;fixture=Build([new([padded],[7],[])],layout:"wideFirst");sink=new Sink();
+            var error=await Assert.ThrowsAsync<DiscoveryException>(()=>ReadWide(new AsyncSource(fixture.Bytes),sink,"1.2.3.6"));
+            Assert.Equal("DB2_UNSUPPORTED",error.Code);Assert.Contains("8-byte",error.Message);Assert.Empty(sink.Rows);
+        }
+    }
+
+    [Theory]
+    [InlineData("a",8)][InlineData("abcd",8)][InlineData("abcdefg",8)][InlineData("",8)]
+    [InlineData("",-4)][InlineData("a",-4)][InlineData("abcdefg",-4)]
+    public async Task Records_with_a_64_bit_field_refuse_extra_zero_bytes_and_four_byte_padding(string name,int change)
+    {
+        // change 8: an extra zero word past the eight-byte boundary. -4: the four-byte
+        // boundary a 32-bit-only table would use, which is short of eight here.
+        var record=WideRecord(name);var length=((record.Length+7)&~7)+change;if(change<0)length=(record.Length+3)&~3;
+        Assert.NotEqual((record.Length+7)&~7,length);
+        var fixture=Build([new([record.Concat(new byte[length-record.Length]).ToArray()],[7],[])],layout:"wideFirst");var sink=new Sink();
+        var error=await Assert.ThrowsAsync<DiscoveryException>(()=>ReadWide(new AsyncSource(fixture.Bytes),sink,"1.2.3.6"));
+        Assert.Equal("DB2_UNSUPPORTED",error.Code);Assert.Contains("Sparse record 7 ",error.Message);Assert.Empty(sink.Rows);
+    }
+
+    [Theory]
+    [InlineData("")][InlineData("abcd")]
+    public async Task A_64_bit_field_after_an_inline_string_is_refused_before_the_header(string name)
+    {
+        // The cursor does not model padding inside a record, which a 64-bit field
+        // behind a variable string might have. Refuse the layout, whatever the rows hold.
+        byte[] record=[..Record(name)[..^4],..BitConverter.GetBytes(0x8000000000000001UL)];
+        var fixture=Build([new([record.Concat(new byte[(-record.Length)&7]).ToArray()],[7],[])],layout:"wideLast");var sink=new Sink();
+        var error=await Assert.ThrowsAsync<DiscoveryException>(()=>ReadWide(new AsyncSource(fixture.Bytes),sink,"1.2.3.5"));
+        Assert.Equal("DB2_UNSUPPORTED",error.Code);Assert.Contains("field Wide follows inline string Name",error.Message);Assert.Null(sink.Header);Assert.Empty(sink.Rows);
+    }
+
     [Theory]
     [InlineData("ff")][InlineData("c0af")][InlineData("eda080")][InlineData("f4908080")][InlineData("61ff62")]
     public async Task Raw_text_is_explicit_opt_in_and_preserves_exact_pre_NUL_bytes_without_guessing_an_encoding(string hex)
@@ -209,7 +255,9 @@ public sealed class Wdc5SparseTests
     }
 
     private static Task<Wdc5Completion> Read(Stream source,Sink sink,Wdc5Limits? limits=null,CancellationToken token=default)=>Wdc5TableReader.ReadAsync(source,Definition(),"1.2.3.4",limits??new(),sink,token);
-    private static DbdDocument Definition()=>DbdDefinitionReader.Parse(Encoding.UTF8.GetBytes("COLUMNS\nint ID\nstring Name\nint Quality\nfloat Ratio\nint Budget\nint Unknown?\n\nLAYOUT 01020304\nBUILD 1.2.3.4\n$noninline,id$ID<u32>\nName\nQuality<u8>\nRatio\nBudget<16>[2]\nUnknown<u8>\n"));
+    private static Task<Wdc5Completion> ReadWide(Stream source,Sink sink,string build)=>Wdc5TableReader.ReadAsync(source,Definition(),build,new(),sink,default);
+    private static DbdDocument Definition()=>DbdDefinitionReader.Parse(Encoding.UTF8.GetBytes("COLUMNS\nint ID\nstring Name\nint Quality\nfloat Ratio\nint Budget\nint Unknown?\nint Wide\n\nLAYOUT 01020304\nBUILD 1.2.3.4\n$noninline,id$ID<u32>\nName\nQuality<u8>\nRatio\nBudget<16>[2]\nUnknown<u8>\n\nLAYOUT 01020305\nBUILD 1.2.3.5\n$noninline,id$ID<u32>\nName\nQuality<u8>\nRatio\nBudget<16>[2]\nWide<64>\n\nLAYOUT 01020306\nBUILD 1.2.3.6\n$noninline,id$ID<u32>\nWide<64>\nName\nQuality<u8>\nRatio\nBudget<16>[2]\n"));
+    private static byte[] WideRecord(string name)=>[..BitConverter.GetBytes(0x8000000000000001UL),..Record(name)[..^4]];
     private static byte[] Record(string name,byte quality=2,float ratio=1.5f)
     {
         using var output=new MemoryStream();using var writer=new BinaryWriter(output,Encoding.UTF8,true);writer.Write(Encoding.UTF8.GetBytes(name));writer.Write((byte)0);
@@ -217,7 +265,8 @@ public sealed class Wdc5SparseTests
     }
     private sealed record Part(byte[][] Records,uint[] Ids,(uint Target,uint Source)[] Copies,ulong Key=0,uint[]? EncryptedIds=null);
     private sealed record Fixture(byte[] Bytes,int PrefixEnd,int[] Starts,int[] RecordEnds,int[] Maps,int[] MapIds,int[] SectionEnds);
-    private static Fixture Build(Part[] parts,int gap=0)
+    // layout: "narrow" (32-bit Unknown last), "wideFirst" (64-bit Wide before Name), "wideLast" (Wide after Name).
+    private static Fixture Build(Part[] parts,int gap=0,string layout="narrow")
     {
         var prefix=204+parts.Length*40+5*28+parts.Where(part=>part.Key!=0).Sum(part=>4+4*(part.EncryptedIds?.Length??0));
         var starts=new int[parts.Length];var ends=new int[parts.Length];var maps=new int[parts.Length];var mapIds=new int[parts.Length];var sectionEnds=new int[parts.Length];var next=prefix+gap;
@@ -227,10 +276,15 @@ public sealed class Wdc5SparseTests
             maps[index]=ends[index]+part.Ids.Length*4+part.Copies.Length*8;mapIds[index]=maps[index]+part.Ids.Length*6;sectionEnds[index]=mapIds[index]+part.Ids.Length*4;next=sectionEnds[index];
         }
         var header=new byte[204];"WDC5"u8.CopyTo(header);Put(header,4,5);Put(header,136,(uint)parts.Sum(part=>part.Ids.Length));Put(header,140,5);Put(header,144,24);
-        Put(header,152,0x11223344);Put(header,156,0x01020304);Half(header,172,5);Put(header,176,5);Put(header,180,24);Put(header,188,120);Put(header,200,(uint)parts.Length);
+        Put(header,152,0x11223344);Put(header,156,layout switch{"wideLast"=>0x01020305u,"wideFirst"=>0x01020306u,_=>0x01020304u});Half(header,172,5);Put(header,176,5);Put(header,180,24);Put(header,188,120);Put(header,200,(uint)parts.Length);
         using var output=new MemoryStream();using var writer=new BinaryWriter(output,Encoding.UTF8,true);writer.Write(header);
         for(var index=0;index<parts.Length;index++){var part=parts[index];writer.Write(part.Key);writer.Write((uint)starts[index]);writer.Write((uint)part.Ids.Length);writer.Write(0u);writer.Write((uint)ends[index]);writer.Write((uint)part.Ids.Length*4);writer.Write(0u);writer.Write((uint)part.Ids.Length);writer.Write((uint)part.Copies.Length);}
-        short[] bits=[0,24,0,16,0];ushort[] positions=[0,4,5,9,13];ushort[] widths=[32,8,32,32,32];
+        var (bits,positions,widths)=layout switch
+        {
+            "wideFirst"=>(new short[]{-32,0,24,0,16},new ushort[]{0,8,12,13,17},new ushort[]{64,32,8,32,32}),
+            "wideLast"=>(new short[]{0,24,0,16,-32},new ushort[]{0,4,5,9,13},new ushort[]{32,8,32,32,64}),
+            _=>(new short[]{0,24,0,16,0},new ushort[]{0,4,5,9,13},new ushort[]{32,8,32,32,32})
+        };
         for(var index=0;index<5;index++){writer.Write(bits[index]);writer.Write(positions[index]);}
         for(var index=0;index<5;index++){writer.Write((ushort)(positions[index]*8));writer.Write(widths[index]);for(var item=0;item<5;item++)writer.Write(0u);}
         foreach(var part in parts.Where(part=>part.Key!=0)){writer.Write((uint)(part.EncryptedIds?.Length??0));foreach(var id in part.EncryptedIds??[])writer.Write(id);}

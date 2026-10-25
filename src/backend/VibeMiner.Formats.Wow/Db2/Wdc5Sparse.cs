@@ -12,9 +12,10 @@ public static partial class Wdc5TableReader
     // require contiguous complete coverage instead of repairing or guessing maps.
     private sealed record SparseLocation(long Offset,int ByteLength,int Section,int LocalIndex,uint PhysicalId);
 
-    private static void ValidateSparseFields(IReadOnlyList<BoundField> fields,Storage[] storage,CancellationToken token)
+    // Returns the record alignment: 8 bytes when any stored field is 64 bits wide, else 4.
+    private static int ValidateSparseFields(IReadOnlyList<BoundField> fields,Storage[] storage,CancellationToken token)
     {
-        long nominal=0;
+        long nominal=0;var alignment=4;string? firstString=null;
         foreach(var binding in fields)
         {
             token.ThrowIfCancellationRequested();if(binding.StorageIndex<0)continue;
@@ -22,16 +23,26 @@ public static partial class Wdc5TableReader
             if(column.Kind!=0||column.Additional!=0||width%8!=0||column.FieldOffset!=nominal
                 ||(binding.Field.Column.Family is "string" or "locstring")&&width!=32)
                 throw Fail("UNSUPPORTED","Sparse fields require ordered byte-aligned NONE storage and scalar inline strings.");
-            nominal=checked(nominal+width/8L*binding.Field.ArrayLength);
+            // After an inline string a 64-bit field may sit behind padding inside the
+            // record that the cursor does not model; refuse it until one is observed.
+            if(width==64&&firstString is not null)
+                throw Fail("UNSUPPORTED",$"Sparse 64-bit field {binding.Field.Column.Name} follows inline string {firstString}; its in-record alignment is not established.");
+            if(binding.Field.Column.Family is "string" or "locstring")firstString??=binding.Field.Column.Name;
+            nominal=checked(nominal+width/8L*binding.Field.ArrayLength);if(width==64)alignment=8;
         }
         // Header recordSize is nominal. In the observed cohort it exceeds the
         // nominal field sum; that does not establish padding in variable records.
+        // Records end on a boundary of their widest stored field, at least four
+        // bytes (D084): 12.0.1.66220 ItemSparse has a 64-bit field and pads to 8,
+        // files without one pad to 4. Chosen from storage once, never from rows.
+        // ABF517CD stores its 64-bit AllowableRace before every string.
+        return alignment;
     }
 
     private static async Task<Wdc5Completion> ReadSparse(Stream decoded,IReadOnlyList<Section> sections,
         IReadOnlyList<BoundField> fields,Storage[] storage,IReadOnlyList<Db2Column> columns,HashSet<uint> encryptedIds,
         uint schema,uint tableHash,uint layoutHash,long declared,long declaredCopies,int nominalRecordSize,
-        int excludedSections,long excluded,long excludedCopies,long length,Wdc5Limits limits,IWdc5Consumer consumer,CancellationToken token,ushort flags)
+        int excludedSections,long excluded,long excludedCopies,long length,Wdc5Limits limits,IWdc5Consumer consumer,CancellationToken token,ushort flags,int alignment)
     {
         var locations=new Dictionary<uint,SparseLocation>();var copies=new Dictionary<uint,uint>();
         for(var sectionIndex=0;sectionIndex<sections.Count;sectionIndex++)
@@ -85,7 +96,7 @@ public static partial class Wdc5TableReader
         }
         foreach(var (id,location) in locations)
         {
-            var (values,issues)=await DecodeSparseValues(decoded,location,id,fields,storage,limits,token,relationships,true);ChargeText(issues);
+            var (values,issues)=await DecodeSparseValues(decoded,location,id,fields,storage,limits,token,relationships,true,alignment);ChargeText(issues);
             await consumer.RowAsync(new(id,false,null,values,issues),token);token.ThrowIfCancellationRequested();physicalRows++;
         }
         foreach(var (id,source) in copies)
@@ -103,7 +114,7 @@ public static partial class Wdc5TableReader
                 if(encryptedIds.Contains(current)){excludedCopies++;continue;}
                 throw Fail("LIMIT","Sparse copy resolution exceeds its chain bound.");
             }
-            var (values,issues)=await DecodeSparseValues(decoded,location,id,fields,storage,limits,token,relationships,false);ChargeText(issues);
+            var (values,issues)=await DecodeSparseValues(decoded,location,id,fields,storage,limits,token,relationships,false,alignment);ChargeText(issues);
             await consumer.RowAsync(new(id,true,source,values,issues),token);token.ThrowIfCancellationRequested();copyRows++;
         }
         decoded.Position=length;var probe=new byte[1];
@@ -113,7 +124,7 @@ public static partial class Wdc5TableReader
     }
 
     private static async Task<(IReadOnlyList<string> Values,IReadOnlyList<Db2TextIssue>? Issues)> DecodeSparseValues(Stream decoded,SparseLocation location,uint id,
-        IReadOnlyList<BoundField> fields,Storage[] storage,Wdc5Limits limits,CancellationToken token,RelationshipData?[] relationships,bool validateRelation)
+        IReadOnlyList<BoundField> fields,Storage[] storage,Wdc5Limits limits,CancellationToken token,RelationshipData?[] relationships,bool validateRelation,int alignment)
     {
         var record=await ReadAt(decoded,location.Offset,location.ByteLength,token);var values=new List<string>();var cursor=0;List<Db2TextIssue>? issues=null;
         foreach(var binding in fields)
@@ -154,11 +165,13 @@ public static partial class Wdc5TableReader
                 }
             }
         }
-        // The pinned WDC5 writer rounds Sparse records to a four-byte boundary.
-        // Admit only that minimal zero suffix; nominal header-size gaps never
-        // establish additional padding or change field positions within a record.
-        if(cursor!=record.Length&&(record.Length!=checked((cursor+3)&~3)||record.AsSpan(cursor).IndexOfAnyExcept((byte)0)>=0))
-            throw Fail("UNSUPPORTED","Sparse fields leave bytes other than the minimal zero alignment to a four-byte record boundary.");
+        // The pinned WDC5 writer rounds Sparse records to a four-byte boundary;
+        // records with a 64-bit field round to eight. Admit only that minimal zero
+        // suffix; nominal header-size gaps never establish additional padding or
+        // change field positions within a record.
+        if(cursor!=record.Length&&(record.Length!=checked((cursor+alignment-1)&~(alignment-1))||record.AsSpan(cursor).IndexOfAnyExcept((byte)0)>=0))
+            throw Fail("UNSUPPORTED",string.Create(CultureInfo.InvariantCulture,
+                $"Sparse record {location.PhysicalId} has {record.Length-cursor} bytes after its fields, not the minimal zero padding to a {alignment}-byte record boundary."));
         return (values.AsReadOnly(),issues?.AsReadOnly());
     }
 }
