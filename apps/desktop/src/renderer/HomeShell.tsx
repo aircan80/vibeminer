@@ -118,9 +118,24 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   return()=>{for(const el of covered)el.inert=false;};
  });
  // The panel's heading is sticky: its height is the panel's top scroll padding, so a control Tab scrolls into view never lands under it.
+ // Focus in the panel that was in view stays in view when the panel or its content changes size, as a text-size switch to the sheet
+ // does (#74). Scrolling the panel away from it on purpose clears that; a scroll caused by layout (the focused control moved in the
+ // panel's content, or the content height changed) doesn't, as in the shell.
  useLayoutEffect(()=>{if(!expanded)return;const panel=host.current?.querySelector<HTMLElement>('#download-activity-panel'),head=panel?.querySelector<HTMLElement>('.download-panel-heading');if(!panel||!head)return;
-  const pad=()=>{panel.style.scrollPaddingTop=`${head.offsetHeight}px`;};pad();const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(pad);observer?.observe(head);
-  return()=>{observer?.disconnect();panel.style.scrollPaddingTop='';};
+  const pad=()=>{panel.style.scrollPaddingTop=`${head.offsetHeight}px`;};
+  const inside=()=>{const el=document.activeElement as HTMLElement|null;return el&&el!==panel&&panel.contains(el)&&!head.contains(el)?el:null;};
+  const view=()=>{const p=panel.getBoundingClientRect();return {top:p.top+head.offsetHeight,bottom:p.top+panel.clientHeight,base:p.top};};
+  const shown=(el:HTMLElement)=>{const v=view(),r=el.getBoundingClientRect();return r.top>=v.top-1&&r.bottom<=v.bottom+1;};
+  let wanted=false,at=0,height=0;
+  const note=()=>{const el=inside();wanted=!!el&&shown(el);at=el?el.getBoundingClientRect().top-view().base+panel.scrollTop:0;height=panel.scrollHeight;};
+  const keep=()=>{pad();const el=inside();if(wanted&&el&&!shown(el)){const v=view(),r=el.getBoundingClientRect();if(r.bottom>v.bottom)panel.scrollTop+=Math.min(r.bottom-v.bottom,r.top-v.top);else panel.scrollTop-=v.top-r.top;}note();};
+  const onFocus=()=>{note();if(inside())wanted=true;};
+  const onScroll=()=>{const el=inside();if(el&&(Math.abs(el.getBoundingClientRect().top-view().base+panel.scrollTop-at)>1||panel.scrollHeight!==height))keep();else note();};
+  pad();note();if(inside())wanted=true;
+  const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(keep);observer?.observe(head);observer?.observe(panel);for(const child of panel.children)observer?.observe(child);
+  const text=new MutationObserver(keep);text.observe(document.documentElement,{attributes:true,attributeFilter:['style','class']});
+  panel.addEventListener('focusin',onFocus);panel.addEventListener('scroll',onScroll,{passive:true});window.addEventListener('resize',keep);
+  return()=>{observer?.disconnect();text.disconnect();panel.removeEventListener('focusin',onFocus);panel.removeEventListener('scroll',onScroll);window.removeEventListener('resize',keep);panel.style.scrollPaddingTop='';};
  },[expanded]);
  const summary=ui&&ui.entry&&!ui.expanded?ui.summary:null;
  return <ShellContext.Provider value={{compact:size.compact,statusSlot,setMinimum}}><div ref={host} className={`desktop-home${size.compact?' dh-compact dh-medium':size.medium?' dh-medium':''}${size.narrow?' dh-narrow':''}${scrolling?' dh-shell-scroll':''}${expanded?' dh-panel-open':''}`} data-area={area}>
