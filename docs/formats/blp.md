@@ -37,10 +37,16 @@ Every other combination is `BLP_UNSUPPORTED`, including BLP1, JPEG and raw BGRA 
 
 - Mip byte must be 0, 1 or `0x11`. Its upper bits get no meaning. The value is returned as `MipFlags`.
 - The mip **count comes from the descriptors**, not the mip byte. Byte 0 with more than one declared level is an error.
-- All 16 descriptor pairs are checked: offset and length both zero or both nonzero, present levels form a contiguous prefix, no level beyond the terminal 1×1, exact length for that level's geometry, inside the source, no overlap with metadata or each other.
-- Exact lengths: palette `w×h + ceil(w×h×depth/8)`; BC1 8 bytes per 4×4 block; BC2/BC3 16 bytes per block; BGRA `w×h×4`.
+- The structure of all 16 descriptor pairs is checked: offset and length both zero or both nonzero, present levels form a contiguous prefix, no level beyond the terminal 1×1. A structure error refuses the whole container.
+- Each declared level's length gets a storage class (`Blp2Mip.Storage`, D096):
+  - **exact**: palette `w×h + ceil(w×h×depth/8)`; BC1 8 bytes per 4×4 block; BC2/BC3 16 bytes per block; BGRA `w×h×4`.
+  - **compact** (BC only): Blizzard's `w×h` sizing at 4 bits per pixel for BC1 and 8 for BC2/BC3, at least one block (8 or 16 bytes), where that is less than exact. For power-of-two sides that means one side under 4 px and the other 8 px or more, e.g. an 8×2 BC2 level declared as 16 bytes where its two blocks need 32. It holds fewer blocks than the level needs, so it is never decoded.
+  - **unrecognized**: any other length.
+- Only the level being decoded is held to its length and position: it must be exact, start at or after the header (and palette), end inside the source and not overlap any other declared level's range. A compact level is `BLP_UNSUPPORTED`; unrecognized, out of the source or overlapping is `BLP_INVALID`. Other levels' lengths, bounds and overlap are not checked, and their bytes are never read.
+- `DecodeLargestWithinAsync` and the model-texture plan skip compact levels and take the next declared level below.
 - A missing requested mip is `BLP_MIP_UNAVAILABLE`. No other level is substituted. Bytes outside declared mips are not interpreted.
 - Observed Retail icon: 64×64 BC1, alpha depth 1, mip byte `0x11`, seven contiguous mips 64 → 1.
+- Observed (#73), 3,157 BLPs: 1,175 creature textures and 596 item icons on wow_classic_ptr 5.5.4.67849, 788 and 598 on wowxptr 12.1.5.70340. Every declared level was exact except seven compact BC2 levels: the 8×2 level of the 128×32 Snake textures (125970, 125974, 125975, 125978) and the 2×8 level of 64×256 textures 123946 and 126486 (also in retail), each 16 bytes where its blocks need 32. Newer files use exact sizing for the same shapes (BC3 1,024×256 textures 1084385 and others store their 8×2 level in 32 bytes), so both are accepted. Only BC2 8×2 and 2×8 compact levels were seen. Every other shape, and BC1 and BC3, is inferred from them. Another rule fits the same data: round each side down to whole blocks, at least one block. The two disagree once such a level has more than 16 pixels, e.g. BC2 16×2 and 32×1: `w×h` gives 32 bytes, rounding down gives 16. Neither shape was seen, so a file that stores one at 16 bytes reads as unrecognized and is refused only if that level is decoded. All levels started at 1,172 and were packed back to back up to the end of the file.
 
 ## Pixel rules
 
@@ -66,7 +72,7 @@ Reads are sliced at 64 KiB and loops check cancellation per row or block.
 
 ## Model textures
 
-Creature textures (#63, D091) first read only the mip descriptors (`ReadMipsAsync`) and start at the first declared mip, in level order, whose width and height are both ≤ 1,024. While one display's slots together exceed 8 MiB of RGBA8, the image with the largest current level steps down one declared level; then each image is decoded once at its planned level with `DecodeAsync`. Nothing is resized. A container whose declared levels never get within 1,024 px is `BLP_MIP_UNAVAILABLE`, and slots that exceed 8 MiB even at their smallest declared levels are `CREATURE_APPEARANCE_TEXEL_LIMIT`; both report `resourceLimit`. The images go into a [VMA1 artifact](../../contracts/geometry-vma1-v2.md) as raw RGBA8, not PNG; the renderer uploads them without decoding.
+Creature textures (#63, D091) first read only the mip descriptors (`ReadMipsAsync`) and start at the first declared mip, in level order, whose width and height are both ≤ 1,024 and that is not compact (D096). While one display's slots together exceed 8 MiB of RGBA8, the image with the largest current level steps down one declared level, skipping compact levels; then each image is decoded once at its planned level with `DecodeAsync`. Nothing is resized. A container whose declared levels never get within 1,024 px is `BLP_MIP_UNAVAILABLE`, and slots that exceed 8 MiB even at their smallest declared levels are `CREATURE_APPEARANCE_TEXEL_LIMIT`; both report `resourceLimit`. The images go into a [VMA1 artifact](../../contracts/geometry-vma1-v2.md) as raw RGBA8, not PNG; the renderer uploads them without decoding.
 
 ## Icon pipeline
 

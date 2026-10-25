@@ -32,6 +32,23 @@ public sealed class ItemIconsStoreTests
         var cached = await h.Catalog.FindItemIconAsync(h.Opening, snapshot, 1001, default); Assert.NotNull(cached);
         Assert.Equal(2, cached.Admission.Association.Memberships.Count); Assert.Null(cached.Admission.Source.Projection);
     }
+    // D096 (#73): only the decoded level is held to its length and bounds. A 2x1 paletted icon whose undecoded 1x1 tail
+    // claims 9 bytes past the end of the file is Ready at level 0; the same fault on level 0 is still corrupt.
+    [Theory]
+    [InlineData(1, ItemIconStatus.Ready)][InlineData(0, ItemIconStatus.Corrupt)]
+    public async Task An_icon_whose_only_fault_is_an_undecoded_tail_descriptor_is_ready(int broken, ItemIconStatus expected)
+    {
+        var icon = new byte[1172 + 3]; "BLP2"u8.CopyTo(icon); Put(4, 1); icon[8] = 1; icon[11] = 1; Put(12, 2); Put(16, 1);
+        Put(20, 1172); Put(84, 2); Put(24, 1174); Put(88, 1); icon[148] = 20; icon[149] = 40; icon[150] = 200;
+        Put(84 + broken * 4, 9);
+        await using var h = await Harness.Create(icon: icon); var snapshot = await h.Store.PrepareAsync(h.Request, _ => Task.CompletedTask, default);
+        var outcome = Assert.Single((await h.Icons.PrepareBatchAsync(new(h.Request, snapshot.ArtifactId, ["1"]), _ => Task.CompletedTask, default)).Outcomes);
+        Assert.Equal(expected, outcome.Status);
+        if (expected == ItemIconStatus.Ready) Assert.Equal((2, 1), (outcome.Image!.Width, outcome.Image.Height));
+        else Assert.Equal("BLP_INVALID", outcome.Problem!.Code);
+        void Put(int at, uint value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(icon.AsSpan(at), value);
+    }
+
     [Fact]
     public async Task Ready_icons_reopen_offline_without_source_session_and_read_authority_is_exact_and_bounded()
     {
@@ -204,7 +221,8 @@ public sealed class ItemIconsStoreTests
     {
         internal const string Time = "2026-10-19T00:00:00Z";
         internal readonly string directory = Path.Combine(Path.GetTempPath(), "vibeminer-item-icons-" + Guid.NewGuid().ToString("N"));
-        internal readonly ItemIconData Fixture = ItemIconData.Create();
+        internal readonly ItemIconData Fixture;
+        private Harness(ItemIconData fixture) => Fixture = fixture;
         internal DiscoveryCatalog Catalog = null!;
         internal VerifiedObjectStore Objects = null!;
         internal CapturedOpeningContext Opening = null!;
@@ -220,9 +238,9 @@ public sealed class ItemIconsStoreTests
         internal HttpClient Client = null!;
         internal bool Offline;
         internal readonly List<string> HttpRequests = [];
-        internal static async Task<Harness> Create(bool legacyMetadata = false)
+        internal static async Task<Harness> Create(bool legacyMetadata = false, byte[]? icon = null)
         {
-            var h = new Harness(); h.Catalog = await DiscoveryCatalog.OpenAsync(h.directory); h.Objects = new(h.directory);
+            var h = new Harness(ItemIconData.Create(icon)); h.Catalog = await DiscoveryCatalog.OpenAsync(h.directory); h.Objects = new(h.directory);
             var versions = Fixtures.Versions($"us|{h.Fixture.BuildKey}|{h.Fixture.CdnKey}||70448|12.1.5.70448||items");
             var cdns = Encoding.UTF8.GetString(h.Fixture.Discovery.Documents.Single(d => d.Role == "cdns").Bytes);
             var discovery = await Fixtures.Attempt(versions, cdns); var generation = await h.Catalog.BeginRefreshAsync("wow", default);

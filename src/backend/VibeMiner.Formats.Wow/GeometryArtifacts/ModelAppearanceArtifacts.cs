@@ -42,7 +42,7 @@ public static class ModelAppearanceArtifacts
 
     /// <summary>Chooses one declared level per distinct image (D091): start at the largest level with both sides at most
     /// 1,024 px, then, while the slots together exceed <paramref name="budget"/>, step the image with the largest current
-    /// level (lowest index on ties) down one declared level. Null when even the smallest declared levels exceed the budget;
+    /// level (lowest index on ties) down one declared level. Compact levels are skipped. Null when even the smallest declared levels exceed the budget;
     /// <paramref name="noFit"/> names an image with no level within 1,024 px (else -1). Nothing is resized.</summary>
     public static int[]? ChooseMips(IReadOnlyList<IReadOnlyList<Blp2Mip>> images, IReadOnlyList<int> slots, out int noFit, long budget = MaximumTexelBytes)
     {
@@ -51,8 +51,16 @@ public static class ModelAppearanceArtifacts
         var levels = new int[images.Count]; noFit = -1;
         for (var i = 0; i < images.Count; i++)
         {
-            levels[i] = images[i].ToList().FindIndex(m => m.Width <= MaximumTextureSide && m.Height <= MaximumTextureSide);
+            levels[i] = Next(i, 0, fit: true);
             if (levels[i] < 0) { noFit = i; return null; }
+        }
+        // Compact levels (Blizzard's width × height sizing, short of their blocks) are never decoded, so never chosen.
+        int Next(int i, int from, bool fit = false)
+        {
+            for (var level = from; level < images[i].Count; level++)
+                if (images[i][level].Storage != Blp2MipStorage.Compact &&
+                    (!fit || images[i][level].Width <= MaximumTextureSide && images[i][level].Height <= MaximumTextureSide)) return level;
+            return -1;
         }
         long Bytes(int i) => (long)images[i][levels[i]].Width * images[i][levels[i]].Height * 4;
         long Total() { long sum = 0; for (var i = 0; i < images.Count; i++) sum += Bytes(i) * slots[i]; return sum; }
@@ -60,9 +68,9 @@ public static class ModelAppearanceArtifacts
         {
             var step = -1;
             for (var i = 0; i < images.Count; i++)
-                if (levels[i] + 1 < images[i].Count && (step < 0 || Bytes(i) > Bytes(step))) step = i;
+                if (Next(i, levels[i] + 1) >= 0 && (step < 0 || Bytes(i) > Bytes(step))) step = i;
             if (step < 0) return null;
-            levels[step]++;
+            levels[step] = Next(step, levels[step] + 1);
         }
         return levels;
     }

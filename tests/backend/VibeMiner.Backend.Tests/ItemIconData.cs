@@ -38,9 +38,10 @@ internal sealed class ItemIconData
     public long ExpectedDecodedBytes => PayloadA.Decoded.LongLength + PayloadB.Decoded.LongLength;
     public long ExpectedMetadataEncodedBytes => Metadata.Values.Sum(value => value.Encoded.LongLength);
 
-    public static ItemIconData Create()
+    /// <param name="icon">Decoded icon BLP for payload A; the authored 1x1 paletted image when null.</param>
+    public static ItemIconData Create(byte[]? icon = null)
     {
-        var a = Object("payloadA", Blp());
+        var a = Object("payloadA", icon ?? Blp());
         var b = Object("payloadB", [.. "BLP1"u8, .. new byte[144]]);
         var root = Object("root", Root(a, b));
         var install = Object("install", Install(a));

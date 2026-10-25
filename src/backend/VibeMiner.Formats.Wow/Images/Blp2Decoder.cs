@@ -14,15 +14,15 @@ public static partial class Blp2Decoder
     public static async Task<Blp2Image> DecodeAsync(Stream source, int mipLevel = 0, Blp2Limits? limits = null,
         CancellationToken token = default) => (await DecodeCoreAsync(source, mipLevel, 0, limits, token))!;
 
-    /// <summary>Validates the container header and every mip descriptor exactly as decoding would, and returns the
-    /// declared levels without reading pixels.</summary>
+    /// <summary>Validates the container header and the descriptor structure as decoding would, and returns the declared
+    /// levels with their storage, without reading pixels. A level's length, bounds and overlap are checked when it is decoded.</summary>
     public static async Task<IReadOnlyList<Blp2Mip>> ReadMipsAsync(Stream source, Blp2Limits? limits = null, CancellationToken token = default)
     {
         var declared = new List<Blp2Mip>(); await DecodeCoreAsync(source, 0, 0, limits, token, declared); return declared.AsReadOnly();
     }
 
-    /// <summary>Decodes the largest declared mip whose width and height are both at most <paramref name="maxSide"/>.
-    /// No declared level fitting is <c>BLP_MIP_UNAVAILABLE</c>; nothing is resized.</summary>
+    /// <summary>Decodes the largest declared mip whose width and height are both at most <paramref name="maxSide"/>,
+    /// skipping compact levels. No declared level fitting is <c>BLP_MIP_UNAVAILABLE</c>; nothing is resized.</summary>
     public static async Task<Blp2Image> DecodeLargestWithinAsync(Stream source, int maxSide, Blp2Limits? limits = null,
         CancellationToken token = default)
     {
@@ -62,24 +62,26 @@ public static partial class Blp2Decoder
             if (level > 0 && Math.Max(width, height) >> (level - 1) <= 1)
                 throw Error("INVALID", "The BLP declares mip levels beyond its terminal one-pixel level.");
             var mipWidth = Math.Max(1, width >> level); var mipHeight = Math.Max(1, height >> level);
-            var expected = EncodedBytes(mipWidth, mipHeight, encoding, alphaDepth);
-            if (count != expected) throw Error("INVALID", "A BLP mip length differs from its exact pixel/block geometry.");
-            if (offset < minimumOffset || offset > sourceLength || count > sourceLength - offset)
-                throw Error("INVALID", "A BLP mip overlaps metadata or lies outside the source.");
-            mips.Add(new(level, mipWidth, mipHeight, offset, count));
+            mips.Add(new(level, mipWidth, mipHeight, offset, count, Storage(count, mipWidth, mipHeight, encoding, alphaDepth)));
         }
         if (mips.Count == 0) throw Error("INVALID", "The BLP source has no declared top-level mip.");
-        long after = minimumOffset;
-        foreach (var mip in mips.OrderBy(mip => mip.Offset))
-        { if (mip.Offset < after) throw Error("INVALID", "BLP mip byte ranges overlap."); after = mip.Offset + mip.ByteLength; }
         if (declared is not null) { declared.AddRange(mips); return null; }
         if (maxSide > 0)
         {
-            mipLevel = mips.FindIndex(mip => mip.Width <= maxSide && mip.Height <= maxSide);
+            mipLevel = mips.FindIndex(mip => mip.Width <= maxSide && mip.Height <= maxSide && mip.Storage != Blp2MipStorage.Compact);
             if (mipLevel < 0) throw Error("MIP_UNAVAILABLE", "No declared mip fits the requested size; no level was resized or substituted.");
         }
         if (mipLevel >= mips.Count) throw Error("MIP_UNAVAILABLE", "The requested mip is not present; no alternative level was substituted.");
-        var selected = mips[mipLevel]; var pixels = selected.Width * (long)selected.Height;
+        // Only the decoded level is held to its exact geometry, the source bounds and the other declared ranges.
+        var selected = mips[mipLevel];
+        if (selected.Storage == Blp2MipStorage.Compact)
+            throw Error("UNSUPPORTED", "This BLP mip is stored with width × height sizing, short of its 4×4 blocks; it is not decoded.");
+        if (selected.Storage != Blp2MipStorage.Exact) throw Error("INVALID", "The BLP mip length differs from its exact pixel/block geometry.");
+        if (selected.Offset < minimumOffset || selected.Offset > sourceLength || selected.ByteLength > sourceLength - selected.Offset)
+            throw Error("INVALID", "The BLP mip overlaps metadata or lies outside the source.");
+        if (mips.Any(mip => mip.Level != selected.Level && mip.Offset < selected.Offset + selected.ByteLength && selected.Offset < mip.Offset + mip.ByteLength))
+            throw Error("INVALID", "The BLP mip overlaps another declared mip.");
+        var pixels = selected.Width * (long)selected.Height;
         if (pixels > limits.MaxPixels || pixels > limits.MaxRgbaBytes / 4 || pixels > int.MaxValue / 4
             || selected.ByteLength > limits.MaxMipBytes || selected.ByteLength > int.MaxValue)
             throw Error("LIMIT", "The selected BLP mip exceeds decoded pixel/working-byte bounds.");
@@ -107,17 +109,27 @@ public static partial class Blp2Decoder
         3 when depth == 8 && alphaEncoding == 0 => Blp2Encoding.Bgra8,
         _ => throw Error("UNSUPPORTED", "BLP color encoding/alpha depth/alpha encoding combination is unsupported.")
     };
-    private static long EncodedBytes(int width, int height, Blp2Encoding encoding, int alphaDepth)
+    private static Blp2MipStorage Storage(uint count, int width, int height, Blp2Encoding encoding, int alphaDepth)
     {
         var pixels = width * (long)height;
         try
         {
-            return encoding switch
+            var exact = encoding switch
             {
                 Blp2Encoding.Paletted => checked(pixels + (checked(pixels * alphaDepth) + 7) / 8),
                 Blp2Encoding.Bgra8 => checked(pixels * 4),
                 _ => checked(((width + 3L) / 4) * ((height + 3L) / 4) * (encoding == Blp2Encoding.Bc1 ? 8 : 16))
             };
+            if (count == exact) return Blp2MipStorage.Exact;
+            // Blizzard sizes block levels as width × height at 4 (BC1) or 8 (BC2/BC3) bits per pixel, at least one block.
+            // With a side under 4 px that is fewer bytes than the level's blocks.
+            if (encoding is Blp2Encoding.Bc1 or Blp2Encoding.Bc2 or Blp2Encoding.Bc3)
+            {
+                var block = encoding == Blp2Encoding.Bc1 ? 8 : 16;
+                var compact = Math.Max(block, encoding == Blp2Encoding.Bc1 ? pixels / 2 : pixels);
+                if (count == compact && compact < exact) return Blp2MipStorage.Compact;
+            }
+            return Blp2MipStorage.Unrecognized;
         }
         catch (OverflowException) { throw Error("LIMIT", "BLP mip geometry exceeds the supported integer byte domain."); }
     }

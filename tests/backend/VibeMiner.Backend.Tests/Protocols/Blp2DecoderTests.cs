@@ -109,7 +109,7 @@ public sealed class Blp2DecoderTests
         Assert.Equal(new byte[]{0,255,0,255},Pixel(image,0,0));
         bytes[11]=19;Assert.Equal("BLP_UNSUPPORTED",await Code(bytes));
         bytes[11]=0;Assert.Equal("BLP_INVALID",await Code(bytes));
-        bytes[11]=17;Put(bytes,84,7);Assert.Equal("BLP_INVALID",await Code(bytes,mip:1));
+        bytes[11]=17;Put(bytes,84,7);Assert.Equal("BLP_INVALID",await Code(bytes));
     }
 
     [Fact]
@@ -128,16 +128,87 @@ public sealed class Blp2DecoderTests
     }
 
     [Fact]
-    public async Task Every_present_mip_is_validated_even_when_another_mip_was_requested()
+    public async Task Descriptor_structure_is_checked_for_every_level_but_length_bounds_and_overlap_only_for_the_decoded_one()
     {
-        var bytes=Build(1,0,0,4,4,[new byte[16],new byte[4]]);var changed=bytes.ToArray();Put(changed,84,15);Assert.Equal("BLP_INVALID",await Code(changed,mip:1));
-        changed=bytes.ToArray();Put(changed,24,1173);Assert.Equal("BLP_INVALID",await Code(changed));
-        changed=bytes.ToArray();Put(changed,20,148);Assert.Equal("BLP_INVALID",await Code(changed));
-        changed=bytes.ToArray();Put(changed,24,uint.MaxValue);Assert.Equal("BLP_INVALID",await Code(changed));
-        changed=bytes.ToArray();Put(changed,24,0);Assert.Equal("BLP_INVALID",await Code(changed));
+        var bytes=Build(1,0,0,4,4,[Enumerable.Repeat((byte)1,16).ToArray(),new byte[4]]);
+        // Structure: paired offset/length, contiguous prefix, mip flag and terminal level fail whichever level is requested.
+        var changed=bytes.ToArray();Put(changed,24,0);Assert.Equal("BLP_INVALID",await Code(changed));
         changed=bytes.ToArray();Put(changed,80,1172);Put(changed,144,1);Assert.Equal("BLP_INVALID",await Code(changed));
         changed=bytes.ToArray();changed[11]=0;Assert.Equal("BLP_INVALID",await Code(changed));
         changed=Build(1,0,0,1,1,[[1],[2]]);Assert.Equal("BLP_INVALID",await Code(changed));
+        // A bad length, an out-of-source range or an overlap refuses the level that is decoded ...
+        changed=bytes.ToArray();Put(changed,84,15);Assert.Equal("BLP_INVALID",await Code(changed));
+        changed=bytes.ToArray();Put(changed,88,5);Assert.Equal("BLP_INVALID",await Code(changed,mip:1));
+        changed=bytes.ToArray();Put(changed,24,1190);Assert.Equal("BLP_INVALID",await Code(changed,mip:1));
+        changed=bytes.ToArray();Put(changed,24,uint.MaxValue);Assert.Equal("BLP_INVALID",await Code(changed,mip:1));
+        changed=bytes.ToArray();Put(changed,20,148);Assert.Equal("BLP_INVALID",await Code(changed));
+        // Overlap refuses both levels it touches.
+        changed=bytes.ToArray();Put(changed,24,1180);Assert.Equal("BLP_INVALID",await Code(changed));Assert.Equal("BLP_INVALID",await Code(changed,mip:1));
+        // ... and not a level that is not decoded.
+        foreach(var (at,value) in new[]{(88,5u),(24,1190u),(24,uint.MaxValue)})
+        {
+            changed=bytes.ToArray();Put(changed,at,value);using var input=new AsyncInput(changed);var image=await Blp2Decoder.DecodeAsync(input);
+            Assert.Equal((0,4,4),(image.MipLevel,image.Width,image.Height));Assert.Equal(Color(1,255),Pixel(image,3,3));
+            Assert.Equal(value,(uint)(at==88?image.Mips[1].ByteLength:image.Mips[1].Offset));
+        }
+        changed=bytes.ToArray();Put(changed,88,5);using(var input=new AsyncInput(changed))
+            Assert.Equal([Blp2MipStorage.Exact,Blp2MipStorage.Unrecognized],(await Blp2Decoder.ReadMipsAsync(input)).Select(mip=>mip.Storage));
+    }
+
+    // Classic Snake 125970 (BC2 128x32) declares its 8x2 level as 16 bytes, Blizzard's width x height at 8 bits per pixel,
+    // where its two 4x4 blocks need 32. Authored stand-in with the same geometry and sizing; no game bytes.
+    [Fact]
+    public async Task Blizzard_width_by_height_tail_levels_are_accepted_as_compact_and_never_decoded()
+    {
+        var alpha=Enumerable.Repeat((byte)0xFF,8).ToArray();
+        byte[] Blocks(int count,ushort color)=>Enumerable.Range(0,count).SelectMany(_=>(byte[])[..alpha,..Block(color,color,0)]).ToArray();
+        // 128x32, 64x16, 32x8, 16x4, 8x2 (compact: one block's 16 bytes), 4x1, 2x1, 1x1; each level has its own colour.
+        var bytes=Build(2,8,1,128,32,[Blocks(256,0xF800),Blocks(64,0x07E0),Blocks(16,0x001F),Blocks(4,0xFFE0),Blocks(1,0x07FF),Blocks(1,0xF81F),Blocks(1,0xFFFF),Blocks(1,0x0000)]);
+        using(var input=new AsyncInput(bytes))
+        {
+            var mips=await Blp2Decoder.ReadMipsAsync(input);Assert.Equal(8,mips.Count);
+            Assert.Equal((4,8,2,16L,Blp2MipStorage.Compact),(mips[4].Level,mips[4].Width,mips[4].Height,mips[4].ByteLength,mips[4].Storage));
+            Assert.All(mips.Where(mip=>mip.Level!=4),mip=>Assert.Equal(Blp2MipStorage.Exact,mip.Storage));
+        }
+        for(var level=0;level<8;level++)
+        {
+            if(level==4){Assert.Equal("BLP_UNSUPPORTED",await Code(bytes,mip:4));continue;}
+            using var input=new AsyncInput(bytes);var image=await Blp2Decoder.DecodeAsync(input,level);
+            Assert.Equal((Math.Max(1,128>>level),Math.Max(1,32>>level)),(image.Width,image.Height));
+            Assert.Equal(level switch{0=>new byte[]{255,0,0,255},1=>[0,255,0,255],2=>[0,0,255,255],3=>[255,255,0,255],5=>[255,0,255,255],6=>[255,255,255,255],_=>[0,0,0,255]},
+                Pixel(image,image.Width-1,image.Height-1));
+        }
+        // The largest level within 8 px each side skips the compact 8x2 for the 4x1 below it.
+        using(var input=new AsyncInput(bytes))Assert.Equal((5,4,1),await Largest(input,8));
+        using(var input=new AsyncInput(bytes))Assert.Equal((3,16,4),await Largest(input,16));
+        // A compact length is exact too: one byte short is unrecognized, and refused only where it is decoded.
+        var shorter=bytes.ToArray();Put(shorter,84+4*4,15);Assert.Equal("BLP_INVALID",await Code(shorter,mip:4));
+        using(var input=new AsyncInput(shorter))Assert.Equal(Blp2MipStorage.Unrecognized,(await Blp2Decoder.ReadMipsAsync(input))[4].Storage);
+        using(var input=new AsyncInput(shorter))Assert.Equal(128,(await Blp2Decoder.DecodeAsync(input)).Width);
+        static async Task<(int,int,int)> Largest(Stream input,int side){var image=await Blp2Decoder.DecodeLargestWithinAsync(input,side);return (image.MipLevel,image.Width,image.Height);}
+    }
+
+    [Theory]
+    // BC1 at 4 bits per pixel with an 8-byte minimum, BC2/BC3 at 8 bits per pixel with a 16-byte minimum.
+    [InlineData(2,0,0,16,2,16,32)][InlineData(2,1,0,8,1,8,16)][InlineData(2,8,7,16,1,16,64)][InlineData(2,4,1,1,8,16,32)][InlineData(2,8,7,2,8,16,32)]
+    public async Task Compact_length_is_width_by_height_with_a_one_block_minimum_where_the_blocks_need_more(byte encoding,byte depth,byte alphaEncoding,int width,int height,int compact,int exact)
+    {
+        var bytes=Build(encoding,depth,alphaEncoding,width,height,[new byte[compact]]);
+        using(var input=new AsyncInput(bytes))Assert.Equal(Blp2MipStorage.Compact,(await Blp2Decoder.ReadMipsAsync(input))[0].Storage);
+        Assert.Equal("BLP_UNSUPPORTED",await Code(bytes));
+        bytes=Build(encoding,depth,alphaEncoding,width,height,[new byte[exact]]);
+        using(var input=new AsyncInput(bytes))Assert.Equal(Blp2MipStorage.Exact,(await Blp2Decoder.ReadMipsAsync(input))[0].Storage);
+        using(var input=new AsyncInput(bytes))Assert.Equal(width*height*4,(await Blp2Decoder.DecodeAsync(input)).Rgba.Length);
+    }
+
+    [Theory]
+    // Where width x height fills whole blocks, or the level is one block, there is no compact length; palette and BGRA have none.
+    [InlineData(2,0,0,4,4,4)][InlineData(2,8,7,2,2,4)][InlineData(2,0,0,2,1,1)][InlineData(1,8,0,4,1,4)][InlineData(3,8,0,4,1,4)]
+    public async Task Only_block_levels_short_of_their_blocks_have_a_compact_length(byte encoding,byte depth,byte alphaEncoding,int width,int height,int length)
+    {
+        var bytes=Build(encoding,depth,alphaEncoding,width,height,[new byte[length]]);
+        using(var input=new AsyncInput(bytes))Assert.Equal(Blp2MipStorage.Unrecognized,(await Blp2Decoder.ReadMipsAsync(input))[0].Storage);
+        Assert.Equal("BLP_INVALID",await Code(bytes));
     }
 
     [Theory]

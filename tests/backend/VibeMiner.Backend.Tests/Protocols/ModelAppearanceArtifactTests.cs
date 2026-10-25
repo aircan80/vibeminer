@@ -112,6 +112,21 @@ public sealed class ModelAppearanceArtifactTests
         Assert.Null(ModelAppearanceArtifacts.ChooseMips([Mips(512, 1), Mips(4096, 2)], [1, 1], out none)); Assert.Equal(1, none);
     }
 
+    [Fact]
+    public void Compact_levels_are_never_chosen_on_entry_or_step_down()
+    {
+        static IReadOnlyList<Blp2Mip> Compact(IReadOnlyList<Blp2Mip> mips, params int[] levels) =>
+            mips.Select(m => levels.Contains(m.Level) ? m with { Storage = Blp2MipStorage.Compact } : m).ToArray();
+        // Entry skips a compact first fit; stepping down skips a compact level for the next decodable one.
+        Assert.Equal([2], ModelAppearanceArtifacts.ChooseMips([Compact(Mips(2048, 3), 1)], [1], out var none)!); Assert.Equal(-1, none);
+        Assert.Equal([3, 0], ModelAppearanceArtifacts.ChooseMips([Compact(Mips(1024, 4), 1, 2), Mips(1024, 1)], [2, 1], out _)!);
+        // Unrecognized levels stay choosable, so the decode refuses them rather than substituting a smaller level.
+        Assert.Equal([0], ModelAppearanceArtifacts.ChooseMips([Mips(1024, 2).Select(m => m with { Storage = Blp2MipStorage.Unrecognized }).ToArray()], [1], out _)!);
+        // Only compact levels within 1,024 px: no fit. Only compact levels below an oversized one: no step down.
+        Assert.Null(ModelAppearanceArtifacts.ChooseMips([Compact(Mips(2048, 2), 1)], [1], out none)); Assert.Equal(0, none);
+        Assert.Null(ModelAppearanceArtifacts.ChooseMips([Compact(Mips(1024, 3), 1, 2), Mips(1024, 1)], [2, 1], out none)); Assert.Equal(-1, none);
+    }
+
     public static TheoryData<string> Invalid => new() { "texelLength", "duplicateSlot", "extended", "side", "missingSlot", "revision" };
     [Theory, MemberData(nameof(Invalid))]
     public async Task Invalid_inputs_are_refused_before_any_output(string kind)

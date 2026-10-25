@@ -168,6 +168,34 @@ public sealed class CreatureGeometryAppearanceTests
         Assert.Equal((mip, chosen, 2, width, 4), (image.MipLevel, image.Width, image.Height, image.BaseWidth, image.BaseHeight));
     }
 
+    // #73: Classic Snake 125970 is BC2 128x32 and declares its 8x2 level in 16 bytes (Blizzard's width x height sizing),
+    // where two 4x4 blocks need 32. Authored stand-in with that geometry; the undrawn compact level does not refuse the texture.
+    private static byte[] CompactTailBc2()
+    {
+        int[] sizes = [4096, 1024, 256, 64, 16, 16, 16, 16];
+        var bytes = new byte[1172 + sizes.Sum()]; "BLP2"u8.CopyTo(bytes); Put(4, 1); bytes[8] = 2; bytes[9] = 8; bytes[10] = 1; bytes[11] = 1; Put(12, 128); Put(16, 32);
+        var at = 1172;
+        for (var level = 0; level < sizes.Length; level++)
+        {
+            Put(20 + level * 4, (uint)at); Put(84 + level * 4, (uint)sizes[level]);
+            for (var block = at; block < at + sizes[level]; block += 16) { bytes.AsSpan(block, 8).Fill(0xFF); bytes[block + 8] = 0x1F; bytes[block + 10] = 0x1F; }
+            at += sizes[level];
+        }
+        return bytes;
+        void Put(int offset, uint value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
+    }
+
+    [Fact]
+    public async Task A_texture_whose_undrawn_tail_level_uses_compact_sizing_draws_textured()
+    {
+        await using var f = await CreatureGeometrySourcesFixture.CreateAsync(textured: Variation(blp: CompactTailBc2())); await using var store = Store(f);
+        var result = await store.PrepareAsync(new(f.Request), Progress, default).WaitAsync(Guard); var appearance = result.Appearance!;
+        Assert.True(appearance.State == CreatureGeometryAppearanceState.Ready, appearance.Problem?.Code + " " + appearance.Problem?.Message);
+        Assert.Equal(new CreatureGeometryTextureImage(128, 32, 0, 128, 32, "bc2"), Assert.Single(appearance.Textures).Image);
+        Assert.Equal(128 * 32 * 4, appearance.Manifest!.Texels.ByteLength);
+        Assert.Equal(0, store.Pressure.Payload);
+    }
+
     // D095 (#70): Classic texture memberships split only by HighResTexture 0x1, with LowViolence 0x80 copies of both.
     private static readonly (uint, uint, bool)[] HighResSplit = [(2, 0x1, true), (2, 0x80, false), (2, 0x81, true)];
 
