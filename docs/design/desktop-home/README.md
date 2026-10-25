@@ -119,7 +119,7 @@ A file explorer for the build's prepared catalog: a filter row, a list with one 
 - **Home and Tables take Discovery's muted `#586a64`**, replacing `#657870` and `#697b72`. That closes the AA gap listed in the UI guidelines for these views.
 - **Below 84rem** (about 1176px at 100%), the activity entry uses its short label.
 - **Enlarged text or a narrow window (below 70rem, like `.dv-compact`):**
-  - The header becomes two rows. Row 1 has the logo and identity. Product and Build are named by their buttons, and Status and Download mode have inline labels. Source and Locale move to the status bar and the identity popover. Row 2 holds the area bar, then the activity entry and Choose build.
+  - The header becomes two rows. Row 1 has the logo and identity. Product and Build are named by their buttons, and Status and Download mode have inline labels. Source and Locale move to the status bar and the identity popover. Row 2 holds the area bar, then the activity entry and Choose build. Since D086 the area bar wraps rather than scrolls, and the actions take a line of their own when they don't fit beside it. When the header and a 10rem area don't both fit, the shell scrolls as a whole.
   - Home becomes one scrolling pane with the panels stacked.
   - Tables shows one pane at a time with a **Tables list / Records / Selected record** switcher, and Files with **Files list / Selected file**. Files filters collapse behind **Filters**. Stacking all three left about one record row visible at 1280×800 and 200%. The Tables title row is visually hidden; the breadcrumb shows the table name.
   - The activity panel covers the whole area, which becomes inert (see Activity entry).

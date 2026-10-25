@@ -40,10 +40,12 @@
 .desktop-home .dh-switch .dh-track::after{content:"";position:absolute;top:.14rem;left:.14rem;width:.7rem;height:.7rem;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
 .desktop-home .dh-switch[aria-checked="true"] .dh-track{background:var(--teal)}
 .desktop-home .dh-switch[aria-checked="true"] .dh-track::after{left:auto;right:.14rem}
-.desktop-home .dh-areas{order:9;flex:1 1 100%;display:flex;align-items:stretch;gap:.186667rem;height:2.286667rem;margin:0 -.802667rem;padding:0 .466667rem;border-top:1px solid var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
-.desktop-home .dh-area-group{display:flex;align-items:stretch;gap:.186667rem}
+/* The area bar wraps instead of scrolling, so no tab hides behind an invisible scroll or under the header actions (#64). */
+.desktop-home .dh-areas{order:9;flex:1 1 100%;display:flex;flex-wrap:wrap;align-items:stretch;gap:0 .186667rem;min-height:2.286667rem;margin:0 -.802667rem;padding:0 .466667rem;border-top:1px solid var(--line)}
+.desktop-home .dh-area-group{display:flex;flex-wrap:wrap;align-items:stretch;gap:0 .186667rem}
+.desktop-home .dh-area-sep.dh-dangling{visibility:hidden}
 .desktop-home .dh-area-sep{align-self:center;width:1px;height:1.213333rem;background:var(--line);margin:0 .42rem;flex:none}
-.desktop-home .dh-areas button{border:0;background:none;padding:0 .7rem;font-size:var(--fs-m);font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;box-shadow:inset 0 -3px 0 transparent}
+.desktop-home .dh-areas button{min-height:calc(2.286667rem - 1px);border:0;background:none;padding:0 .7rem;font-size:var(--fs-m);font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;box-shadow:inset 0 -3px 0 transparent}
 .desktop-home .dh-areas button:hover{color:var(--ink);background:var(--hover)}
 .desktop-home .dh-areas button[aria-current="page"]{color:var(--teal);font-weight:700;box-shadow:inset 0 -3px 0 var(--teal)}
 .desktop-home .dh-areas button:focus-visible{outline-offset:-3px}
@@ -301,17 +303,21 @@
 .desktop-home .dh-files [role="option"]>span.dh-fname-cell{white-space:normal;overflow-wrap:anywhere;overflow:visible;padding:.28rem 0}
 .desktop-home .dh-files .dh-insp-head{min-height:calc(var(--pane-head) + var(--thead))}
 .desktop-home.dh-medium .dh-storage-cols{grid-template-columns:minmax(0,1fr)}
-.desktop-home.dh-compact .dh-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"brand ids ids" "areas areas actions";column-gap:.653333rem}
-.desktop-home.dh-compact .dh-brand{grid-area:brand}
-.desktop-home.dh-compact .dh-idfields{grid-area:ids}
+/* Compact header: brand and identity on the first line; the area bar and the actions share the next line when they fit, otherwise the actions take their own line and the tabs wrap. BuildHeader keeps the activity entry's widest width in this area reserved (its min-width, then .dh-entry-reserve once it retires), so the header doesn't re-wrap under the reader (#64). */
+.desktop-home.dh-compact .dh-toolbar{align-items:stretch;gap:0;padding:0;reading-flow:flex-visual}
+.desktop-home.dh-compact .dh-brand{order:1;padding:.401333rem 0 .401333rem .802667rem}
+.desktop-home.dh-compact .dh-idfields{order:2;flex:1 1 calc(100% - 3rem);padding:.401333rem .802667rem .401333rem .653333rem}
 .desktop-home.dh-compact .dh-brand .dh-word,.desktop-home.dh-compact .dh-toolbar .dh-divider{display:none}
 .desktop-home.dh-compact .dh-idfields{gap:.28rem .84rem}
 .desktop-home.dh-compact .dh-idf{flex-direction:row;align-items:center;gap:.326667rem}
 .desktop-home.dh-compact .dh-idf>dt{font-size:var(--fs-m)}
 .desktop-home.dh-compact .dh-idf.dh-named>dt{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .desktop-home.dh-compact .dh-idf.dh-moved{display:none}
-.desktop-home.dh-compact .dh-areas{grid-area:areas;align-self:stretch;min-width:0;margin:0 -.653333rem 0 -.802667rem;height:auto;min-height:2.286667rem}
-.desktop-home.dh-compact .dh-hgroup{grid-area:actions;align-self:stretch;margin:0 -.802667rem 0 0;padding:.28rem .802667rem .28rem .653333rem;border-top:1px solid var(--line)}
+.desktop-home .dh-entry-reserve{display:none}
+.desktop-home.dh-compact .dh-entry-reserve{display:block;flex:none;width:var(--dh-entry-min,0);min-height:2.006667rem}
+.desktop-home.dh-compact .dh-hgroup .dv-chip{min-width:var(--dh-entry-min,0)}
+.desktop-home.dh-compact .dh-areas{order:3;flex:1 1 auto;min-width:0;margin:0}
+.desktop-home.dh-compact .dh-hgroup{order:4;flex:1 1 auto;min-width:0;flex-wrap:wrap;justify-content:flex-end;gap:.401333rem .802667rem;margin:0;padding:.28rem .802667rem .28rem .653333rem;border-top:1px solid var(--line)}
 .desktop-home.dh-compact .dh-home-grid{display:block;overflow:auto;background:var(--paper)}
 .desktop-home.dh-compact .dh-panel{display:block;border-bottom:1px solid var(--line)}
 .desktop-home.dh-compact .dh-panel.dh-side{background:var(--side)}
@@ -347,7 +353,21 @@
 /* App shell additions: window grid, hidden areas, fixture label, scrolling area panes. */
 .desktop-home{height:100vh;line-height:1.45}
 .desktop-home[hidden],.desktop-home [hidden]{display:none!important}
-.desktop-home .dh-app{height:100%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto}
+/* The area keeps at least 10rem. When the header and that minimum don't both fit (600x480 at 200% text), the shell scrolls vertically as a whole and the header scrolls away with it; otherwise nothing overflows and the window stays fixed (#64). */
+.desktop-home .dh-app{height:100%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(10rem,1fr) auto;overflow-x:hidden;overflow-y:auto;scroll-padding:.533333rem 0;position:relative}
+/* While the shell scrolls, Home takes its natural height so the shell is its only scroller: the shell lays out as a block, so the area grows
+   with its content (at least 10rem) and the status bar stays last. */
+.desktop-home.dh-shell-scroll[data-area="home"] .dh-app{display:block}
+/* While the activity panel is open the scrolling shell is locked (wheel, PageDown and End can't move it; focus moves still reveal their
+   target from code), so the panel can't be scrolled away. The stable gutter keeps the lock from reflowing the header. */
+.desktop-home.dh-shell-scroll .dh-app{scrollbar-gutter:stable;scroll-padding:.533333rem 0 calc(2.166667rem + 1px)}
+/* The status bar stays at the window bottom while the shell scrolls (still last in the shell), so the panel and the floating entry sit on it. */
+.desktop-home.dh-shell-scroll .dh-statusbar{position:sticky;bottom:0;z-index:2}
+.desktop-home.dh-shell-scroll.dh-panel-open .dh-app{overflow-y:hidden}
+.desktop-home aside.download-activity-panel{overscroll-behavior:contain}
+.desktop-home.dh-shell-scroll[data-area="home"] .dh-area{grid-template-rows:auto;min-height:10rem}
+.desktop-home.dh-shell-scroll[data-area="home"] .dh-home{grid-template-rows:auto auto}
+.desktop-home.dh-shell-scroll[data-area="home"] .dh-home-grid{overflow:visible}
 .desktop-home .dh-area{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;min-width:0;outline:none}
 .desktop-home .dh-area>*{grid-area:1/1;min-height:0;min-width:0}
 .desktop-home .dh-area>.dh-home{display:grid}
@@ -390,10 +410,19 @@
 .desktop-home .dv-pulse,.desktop-home .dh-pulse{display:inline-block;width:.466667rem;height:.466667rem;border-radius:50%;background:currentColor;animation:dh-pulse 1.6s ease-in-out infinite;flex:none}
 @keyframes dh-pulse{50%{opacity:.35}}
 .desktop-home .dv-panel-slot{display:contents}
+/* While the Home shell scrolls (600x480 at 200% text) the header can scroll away and DownloadActivity shows its floating entry, outside
+   .desktop-home. It becomes one compact line at its natural width, its bottom 1rem above the status bar (1.633333rem plus its 1px border);
+   the summary is visually hidden but stays in its accessible name (#64). */
+:root:has(.desktop-home.dh-shell-scroll) .download-activity-floating{inline-size:auto;max-width:calc(100vw - 2rem);bottom:calc(2.633333rem + 1px);padding:.35rem .7rem;white-space:nowrap}
+:root:has(.desktop-home.dh-shell-scroll) .download-activity-floating>span{display:block;position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 /* Activity panel docked after the entry: below the header, above the status bar, over the side column or inspector. */
-.desktop-home aside.download-activity-panel{top:var(--dh-panel-top,5.5rem);bottom:var(--dh-panel-bottom,1.633333rem);right:0;left:auto;width:var(--panel-w);border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:-8px 0 24px rgba(36,59,58,.08);font-size:var(--fs-m);z-index:3}
-.desktop-home.dh-compact aside.download-activity-panel{width:100%}
+.desktop-home aside.download-activity-panel{top:var(--dh-panel-top,5.5rem);bottom:var(--dh-panel-bottom,1.633333rem);right:var(--dh-panel-right,0);left:auto;width:var(--panel-w);border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:-8px 0 24px rgba(36,59,58,.08);font-size:var(--fs-m);z-index:3}
+/* Compact: the panel covers the area inside the shell. */
+.desktop-home.dh-compact aside.download-activity-panel{position:absolute;top:var(--dh-area-top,0);height:var(--dh-area-height,auto);bottom:auto;left:0;right:0;width:auto}
+/* While the shell scrolls (it is locked while the panel is open), the panel is fixed to the window: from the top to the status bar's height
+   above the bottom, within the shell's inner width. It never moves with the shell, and focus inside it never scrolls the shell. */
+.desktop-home.dh-shell-scroll aside.download-activity-panel{position:fixed;top:0;bottom:var(--dh-status-h,1.633333rem);height:auto;left:0;right:var(--dh-panel-right,0);width:auto}
 .desktop-home aside.download-activity-panel .download-panel-heading{padding:.56rem .933333rem;align-items:center}
 .desktop-home aside.download-activity-panel .download-panel-heading h2{font-size:.933333rem;margin:0 0 .4rem}
 .desktop-home aside.download-activity-panel .download-task{border:1px solid var(--line);border-radius:6px;padding:.56rem .653333rem;margin:.56rem .933333rem}
