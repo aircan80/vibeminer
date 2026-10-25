@@ -8,6 +8,35 @@ namespace VibeMiner.Backend.Tests;
 
 public sealed class CreatureGeometryValidationTests
 {
+    // D095: the chosen variant is the 0x1-clear twin of the left-out one and names the decoded source's content key.
+    [Theory]
+    [InlineData("valid")][InlineData("samePair")][InlineData("lowViolence")][InlineData("notTwin")][InlineData("policy")]
+    [InlineData("sourceKey")][InlineData("sameKeys")][InlineData("nullFileDataId")][InlineData("nullFileDataIdControl")]
+    public void A_texture_variant_must_be_the_standard_twin_of_its_decoded_source(string kind)
+    {
+        var ready = Appearance(); var texture = ready.Textures[0];
+        var variant = new CreatureGeometryTextureVariant(CreatureGeometryValidation.TextureVariantPolicy, texture.Source!.ContentKey, 0x2080000, new('d', 32), 0x2080001);
+        var unresolved = ready with { State = CreatureGeometryAppearanceState.TextureUnresolved, Manifest = null,
+            Problem = new("CREATURE_APPEARANCE_TEXTURE_UNRESOLVED", "Texture ordinal 0 has a zero FileDataID.", false, null, 0) };
+        CreatureGeometryAppearance With(CreatureGeometryTextureVariant? v, CreatureGeometryAppearance? on = null, CreatureGeometryTexture? row = null) =>
+            (on ?? ready) with { Textures = [(row ?? texture) with { Variant = v }] };
+        var unresolvedRow = texture with { FileDataId = null, State = CreatureGeometryTextureState.Unresolved, Image = null, Source = null };
+        var value = kind switch
+        {
+            "valid" => With(variant),
+            "samePair" => With(variant with { HighResolutionContentFlags = 0x2080000 }),
+            "lowViolence" => With(variant with { ContentFlags = 0x2080080, HighResolutionContentFlags = 0x2080081 }),
+            "notTwin" => With(variant with { HighResolutionContentFlags = 0x2080009 }),
+            "policy" => With(variant with { Policy = "all-root-variants-consistent-asset-v1" }),
+            "sourceKey" => With(variant with { ContentKey = new('e', 32) }),
+            "sameKeys" => With(variant with { HighResolutionContentKey = texture.Source.ContentKey }),
+            "nullFileDataId" => With(variant, unresolved, unresolvedRow),
+            _ => With(null, unresolved, unresolvedRow)
+        };
+        if (kind is "valid" or "nullFileDataIdControl") { Assert.Equal(value.Textures[0].Variant, CreatureGeometryValidation.Snapshot(value).Textures[0].Variant); return; }
+        Assert.Throws<DiscoveryException>(() => CreatureGeometryValidation.Snapshot(value));
+    }
+
     [Theory]
     [InlineData(-1, "1")]
     [InlineData(4, "1")]

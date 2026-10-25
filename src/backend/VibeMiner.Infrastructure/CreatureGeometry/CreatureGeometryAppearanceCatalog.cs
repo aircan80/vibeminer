@@ -107,7 +107,8 @@ public sealed partial class DiscoveryCatalog
         return (reader.GetString(0), artifact, reader.GetString(2));
     }
 
-    // Keyed by display: the geometry locator, the exact CreatureDisplayInfo rows artifact, row and texture fields, and every revision.
+    // Keyed by display: the geometry locator, the exact CreatureDisplayInfo rows artifact, row and texture fields, every revision
+    // and the D095 texture variant policy, so a later variant rule never reuses an appearance chosen under this one.
     private static async Task<string> GeometryAppearanceKeyAsync(GeometryDisplayAuthorization selection, GeometryLocator geometry,
         IGeometryArtifactWorkBudget budget, CancellationToken token)
     {
@@ -120,7 +121,8 @@ public sealed partial class DiscoveryCatalog
                 revision = "geometry-appearance-key-v1", geometry = geometry.Key, geometryArtifact = geometry.Descriptor.Manifest.ArtifactId,
                 display = selection.Display.Binding.Admission.Artifact.ContentKey, row = selection.Selected.DisplayId, textures = selection.Display.Textures,
                 policy = GeometryAppearanceSources.Policy, material = M2Appearance.MaterialPolicy, reader = M2Appearance.ReaderRevision,
-                texture = ModelAppearanceArtifacts.TexturePolicy, decoder = Blp2Decoder.Revision, artifact = ModelAppearanceArtifacts.Revision
+                texture = ModelAppearanceArtifacts.TexturePolicy, decoder = Blp2Decoder.Revision, artifact = ModelAppearanceArtifacts.Revision,
+                variant = RootTextureVariants.Policy
             }, GeometrySourceBytes);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             hash.AppendData("vibeminer-geometry-appearance-key-v1\0"u8); hash.AppendData(bytes);

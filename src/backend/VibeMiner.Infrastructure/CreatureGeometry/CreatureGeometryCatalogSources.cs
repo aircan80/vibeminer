@@ -173,7 +173,7 @@ public sealed partial class DiscoveryCatalog
             source.Memberships is null || source.Memberships.Count is < 1 or > 256 || source.Memberships.Any(m => m?.Entry is null) ||
             expected is null || receipt is null || receipt.Location is null || receipt.Projection is not null || receipt.VerifierRevision != "content-blte-v1" ||
             source.ResearchLocale != "enUS" || source.SourceReference.Region != source.Request.SourceRegion ||
-            source.VariantPolicy != AssetResolutionSession.VariantPolicy || source.EncodingLookupRevision != ResolverArtifacts.EncodingRevision ||
+            !(source.VariantPolicy == AssetResolutionSession.VariantPolicy || texture && source.VariantPolicy == RootTextureVariants.Policy) || source.EncodingLookupRevision != ResolverArtifacts.EncodingRevision ||
             source.RootLookupRevision != AssetResolutionSessions.RootArtifactRevision || source.EncodingSelectionPolicy != AssetResolutionSession.EncodingSelectionPolicy ||
             expected.Role != "asset" || expected.EncodedBytes < 9 || expected.EncodedBytes > (texture ? 16 << 20 : 4 << 20) ||
             expected.DecodedBytes < 1 || expected.DecodedBytes > (texture ? 16 << 20 : 8 << 20) ||

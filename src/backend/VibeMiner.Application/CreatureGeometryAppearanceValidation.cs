@@ -6,6 +6,8 @@ namespace VibeMiner.Application;
 public static partial class CreatureGeometryValidation
 {
     public const string AppearancePolicy = "creature-textured-appearance-v1";
+    /// <summary>D095, the same name as VibeMiner.Formats.Wow.RootTextureVariants.Policy.</summary>
+    public const string TextureVariantPolicy = "root-texture-standard-resolution-v1";
     private static readonly string[] Encodings = ["palette", "bc1", "bc2", "bc3", "bgra8"];
 
     /// <summary>Owned bounded copy of an appearance outcome. Ready needs its manifest and decoded chain; every other
@@ -35,7 +37,11 @@ public static partial class CreatureGeometryValidation
             if (t.Source is { } source)
                 Require(Hash(source.ContentKey, 32) && Hash(source.EncodingKey, 32) && Hash(source.EncodedSha256) && source.EncodedBytes is >= 9 and <= 16 << 20 &&
                     source.DecodedBytes is >= 1 and <= 16 << 20 && source.FullVerifierRevision == "content-blte-v1");
-            textures[i] = t with { Image = t.Image is null ? null : t.Image with { }, Source = t.Source is null ? null : t.Source with { } };
+            if (t.Variant is { } variant)
+                Require(variant.Policy == TextureVariantPolicy && Hash(variant.ContentKey, 32) && Hash(variant.HighResolutionContentKey, 32) &&
+                    variant.ContentKey != variant.HighResolutionContentKey && (variant.ContentFlags & 0x81) == 0 && (variant.HighResolutionContentFlags & 0x81) == 1 &&
+                    (variant.ContentFlags | 1) == variant.HighResolutionContentFlags && t.FileDataId is not null && (t.Source is null || t.Source.ContentKey == variant.ContentKey));
+            textures[i] = t with { Image = t.Image is null ? null : t.Image with { }, Source = t.Source is null ? null : t.Source with { }, Variant = t.Variant is null ? null : t.Variant with { } };
         }
         if (value.Effects is { } e) Require(new[] { e.Particles, e.Ribbons, e.Lights, e.ShadowBatches, e.UnbatchedSections, e.BlendedBatches, e.EnvTransforms }.All(n => n is >= 0 and <= 65536));
         if (value.Problem is { } p)

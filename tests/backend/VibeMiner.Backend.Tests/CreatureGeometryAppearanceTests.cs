@@ -116,6 +116,23 @@ public sealed class CreatureGeometryAppearanceTests
         Assert.Equal(JsonSerializer.Serialize(appearance, CreaturesPolicy.Json), JsonSerializer.Serialize(read.Appearance, CreaturesPolicy.Json));
     }
 
+    // D095 with #69's combiners: both stages of a two-stage batch use the standard variant and record it.
+    [Fact]
+    public async Task Both_stages_of_a_two_stage_batch_draw_the_standard_variant_of_a_HighResTexture_split()
+    {
+        var spec = new Model([new(11, 0), new(0, 1, CreatureGeometrySourcesFixture.TextureId)], [(0, 0), (0x15, 4)], [0, 1], [0], [ushort.MaxValue, ushort.MaxValue],
+            [[[32767]]], [0x20]);
+        await using var f = await CreatureGeometrySourcesFixture.CreateAsync(textured: new(spec,
+            [new(Section: 0, Shader: 0x8002, Flags: 0x80, TextureCount: 2), new(Section: 1, Material: 1, Shader: 0x4014, Flags: 0x80, TextureCount: 2)], Sections: 2,
+            Variants: [(2, 0x1, true), (2, 0x80, false), (2, 0x81, true)]));
+        await using var store = Store(f);
+        var appearance = (await store.PrepareAsync(new(f.Request), Progress, default).WaitAsync(Guard)).Appearance!;
+        Assert.True(appearance.State == CreatureGeometryAppearanceState.Ready, appearance.Problem?.Code + " " + appearance.Problem?.Message);
+        Assert.Equal(2, appearance.Textures.Count);
+        Assert.All(appearance.Textures, t => Assert.Equal((CreatureGeometryValidation.TextureVariantPolicy, t.Source!.ContentKey, 1u), (t.Variant!.Policy, t.Variant.ContentKey, t.Variant.HighResolutionContentFlags)));
+        Assert.DoesNotContain(f.Http.Requests, r => f.Http.Responses.TryGetValue(r, out var b) && ReferenceEquals(b, f.HighTextureEncoded));
+    }
+
     [Fact]
     public async Task An_unsupported_combiner_is_retained_by_name_without_texture_demand()
     {
@@ -149,6 +166,40 @@ public sealed class CreatureGeometryAppearanceTests
         if (mip < 0) { Assert.Equal(CreatureGeometryAppearanceState.ResourceLimit, appearance.State); Assert.Equal("BLP_MIP_UNAVAILABLE", appearance.Problem!.Code); return; }
         var image = Assert.Single(appearance.Textures).Image!;
         Assert.Equal((mip, chosen, 2, width, 4), (image.MipLevel, image.Width, image.Height, image.BaseWidth, image.BaseHeight));
+    }
+
+    // D095 (#70): Classic texture memberships split only by HighResTexture 0x1, with LowViolence 0x80 copies of both.
+    private static readonly (uint, uint, bool)[] HighResSplit = [(2, 0x1, true), (2, 0x80, false), (2, 0x81, true)];
+
+    [Fact]
+    public async Task A_HighResTexture_split_draws_the_standard_variant_names_it_in_the_chain_and_never_fetches_the_high_one()
+    {
+        await using var f = await CreatureGeometrySourcesFixture.CreateAsync(textured: new(Simple(), [new()], Variants: HighResSplit)); await using var store = Store(f);
+        var result = await store.PrepareAsync(new(f.Request), Progress, default).WaitAsync(Guard); var appearance = result.Appearance!;
+        Assert.True(appearance.State == CreatureGeometryAppearanceState.Ready, appearance.Problem?.Code + " " + appearance.Problem?.Message);
+        var texture = Assert.Single(appearance.Textures);
+        Assert.Equal(new CreatureGeometryTextureImage(8, 8, 0, 8, 8, "bgra8"), texture.Image);
+        var variant = texture.Variant!;
+        Assert.Equal(("root-texture-standard-resolution-v1", texture.Source!.ContentKey, 0u, 1u), (variant.Policy, variant.ContentKey, variant.ContentFlags, variant.HighResolutionContentFlags));
+        Assert.NotEqual(variant.ContentKey, variant.HighResolutionContentKey);
+        Assert.True(Requested(f)); Assert.DoesNotContain(f.Http.Requests, r => f.Http.Responses.TryGetValue(r, out var b) && ReferenceEquals(b, f.HighTextureEncoded));
+        var read = await store.ReadAsync(new(f.Request), default);
+        Assert.Equal(JsonSerializer.Serialize(appearance, CreaturesPolicy.Json), JsonSerializer.Serialize(read.Appearance, CreaturesPolicy.Json));
+        Assert.Equal(0, store.Pressure.Payload);
+    }
+
+    [Theory]
+    [InlineData("locale")][InlineData("crossed copy")][InlineData("other bit")]
+    public async Task Any_other_texture_variant_disagreement_stays_ambiguous_and_fetches_nothing(string kind)
+    {
+        (uint, uint, bool)[] variants = kind switch
+        { "locale" => [(4, 0x1, true)], "crossed copy" => [(2, 0x1, true), (2, 0x80, true)], _ => [(2, 0x9, true)] };
+        await using var f = await CreatureGeometrySourcesFixture.CreateAsync(textured: new(Simple(), [new()], Variants: variants)); await using var store = Store(f);
+        var result = await store.PrepareAsync(new(f.Request), Progress, default).WaitAsync(Guard); var appearance = result.Appearance!;
+        Assert.Equal(CreatureGeometryState.Ready, result.State);
+        Assert.Equal(CreatureGeometryAppearanceState.TextureAmbiguous, appearance.State); Assert.Equal("CREATURE_APPEARANCE_TEXTURE_AMBIGUOUS", appearance.Problem!.Code);
+        var texture = Assert.Single(appearance.Textures); Assert.Equal(CreatureGeometryTextureState.Ambiguous, texture.State); Assert.Null(texture.Variant);
+        Assert.False(Requested(f));
     }
 
     // One FileDataID drawn through three wrap combinations is three 1,024² slots: 12 MiB, over the 8 MiB bound.

@@ -3,6 +3,7 @@ import type {DiscoveryBridge} from '../shared/bridge';
 import type {GeometryParams} from '../shared/creature-geometry';
 import {geometrySelectionKey} from '../shared/creature-geometry';
 import {creatureDisplayMatches} from '../shared/creature-display';
+import {hex} from '../shared/inventory';
 import type {GeometrySection} from './geometry-vmg';
 
 export type GeometryFailure=Readonly<{code:string;message:string;retryable:boolean}>;
@@ -64,6 +65,8 @@ export const appearanceOutcome:Record<AppearanceState,string>={notPrepared:'Text
 type TextureState=NonNullable<CreatureGeometryResult['appearance']>['textures'][number]['state'];
 /** Plain words for one texture chain row; decoded rows show their image instead. */
 export const textureOutcome:Record<TextureState,string>={decoded:'decoded',unresolved:'unresolved',notReached:'not reached',missing:'not in this build',ambiguous:'file variants disagree',protected:'encrypted',unsupported:'unsupported encoding',corrupt:'failed integrity checks',unavailable:'unavailable',resourceLimit:'over a size limit'};
+/** D095 chain row: which ROOT variant the texture used and which it left out. */
+export const variantText=(v:{contentFlags:number;highResolutionContentFlags:number})=>`standard ROOT variant (content flags ${hex(v.contentFlags)}); high-resolution ${hex(v.highResolutionContentFlags)} not used`;
 /** "1 ribbon", "2 ribbons". */
 export const counted=(n:number,one:string,many=one+'s')=>`${n} ${n===1?one:many}`;
 export const geometryOutcome:Record<CreatureGeometryResult['state'],string>={ready:'Drawing geometry',notPrepared:'Required geometry is not prepared',metadataNotResolved:'Display metadata needs attention',noDeclaredTriangles:'Declared main-view sections reference no triangles',missingMembership:'Required source file is not in the admitted scope',ambiguousVariants:'Source variants disagree',encodingUnresolved:'Source encoding is unresolved',protected:'Required source is protected',unsupported:'This source geometry is unsupported',unavailable:'Required source is unavailable',corrupt:'Geometry failed integrity checks',resourceLimit:'Geometry exceeded a resource limit'};

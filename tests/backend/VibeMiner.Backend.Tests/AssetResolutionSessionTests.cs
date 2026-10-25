@@ -133,6 +133,31 @@ public sealed class AssetResolutionSessionTests
         Assert.Equal(new uint[] { 0, 4 }, batch.Results[2].Association.Memberships.Select(match => match.Entry.LocaleFlags));
     }
 
+    // D095: the session status stays ambiguous for every consumer; only a HighResTexture-only split carries the standard choice.
+    [Fact]
+    public async Task HighResTextureOnlySplitStaysAmbiguousAndCarriesTheStandardChoiceWithItsEncoding()
+    {
+        var data = InventoryFixture.Create();
+        const uint locale = 0x173F6, flags = 0x2080000;
+        var (standard, high) = (data.PayloadA.ContentKey, data.PayloadB.ContentKey);
+        await using var fixture = await SessionFixture.CreateWithContentAsync(
+            (1U, high, locale, flags | 1), (1U, standard, locale, flags), (1U, high, locale, flags | 0x81), (1U, standard, locale, flags | 0x80),
+            (2U, high, locale, flags | 1), (2U, standard, 0x2U, flags),
+            (3U, high, locale, flags | 1), (3U, new string('f', 32), locale, flags));
+        var batch = await fixture.Session.ResolveAsync(new uint[] { 1, 2, 3 }, Ignore);
+        Assert.All(batch.Results, r => { Assert.Equal(AssetResolutionStatus.AmbiguousVariants, r.Status); Assert.Null(r.Expectation); });
+        var variant = batch.Results[0].TextureVariant!;
+        const uint stored = flags | RootInventoryReader.NoNames;
+        Assert.Equal((standard, stored, high, stored | 1), (variant.Choice.ContentKey, variant.Choice.ContentFlags, variant.Choice.HighResolutionContentKey, variant.Choice.HighResolutionContentFlags));
+        Assert.Equal(new[] { stored, stored | 0x80 }, variant.Choice.Selected.Select(m => m.Entry.ContentFlags));
+        Assert.Equal(4, batch.Results[0].Association.Memberships.Count);
+        Assert.Equal((data.PayloadA.EncodingKey, data.PayloadA.Decoded.LongLength), (variant.Expectation!.EncodingKey, variant.Expectation.DecodedBytes));
+        Assert.Null(batch.Results[1].TextureVariant);
+        Assert.Null(Assert.IsType<AssetTextureVariant>(batch.Results[2].TextureVariant).Expectation);
+        var cached = await fixture.Session.ResolveAsync(new uint[] { 1 }, Ignore);
+        Assert.False(cached.ScannedRoot); Assert.Equal(variant, cached.Results[0].TextureVariant);
+    }
+
     [Fact]
     public async Task OneRootPassAndDeduplicatedNativeEncodingPagesServeManyIdsAndRetainedMappings()
     {
@@ -260,7 +285,9 @@ public sealed class AssetResolutionSessionTests
         private readonly string path = Path.Combine(Path.GetTempPath(), "vibeminer-asset-session-" + Guid.NewGuid().ToString("N"));
         internal CountingInput Root = null!, Encoding = null!;
         internal AssetResolutionSession Session = null!;
-        internal static async Task<SessionFixture> CreateAsync(params (uint Id, string CKey, uint Locale)[] memberships)
+        internal static Task<SessionFixture> CreateAsync(params (uint Id, string CKey, uint Locale)[] memberships) =>
+            CreateWithContentAsync(memberships.Select(m => (m.Id, m.CKey, m.Locale, 0U)).ToArray());
+        internal static async Task<SessionFixture> CreateWithContentAsync(params (uint Id, string CKey, uint Locale, uint Content)[] memberships)
         {
             var fixture = new SessionFixture(); Directory.CreateDirectory(fixture.path);
             var data = InventoryFixture.Create();
@@ -268,8 +295,8 @@ public sealed class AssetResolutionSessionTests
             using (var writer = new BinaryWriter(bytes, System.Text.Encoding.UTF8, leaveOpen: true))
             {
                 writer.Write("TSFM"u8); writer.Write(24U); writer.Write(2U); writer.Write((uint)memberships.Length); writer.Write(0U); writer.Write(0U);
-                foreach (var (id, key, locale) in memberships)
-                { writer.Write(1U); writer.Write(locale); writer.Write(RootInventoryReader.NoNames); writer.Write(0U); writer.Write((byte)0); writer.Write(id); writer.Write(Convert.FromHexString(key)); }
+                foreach (var (id, key, locale, content) in memberships)
+                { writer.Write(1U); writer.Write(locale); writer.Write(RootInventoryReader.NoNames | content); writer.Write(0U); writer.Write((byte)0); writer.Write(id); writer.Write(Convert.FromHexString(key)); }
             }
             var rootBytes = bytes.ToArray();
             await File.WriteAllBytesAsync(Path.Combine(fixture.path, "root"), rootBytes);

@@ -146,6 +146,24 @@ public sealed class CreatureGeometrySourcesTests
         };
         await Assert.ThrowsAsync<DiscoveryException>(() => GeometrySourceCapsuleCodec.EncodeAsync(pair, new GeometryWorkBudget(fixture.Resources), default));
     }
+    // D095 is a texture-only rule: a model or SKIN association naming it is refused by the capsule, the association
+    // snapshot and the catalog source shape; the same association is accepted only on the texture path.
+    [Theory]
+    [InlineData("model")]
+    [InlineData("skin")]
+    public async Task A_model_or_SKIN_source_naming_the_D095_texture_policy_is_refused(string role)
+    {
+        await using var fixture = await CreatureGeometrySourcesFixture.CreateAsync(); var prepared = await fixture.PrepareAsync().WaitAsync(Deadline);
+        var pair = prepared.Closure.Capsule; var source = role == "model" ? pair.Model : pair.Skin; var budget = new GeometryWorkBudget(fixture.Resources);
+        var d095 = source.Association with { VariantPolicy = RootTextureVariants.Policy };
+        pair = role == "model" ? pair with { Model = pair.Model with { Association = d095 } } : pair with { Skin = pair.Skin with { Association = d095 } };
+        Assert.Equal("CREATURE_GEOMETRY_SOURCE_INVALID", (await Assert.ThrowsAsync<DiscoveryException>(() => GeometrySourceCapsuleCodec.EncodeAsync(pair, budget, default))).Code);
+        Assert.Equal("CREATURE_GEOMETRY_SOURCE_INVALID", (await Assert.ThrowsAsync<DiscoveryException>(() => GeometrySourceCapsuleCodec.SnapshotAssociationAsync(d095, budget, default))).Code);
+        Assert.Equal(RootTextureVariants.Policy, (await GeometrySourceCapsuleCodec.SnapshotAssociationAsync(d095, budget, default, texture: true)).VariantPolicy);
+        Assert.Equal("CREATURE_GEOMETRY_SOURCE_INVALID", (await Assert.ThrowsAsync<DiscoveryException>(() =>
+            fixture.Catalog.ReadGeometryOriginalSourcesAsync(d095, source.Expectation, source.Receipt, default))).Code);
+        Assert.Equal(source.Receipt.EncodingKey, (await fixture.Catalog.ReadGeometryOriginalSourcesAsync(d095, source.Expectation, source.Receipt, default, texture: true)).Receipt.EncodingKey);
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

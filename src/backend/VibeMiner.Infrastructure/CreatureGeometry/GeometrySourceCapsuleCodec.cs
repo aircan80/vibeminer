@@ -186,14 +186,17 @@ internal static class GeometrySourceCapsuleCodec
         await Task.Yield();
         return value with { Expectation = expectation, Receipt = receipt, Association = association };
     }
-    internal static async Task<AssetSourceAssociation> SnapshotAssociationAsync(AssetSourceAssociation value, IGeometryArtifactWorkBudget budget, CancellationToken token)
+    /// <summary>A texture association may also name the D095 standard-resolution policy; model and SKIN keep the exact one.</summary>
+    internal static async Task<AssetSourceAssociation> SnapshotAssociationAsync(AssetSourceAssociation value, IGeometryArtifactWorkBudget budget, CancellationToken token,
+        bool texture = false)
     {
         if (value is null || value.Request is null || value.SourceReference is null || value.Configurations is null || value.Memberships is null) throw Invalid();
         RootTargetMatch[] members; ConfigurationReceipt[] configurations; MetadataReceipt encoding, root;
         using (await Work(budget, token))
         {
             WorkspaceService.Validate(value.Request);
-            if (value.ResearchLocale != "enUS" || value.VariantPolicy != AssetResolutionSession.VariantPolicy || value.EncodingSelectionPolicy != AssetResolutionSession.EncodingSelectionPolicy ||
+            if (value.ResearchLocale != "enUS" || !(value.VariantPolicy == AssetResolutionSession.VariantPolicy || texture && value.VariantPolicy == RootTextureVariants.Policy) ||
+                value.EncodingSelectionPolicy != AssetResolutionSession.EncodingSelectionPolicy ||
                 value.EncodingLookupRevision != ResolverArtifacts.EncodingRevision || value.RootLookupRevision != AssetResolutionSessions.RootArtifactRevision) throw Invalid();
             var count = value.Memberships.Count; if (count is < 1 or > MaximumMemberships) throw Limit(); members = new RootTargetMatch[count];
             if (value.Configurations.Count != 2) throw Invalid();

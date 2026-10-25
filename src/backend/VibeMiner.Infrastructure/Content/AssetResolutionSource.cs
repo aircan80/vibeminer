@@ -65,6 +65,13 @@ internal sealed class AssetResolutionSource : IAsyncDisposable
         lock (gate) { ObjectDisposedException.ThrowIf(disposed, this); missing = ids.Where(id => !cache.ContainsKey(id)).ToArray(); }
         var fresh = new Dictionary<uint, AssetResolutionResult>();
         var freshMappings = new Dictionary<string, MetadataExpectation?>(StringComparer.Ordinal);
+        async Task<MetadataExpectation?> ExpectAsync(string key)
+        {
+            if (freshMappings.TryGetValue(key, out var expected) || mappings.TryGetValue(key, out expected)) return expected;
+            try { expected = await SelectedFileAcquirer.ResolveAsync(encoding.Lookup, "asset", key, token); }
+            catch (DiscoveryException failure) when (failure.Code == "CONTENT_UNRESOLVED") { expected = null; }
+            freshMappings.Add(key, expected); return expected;
+        }
         if (missing.Length > 0)
         {
             await progress("Finding requested asset memberships");
@@ -91,14 +98,13 @@ internal sealed class AssetResolutionSource : IAsyncDisposable
                     { fresh.Add(target.FileDataId, new(target.FileDataId, AssetResolutionStatus.MissingMembership, null, source)); continue; }
                     var keys = target.Memberships.Select(match => match.Entry.ContentKey).Distinct(StringComparer.Ordinal).ToArray();
                     if (keys.Length != 1)
-                    { fresh.Add(target.FileDataId, new(target.FileDataId, AssetResolutionStatus.AmbiguousVariants, null, source)); continue; }
-                    var key = keys[0];
-                    if (!freshMappings.TryGetValue(key, out var expected) && !mappings.TryGetValue(key, out expected))
                     {
-                        try { expected = await SelectedFileAcquirer.ResolveAsync(encoding.Lookup, "asset", key, token); }
-                        catch (DiscoveryException failure) when (failure.Code == "CONTENT_UNRESOLVED") { expected = null; }
-                        freshMappings.Add(key, expected);
+                        // Status stays ambiguous. A D095 standard-resolution choice is attached for geometry textures to opt into.
+                        var choice = RootTextureVariants.ChooseStandard(target.Memberships);
+                        var variant = choice is null ? null : new AssetTextureVariant(choice, await ExpectAsync(choice.ContentKey));
+                        fresh.Add(target.FileDataId, new(target.FileDataId, AssetResolutionStatus.AmbiguousVariants, null, source, variant)); continue;
                     }
+                    var expected = await ExpectAsync(keys[0]);
                     fresh.Add(target.FileDataId, new(target.FileDataId,
                         expected is null ? AssetResolutionStatus.EncodingUnresolved : AssetResolutionStatus.Ready, expected, source));
                 }

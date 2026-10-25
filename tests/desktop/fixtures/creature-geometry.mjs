@@ -58,8 +58,8 @@ export function appearanceArtifact(geometry,displayId){
   readerRevision:'m2-appearance-batches-v1',decoderRevision:'blp2-rgba8-v2',artifactRevision:'model-appearance-vma1-v2'};
  const source=(c)=>({contentKey:c.repeat(32),encodingKey:'b'.repeat(32),encodedSha256:c.repeat(64),encodedBytes:120,decodedBytes:180,fullVerifierRevision:'content-blte-v1'});
  const appearance={policy:'creature-textured-appearance-v1',state:'ready',display:{displayId:String(displayId),extendedDisplayInfoId:'0',textureVariations:['779','0','0','0']},
-  textures:[{ordinal:0,type:11,binding:'variation',variation:0,fileDataId:'779',state:'decoded',image:{width:4,height:4,mipLevel:0,baseWidth:4,baseHeight:4,encoding:'bc1'},source:source('a')},
-   {ordinal:1,type:0,binding:'txid',variation:null,fileDataId:'780',state:'decoded',image:{width:4,height:4,mipLevel:0,baseWidth:4,baseHeight:4,encoding:'bc1'},source:source('c')}],
+  textures:[{ordinal:0,type:11,binding:'variation',variation:0,fileDataId:'779',state:'decoded',image:{width:4,height:4,mipLevel:0,baseWidth:4,baseHeight:4,encoding:'bc1'},source:source('a'),variant:null},
+   {ordinal:1,type:0,binding:'txid',variation:null,fileDataId:'780',state:'decoded',image:{width:4,height:4,mipLevel:0,baseWidth:4,baseHeight:4,encoding:'bc1'},source:source('c'),variant:null}],
   effects:{particles:2,ribbons:0,lights:0,shadowBatches:1,unbatchedSections:0,blendedBatches:1,envTransforms:0,evaluation:'notDrawn'},manifest,problem:null};
  return {bytes,manifest,appearance};
 }

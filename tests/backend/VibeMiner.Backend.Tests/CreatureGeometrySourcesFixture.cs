@@ -37,10 +37,12 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
     internal GeometryPreparedSources? Prepared;
     internal GeometryProducerPayload? Producer;
     private IDisposable? capture;
-    internal byte[] ModelEncoded = [], SkinEncoded = [], TextureEncoded = [];
+    internal byte[] ModelEncoded = [], SkinEncoded = [], TextureEncoded = [], HighTextureEncoded = [];
     // Textured appearance (#63): an authored model/SKIN pair, one BLP and the display row's texture fields.
+    // Variants (#70, D095) add one-entry ROOT blocks for TextureId: locale, content flags, and whether the entry names the
+    // separate high-resolution BLP instead of the main one (locale 2, content 0).
     internal sealed record Textured(AppearanceModels.Model Model, AppearanceModels.Batch[] Batches, int Variation = (int)TextureId, int Extended = 0,
-        bool Encrypted = false, byte[]? Blp = null, int Sections = 1);
+        bool Encrypted = false, byte[]? Blp = null, int Sections = 1, (uint Locale, uint Content, bool High)[]? Variants = null);
     internal static async Task<CreatureGeometrySourcesFixture> CreateAsync(bool empty = false, bool encryptedSkin = false, bool oversizedModel = false, bool ambiguousModel = false, bool missingModel = false, bool externalSkeleton = false,
         Textured? textured = null)
     {
@@ -55,16 +57,18 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
         var texture = Object("texture", textured?.Blp ?? AppearanceModels.Blp(8, 8, 4));
         if (textured?.Encrypted == true) { texture = texture with { Encoded = Encrypted(texture.Decoded.Length) }; texture = texture with { EncodingKey = Hash(texture.Encoded.AsSpan(0, 36)) }; }
         TextureEncoded = texture.Encoded;
+        var high = textured?.Variants is null ? null : Object("texture", AppearanceModels.Blp(32, 32, 1));
+        HighTextureEncoded = high?.Encoded ?? [];
         if (encryptedSkin) skin = skin with { Encoded = Encrypted(skin.Decoded.Length) };
         if (encryptedSkin) skin = skin with { EncodingKey = Hash(skin.Encoded.AsSpan(0, 36)) };
         var table = Object("table", "authored table source\n"u8.ToArray());
-        var root = Object("root", Root(model, skin, table, ambiguousModel, missingModel, textured is null ? null : texture));
-        var encoding = Object("encoding", EncodingManifest(textured is null ? [model, skin, table, root] : [model, skin, table, texture, root], oversizedModel));
+        var root = Object("root", Root(model, skin, table, ambiguousModel, missingModel, textured is null ? null : texture, textured?.Variants, high));
+        var encoding = Object("encoding", EncodingManifest(textured is null ? [model, skin, table, root] : high is null ? [model, skin, table, texture, root] : [model, skin, table, texture, high, root], oversizedModel));
         ModelEncoded = model.Encoded; SkinEncoded = skin.Encoded;
         var build = Encoding.UTF8.GetBytes($"root = {root.ContentKey}\nencoding = {encoding.ContentKey} {encoding.EncodingKey}\nencoding-size = {encoding.Decoded.Length} {encoding.Encoded.Length}\n");
         var cdn = "archives =\n"u8.ToArray(); var buildKey = Hash(build); var cdnKey = Hash(cdn);
         Http.Responses[InventoryFixture.Url("config", buildKey)] = build; Http.Responses[InventoryFixture.Url("config", cdnKey)] = cdn;
-        foreach (var item in new[] { model, skin, table, root, encoding, texture }) Http.Responses[InventoryFixture.Url("data", item.EncodingKey)] = item.Encoded;
+        foreach (var item in new[] { model, skin, table, root, encoding, texture }.Concat(high is null ? [] : [high])) Http.Responses[InventoryFixture.Url("data", item.EncodingKey)] = item.Encoded;
         Catalog = await DiscoveryCatalog.OpenAsync(Projection.DirectoryPath);
         var versions = Fixtures.Versions($"us|{buildKey}|{cdnKey}||70448|12.1.5.70448||geometry-authored");
         var attempt = await Fixtures.Attempt(versions, "Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0\nus|tpr/wow|us.cdn.blizzard.com|https://us.cdn.blizzard.com/\n");
@@ -207,17 +211,25 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
         W(result, 86, 3); W(result, 90, empty ? (ushort)0 : (ushort)3); result[128] = 255;
         return result;
     }
-    private static byte[] Root(Blob model, Blob skin, Blob table, bool ambiguousModel, bool missingModel, Blob? texture)
+    private static byte[] Root(Blob model, Blob skin, Blob table, bool ambiguousModel, bool missingModel, Blob? texture,
+        (uint Locale, uint Content, bool High)[]? variants = null, Blob? high = null)
     {
+        variants ??= [];
         using var stream = new MemoryStream(); using var w = new BinaryWriter(stream);
         var entries = new[] { (ModelId, model), (SkinId, skin), (uint.Parse(CreaturesPolicy.FileDataId), table), (1108759u, table), (1365368u, table) }
             .Concat(texture is null ? [] : [(TextureId, texture)]).Where(x => !missingModel || x.Item1 != ModelId).OrderBy(x => x.Item1).ToArray();
-        w.Write("TSFM"u8); w.Write(24u); w.Write(2u); w.Write((uint)(entries.Length + (ambiguousModel ? 1 : 0))); w.Write((uint)(entries.Length + (ambiguousModel ? 1 : 0))); w.Write(0u);
+        var total = (uint)(entries.Length + (ambiguousModel ? 1 : 0) + variants.Length);
+        w.Write("TSFM"u8); w.Write(24u); w.Write(2u); w.Write(total); w.Write(total); w.Write(0u);
         w.Write((uint)entries.Length); w.Write(2u); w.Write(0u); w.Write(0u); w.Write((byte)0);
         uint previous = 0; foreach (var (id, _) in entries) { w.Write(id - previous); previous = id + 1; }
         foreach (var (_, blob) in entries) w.Write(Convert.FromHexString(blob.ContentKey));
         foreach (var (id, _) in entries) w.Write((ulong)id);
         if (ambiguousModel) { w.Write(1u); w.Write(1u); w.Write(0u); w.Write(0u); w.Write((byte)0); w.Write(ModelId); w.Write(Convert.FromHexString(table.ContentKey)); w.Write((ulong)ModelId); }
+        foreach (var (locale, content, isHigh) in variants)
+        {
+            w.Write(1u); w.Write(locale); w.Write(content); w.Write(0u); w.Write((byte)0); w.Write(TextureId);
+            w.Write(Convert.FromHexString((isHigh ? high! : texture!).ContentKey)); w.Write((ulong)TextureId);
+        }
         return stream.ToArray();
     }
     private static byte[] EncodingManifest(Blob[] blobs, bool oversizedModel)

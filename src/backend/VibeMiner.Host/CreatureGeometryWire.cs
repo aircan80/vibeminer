@@ -98,7 +98,8 @@ internal static class CreatureGeometryWire
         {
             t.Ordinal, t.Type, binding = Name(t.Binding), t.Variation, t.FileDataId, state = Name(t.State),
             image = t.Image is { } image ? new { image.Width, image.Height, image.MipLevel, image.BaseWidth, image.BaseHeight, image.Encoding } : null,
-            source = t.Source is { } source ? new { source.ContentKey, source.EncodingKey, source.EncodedSha256, source.EncodedBytes, source.DecodedBytes, source.FullVerifierRevision } : null
+            source = t.Source is { } source ? new { source.ContentKey, source.EncodingKey, source.EncodedSha256, source.EncodedBytes, source.DecodedBytes, source.FullVerifierRevision } : null,
+            variant = t.Variant is { } variant ? new { variant.Policy, variant.ContentKey, variant.ContentFlags, variant.HighResolutionContentKey, variant.HighResolutionContentFlags } : null
         }),
         effects = value.Effects is { } e ? new { e.Particles, e.Ribbons, e.Lights, e.ShadowBatches, e.UnbatchedSections, e.BlendedBatches, e.EnvTransforms, evaluation = "notDrawn" } : null,
         manifest = value.Manifest is { } manifest ? AppearanceManifest(manifest) : null,

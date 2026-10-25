@@ -79,6 +79,14 @@ it('shows the texture chain for a textured draw and names a refusal while the ed
  expect(screen.getByRole('region',{name:'Texture chain'})).toHaveTextContent('Combiners_Mod_Mod with Diffuse_T1_T2 (shader 0x4011, 2 textures), which is not drawn. Batch 0.');
 });
 
+it('names the standard ROOT variant a texture used and the high-resolution one it left out (D095)',()=>{
+ const textured=texturedJson as unknown as CreatureGeometryResult,{flow}=fixture(),texture=textured.appearance!.textures[0]!;
+ const variant={policy:'root-texture-standard-resolution-v1' as const,contentKey:texture.source!.contentKey,contentFlags:0x2080000,highResolutionContentKey:'d'.repeat(32),highResolutionContentFlags:0x2080001};
+ const result={...textured,appearance:{...textured.appearance!,textures:[{...texture,variant}]}};
+ render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result}}}} onReturn={()=>{}}/>);
+ expect(screen.getByRole('region',{name:'Texture chain'})).toHaveTextContent('FileDataID 779 · standard ROOT variant (content flags 0x02080000); high-resolution 0x02080001 not used · BC1, mip 0 2×2 of 2×2');
+});
+
 it('names texture chain states in plain words, counts in the singular and offers Retry textures for a retryable texture outcome',()=>{
  const textured=texturedJson as unknown as CreatureGeometryResult,{flow,session}=fixture();
  const appearance={...textured.appearance!,state:'textureUnavailable' as const,manifest:null,effects:{...textured.appearance!.effects!,ribbons:1,shadowBatches:1},

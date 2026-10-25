@@ -70,3 +70,15 @@ test('a ready display appearance carries its VMA1 manifest and every other state
   assert.equal(check('CreatureGeometryTexture')({ ...appearance.textures[0], type: 14 }), false);
   assert.equal(check('CreatureGeometryTextureImage')({ ...appearance.textures[0].image, width: 1025 }), false);
 });
+
+test('a texture row names the D095 standard-resolution ROOT variant it used, or null', () => {
+  const texture = textured.appearance.textures[0];
+  const variant = { policy: 'root-texture-standard-resolution-v1', contentKey: texture.source.contentKey, contentFlags: 0x2080000,
+    highResolutionContentKey: 'd'.repeat(32), highResolutionContentFlags: 0x2080001 };
+  assert.ok(check('CreatureGeometryTexture')({ ...texture, variant }), JSON.stringify(check('CreatureGeometryTexture').errors));
+  assert.ok(check('CreatureGeometryTexture')({ ...texture, variant: null }));
+  const { variant: _omitted, ...withoutVariant } = texture;
+  assert.equal(check('CreatureGeometryTexture')(withoutVariant), false);
+  for (const patch of [{ policy: 'all-root-variants-consistent-asset-v1' }, { contentFlags: -1 }, { highResolutionContentFlags: 2 ** 32 }, { contentKey: 'A'.repeat(32) }, { extra: 1 }])
+    assert.equal(check('CreatureGeometryTextureVariant')({ ...variant, ...patch }), false, JSON.stringify(patch));
+});

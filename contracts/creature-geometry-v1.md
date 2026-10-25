@@ -70,14 +70,14 @@ Texture chain, per texture stage of each drawn batch ([m2-skin.md](../docs/forma
 
 1. `CreatureDisplayInfo.ExtendedDisplayInfoID` ≠ 0 → `characterModel` (baked CreatureDisplayInfoExtra textures are not resolved).
 2. Stage *i* reads `TextureCombos[TextureComboIndex + i]`, which names one texture ordinal. Type 0 → `TXID[ordinal]`; types 11, 12, 13 → `TextureVariationFileDataID[0]`, `[1]`, `[2]` of the same admitted display row (all four positions are read with the ModelID edge). A zero FileDataID is `textureUnresolved`, naming the ordinal; nothing is substituted.
-3. Each distinct FileDataID is resolved through the open handle under `all-root-variants-consistent-asset-v1`, acquired at interactive priority (≤ 16 MiB encoded and decoded) and fully BLTE-verified. Its mip descriptors fix one level per image first: the largest ≤ 1,024 px each side, stepped down largest first while the slots exceed 8 MiB ([blp.md](../docs/formats/blp.md#model-textures)); each image is then decoded once at that level.
+3. Each distinct FileDataID is resolved through the open handle under `all-root-variants-consistent-asset-v1`; when its memberships differ only in HighResTexture `0x1` (LowViolence `0x80` copies allowed) it uses the standard variant under `root-texture-standard-resolution-v1` (D095), for every stage, and any other disagreement is `textureAmbiguous`. It is acquired at interactive priority (≤ 16 MiB encoded and decoded) and fully BLTE-verified. Its mip descriptors fix one level per image first: the largest ≤ 1,024 px each side, stepped down largest first while the slots exceed 8 MiB ([blp.md](../docs/formats/blp.md#model-textures)); each image is then decoded once at that level.
 4. The VMA1 artifact is built into ≤ 10 MiB staging, verified, published to CAS and fenced in one transaction with the geometry locator, the CDI/CMD admissions and the known invalidity of the VMA1 file and every texture source.
 
 | Field | Meaning |
 | --- | --- |
 | `policy`, `state` | Fixed policy; state below |
 | `display` | The display ID, ExtendedDisplayInfoID and four TextureVariationFileDataID values read; null if the row cannot supply them |
-| `textures` | One entry per drawn texture ordinal, over all stages: `ordinal`, `type`, `binding` (`txid`/`variation`), `variation`, `fileDataId` (null when zero), `state`, and for `decoded` the chosen `image` (size, mip, base size, encoding) and verified `source` receipt |
+| `textures` | One entry per drawn texture ordinal, over all stages: `ordinal`, `type`, `binding` (`txid`/`variation`), `variation`, `fileDataId` (null when zero), `state`, and for `decoded` the chosen `image` (size, mip, base size, encoding) and verified `source` receipt; `variant` (D095) names the policy, the chosen standard CKey and content flags and the high-resolution CKey and flags left out, or is null when ROOT has one CKey |
 | `effects` | Counts of particles, ribbons, lights, shadow batches, sections without a batch, `blendedBatches` (blend 2–7 layers) and `envTransforms` (env-map stages drawn without their UV animation); `evaluation: notDrawn` |
 | `manifest` | VMA1 manifest, only for `ready` |
 | `problem` | `code`, `message`, `retryable`, optional `batchOrdinal` and `textureOrdinal` |
@@ -89,12 +89,12 @@ Texture chain, per texture stage of each drawn batch ([m2-skin.md](../docs/forma
 | `characterModel` | ExtendedDisplayInfoID ≠ 0 | yes |
 | `multiTexture`, `combinerUnsupported`, `blendUnsupported`, `textureWeight`, `textureTransform`, `materialUnsupported` | The first refused batch, in SKIN order (`batchOrdinal`): more than two stages; a combiner that is not drawn (the message names the pixel and vertex shader and shader ID); an unknown blend mode, or only blended layers left; an animated opacity; a UV stage's animated transform; anything else outside the profile | yes |
 | `textureUnresolved` | A zero TXID entry or display variation (`textureOrdinal`), or an unreadable display row | yes |
-| `textureMissing`, `textureAmbiguous` | No ROOT membership or encoding; memberships disagree | no |
+| `textureMissing`, `textureAmbiguous` | No ROOT membership or encoding; memberships disagree other than as D095 standard/high-resolution copies | no |
 | `textureProtected`, `textureUnsupported`, `textureCorrupt`, `textureUnavailable` | Encrypted; BLP variant outside the decoder; integrity failure; CDN or storage unavailable | no |
 | `resourceLimit` | A texture source, mip or the texel/artifact bound | no |
 | `corrupt` | The VMA1 artifact failed verification | no |
 
-Retained outcomes depend only on the verified model, SKIN and display row and the revisions, so they are stored in `geometry_appearances` (catalog version 19), keyed by the geometry locator, the CDI rows artifact, row and texture fields and every revision. A ready geometry is reused only with its retained appearance; otherwise Prepare produces both again from local CAS. Read re-verifies a retained VMA1 fully; missing bytes read as `notPrepared`, same-size corruption as `corrupt`.
+Retained outcomes depend only on the verified model, SKIN and display row and the revisions, so they are stored in `geometry_appearances` (catalog version 19), keyed by the geometry locator, the CDI rows artifact, row and texture fields, every revision and the texture variant policy (D095). A ready geometry is reused only with its retained appearance; otherwise Prepare produces both again from local CAS. Read re-verifies a retained VMA1 fully; missing bytes read as `notPrepared`, same-size corruption as `corrupt`.
 
 Particles, ribbons (D090) and blended layers (D094) do not block texturing: they are counted and not drawn. Lights, shadow batches, geosets, colour/alpha animation and env-map UV animation are not drawn or evaluated either.
 

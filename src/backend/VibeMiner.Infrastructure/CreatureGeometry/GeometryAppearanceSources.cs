@@ -93,24 +93,35 @@ internal static class GeometryAppearanceSources
         var resolved = new Dictionary<uint, AssetResolutionResult>(); var budget = new GeometryWorkBudget(services.Resources);
         IReadOnlyList<CreatureGeometryTexture> Mark(int at, CreatureGeometryTextureState state)
         { var copy = chain.ToArray(); copy[at] = copy[at] with { State = state }; return copy; }
+        // D095: memberships that differ only in HighResTexture (0x1, LowViolence copies allowed) use the standard variant.
+        // Every row of one FileDataID records it; any other disagreement stays textureAmbiguous.
+        for (var i = 0; i < chain.Length; i++)
+            if (batch.Results.Single(r => r.FileDataId == ids[i]) is { Status: AssetResolutionStatus.AmbiguousVariants, TextureVariant.Choice: { } choice })
+                chain[i] = chain[i] with { Variant = new(RootTextureVariants.Policy, choice.ContentKey, choice.ContentFlags, choice.HighResolutionContentKey, choice.HighResolutionContentFlags) };
         for (var i = 0; i < chain.Length; i++)
         {
             if (resolved.ContainsKey(ids[i])) continue;
             var result = batch.Results.Single(r => r.FileDataId == ids[i]);
-            if (result.Status != AssetResolutionStatus.Ready)
+            var variant = result.Status == AssetResolutionStatus.AmbiguousVariants ? result.TextureVariant : null;
+            if (variant is not null && variant.Choice.Selected.Any(m => m.Entry.FileDataId != ids[i] || m.Entry.ContentKey != variant.Choice.ContentKey)) throw GeometrySourceCapsuleCodec.Invalid();
+            var status = variant is null ? result.Status : variant.Expectation is null ? AssetResolutionStatus.EncodingUnresolved : AssetResolutionStatus.Ready;
+            if (status != AssetResolutionStatus.Ready)
             {
-                var ambiguous = result.Status == AssetResolutionStatus.AmbiguousVariants;
+                var ambiguous = status == AssetResolutionStatus.AmbiguousVariants;
                 return Stop(ambiguous ? CreatureGeometryAppearanceState.TextureAmbiguous : CreatureGeometryAppearanceState.TextureMissing,
-                    Problem(ambiguous ? "CREATURE_APPEARANCE_TEXTURE_AMBIGUOUS" : result.Status == AssetResolutionStatus.MissingMembership ? "CREATURE_APPEARANCE_TEXTURE_MISSING" : "CREATURE_APPEARANCE_TEXTURE_ENCODING_UNRESOLVED",
+                    Problem(ambiguous ? "CREATURE_APPEARANCE_TEXTURE_AMBIGUOUS" : status == AssetResolutionStatus.MissingMembership ? "CREATURE_APPEARANCE_TEXTURE_MISSING" : "CREATURE_APPEARANCE_TEXTURE_ENCODING_UNRESOLVED",
                         "Texture ordinal " + chain[i].Ordinal + " (FileDataID " + ids[i] + ") has no single verified source in this build.", texture: chain[i].Ordinal),
                     Mark(i, ambiguous ? CreatureGeometryTextureState.Ambiguous : CreatureGeometryTextureState.Missing), cacheable: false);
             }
+            // The chosen variant's association names the D095 policy and only the memberships of its content key.
+            if (variant is not null) result = result with { Expectation = variant.Expectation,
+                Association = result.Association with { VariantPolicy = RootTextureVariants.Policy, Memberships = variant.Choice.Selected } };
             var expected = result.Expectation;
             if (expected is null || expected.Role != "asset" || expected.EncodedBytes is < 9 or > ModelAppearanceArtifacts.MaximumTextureSourceBytes ||
                 expected.DecodedBytes is < 1 or > ModelAppearanceArtifacts.MaximumTextureSourceBytes)
                 return Stop(CreatureGeometryAppearanceState.ResourceLimit, Problem("CREATURE_APPEARANCE_TEXTURE_LIMIT",
                     "Texture ordinal " + chain[i].Ordinal + " exceeds the 16 MiB texture source bound.", texture: chain[i].Ordinal), Mark(i, CreatureGeometryTextureState.ResourceLimit), cacheable: false);
-            var association = await GeometrySourceCapsuleCodec.SnapshotAssociationAsync(result.Association, budget, token);
+            var association = await GeometrySourceCapsuleCodec.SnapshotAssociationAsync(result.Association, budget, token, texture: true);
             var core = original.Core.Artifact.Binding.Source.Association;
             if (association.Request != context.Request || association.SourceReference != context.Opening || association.ResearchLocale != context.ResearchLocale ||
                 association.Memberships.Any(m => m.Entry.FileDataId != ids[i] || m.Entry.ContentKey != expected.ContentKey) ||

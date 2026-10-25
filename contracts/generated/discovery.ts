@@ -321,6 +321,7 @@ export interface DiscoveryContract {
   creatureGeometryAppearanceDisplay?: CreatureGeometryAppearanceDisplay;
   creatureGeometryTextureImage?: CreatureGeometryTextureImage;
   creatureGeometryTextureSource?: CreatureGeometryTextureSource;
+  creatureGeometryTextureVariant?: CreatureGeometryTextureVariant;
   creatureGeometryTexture?: CreatureGeometryTexture;
   creatureGeometryEffects?: CreatureGeometryEffects;
   creatureGeometryAppearanceProblem?: CreatureGeometryAppearanceProblem;
@@ -3130,6 +3131,16 @@ export interface CreatureGeometryTextureSource {
   decodedBytes: number;
   fullVerifierRevision: 'content-blte-v1';
 }
+/**
+ * D095: the standard-resolution ROOT variant used when a texture's memberships differ only in content bit 0x1 (HighResTexture), and the high-resolution variant left out.
+ */
+export interface CreatureGeometryTextureVariant {
+  policy: 'root-texture-standard-resolution-v1';
+  contentKey: string;
+  contentFlags: number;
+  highResolutionContentKey: string;
+  highResolutionContentFlags: number;
+}
 export interface CreatureGeometryTexture {
   ordinal: number;
   type: 0 | 11 | 12 | 13;
@@ -3139,6 +3150,7 @@ export interface CreatureGeometryTexture {
   state: CreatureGeometryTextureState;
   image: CreatureGeometryTextureImage | null;
   source: CreatureGeometryTextureSource | null;
+  variant: CreatureGeometryTextureVariant | null;
 }
 export interface CreatureGeometryEffects {
   particles: number;

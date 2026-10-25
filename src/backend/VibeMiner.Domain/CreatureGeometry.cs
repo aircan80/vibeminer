@@ -41,8 +41,12 @@ public sealed record CreatureGeometryAppearanceDisplay(string DisplayId, string 
 public sealed record CreatureGeometryTextureImage(int Width, int Height, int MipLevel, int BaseWidth, int BaseHeight, string Encoding);
 public sealed record CreatureGeometryTextureSource(string ContentKey, string EncodingKey, string EncodedSha256, long EncodedBytes,
     long DecodedBytes, string FullVerifierRevision);
+/// <summary>The ROOT variant a texture used when its memberships differ only in the HighResTexture bit (D095): the chosen
+/// standard-resolution content key and flags, and the high-resolution variant left out. Null when ROOT has one content key.</summary>
+public sealed record CreatureGeometryTextureVariant(string Policy, string ContentKey, uint ContentFlags, string HighResolutionContentKey, uint HighResolutionContentFlags);
 public sealed record CreatureGeometryTexture(int Ordinal, int Type, CreatureGeometryTextureBinding Binding, int? Variation,
-    string? FileDataId, CreatureGeometryTextureState State, CreatureGeometryTextureImage? Image = null, CreatureGeometryTextureSource? Source = null);
+    string? FileDataId, CreatureGeometryTextureState State, CreatureGeometryTextureImage? Image = null, CreatureGeometryTextureSource? Source = null,
+    CreatureGeometryTextureVariant? Variant = null);
 /// <summary>Declared parts the textured draw leaves out; all are notEvaluated and never drawn. BlendedBatches are
 /// batches with blend mode 2-7 (D094); EnvTransforms are env-map stages drawn without their UV animation.</summary>
 public sealed record CreatureGeometryEffects(int Particles, int Ribbons, int Lights, int ShadowBatches, int UnbatchedSections,

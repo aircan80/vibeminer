@@ -245,7 +245,8 @@
           "encodedBytes": 120,
           "decodedBytes": 180,
           "fullVerifierRevision": "content-blte-v1"
-        }
+        },
+        "variant": null
       },
       {
         "ordinal": 1,
@@ -269,7 +270,8 @@
           "encodedBytes": 120,
           "decodedBytes": 180,
           "fullVerifierRevision": "content-blte-v1"
-        }
+        },
+        "variant": null
       }
     ],
     "effects": {

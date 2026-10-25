@@ -310,6 +310,9 @@
     "creatureGeometryTextureSource": {
       "$ref": "#/definitions/CreatureGeometryTextureSource"
     },
+    "creatureGeometryTextureVariant": {
+      "$ref": "#/definitions/CreatureGeometryTextureVariant"
+    },
     "creatureGeometryTexture": {
       "$ref": "#/definitions/CreatureGeometryTexture"
     },
@@ -16234,6 +16237,42 @@
       ],
       "additionalProperties": false
     },
+    "CreatureGeometryTextureVariant": {
+      "title": "CreatureGeometryTextureVariant",
+      "description": "D095: the standard-resolution ROOT variant used when a texture's memberships differ only in content bit 0x1 (HighResTexture), and the high-resolution variant left out.",
+      "type": "object",
+      "properties": {
+        "policy": {
+          "const": "root-texture-standard-resolution-v1"
+        },
+        "contentKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "contentFlags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "highResolutionContentKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "highResolutionContentFlags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "policy",
+        "contentKey",
+        "contentFlags",
+        "highResolutionContentKey",
+        "highResolutionContentFlags"
+      ],
+      "additionalProperties": false
+    },
     "CreatureGeometryTexture": {
       "title": "CreatureGeometryTexture",
       "type": "object",
@@ -16302,6 +16341,16 @@
               "type": "null"
             }
           ]
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreatureGeometryTextureVariant"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -16312,7 +16361,8 @@
         "fileDataId",
         "state",
         "image",
-        "source"
+        "source",
+        "variant"
       ],
       "additionalProperties": false
     },

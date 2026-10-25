@@ -1,6 +1,7 @@
 import {it,expect} from 'vitest';
 import type {CreatureGeometryResult} from '../../../contracts/generated/discovery';
 import ready from '../../../contracts/examples/creature-geometry-ready.json';
+import texturedJson from '../../../contracts/examples/creature-geometry-textured.json';
 import {validGeometryRead,validGeometryOpen,validGeometryManifest,snapshotGeometryManifest,creatureGeometryMatches,validGeometryViewEnter,validGeometrySceneDisposal,validGeometryProgress} from '../src/shared/creature-geometry';
 const p={...ready.context,researchLocale:'enUS' as const,artifactId:ready.artifactId,creatureId:ready.creatureId,slot:ready.slot};
 it('accepts exact current compact evidence and safe numeric geometry manifest without widening original Creature/C2 authority',()=>{expect(validGeometryRead(p)).toBe(true);expect(validGeometryRead({...p,expectedGeometryArtifactId:null})).toBe(true);expect(creatureGeometryMatches(ready as unknown as CreatureGeometryResult,p)).toBe(true);expect(validGeometryManifest(ready.manifest)).toBe(true);const m=snapshotGeometryManifest(ready.manifest);expect(Object.isFrozen(m.bounds.min)).toBe(true);expect(validGeometryOpen({...p,geometryArtifactId:m.artifactId})).toBe(true);});
@@ -8,4 +9,13 @@ it('rejects caller FDIDs/paths and changed compact source/copy/selection proofs'
 it('refuses nonfinite or noncanonical manifest layout and scene handshake ownership',()=>{for(const patch of[{byteLength:'200'},{lineIndexCount:7},{formatVersion:2},{bounds:{min:[0,-0,0],max:[1,1,1]}},{bounds:{min:[0,0,0],max:[1,Infinity,1]}},{mainSkinOrdinal:1},{modelFileDataId:0}])expect(validGeometryManifest({...ready.manifest,...patch})).toBe(false);expect(validGeometryViewEnter({selection:p,viewGeneration:1})).toBe(true);expect(validGeometryViewEnter({selection:p,viewGeneration:0})).toBe(false);expect(validGeometrySceneDisposal({viewId:'a'.repeat(32),operationToken:null,scope:'view'})).toBe(true);expect(validGeometrySceneDisposal({viewId:'a'.repeat(32),operationToken:'b'.repeat(32),scope:'view',retired:true})).toBe(false);});
 it('keeps geometry progress finite, safe, stage-specific and separate from table progress',()=>{const progress={protocolVersion:1 as const,type:'progress' as const,requestId:'geometry',sequence:1,stage:'Checking model bytes',unit:'bytes',completed:1,total:null,region:'us',geometryStage:'modelVerification' as const,geometryDependency:'model' as const};expect(validGeometryProgress(progress)).toBe(true);expect(validGeometryProgress({...progress,total:9007199254740992})).toBe(false);expect(validGeometryProgress({...progress,geometryStage:null})).toBe(false);expect(validGeometryProgress({...progress,tableId:'bfdaf9f1'})).toBe(false);});
 
+it('accepts a D095 standard-resolution texture variant and refuses one that is not its HighResTexture twin',()=>{
+ const textured=texturedJson as unknown as CreatureGeometryResult,texture=textured.appearance!.textures[0]!;
+ const q={...textured.context,researchLocale:'enUS' as const,artifactId:textured.artifactId,creatureId:textured.creatureId,slot:textured.slot};
+ const variant={policy:'root-texture-standard-resolution-v1',contentKey:texture.source!.contentKey,contentFlags:0x2080000,highResolutionContentKey:'d'.repeat(32),highResolutionContentFlags:0x2080001};
+ const withVariant=(v:Record<string,unknown>)=>({...textured,appearance:{...textured.appearance!,textures:[{...texture,variant:v}]}}) as unknown as CreatureGeometryResult;
+ expect(creatureGeometryMatches(textured,q)).toBe(true);expect(creatureGeometryMatches(withVariant(variant),q)).toBe(true);
+ for(const change of[{highResolutionContentFlags:0x2080000},{contentFlags:0x2080080,highResolutionContentFlags:0x2080081},{contentKey:'e'.repeat(32)},{highResolutionContentKey:texture.source!.contentKey},{policy:'all-root-variants-consistent-asset-v1'},{extra:1}])
+  expect(creatureGeometryMatches(withVariant({...variant,...change}),q)).toBe(false);
+});
 it('requires exact promoted Float32 JSON coordinates rather than their rounded shortest Single spelling',()=>{const m={...structuredClone(ready.manifest),bounds:{min:[Math.fround(0.1),0,0],max:[Math.fround(0.2),1,1]}};expect(validGeometryManifest(m)).toBe(true);expect(validGeometryManifest({...m,bounds:{min:[0.1,0,0],max:[0.2,1,1]}})).toBe(false);});

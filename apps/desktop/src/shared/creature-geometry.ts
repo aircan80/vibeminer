@@ -72,11 +72,15 @@ export function snapshotBodyManifest(value:unknown):ReadonlyBodyManifest{
 }
 export function sameBodyManifest(a:unknown,b:unknown):boolean{return validBodyManifest(a)&&validBodyManifest(b)&&isAppearanceManifest(a)===isAppearanceManifest(b)&&same(a,b);}
 const appearanceStates=['notPrepared','ready','characterModel','multiTexture','blendUnsupported','textureWeight','textureTransform','materialUnsupported','textureUnresolved','textureMissing','textureAmbiguous','textureProtected','textureUnsupported','textureCorrupt','textureUnavailable','resourceLimit','corrupt','combinerUnsupported'];
+/** D095: a standard-resolution ROOT variant chosen over its HighResTexture (0x1) twin; null when ROOT had one content key. */
+function validTextureVariant(t:CreatureGeometryAppearance['textures'][number]):boolean{const v=t.variant;if(v===null)return true;
+ return exact(v,['policy','contentKey','contentFlags','highResolutionContentKey','highResolutionContentFlags'])&&v.policy==='root-texture-standard-resolution-v1'&&validGeometryToken(v.contentKey)&&validGeometryToken(v.highResolutionContentKey)&&v.contentKey!==v.highResolutionContentKey&&
+  integer(v.contentFlags,0,4294967295)&&integer(v.highResolutionContentFlags,0,4294967295)&&(v.contentFlags&0x81)===0&&v.highResolutionContentFlags===v.contentFlags+1&&t.fileDataId!==null&&(t.source===null||t.source.contentKey===v.contentKey);}
 /** Bounded appearance shape. The engine already checked chain semantics; this refuses anything the view cannot present honestly. */
 export function validGeometryAppearance(a:CreatureGeometryAppearance,geometry:CreatureGeometryManifest|null):boolean{try{
  if(!exact(a,['policy','state','display','textures','effects','manifest','problem'])||a.policy!=='creature-textured-appearance-v1'||!appearanceStates.includes(a.state)||!Array.isArray(a.textures)||a.textures.length>32)return false;
  if(a.display!==null&&(!uint(a.display.displayId)||!Array.isArray(a.display.textureVariations)||a.display.textureVariations.length!==4||![a.display.extendedDisplayInfoId,...a.display.textureVariations].every(v=>typeof v==='string'&&/^(0|-?[1-9][0-9]{0,9})$/.test(v))))return false;
- for(const t of a.textures)if(!integer(t.ordinal,0,31)||![0,11,12,13].includes(t.type)||!['txid','variation'].includes(t.binding)||t.fileDataId!==null&&!uint(t.fileDataId)||(t.state==='decoded')!==(t.image!==null&&t.source!==null))return false;
+ for(const t of a.textures)if(!integer(t.ordinal,0,31)||![0,11,12,13].includes(t.type)||!['txid','variation'].includes(t.binding)||t.fileDataId!==null&&!uint(t.fileDataId)||(t.state==='decoded')!==(t.image!==null&&t.source!==null)||!validTextureVariant(t))return false;
  if(a.problem!==null&&(!text(a.problem.code,64)||!/^[A-Z0-9_]+$/.test(a.problem.code)||!text(a.problem.message,512)))return false;
  if(a.state==='ready')return a.problem===null&&validAppearanceManifest(a.manifest)&&!!geometry&&a.manifest.vertexCount===geometry.vertexCount&&a.manifest.geometryBindingSha256===geometry.bindingSha256&&a.textures.every(t=>t.state==='decoded');
  return a.manifest===null&&(a.state==='notPrepared'?a.problem===null&&a.textures.length===0:a.problem!==null);

@@ -41,7 +41,8 @@ Block body is columnar:
 - The same FDID can appear in several blocks with different locale/content flags, and with the same or different CKeys. Every membership is kept with its block and entry ordinal. Nothing is filtered by locale or platform during parsing.
 - Locale bits (from TACTSharp `RootInstance`): enUS `0x2`, esES `0x80`, esMX `0x1000`. enGB is `0x200`; an observed mask of 514 (`0x202`) means enUS plus enGB, not an enUS-only file. esES and esMX are different cultures.
 - OR-ing every block's locale mask does not prove which locales a build supports.
-- Reference content-flag names (LowViolence `0x80`, DoNotLoad `0x100`, Encrypted `0x08000000`, NoNames `0x10000000`) come from public tools. Apart from NoNames we treat content bits as opaque raw facts. Do not infer a Windows/platform selection from them.
+- Reference content-flag names (HighResTexture `0x1`, LowViolence `0x80`, DoNotLoad `0x100`, Encrypted `0x08000000`, NoNames `0x10000000`) come from public tools. Apart from NoNames, and HighResTexture for geometry textures (D095), we treat content bits as opaque raw facts. Do not infer a Windows/platform selection from them.
+- HighResTexture: on Classic 5.5.4 each creature texture has a `0x1` membership that is the same art at 2× or 4× the side, part of the optional high-resolution asset download. M2 and SKIN files have one membership.
 - A name hash is not a filename. ROOT has no names.
 
 ## Memory and limits
@@ -77,8 +78,9 @@ ROOT gives memberships; a policy picks one CKey. The policy name is stored with 
 | --- | --- | --- |
 | `enus-consistent-root-variants-v1` | Table (DB2) files | Keep memberships with `LocaleFlags & 0x2`. None → `CONTENT_VARIANT_MISSING`. More than 256 → `CONTENT_VARIANT_LIMIT`. More than one distinct CKey → `CONTENT_VARIANT_AMBIGUOUS`. |
 | `all-root-variants-consistent-asset-v1` | Assets (BLP, M2, SKIN) | Every membership of the FDID, across all locale and content flags, must share one CKey. Otherwise `AmbiguousVariants`. No memberships → `MissingMembership`. |
+| `root-texture-standard-resolution-v1` | Creature geometry textures only, after the asset policy reports `AmbiguousVariants` (D095) | All memberships share one locale mask and one set of content flags (derived and raw parts) apart from HighResTexture `0x1` and LowViolence `0x80`; exactly two CKeys, each only on one side of `0x1`; each side has a membership without `0x80`. Then the `0x1`-clear CKey is used, with only its memberships. Anything else stays ambiguous. |
 
-Neither policy uses the host OS, the source region or a zero-locale fallback. Ambiguity is a result, not something to resolve by sorting or taking the first row.
+None of the policies use the host OS, the source region or a zero-locale fallback. Ambiguity is a result, not something to resolve by sorting or taking the first row. [`RootTextureVariants`](../../src/backend/VibeMiner.Formats.Wow/RootTextureVariants.cs) is the only rule that reads a content bit to choose, and only between the standard and high-resolution copies of one texture.
 
 CKey → EKey uses `lexicographic-complete-encoding-v1`: sort the CKey's EN candidate EKeys by ordinal string order and take the first one that has an encoding-table row (and so a known encoded size). No candidate → `CONTENT_UNRESOLVED`.
 
@@ -89,6 +91,8 @@ A complete ROOT can reference CKeys that the same build's EN does not contain. O
 ## References
 
 - Original Java VibeMiner checkpoint `8f353d046d961108f7acc86bfe1381004467afd5`: `FullRootInventory`, `WowRootParser`.
-- TACTSharp `67fd53ac852ca297e9bf95bb41d1a97da202eba4` (MIT): `RootInstance` locale and content-flag names.
+- TACTSharp `67fd53ac852ca297e9bf95bb41d1a97da202eba4` (MIT): `RootInstance` locale and content-flag names (`0x1` unnamed, never filtered).
+- wowdev.wiki [TACT](https://wowdev.wiki/index.php?title=TACT&oldid=37051), oldid 37051: `content_flags` names `0x1` HighResTexture, marked `{{Unverified}}`.
+- Blizzard, Cataclysm Classic 4.4.1 patch notes: high-resolution textures are an opt-in Battle.net download and a Graphics option.
 
 Our reader is original code; neither reference was copied.
