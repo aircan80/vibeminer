@@ -9,8 +9,8 @@ import {itemsSnapshot,itemDetail,itemFacts,itemLabelLists} from '../../../tests/
 afterEach(cleanup);
 const snapshot=itemsSnapshot();
 const cell=(tableId:'50238ec2'|'919be54e',column:string,columnIndex:number,value:string):ItemFactValue=>({tableId,table:tableId==='50238ec2'?'Item':'ItemSparse',column,columnIndex,recordId:'3',value,label:null});
-function view(change:(facts:ItemFact[])=>void){
- const result=structuredClone(itemFacts(snapshot,{itemId:'3'})) as ItemFactsResult;change(result.facts as ItemFact[]);
+function view(change:(facts:ItemFact[])=>void,sparse?:ItemFactsResult['sparse']){
+ const result=structuredClone(itemFacts(snapshot,{itemId:'3'})) as ItemFactsResult;change(result.facts as ItemFact[]);if(sparse)result.sparse=sparse;
  return render(<ItemDetailView snapshot={snapshot} item={result.facts?itemDetail(snapshot,'3')!.summary:itemDetail(snapshot,'3')!.summary} detail={itemDetail(snapshot,'3')} facts={result} factsAvailable factsError={null} detailError={null} busy={false} labels={labelMaps(itemLabelLists)} open={()=>{}} compact={false} headingRef={createRef()} onRetry={()=>{}} icon={null} iconText={null} classificationPending={false} classificationBlocked={null} classificationsAvailable={false} subclassAvailable={false} effects={null}/>);
 }
 const set=(facts:ItemFact[],key:string,fact:Partial<ItemFact>)=>{const i=facts.findIndex(f=>f.key===key);facts[i]={...facts[i]!,...fact} as ItemFact;};
@@ -34,6 +34,36 @@ it('keeps the retail allocation heading and note when no stored amounts exist',(
  view(()=>{});
  expect(screen.getByRole('heading',{name:'Stat allocation, not final stats'})).toBeVisible();
  expect(screen.getByText(/Final \+N depends on item level, slot and bonuses/)).toBeVisible();
+});
+
+// #61 QA: Classic item 17 has no ItemSparse row, so nothing says which kind of stat numbers its layout would hold.
+it.each(['missing','unknown'] as const)('claims neither stat kind when the ItemSparse row is %s',sparse=>{
+ view(()=>{},sparse);
+ expect(screen.getByRole('heading',{name:'Stats'})).toBeVisible();
+ expect(screen.queryByRole('heading',{name:'Stat allocation, not final stats'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('heading',{name:'Stats · stored amounts'})).not.toBeInTheDocument();
+});
+
+// #61 QA: Classic Required level links Item.RequiredLevel too, so the section names both tables, and the Item value stays
+// when the ItemSparse row is missing.
+it('names both tables on Requirements when Item supplies Required level, and keeps that value without an ItemSparse row',()=>{
+ const required=(facts:ItemFact[],values:ItemFactValue[],agreement:'single'|'agree')=>set(facts,'requiredLevel',{state:'value',agreement,values:values as ItemFact['values']});
+ const section=()=>screen.getByRole('heading',{name:'Requirements'}).closest('section')!;
+ const{unmount}=view(facts=>required(facts,[cell('50238ec2','RequiredLevel',9,'60'),cell('919be54e','RequiredLevel',6,'60')],'agree'));
+ expect(within(section()).getByText('Item and ItemSparse')).toBeVisible();
+ unmount();
+ const missing=view(facts=>required(facts,[cell('50238ec2','RequiredLevel',9,'12')],'single'),'missing');
+ expect(within(section()).getByText('Item and ItemSparse')).toBeVisible();
+ expect(within(section()).getByText('12')).toBeVisible();expect(within(section()).getByText('From Item only.')).toBeVisible();
+ expect(within(section()).getByText('Missing')).toBeVisible();
+ expect(within(section()).getByText('The other values come from ItemSparse, which has no row 3 in its complete sections.')).toBeVisible();
+ expect(screen.getByRole('heading',{name:'Inventory and price'}).closest('section')!).toHaveTextContent('These values come from ItemSparse, which has no row 3');
+ missing.unmount();
+ const unknown=view(facts=>required(facts,[cell('50238ec2','RequiredLevel',9,'12')],'single'),'unknown');
+ expect(within(section()).getByText(/^The other values come from ItemSparse\. Row 3 isn't in the readable ItemSparse sections\./)).toBeVisible();
+ unknown.unmount();
+ view(facts=>required(facts,[cell('919be54e','RequiredLevel',6,'40')],'single'));
+ expect(within(section()).getByText('ItemSparse')).toBeVisible();
 });
 
 it('shows a field Item and ItemSparse store differently as one fact per table, with every element',()=>{

@@ -10613,7 +10613,8 @@
         "unsupported",
         "corrupt",
         "resourceLimit",
-        "stale"
+        "stale",
+        "notInBuild"
       ]
     },
     "ItemEffectsReadinessState": {
@@ -10628,7 +10629,8 @@
         "protected",
         "unsupported",
         "corrupt",
-        "resourceLimit"
+        "resourceLimit",
+        "notInBuild"
       ]
     },
     "ItemEffectState": {
@@ -10646,7 +10648,8 @@
         "unsupported",
         "corrupt",
         "resourceLimit",
-        "stale"
+        "stale",
+        "notInBuild"
       ]
     },
     "ItemEffectNameState": {
@@ -10667,7 +10670,8 @@
         "unsupported",
         "corrupt",
         "resourceLimit",
-        "stale"
+        "stale",
+        "notInBuild"
       ]
     },
     "ItemEffectsAbsence": {
@@ -11741,6 +11745,42 @@
           "if": {
             "properties": {
               "state": {
+                "const": "notInBuild"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "historicalArtifactId": {
+                "type": "null"
+              },
+              "problem": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsProblem"
+                  },
+                  {
+                    "properties": {
+                      "code": {
+                        "const": "ITEM_EFFECTS_SOURCE_NOT_IN_BUILD"
+                      },
+                      "message": {
+                        "const": "This build does not include the selected source."
+                      },
+                      "retryable": {
+                        "const": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
                 "const": "corrupt"
               }
             }
@@ -12270,6 +12310,7 @@
                   "unavailable",
                   "protected",
                   "unsupported",
+                  "notInBuild",
                   "corrupt",
                   "resourceLimit"
                 ]
@@ -12456,6 +12497,53 @@
                       },
                       "message": {
                         "const": "The selected source profile is unsupported."
+                      },
+                      "retryable": {
+                        "const": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "notInBuild"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsSource"
+                  },
+                  {
+                    "properties": {
+                      "state": {
+                        "const": "notInBuild"
+                      }
+                    }
+                  }
+                ]
+              },
+              "problem": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsProblem"
+                  },
+                  {
+                    "properties": {
+                      "code": {
+                        "const": "ITEM_EFFECTS_SOURCE_NOT_IN_BUILD"
+                      },
+                      "message": {
+                        "const": "This build does not include the selected source."
                       },
                       "retryable": {
                         "const": false
@@ -13891,6 +13979,7 @@
                   "unavailable",
                   "protected",
                   "unsupported",
+                  "notInBuild",
                   "corrupt",
                   "resourceLimit",
                   "stale"
@@ -14006,6 +14095,39 @@
                       },
                       "message": {
                         "const": "The selected source profile is unsupported."
+                      },
+                      "retryable": {
+                        "const": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "notInBuild"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "problem": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsProblem"
+                  },
+                  {
+                    "properties": {
+                      "code": {
+                        "const": "ITEM_EFFECTS_SOURCE_NOT_IN_BUILD"
+                      },
+                      "message": {
+                        "const": "This build does not include the selected source."
                       },
                       "retryable": {
                         "const": false
@@ -14550,6 +14672,7 @@
                   "unavailable",
                   "protected",
                   "unsupported",
+                  "notInBuild",
                   "corrupt",
                   "resourceLimit",
                   "stale"
@@ -14665,6 +14788,39 @@
                       },
                       "message": {
                         "const": "The selected source profile is unsupported."
+                      },
+                      "retryable": {
+                        "const": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "notInBuild"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "problem": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsProblem"
+                  },
+                  {
+                    "properties": {
+                      "code": {
+                        "const": "ITEM_EFFECTS_SOURCE_NOT_IN_BUILD"
+                      },
+                      "message": {
+                        "const": "This build does not include the selected source."
                       },
                       "retryable": {
                         "const": false
@@ -15267,6 +15423,7 @@
                   "unavailable",
                   "protected",
                   "unsupported",
+                  "notInBuild",
                   "corrupt",
                   "resourceLimit",
                   "stale"
@@ -15388,6 +15545,39 @@
                       },
                       "message": {
                         "const": "The selected source profile is unsupported."
+                      },
+                      "retryable": {
+                        "const": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "notInBuild"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "problem": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsProblem"
+                  },
+                  {
+                    "properties": {
+                      "code": {
+                        "const": "ITEM_EFFECTS_SOURCE_NOT_IN_BUILD"
+                      },
+                      "message": {
+                        "const": "This build does not include the selected source."
                       },
                       "retryable": {
                         "const": false

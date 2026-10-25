@@ -935,6 +935,16 @@ test('authored effects phases preserve separate source roles, copy occurrences a
  // UTF16 surrogate, equality/order/cursor digest and relational source-generation checks
  // are the shared/runtime matcher responsibility, not scalar JSON Schema length.
 });
+// #85: a table the build doesn't ship is notInBuild with its one fixed problem, never retryable.
+test('a not-in-build effects source carries only its fixed non-retryable problem',async()=>{
+ const template=JSON.parse(await readFile(path.join(root,'contracts/examples/item-effects-readiness.json'),'utf8')),problem={code:'ITEM_EFFECTS_SOURCE_NOT_IN_BUILD',message:'This build does not include the selected source.',retryable:false};
+ const v={...template,state:'notInBuild',snapshot:null,observedAssociations:null,source:{role:'bridge',state:'notInBuild',snapshot:null,historicalArtifactId:null,problem},problem};
+ validate('ItemEffectsReadiness',v);
+ const retry={...problem,retryable:true};
+ assert.equal(validator('ItemEffectsReadiness')({...v,source:{...v.source,problem:retry},problem:retry}),false,'notInBuild must refuse a retryable problem');
+ const unavailable={code:'ITEM_EFFECTS_SOURCE_UNAVAILABLE',message:'The selected source is unavailable.',retryable:true};
+ assert.equal(validator('ItemEffectsReadiness')({...v,source:{...v.source,problem:unavailable},problem:unavailable}),false,'notInBuild must refuse the unavailable problem');
+});
 test('all seven effects requests have exact flat authority and bounded decimal edge keys',()=>{
  const common={productId:'wow',buildIdentity:'a'.repeat(64),sourceRegion:'us',researchLocale:'enUS',itemsArtifactId:'b'.repeat(64),itemId:'0'};
  const methods=['items.effects.data','items.effects.prepare','items.effects.page','items.effects.details','items.effects.details.prepare','items.effects.names','items.effects.names.prepare'];

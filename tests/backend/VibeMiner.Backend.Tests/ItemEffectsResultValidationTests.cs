@@ -169,6 +169,7 @@ public sealed class ItemEffectsResultValidationTests
     [InlineData(ItemEffectsSourceState.Unavailable)] [InlineData(ItemEffectsSourceState.Protected)]
     [InlineData(ItemEffectsSourceState.Unsupported)] [InlineData(ItemEffectsSourceState.Corrupt)]
     [InlineData(ItemEffectsSourceState.ResourceLimit)] [InlineData(ItemEffectsSourceState.Stale)]
+    [InlineData(ItemEffectsSourceState.NotInBuild)]
     public void EveryOptionalFailureHasItsOwnFixedProblemAndErasesDependentEvidence(ItemEffectsSourceState state)
     {
         var (code, message) = state switch
@@ -178,6 +179,7 @@ public sealed class ItemEffectsResultValidationTests
             ItemEffectsSourceState.Unsupported => ("ITEM_EFFECTS_SOURCE_UNSUPPORTED", "The selected source profile is unsupported."),
             ItemEffectsSourceState.Corrupt => ("ITEM_EFFECTS_SOURCE_CORRUPT", "The selected source failed integrity validation."),
             ItemEffectsSourceState.ResourceLimit => ("ITEM_EFFECTS_LIMIT", "The effects resource limit was exceeded."),
+            ItemEffectsSourceState.NotInBuild => ("ITEM_EFFECTS_SOURCE_NOT_IN_BUILD", "This build does not include the selected source."),
             _ => ("ITEM_EFFECTS_TARGET_STALE", "The selected target source changed.")
         };
         var problem = new ItemEffectsProblem(code, message, state is ItemEffectsSourceState.Unavailable or ItemEffectsSourceState.Stale);
@@ -194,6 +196,9 @@ public sealed class ItemEffectsResultValidationTests
         {
             var readiness = new ItemEffectsReadiness(Details.Selection, true, Enum.Parse<ItemEffectsReadinessState>(state.ToString()), Source: new(ItemEffectsSourceRole.Bridge, state, Problem: problem), Problem: problem);
             ItemEffectsValidation.Validate(readiness, Details.Selection);
+            // A table missing from the build is settled for that build: it never claims a Retry (#85).
+            var flipped = problem with { Retryable = !problem.Retryable };
+            Bad(() => ItemEffectsValidation.Validate(readiness with { Source = readiness.Source! with { Problem = flipped }, Problem = flipped }, Details.Selection));
         }
     }
 

@@ -28,6 +28,7 @@ public sealed partial class ItemEffectsStore
         ItemEffectsSourceState.Corrupt => new("ITEM_EFFECTS_SOURCE_CORRUPT", "The selected source failed integrity validation.", false),
         ItemEffectsSourceState.ResourceLimit => new("ITEM_EFFECTS_LIMIT", "The effects resource limit was exceeded.", false),
         ItemEffectsSourceState.Stale => new("ITEM_EFFECTS_TARGET_STALE", "The selected target source changed.", true),
+        ItemEffectsSourceState.NotInBuild => new("ITEM_EFFECTS_SOURCE_NOT_IN_BUILD", "This build does not include the selected source.", false),
         _ => throw new DiscoveryException("ITEM_EFFECTS_RESULT_INVALID", "The effects result did not satisfy its bounded source and state contract.")
     };
     private static SourceProbe Failed(SourceProbe probe, ItemEffectsSourceState state) => probe with
@@ -226,7 +227,10 @@ public sealed partial class ItemEffectsStore
         {
             case "BLTE_ENCRYPTED": case "BLTE_KEY_UNAVAILABLE": case "BLTE_RANGE_UNAVAILABLE":
                 state = ItemEffectsSourceState.Protected; return true;
-            case "CONTENT_UNAVAILABLE": case "CONTENT_VARIANT_MISSING": case "CONTENT_UNRESOLVED": case "CONTENT_TIMEOUT":
+            // The exact build's ROOT lists no enUS file for this FileDataID: the build doesn't ship the table, and asking
+            // again can't change that (#85). Classic Era 1.15 ships no ItemXItemEffect, for one.
+            case "CONTENT_VARIANT_MISSING": state = ItemEffectsSourceState.NotInBuild; return true;
+            case "CONTENT_UNAVAILABLE": case "CONTENT_UNRESOLVED": case "CONTENT_TIMEOUT":
             case "METADATA_UNAVAILABLE": case "LOCAL_OBJECT_MISSING": case "HTTP_ERROR": case "HTTP_TIMEOUT":
                 state = ItemEffectsSourceState.Unavailable; return true;
             case "DB2_SCHEMA_MISSING": case "DB2_SCHEMA_AMBIGUOUS": case "DB2_SCHEMA_MISMATCH": case "BLTE_UNSUPPORTED":

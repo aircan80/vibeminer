@@ -2,15 +2,15 @@ namespace VibeMiner.Domain;
 
 public enum ItemEffectsSourceRole { Bridge, Effect, Name }
 public enum ItemEffectsSourceState
-{ NotChecked, NotPrepared, Ready, Unavailable, Protected, Unsupported, Corrupt, ResourceLimit, Stale }
+{ NotChecked, NotPrepared, Ready, Unavailable, Protected, Unsupported, Corrupt, ResourceLimit, Stale, NotInBuild }
 public enum ItemEffectsReadinessState
-{ NotPrepared, Ready, MissingItem, ItemKeyOutOfRange, Unavailable, Protected, Unsupported, Corrupt, ResourceLimit }
+{ NotPrepared, Ready, MissingItem, ItemKeyOutOfRange, Unavailable, Protected, Unsupported, Corrupt, ResourceLimit, NotInBuild }
 public enum ItemEffectState
 { NotPrepared, ObservedReady, EffectKeyOutOfRange, FieldUnavailable, NotFoundInAdmittedScope,
-  Ambiguous, Unavailable, Protected, Unsupported, Corrupt, ResourceLimit, Stale }
+  Ambiguous, Unavailable, Protected, Unsupported, Corrupt, ResourceLimit, Stale, NotInBuild }
 public enum ItemEffectNameState
 { EffectNotReady, NotPrepared, Ready, EmptyText, InvalidText, TextTooLarge, SpellKeyOutOfRange,
-  NotFoundInAdmittedScope, Ambiguous, Unavailable, Protected, Unsupported, Corrupt, ResourceLimit, Stale }
+  NotFoundInAdmittedScope, Ambiguous, Unavailable, Protected, Unsupported, Corrupt, ResourceLimit, Stale, NotInBuild }
 public enum ItemEffectsAbsence { AbsentFromCompleteSource, UnknownOutsideReadableScope }
 public enum ItemEffectEvidenceKind { StrictNumeric, RawPhysicalInteger, UnverifiedCandidate }
 

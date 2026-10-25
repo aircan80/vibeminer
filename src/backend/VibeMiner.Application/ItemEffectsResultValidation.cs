@@ -278,6 +278,7 @@ public static partial class ItemEffectsValidation
             "Corrupt" => ("ITEM_EFFECTS_SOURCE_CORRUPT", "The selected source failed integrity validation."),
             "ResourceLimit" => ("ITEM_EFFECTS_LIMIT", "The effects resource limit was exceeded."),
             "Stale" => ("ITEM_EFFECTS_TARGET_STALE", "The selected target source changed."),
+            "NotInBuild" => ("ITEM_EFFECTS_SOURCE_NOT_IN_BUILD", "This build does not include the selected source."),
             "FieldUnavailable" => ("ITEM_EFFECTS_FIELD_UNAVAILABLE", "A required effect input is unavailable."),
             _ => throw BadResult()
         };

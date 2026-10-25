@@ -255,7 +255,9 @@ export function ItemDetailView({snapshot,item,detail,facts,factsAvailable,factsE
  if(detailError)return <>{head}<div className="iv-dbody"><div className="dh-state-box iv-error iv-pad" role="alert"><strong>Item details need attention</strong><p><code>{detailError.code}</code> {detailError.message}</p>{detailError.retryable&&<div className="dh-row"><button className="dh-btn dh-small" onClick={onRetry}>Retry item details</button></div>}</div></div></>;
  if(busy&&!facts)return <>{head}<div className="iv-dbody"><p className="iv-pad iv-dim" role="status">Reading the item's source values…</p></div></>;
  if(!factsAvailable||factsError||!facts)return <>{head}<div className="iv-dbody"><div className="dh-state-box dh-plain iv-pad" role={factsError?'alert':undefined}><strong>{factsError?'Item facts need attention':'Item facts aren\'t available from this engine'}</strong><p>{factsError?<><code>{factsError.code}</code> {factsError.message}</>:<>It doesn't provide the item facts capability. <code>ITEM_FACTS_UNAVAILABLE</code></>} The Item and ItemSparse records can still be read in Tables.</p>{factsError?.retryable&&<div className="dh-row"><button className="dh-btn dh-small" onClick={onRetry}>Retry item details</button></div>}</div></div></>;
- const whole=sparse!=='present'?<div className="dh-state-box dh-plain iv-sec-state"><strong>{sparse==='missing'?'Missing':'Unknown'}</strong><p>{sparse==='missing'?`These values come from ItemSparse, which has no row ${item.id} in its complete sections.`:`Row ${item.id} isn't in the readable ItemSparse sections. It may be in an encrypted section; nothing is inferred.`}</p></div>:null;
+ // others: the box sits under a value Item supplied, so it speaks of the section's other values.
+ const absentBox=(others:boolean)=><div className="dh-state-box dh-plain iv-sec-state"><strong>{sparse==='missing'?'Missing':'Unknown'}</strong><p>{sparse==='missing'?`${others?'The other values':'These values'} come from ItemSparse, which has no row ${item.id} in its complete sections.`:`${others?'The other values come from ItemSparse. ':''}Row ${item.id} isn't in the readable ItemSparse sections. It may be in an encrypted section; nothing is inferred.`}</p></div>;
+ const whole=sparse!=='present'?absentBox(false):null;
  const section=(id:string,title:string,scope:string,body:ReactNode,extra?:ReactNode)=><section className="iv-sec" aria-labelledby={id} data-rove=""><div className="iv-sec-head"><h3 id={id}>{title}</h3><span className="iv-scope">{scope}</span></div>{body}{extra}</section>;
  // Class and Subclass: the number is the Item key; the label comes from ItemClass / ItemSubClass through the optional label service.
  const kindLabel=(kind:'class'|'subclass')=>{if(!classificationsAvailable)return null;if(kind==='subclass'&&!subclassAvailable)return <span className="iv-fsub">· Subclass labels aren't available from this engine</span>;const value=classification?.outcome[kind];
@@ -276,8 +278,11 @@ export function ItemDetailView({snapshot,item,detail,facts,factsAvailable,factsE
  const rank=f('requiredSkillRank'),rep=f('minReputation');
  // A mask field is an array (retail AllowableRaces[0–1], Classic 1.15.9 AllowableRace[0–1]) or, in some layouts, one column; every element is shown as read.
  const masks=(v:ItemFactValue[])=>v.length===1?<>{v[0]!.value} <span className="iv-fsub">· raw mask</span></>:<>[{v.map(x=>x.value).join(', ')}] <span className="iv-fsub">· {v.length} raw masks</span></>;
- const secReq=section('iv-h-req','Requirements','ItemSparse',whole??<>
-  <SharedFact label="Required level" fact={f('requiredLevel')} open={open} render={plain}/>
+ // Classic stores RequiredLevel in Item as well, so the scope names both tables when Item supplies it, and the Item value
+ // still shows when the ItemSparse row is missing or unreadable.
+ const reqLevel=f('requiredLevel'),reqFromItem=reqLevel?.state==='value'&&reqLevel.values.some(v=>v.tableId===ITEM_TABLE);
+ const secReq=section('iv-h-req','Requirements',reqFromItem?'Item and ItemSparse':'ItemSparse',whole?<>{reqFromItem&&<SharedFact label="Required level" fact={reqLevel} open={open} render={plain}/>}{absentBox(reqFromItem)}</>:<>
+  <SharedFact label="Required level" fact={reqLevel} open={open} render={plain}/>
   <Fact label="Required skill" fact={f('requiredSkill')} open={open} render={v=><>{v[0].value} <span className="iv-fsub">· rank {rank?.state==='value'?rank.values[0]?.value:'not supplied'}</span></>} extraSources={rank?.values.map(v=><SourceLink key={v.columnIndex} value={v} open={open}/>)}/>
   <Fact label="Required ability" fact={f('requiredAbility')} open={open}/>
   <Fact label="Faction and reputation" fact={f('minFaction')} open={open} render={v=><>{v[0].value} <span className="iv-fsub">· minimum reputation {rep?.state==='value'?rep.values[0]?.value:'not supplied'}</span></>} extraSources={rep?.values.map(v=><SourceLink key={v.columnIndex} value={v} open={open}/>)}/>
@@ -298,7 +303,8 @@ export function ItemDetailView({snapshot,item,detail,facts,factsAvailable,factsE
  const statColumns=([['statType','Stat type','bonusStat','StatModifier_bonusStat'],['statAmount','Amount','bonusAmount','StatModifier_bonusAmount'],['statPercentEditor','Percent editor','PercentEditor','StatPercentEditor'],['statSocketShare','Socket share','PercentageOfSocket','StatPercentageOfSocket']] as const).map(([key,title,short,field])=>({fact:f(key),title,short,field})).filter(c=>c.fact?.state==='value'),slots=Math.max(0,...statColumns.map(c=>c.fact!.values.length));
  const stored=statColumns.some(c=>c.field==='StatModifier_bonusAmount');
  const group=(x:ItemFact|undefined,name:string)=>x?.state==='value'&&x.values.length?<SourceLink value={x.values[0]} label={`${name}[0–${x.values.length-1}]`} open={open}/>:null;
- const statTitle=stored?'Stats · stored amounts':'Stat allocation, not final stats';
+ // With no readable ItemSparse row there is no layout evidence either way, so the heading claims neither kind.
+ const statTitle=whole?'Stats':stored?'Stats · stored amounts':'Stat allocation, not final stats';
  const secStats=section('iv-h-stats',statTitle,'ItemSparse',whole??(slots===0?<div className="dh-state-box dh-plain iv-sec-state"><strong>Not decoded for this layout</strong><p>This ItemSparse layout has no stat fields, so they are shown as unsupported, not as zero.</p></div>:<>
   <p className="iv-sec-note">{stored?'These are the stat amounts this layout stores for each slot, as read. Nothing is scaled or added.':'Final +N depends on item level, slot and bonuses. These are the aligned allocation inputs, as read.'}</p>
   <div className="iv-tbl" role="region" aria-label={`${stored?'Stats':'Stat allocation'}, ${slots} slots`}><table className="iv-inputs"><thead><tr><th>Slot</th>{statColumns.map(c=><th key={c.field}>{c.title}<small>{c.short}</small></th>)}</tr></thead>

@@ -108,7 +108,8 @@ export type ItemEffectsSourceState =
   | 'unsupported'
   | 'corrupt'
   | 'resourceLimit'
-  | 'stale';
+  | 'stale'
+  | 'notInBuild';
 export type ItemEffectsReadinessState =
   | 'notPrepared'
   | 'ready'
@@ -118,7 +119,8 @@ export type ItemEffectsReadinessState =
   | 'protected'
   | 'unsupported'
   | 'corrupt'
-  | 'resourceLimit';
+  | 'resourceLimit'
+  | 'notInBuild';
 export type ItemEffectState =
   | 'notPrepared'
   | 'observedReady'
@@ -131,7 +133,8 @@ export type ItemEffectState =
   | 'unsupported'
   | 'corrupt'
   | 'resourceLimit'
-  | 'stale';
+  | 'stale'
+  | 'notInBuild';
 export type ItemEffectNameState =
   | 'effectNotReady'
   | 'notPrepared'
@@ -147,7 +150,8 @@ export type ItemEffectNameState =
   | 'unsupported'
   | 'corrupt'
   | 'resourceLimit'
-  | 'stale';
+  | 'stale'
+  | 'notInBuild';
 export type ItemEffectsAbsence = 'absentFromCompleteSource' | 'unknownOutsideReadableScope';
 export type ItemEffectEvidenceKind = 'strictNumeric' | 'rawPhysicalInteger' | 'unverifiedCandidate';
 export type ItemEffectsSource = ItemEffectsSource1;

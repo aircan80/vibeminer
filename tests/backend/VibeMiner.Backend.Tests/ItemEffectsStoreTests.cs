@@ -84,6 +84,41 @@ public sealed class ItemEffectsStoreTests
         Assert.Equal(ItemEffectsSourceState.Ready, prepared.Sources[1].State);
         Assert.Equal(new[] { "4002a5b1", "46c66698" }, f.Prepared.ToArray());
     }
+
+    // #85: a table the exact build's ROOT doesn't list (Classic Era 1.15 has no ItemXItemEffect) is a settled fact of
+    // that build, never a retryable unavailable source. A transient miss keeps its retryable state.
+    [Theory]
+    [InlineData("CONTENT_VARIANT_MISSING", false, ItemEffectsReadinessState.NotInBuild, "ITEM_EFFECTS_SOURCE_NOT_IN_BUILD", false)]
+    [InlineData("CONTENT_UNAVAILABLE", true, ItemEffectsReadinessState.Unavailable, "ITEM_EFFECTS_SOURCE_UNAVAILABLE", true)]
+    [InlineData("HTTP_TIMEOUT", true, ItemEffectsReadinessState.Unavailable, "ITEM_EFFECTS_SOURCE_UNAVAILABLE", true)]
+    public async Task ABridgeTableTheBuildDoesNotShipIsNotInBuildAndNotRetryable(string failure, bool transient,
+        ItemEffectsReadinessState expected, string code, bool retryable)
+    {
+        await using var f = await ItemEffectsStoreFixture.Create(bridge: false);
+        f.BeforePrepare = (_, _) => throw new DiscoveryException(failure, "Authored acquisition outcome.", transient);
+        var links = await f.Store.PrepareLinksAsync(f.Selection, _ => Task.CompletedTask, default);
+        Assert.Equal(expected, links.State); Assert.Null(links.Snapshot); Assert.Null(links.ObservedAssociations);
+        Assert.Equal(Enum.Parse<ItemEffectsSourceState>(expected.ToString()), links.Source!.State);
+        Assert.Equal(code, links.Problem!.Code); Assert.Equal(retryable, links.Problem.Retryable);
+        Assert.Equal(links.Problem, links.Source.Problem);
+        Assert.Equal(new[] { "00cb674f" }, f.Prepared.ToArray());
+        ItemEffectsValidation.Validate(links, f.Selection);
+    }
+
+    [Fact]
+    public async Task AnEffectTableTheBuildDoesNotShipLeavesLinksAndNeverConsultsNames()
+    {
+        await using var f = await ItemEffectsStoreFixture.Create(effect: false, name: false);
+        var ready = await f.Store.PrepareLinksAsync(f.Selection, _ => Task.CompletedTask, default);
+        var page = await f.Store.ReadPageAsync(new(f.Selection, ready.Snapshot!.ArtifactId), default);
+        var keys = page.Edges.Select(edge => edge.Key).ToArray();
+        f.BeforePrepare = (_, _) => throw new DiscoveryException("CONTENT_VARIANT_MISSING", "Authored acquisition outcome.");
+        var details = await f.Store.PrepareDetailsAsync(new(f.Selection, ready.Snapshot.ArtifactId, keys), _ => Task.CompletedTask, default);
+        Assert.Equal(ItemEffectsSourceState.NotInBuild, details.Source.State);
+        Assert.False(details.Source.Problem!.Retryable);
+        Assert.Contains(details.Outcomes, outcome => outcome.State == ItemEffectState.NotInBuild && outcome.Problem == details.Source.Problem);
+        Assert.Equal(new[] { "4002a5b1" }, f.Prepared.ToArray());
+    }
 }
 
 // Authored row artifacts exercise orchestration/authority, not native WDC5/BLTE qualification.
