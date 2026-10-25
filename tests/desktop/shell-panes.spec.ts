@@ -167,3 +167,56 @@ test('Records, the Tables list and Files keep three whole rows and keep focus in
     await text(page, 1);
   } finally { await session.close(); }
 });
+
+// #78: with the shell scrolling as a whole, one click on a visible Files row selects it, in the object list and in the file
+// list, although the list wasn't focused and its active row was scrolled out of view: focusing the list on mousedown must
+// not scroll the shell to that row and move another row under the pointer.
+test('one click on a visible Files row selects it at 600x480 and 200% text (#78)', async () => {
+  test.setTimeout(90_000);
+  const session = await launch(true, false, false, false, false, false, false, false, false, false, false, true);
+  try {
+    const { page, app, data } = session;
+    await size(app, 1280, 800);
+    await page.locator('.build-row').first().click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeFocused();
+    await size(app, 600, 480); await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([600, 480]);
+    await text(page, 2);
+    await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-compact.dh-shell-scroll'));
+    await page.getByRole('navigation', { name: 'Build areas' }).getByRole('button', { name: 'Files', exact: true }).click();
+    const heading = page.getByRole('heading', { name: 'Files', exact: true });
+    await expect(heading).toBeFocused();
+    const pane = page.locator('.dh-files .dh-pane.dh-list');
+    await expect(pane.getByText('Object 1', { exact: true })).toBeVisible();
+    // The list isn't focused, its active row (the first) is scrolled out of its scroller, and the list is in the shell's
+    // view. One click on the row now at the top of the scroller selects it.
+    async function clickVisibleRow(label: string) {
+      await heading.focus(); await settle(page);
+      const target = await page.evaluate(() => {
+        const scroller = [...document.querySelectorAll<HTMLElement>('.dh-files .dh-list-scroll')].find(el => el.getClientRects().length > 0)!;
+        const app = document.querySelector<HTMLElement>('.dh-app')!, options = [...scroller.querySelectorAll<HTMLElement>('[role=option]')];
+        const head = scroller.querySelector<HTMLElement>('.dh-fthead')!.getBoundingClientRect().height;
+        scroller.scrollTop += options[6].getBoundingClientRect().top - scroller.getBoundingClientRect().top - head;
+        app.scrollTop += scroller.getBoundingClientRect().top - app.getBoundingClientRect().top - (parseFloat(getComputedStyle(app).scrollPaddingTop) || 0);
+        const r = options[6].getBoundingClientRect(), x = r.left + r.width / 3, y = (r.top + r.bottom) / 2;
+        return { x, y, id: options[6].id, hit: options[6].contains(document.elementFromPoint(x, y)), hidden: options[0].getBoundingClientRect().bottom <= scroller.getBoundingClientRect().top + head + 1 };
+      });
+      expect(target.hit, `${label}: the seventh row is under the pointer`).toBe(true);
+      expect(target.hidden, `${label}: the active first row is scrolled out of the list`).toBe(true);
+      await page.mouse.click(target.x, target.y);
+      await expect(page.locator(`[id="${target.id}"]`), `${label}: one click selects the row`).toHaveAttribute('aria-selected', 'true');
+      await expect(pane.getByRole('listbox')).toBeFocused();
+    }
+    await clickVisibleRow('object list');
+    await expect(page.locator('#files-inspector-heading')).toHaveText('Encoded object 7');
+    await writeFile(path.join(data, 'file-catalog-ready'), 'ready');
+    const show = page.getByRole('button', { name: 'Show file list' }).first();
+    await expect(show).toBeVisible(); await show.click();
+    const files = pane.getByRole('listbox', { name: 'Files, one row per FileDataID' });
+    await expect(files.getByRole('option').first()).toContainText('800001');
+    await clickVisibleRow('file list');
+    await expect(page.locator('#files-inspector-heading')).not.toHaveText('FileDataID 800001');
+    await text(page, 1);
+  } finally { await session.close(); }
+});

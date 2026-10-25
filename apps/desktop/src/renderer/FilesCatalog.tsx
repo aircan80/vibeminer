@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import type { InventoryFile, InventoryFileDetail, InventoryFileMembership, InventoryFilesPage, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
 import { exactBytes, exactCount, filePosition, hex, inventoryFileDetailMatches, inventoryFilesPageMatches, localeBits, localeNames, readableBytes, type FileFilters, type InventoryFilesParams } from '../shared/inventory';
@@ -243,7 +243,11 @@ export function useListbox<T>(entries: readonly T[], key: (entry: T) => string) 
     /** A new destination, such as a FileDataID followed from Tables: forget the earlier pick too. */
     reset: () => { picked.current = false; latest.current = null; setSelected(null); },
     props: { role: 'listbox', tabIndex: 0, 'aria-activedescendant': entries.length ? optionId(active) : undefined, onKeyDown },
-    option: (i: number) => ({ id: optionId(i), role: 'option', 'aria-selected': i === index, className: i === active ? ' dh-active' : '', onClick: () => select(i) }) };
+    // A row is picked on mousedown, as in a native list box. React commits it before the list takes focus (the default action
+    // that follows the event), so the shell reveals the row under the pointer rather than scrolling to the earlier active row
+    // and moving another row under the pointer before mouseup (#78).
+    option: (i: number) => ({ id: optionId(i), role: 'option', 'aria-selected': i === index, className: i === active ? ' dh-active' : '',
+      onMouseDown: (event: MouseEvent) => { if (event.button === 0) select(i); }, onClick: () => select(i) }) };
 }
 export function CatalogPageControls({ busy, canFirst, canPrevious, canNext, onFirst, onPrevious, onNext }: { busy: boolean; canFirst: boolean; canPrevious: boolean; canNext: boolean; onFirst: () => void; onPrevious: () => void; onNext: () => void }) {
   return <span className="dh-pages" role="group" aria-label="Catalog pages"><button className="dh-btn" aria-disabled={busy || !canFirst} onClick={() => { if (!busy && canFirst) onFirst(); }}>First page</button><button className="dh-btn" aria-disabled={busy || !canPrevious} onClick={() => { if (!busy && canPrevious) onPrevious(); }}>Previous page</button><button className="dh-btn" aria-disabled={busy || !canNext} onClick={() => { if (!busy && canNext) onNext(); }}>Next page</button></span>;
