@@ -15,7 +15,7 @@ internal static class M2SkinGeometryCore
     {
         var input = new M2Input(source, limits, token); var budget = new M2Budget(limits.MaxOutputBytes, model.RetainedBytes);
         budget.Add(0, 1);
-        var headerBytes = model.Version == 264 ? 48 : model.Version == 274 ? 56 : throw Error("UNSUPPORTED", "The supplied model has no admitted SKIN profile.");
+        var headerBytes = model.Version == 264 ? 48 : model.Version is (272 or 274) ? 56 : throw Error("UNSUPPORTED", "The supplied model has no admitted SKIN profile.");
         var header = await input.AtAsync(0, headerBytes);
         if (!header.AsSpan(0, 4).SequenceEqual("SKIN"u8)) throw Error("UNSUPPORTED", "An external SKIN profile is required.");
         M2Span S(string name, int at, int stride, int max) => input.Span(name, U32(header, at), U32(header, at + 4), stride, max, 0, input.Length, headerBytes);
@@ -26,10 +26,10 @@ internal static class M2SkinGeometryCore
         var batchSpan = S("SKIN batches", 36, 24, limits.MaxBatches);
         var shadowSpan = headerBytes == 56 ? S("SKIN shadow batches", 48, 12, limits.MaxBatches) : new M2Span("SKIN shadow batches", 0, 0, 12);
         var maxBones = U32(header, 44);
-        // Authenticated modern274 sources can retain zero here while declaring
+        // Authenticated chunked 272 and 274 sources can retain zero here while declaring
         // nonempty section palettes. Preserve that raw fact, never invent a maximum.
         // This finite exception does not assert universal zero/sentinel semantics.
-        var rawZeroHeader = model.IsChunked && model.Version == 274 && maxBones == 0;
+        var rawZeroHeader = model.IsChunked && model.Version is (272 or 274) && maxBones == 0;
         if (maxBones > 256) throw Error("LIMIT", "The SKIN palette exceeds the byte-addressed bone profile.");
         if (triangleSpan.Count % 3 != 0) throw Error("INVALID", "The SKIN triangle index count is not divisible by three.");
         if (propertiesSpan.Count != lookupSpan.Count) throw Error("INVALID", "SKIN needs one four-byte bone-property record per lookup vertex.");

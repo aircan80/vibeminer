@@ -116,6 +116,20 @@ public sealed class M2AppearanceTests
     }
 
     [Fact]
+    public async Task Material_refusals_name_the_exact_value_outside_the_profile()
+    {
+        // Live Dark Phoenix Hatchling (#75): one alpha-key batch whose material carries render flags 0x81.
+        var (_, _, flag) = await PlanAsync(Simple(blend: 1) with { Materials = [(0x81, 1)] }, [new(Shader: 0x10)]);
+        Assert.Equal(M2AppearanceRefusal.MaterialUnsupported, flag.Decline!.Reason); Assert.Contains("render flags 0x80", flag.Decline.Message);
+        var (_, _, batch) = await PlanAsync(Simple(), [new(Flags: 0x20)]);
+        Assert.Contains("batch flags 0x20", batch.Decline!.Message);
+        var (_, _, layer) = await PlanAsync(Simple(), [new(Layer: 2)]);
+        Assert.Contains("material layer 2", layer.Decline!.Message);
+        var (_, _, blended) = await PlanAsync(Simple(blend: 4), [new()]);
+        Assert.Equal(M2AppearanceRefusal.BlendUnsupported, blended.Decline!.Reason); Assert.Contains("blends with mode 4", blended.Decline.Message);
+    }
+
+    [Fact]
     public async Task Blended_layers_are_counted_not_drawn_and_never_layer_conflict()
     {
         // Batch 1 (alpha blend) and batch 2 (add) lie over sections 0 and 1; batch 0 alone is drawn.

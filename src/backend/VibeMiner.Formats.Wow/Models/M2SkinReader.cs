@@ -2,7 +2,7 @@ using static VibeMiner.Formats.Wow.M2Input;
 
 namespace VibeMiner.Formats.Wow;
 
-/// <summary>Original SKIN reader for the explicitly paired 264/274 static profiles.</summary>
+/// <summary>Original SKIN reader for the explicitly paired static profiles: unchunked 264 and chunked 272/274.</summary>
 public static class M2SkinReader
 {
     public const string Revision = "m2-skin-native-v2";

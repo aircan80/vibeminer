@@ -51,7 +51,7 @@ Each source record: `role`, `fileDataId`, `contentKey`, `encodingKey`, `encodedS
 | `ambiguousVariants` | ROOT memberships for the FDID disagree on the CKey. |
 | `encodingUnresolved` | The CKey has no ENCODING entry. |
 | `protected` | BLTE encrypted; no full receipt. |
-| `unsupported` | Model/SKIN outside the reader's finite profile, or an external skeleton/bone dependency. |
+| `unsupported` | Model/SKIN outside the reader's finite profile, or an external skeleton/bone dependency. For `MODEL_UNSUPPORTED` the problem message names the feature (version and container, `SKID`, `BFID`). |
 | `unavailable` | CDN unavailable. |
 | `corrupt` | Hash, key, grammar or receipt conflict. |
 | `resourceLimit` | A size, count or reservation limit was exceeded. |
@@ -107,7 +107,7 @@ Manifest `bounds.min`/`max` are Float32 values sent as JSON doubles (exact widen
 1. Re-authorize the selection through the display-metadata store: `Creature.DisplayID[slot]` → `CreatureDisplayInfo.ID` → `ModelID` → `CreatureModelData.ID` → positive `FileDataID`. Capture the original opening, Creature core, slot and delivered CDI/CMD bindings before any wait; later checks compare against these and never adopt a newer opening.
 2. Open one feature handle on the shared `AssetResolutionSessions` registry and resolve the model FDID under `all-root-variants-consistent-asset-v1`: every ROOT membership must agree on one CKey, all memberships are kept (max 256). It never uses `SelectedFileAcquirer`, whose enUS table policy is a different source certificate.
 3. Require encoded length 9 B–4 MiB and decoded length 1 B–8 MiB before any payload demand. Acquire through the shared pipeline at interactive priority, then strict BLTE decode with EKey, chunk, CKey and EOF verification. No partial projections, holes or zero fill.
-4. Parse the model under the geometry-only profile (chunked MD21/MD20 version 274, no external skeleton or bone files) with M2 limits of 8 MiB source and output, 65,536 vertices, 131,070 triangle indices, 256 sections.
+4. Parse the model under the geometry-only profile (chunked MD21/MD20 version 272 or 274, no external skeleton or bone files) with M2 limits of 8 MiB source and output, 65,536 vertices, 131,070 triangle indices, 256 sections.
 5. Use only `SkinFileDataIds[0]` (main SKIN ordinal 0). A missing or zero SFID[0] is unsupported. No guessed `00.skin`, other LOD, textures or animation files.
 6. Resolve, acquire and verify the SKIN through the **same** handle with the same limits. Exactly two asset nodes.
 7. Seal the closure, build VMG1 into ≤2 MiB staging, verify it, publish it to CAS, then run one final catalog transaction.

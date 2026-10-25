@@ -52,8 +52,7 @@ internal sealed partial class GeometrySourceClosure
                 try { node.Decoded.Position = 0; using (await services.Resources.EnterCpuAsync(null, token)) appearanceFacts = await M2Appearance.ReadModelAsync(node.Decoded, model, token); }
                 catch (DiscoveryException error) when (error.Code.StartsWith("MODEL_", StringComparison.Ordinal)) { appearanceFailure = error; }
             }
-            if (!model.IsChunked || model.Version != 274 || model.SkeletonFileDataId != 0 || model.BoneFileDataIds.Any(id => id != 0))
-                throw new DiscoveryException("MODEL_UNSUPPORTED", "The model requires a source geometry profile or external dependency outside this capability.");
+            if (M2GeometrySkinReader.ProfileRefusal(model) is { } refusal) throw new DiscoveryException("MODEL_UNSUPPORTED", refusal);
             if (model.SkinFileDataIds.Count == 0 || model.SkinFileDataIds[0] == 0) throw new DiscoveryException("MODEL_UNSUPPORTED", "The model has no positive declared main SKIN.");
             var skinId = model.SkinFileDataIds[0]; dependency = CreatureGeometryDependency.Skin;
             await selection.RevalidateAsync(token);
@@ -206,6 +205,9 @@ internal sealed partial class GeometrySourceClosure
             _ when e.Code.Contains("UNAVAILABLE", StringComparison.Ordinal) || e.Code == "LOCAL_OBJECT_MISSING" => CreatureGeometryState.Unavailable,
             _ => CreatureGeometryState.Corrupt
         };
-        return new(state, dependency, new(e.Code, "The original geometry source could not be admitted (" + state + ").", e.Retryable), reached);
+        // Our own readers name the model or SKIN feature outside the profile in a short fixed message (#75); keep it.
+        var message = "The original geometry source could not be admitted (" + state + ")";
+        message = e.Code == "MODEL_UNSUPPORTED" && e.Message.Length is > 0 and <= 400 ? message + ": " + e.Message : message + ".";
+        return new(state, dependency, new(e.Code, message, e.Retryable), reached);
     }
 }

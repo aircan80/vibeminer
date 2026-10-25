@@ -37,8 +37,9 @@ public static class M2ModelReader
         var core = await input.AtAsync(origin, 304);
         if (!core.AsSpan(0, 4).SequenceEqual("MD20"u8)) throw Error("INVALID", "MD21 must contain a nested MD20 model.");
         var version = U32(core, 4);
-        if ((!chunked && version != 264) || (chunked && version != 274))
-            throw Error("UNSUPPORTED", "Only unchunked MD20/264 and chunked MD21/MD20/274 static profiles are admitted.");
+        // Chunked 272 and 274 share one layout for everything read here (#75): checked on live retail 272 pairs.
+        if ((!chunked && version != 264) || (chunked && version is not (272 or 274)))
+            throw Error("UNSUPPORTED", $"M2 version {version} {(chunked ? "in a chunked MD21" : "in an unchunked MD20")} model is outside the admitted profiles (unchunked 264, chunked 272 and 274).");
         var flags = U32(core, 16); var headerBytes = (flags & 8) != 0 ? 312 : 304;
         if (bytes < headerBytes) throw Error("INVALID", "The flagged texture-combiner descriptor is truncated.");
         var declarations = new List<M2ArrayDeclaration>(); var spans = new Dictionary<string, M2Span>(StringComparer.Ordinal);

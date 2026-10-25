@@ -184,9 +184,29 @@ public sealed class CreatureGeometrySourcesTests
         var requests = fixture.Http.Requests.Count;
         var failure = await Assert.ThrowsAsync<GeometrySourceFailureException>(() => fixture.PrepareAsync().WaitAsync(Deadline));
         Assert.Equal(external ? CreatureGeometryState.Unsupported : CreatureGeometryState.MissingMembership, failure.State);
+        if (external) Assert.Contains("external skeleton file (SKID 900)", failure.Problem.Message);
         Assert.Equal(external ? 1 : 0, failure.Sources.Count);
         Assert.Equal(external ? requests + 1 : requests, fixture.Http.Requests.Count);
         Assert.Equal(0, fixture.Payload.ReservedBytes);
+    }
+    [Theory]
+    [InlineData(272u, null)]
+    [InlineData(273u, "M2 version 273 in a chunked MD21 model is outside the admitted profiles")]
+    public async Task Chunked_272_models_prepare_and_other_versions_name_their_version(uint version, string? named)
+    {
+        await using var fixture = await CreatureGeometrySourcesFixture.CreateAsync(modelVersion: version);
+        if (named is null)
+        {
+            var prepared = await fixture.PrepareAsync().WaitAsync(Deadline);
+            Assert.Equal(272u, prepared.Skin.Model.Version); Assert.Equal(new GeometryNativeCounts(3, 3, 3, 3, 1), prepared.Closure.Capsule.Counts);
+            var budget = new GeometryWorkBudget(fixture.Resources); using var output = new MemoryStream();
+            var artifact = await ModelGeometryArtifacts.BuildAsync(prepared.Skin, prepared.DataBinding, output, budget, default);
+            output.Position = 0; await ModelGeometryArtifacts.VerifyAsync(output, artifact, budget, default);
+            return;
+        }
+        var failure = await Assert.ThrowsAsync<GeometrySourceFailureException>(() => fixture.PrepareAsync().WaitAsync(Deadline));
+        Assert.Equal(CreatureGeometryState.Unsupported, failure.State); Assert.Equal("MODEL_UNSUPPORTED", failure.Problem.Code);
+        Assert.Contains(named, failure.Problem.Message); Assert.Single(failure.Sources); Assert.Equal(0, fixture.Payload.ReservedBytes);
     }
     [Theory]
     [InlineData(256)]

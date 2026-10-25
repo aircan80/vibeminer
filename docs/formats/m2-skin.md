@@ -18,9 +18,11 @@ Input streams must be readable, seekable, start at 0 and be complete. A BLTE pro
 | Container | Version | SKIN header |
 | --- | --- | --- |
 | Unchunked: file starts `MD20` | 264 | 48 bytes |
-| Chunked: `MD21` chunk containing `MD20` | 274 | 56 bytes |
+| Chunked: `MD21` chunk containing `MD20` | 272, 274 | 56 bytes |
 
-Everything else is `MODEL_UNSUPPORTED`. In particular **version 272 is unsupported**, and no "version ≥ 264" layout is assumed. The SKIN profile is taken from the parsed model, never guessed from offsets.
+Everything else is `MODEL_UNSUPPORTED`, and the message names the version and container. No "version ≥ 264" layout is assumed: 273, an unchunked 272 or 274 and a chunked 264 stay refused. The SKIN profile is taken from the parsed model, never guessed from offsets.
+
+**Chunked 272** (D097, #75) reads with the 274 layout. Checked on the five wowxptr 12.1.5.70340 creature models that refused on it (Tiny Green Dragon, Crystalwing Stone Drake, Phoenix Hatchling, Dark Phoenix Hatchling, Spirit Wolf 3524): MD21 with `SFID`/`TXID`/`AFID`, header flags `0x80`/`0x81`/`0x90`, and in every vertex the bone weights sum to 255 and the normal has unit length. Their main SKINs have the 56-byte header (data starts at 64; shadow batches at 48, count 0-5, inside the file) and a maximum-bones field of 0 with 27-76 bones per section, the normal modern value (see the bone-palette rule). pywowlib's version branches change nothing we read after Cataclysm (its WoD sequence change splits the u32 at sequence offset 28 in two; flags stay at 12), and wow.export reads every `MD21` model with one layout.
 
 ## Chunked container
 
@@ -99,15 +101,15 @@ Batch, 24 bytes: u8 flags, i8 priority, u16 shader ID, u16 section index, u16 se
 
 ### Bone-palette rule
 
-Normally each section's bone count must be ≤ the header's maximum bones (≤256), influences ≤4, and `boneStart + boneCount` must fit the M2 bone lookup.
+With a positive header maximum (≤256), each section's bone count must be ≤ it, influences ≤4, and `boneStart + boneCount` must fit the M2 bone lookup.
 
-Exception, revision `m2-skin-native-v2`: **chunked 274 with a header maximum of 0**. A real Retail model (33,915 vertices, 178 bone-lookup entries) has header 0 while nine sections each declare 60 bones. For that case the raw 0 is kept (no inferred maximum), each section palette is capped at 256, influences at 4, and spans must still fit the actual bone lookup. The exception does not apply to 264 or 272. It does not mean 0 is "unlimited" in general.
+**Chunked 272 or 274 with a header maximum of 0**, revision `m2-skin-native-v2`. This is the normal value in modern SKINs, not a rare case: a Retail 274 model (33,915 vertices, 178 bone-lookup entries) has header 0 while nine sections each declare 60 bones, and every live chunked 272 SKIN checked has 0 too (D097). The raw 0 is kept (no inferred maximum), each section palette is capped at 256, influences at 4, and spans must still fit the actual bone lookup. This rule does not apply to 264, where 0 is still checked as a maximum. It does not mean 0 is "unlimited" in general.
 
 ## Static geometry
 
 `M2StaticGeometry.Create` resolves every SKIN triangle to an M2 vertex index (`uint`), keeps native positions, normals, UVs and winding, keeps every declared section (including overlaps and duplicates), and computes bounds over section-referenced positions only. A SKIN parsed against another model object is rejected even when counts match. No pose is applied: bind/rest positions only.
 
-The geometry-only reader exists for models whose materials fail the strict profile but whose geometry is valid. It requires chunked 274 with no external `SKID`/`BFID`. It still validates batch and shadow array framing but publishes their declarations only. An `M2GeometrySkin` cannot be passed to `AdmitOpaque`; that is a compile-time boundary. Geometry-ready never means appearance-ready.
+The geometry-only reader exists for models whose materials fail the strict profile but whose geometry is valid. It requires chunked 272 or 274 with no external `SKID`/`BFID`; the refusal names which one (version, `SKID` and its FileDataID, or `BFID`). It still validates batch and shadow array framing but publishes their declarations only. An `M2GeometrySkin` cannot be passed to `AdmitOpaque`; that is a compile-time boundary. Geometry-ready never means appearance-ready.
 
 ## Opaque material profile
 
@@ -180,6 +182,8 @@ Every two-texture batch has batch flags `0x80`, or `0x90` when both stages' tran
 | Each stage's texture is type 0 (TXID) or 11/12/13 (display variation 0/1/2) | `MaterialUnsupported` |
 | One opaque or alpha-key batch per section; blended layers do not count | `MaterialUnsupported` |
 | At least one opaque or alpha-key batch draws a triangle | `BlendUnsupported` when only blended layers are left, else `MaterialUnsupported` |
+
+A `MaterialUnsupported` refusal for flags or layer names the first value outside the profile (render flags, batch flags, second raw field, material layer, in that order), and `BlendUnsupported` for blended layers names the first layer's blend mode.
 
 Particles, ribbons, lights, shadow batches and blended layers are counted, not drawn, and do not refuse (D090, D094). Priority planes are ignored: nothing blends. Color tracks (vertex color/alpha animation, often used to hide alternate geosets) are not evaluated, like pose. Alpha key applies only to `Combiners_Mod` (any `0x70` bit, texture alpha), at 128/255; the other drawn combiners have no texture alpha. Render flag `0x01` (unlit) has no effect because the preview is unlit; `0x04` draws both sides; `0x08`/`0x10` turn off depth test/write. The renderer applies the formulas above to the stored texel values, unlit, with the added term added directly ([VMA1 renderer](../../contracts/geometry-vma1-v2.md#renderer)).
 

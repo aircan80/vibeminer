@@ -7,10 +7,12 @@ namespace VibeMiner.Backend.Tests.Protocols;
 
 public sealed class M2SkinReaderTests
 {
-    [Fact]
-    public async Task Modern_zero_header_preserves_raw_fact_with_observed_section60_lookup178_shape()
+    [Theory]
+    [InlineData(272u)][InlineData(274u)]
+    public async Task Modern_zero_header_preserves_raw_fact_with_observed_section60_lookup178_shape(uint version)
     {
-        var model=await Model();using var source=new AsyncSource(Skin());var skin=await M2SkinReader.ReadAsync(source,model);
+        // Live retail chunked 272 SKINs (#75) all have header 0 with sections declaring 27-76 bones, like the 274 case.
+        var model=await Model(version);using var source=new AsyncSource(Skin(version));var skin=await M2SkinReader.ReadAsync(source,model);
         Assert.Equal("m2-skin-native-v2",M2SkinReader.Revision);Assert.Equal(0u,skin.MaximumBones);
         Assert.Equal((ushort)60,Assert.Single(skin.Sections).BoneCount);Assert.Equal(178,model.BoneLookup.Count);
         Assert.Equal(new uint[]{2,0,1},M2StaticGeometry.Create(model,skin).Indices);Assert.Equal(source.Length,source.Position);Assert.True(source.CanRead);
@@ -38,7 +40,7 @@ public sealed class M2SkinReaderTests
     public async Task Positive_header_constraints_remain_unchanged(uint header,string code)=>await Error(code,Skin(header:header),await Model());
 
     [Theory]
-    [InlineData(264u)][InlineData(274u)]
+    [InlineData(264u)][InlineData(272u)][InlineData(274u)]
     public async Task Positive_header60_retains_raw_value_and_exact_actual_lookup_bounds(uint version)
     {
         var model=await Model(version);using var input=new AsyncSource(Skin(version,header:60,boneStart:118));var skin=await M2SkinReader.ReadAsync(input,model);
@@ -49,7 +51,7 @@ public sealed class M2SkinReaderTests
     public async Task Zero_header_does_not_expand_legacy264_or_model_container_version_profiles()
     {
         await Error("MODEL_INVALID",Skin(264),await Model(264));
-        foreach(var bytes in new[]{ModelBytes(272),ModelBytes(274,wrap:false),ModelBytes(264,wrap:true)})
+        foreach(var bytes in new[]{ModelBytes(273),ModelBytes(272,wrap:false),ModelBytes(274,wrap:false),ModelBytes(264,wrap:true)})
         {using var input=new AsyncSource(bytes);Assert.Equal("MODEL_UNSUPPORTED",(await Assert.ThrowsAsync<DiscoveryException>(()=>M2ModelReader.ReadAsync(input))).Code);Assert.True(input.CanRead);}
     }
 

@@ -44,15 +44,15 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
     internal sealed record Textured(AppearanceModels.Model Model, AppearanceModels.Batch[] Batches, int Variation = (int)TextureId, int Extended = 0,
         bool Encrypted = false, byte[]? Blp = null, int Sections = 1, (uint Locale, uint Content, bool High)[]? Variants = null);
     internal static async Task<CreatureGeometrySourcesFixture> CreateAsync(bool empty = false, bool encryptedSkin = false, bool oversizedModel = false, bool ambiguousModel = false, bool missingModel = false, bool externalSkeleton = false,
-        Textured? textured = null)
+        Textured? textured = null, uint modelVersion = 274)
     {
         var f = new CreatureGeometrySourcesFixture();
-        try { await f.InitializeAsync(empty, encryptedSkin, oversizedModel, ambiguousModel, missingModel, externalSkeleton, textured); return f; }
+        try { await f.InitializeAsync(empty, encryptedSkin, oversizedModel, ambiguousModel, missingModel, externalSkeleton, textured, modelVersion); return f; }
         catch { await f.DisposeAsync(); throw; }
     }
-    private async Task InitializeAsync(bool empty, bool encryptedSkin, bool oversizedModel, bool ambiguousModel, bool missingModel, bool externalSkeleton, Textured? textured)
+    private async Task InitializeAsync(bool empty, bool encryptedSkin, bool oversizedModel, bool ambiguousModel, bool missingModel, bool externalSkeleton, Textured? textured, uint modelVersion)
     {
-        var model = Object("model", textured is null ? ModelBytes(externalSkeleton) : AppearanceModels.ModelBytes(textured.Model));
+        var model = Object("model", textured is null ? ModelBytes(externalSkeleton, modelVersion) : AppearanceModels.ModelBytes(textured.Model));
         var skin = Object("skin", textured is null ? SkinBytes(empty) : AppearanceModels.SkinBytes(textured.Batches, textured.Sections));
         var texture = Object("texture", textured?.Blp ?? AppearanceModels.Blp(8, 8, 4));
         if (textured?.Encrypted == true) { texture = texture with { Encoded = Encrypted(texture.Decoded.Length) }; texture = texture with { EncodingKey = Hash(texture.Encoded.AsSpan(0, 36)) }; }
@@ -190,9 +190,9 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
     private sealed record Blob(string Role, string ContentKey, string EncodingKey, byte[] Decoded, byte[] Encoded);
     private static Blob Object(string role, byte[] decoded)
     { byte[] encoded = [.. "BLTE"u8.ToArray(), 0, 0, 0, 0, (byte)'N', .. decoded]; return new(role, Hash(decoded), Hash(encoded), decoded, encoded); }
-    private static byte[] ModelBytes(bool externalSkeleton)
+    private static byte[] ModelBytes(bool externalSkeleton, uint version)
     {
-        var body = new byte[304 + 3 * 48]; "MD20"u8.CopyTo(body); Put(body, 4, 274); Put(body, 60, 3); Put(body, 64, 304); Put(body, 68, 1);
+        var body = new byte[304 + 3 * 48]; "MD20"u8.CopyTo(body); Put(body, 4, version); Put(body, 60, 3); Put(body, 64, 304); Put(body, 68, 1);
         BinaryPrimitives.WriteSingleLittleEndian(body.AsSpan(304 + 48), 1); BinaryPrimitives.WriteSingleLittleEndian(body.AsSpan(304 + 96 + 4), 2);
         for (var i = 0; i < 3; i++) BinaryPrimitives.WriteSingleLittleEndian(body.AsSpan(304 + i * 48 + 28), 1);
         var result = new byte[body.Length + 20]; "MD21"u8.CopyTo(result); Put(result, 4, (uint)body.Length); body.CopyTo(result, 8);

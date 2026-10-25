@@ -11,7 +11,7 @@ namespace VibeMiner.Backend.Tests.Protocols;
 public sealed class M2StaticDecoderTests
 {
     [Theory]
-    [InlineData(264)][InlineData(274)]
+    [InlineData(264)][InlineData(272)][InlineData(274)]
     public async Task Native_geometry_has_two_level_indices_and_section_bounds_without_coordinate_or_pose_guess(int version)
     {
         var fixture = Model((uint)version); using var source = new AsyncSource(fixture); var model = await M2ModelReader.ReadAsync(source);
@@ -26,7 +26,7 @@ public sealed class M2StaticDecoderTests
         Assert.Equal(Vector3.Zero, geometry.Bounds.Minimum); Assert.Equal(new Vector3(2, 3, 0), geometry.Bounds.Maximum);
         Assert.Equal(new Vector3(50, 60, 70), model.ComputedBounds!.Value.Maximum);
         Assert.Equal(0x03020100u, skin.BoneProperties[0]); Assert.Equal(4, skin.BoneProperties.Count);
-        Assert.Equal((uint)version, model.Version); Assert.Equal(version == 274, model.IsChunked);
+        Assert.Equal((uint)version, model.Version); Assert.Equal(version != 264, model.IsChunked);
         Assert.Equal(fixture.Length, source.Position); Assert.False(source.Closed); Assert.False(skinSource.Closed);
     }
 
@@ -67,10 +67,25 @@ public sealed class M2StaticDecoderTests
     }
 
     [Theory]
-    [InlineData(256)][InlineData(263)][InlineData(272)][InlineData(273)][InlineData(275)]
+    [InlineData(256)][InlineData(263)][InlineData(264)][InlineData(271)][InlineData(273)][InlineData(275)]
     public async Task Unsupported_versions_are_not_assumed_to_have_the_same_layout(int version)
     {
-        var bytes = Model(); U32(bytes, Base(bytes) + 4, (uint)version); await Throws("MODEL_UNSUPPORTED", () => ReadModel(bytes));
+        var bytes = Model(); U32(bytes, Base(bytes) + 4, (uint)version);
+        var error = await Assert.ThrowsAsync<DiscoveryException>(() => ReadModel(bytes));
+        Assert.Equal("MODEL_UNSUPPORTED", error.Code); Assert.Contains($"M2 version {version} in a chunked MD21", error.Message);
+    }
+
+    [Theory]
+    [InlineData(272)][InlineData(274)]
+    public async Task Chunked_272_and_274_read_one_layout_but_never_unchunked(int version)
+    {
+        var chunked = await ReadModel(Model((uint)version)); var reference = await ReadModel(Model(274));
+        Assert.Equal((uint)version, chunked.Version); Assert.Equal(reference.Vertices, chunked.Vertices);
+        Assert.Equal(reference.Declarations, chunked.Declarations); Assert.Equal(reference.SkinFileDataIds, chunked.SkinFileDataIds);
+        var skin = await ReadSkin(Skin((uint)version, shadows: true), chunked); Assert.Single(skin.ShadowBatches);
+        await Throws("MODEL_INVALID", () => ReadSkin(Skin(264), chunked));
+        var error = await Assert.ThrowsAsync<DiscoveryException>(() => ReadModel(Body((uint)version)));
+        Assert.Equal("MODEL_UNSUPPORTED", error.Code); Assert.Contains($"M2 version {version} in an unchunked MD20", error.Message);
     }
 
     [Fact]

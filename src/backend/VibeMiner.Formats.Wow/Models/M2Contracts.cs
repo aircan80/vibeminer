@@ -92,7 +92,7 @@ public sealed class M2Skin
     public IReadOnlyList<M2Section> Sections { get; }
     public IReadOnlyList<M2Batch> Batches { get; }
     public IReadOnlyList<M2ShadowBatch> ShadowBatches { get; }
-    /// <summary>Raw uint32 SKIN header field. Modern274 zero is preserved without an inferred effective maximum.</summary>
+    /// <summary>Raw uint32 SKIN header field. Chunked 272/274 SKINs normally store 0; it is preserved without an inferred effective maximum.</summary>
     public uint MaximumBones { get; }
 }
 

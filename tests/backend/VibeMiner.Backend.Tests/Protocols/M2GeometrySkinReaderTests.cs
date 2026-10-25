@@ -61,11 +61,26 @@ public sealed class M2GeometrySkinReaderTests
     }
 
     [Theory]
-    [InlineData("legacy")][InlineData("skeleton")][InlineData("bones")]
-    public async Task New_profile_does_not_admit_legacy_or_external_skeleton_dependencies(string kind)
+    [InlineData("legacy","unchunked version 264")][InlineData("skeleton","external skeleton file (SKID 800)")][InlineData("bones","external bone files (BFID)")]
+    public async Task New_profile_does_not_admit_legacy_or_external_skeleton_dependencies(string kind,string named)
     {
         var bytes=ModelBytes();if(kind=="legacy")bytes=Body(264);else bytes=bytes.Concat(Chunk(kind=="skeleton"?"SKID":"BFID",Word(800))).ToArray();
-        var model=await Model(bytes);using var source=new AsyncSource(Skin());await Error("MODEL_UNSUPPORTED",()=>M2GeometrySkinReader.ReadAsync(source,model));Assert.Equal(0,source.Reads);Assert.True(source.CanRead);
+        var model=await Model(bytes);Assert.Contains(named,M2GeometrySkinReader.ProfileRefusal(model));
+        using var source=new AsyncSource(Skin());var error=await Assert.ThrowsAsync<DiscoveryException>(()=>M2GeometrySkinReader.ReadAsync(source,model));
+        Assert.Equal("MODEL_UNSUPPORTED",error.Code);Assert.Contains(named,error.Message);Assert.Equal(0,source.Reads);Assert.True(source.CanRead);
+    }
+
+    [Fact]
+    public async Task Chunked_272_reads_the_same_geometry_as_274_with_its_zero_bone_header()
+    {
+        // Live retail 272 pairs (#75): MD21 with SFID/TXID, a 56-byte SKIN header and maximum bones 0 with 27-76 bone palettes.
+        var modern=await Model();var older=await Model(ModelBytes(272));Assert.Null(M2GeometrySkinReader.ProfileRefusal(older));
+        using var a=new AsyncSource(Skin());using var b=new AsyncSource(Skin());
+        var expected=M2StaticGeometry.Create(modern,await M2GeometrySkinReader.ReadAsync(a,modern));
+        var skin=await M2GeometrySkinReader.ReadAsync(b,older);var actual=M2StaticGeometry.Create(older,skin);
+        Assert.Equal(272u,older.Version);Assert.Equal(0u,skin.MaximumBones);Assert.Equal((ushort)60,skin.Sections[0].BoneCount);
+        Assert.Equal(expected.Indices,actual.Indices);Assert.Equal(expected.Bounds,actual.Bounds);Assert.Equal(1u,skin.ShadowBatchDeclaration.Count);
+        await GeometryError("MODEL_INVALID",Skin(maxBones:59),older);
     }
 
     [Fact]
@@ -105,7 +120,7 @@ public sealed class M2GeometrySkinReaderTests
     private static async Task<M2Skin> Strict(byte[] bytes,M2Model model){using var input=new AsyncSource(bytes);return await M2SkinReader.ReadAsync(input,model);}
     private static async Task<M2Model> Model(byte[]? bytes=null){using var input=new AsyncSource(bytes??ModelBytes());return await M2ModelReader.ReadAsync(input);}
     // All bytes are authored. Deliberately asymmetric positions and duplicate sections are source-shape facts, not game payloads.
-    private static byte[] ModelBytes()=>Chunk("MD21",Body(274)).Concat(Chunk("SFID",Word(900))).Concat(Chunk("TXID",Word(700))).ToArray();
+    private static byte[] ModelBytes(uint version=274)=>Chunk("MD21",Body(version)).Concat(Chunk("SFID",Word(900))).Concat(Chunk("TXID",Word(700))).ToArray();
     private static byte[] Body(uint version)
     {
         using var output=new MemoryStream();output.SetLength(304);output.Position=304;using var writer=new BinaryWriter(output,Encoding.UTF8,true);var descriptors=new List<(int At,int Count,int Offset)>();
@@ -115,13 +130,13 @@ public sealed class M2GeometrySkinReaderTests
         Add(80,1,w=>w.Write(new byte[16]));Add(112,1,w=>w.Write(0u));Add(128,1,w=>w.Write((ushort)0));Add(144,1,w=>w.Write(ushort.MaxValue));Add(152,1,w=>w.Write(ushort.MaxValue));
         var body=output.ToArray();"MD20"u8.CopyTo(body);U32(body,4,version);U32(body,68,1);foreach(var d in descriptors){U32(body,d.At,(uint)d.Count);U32(body,d.At+4,(uint)d.Offset);}return body;
     }
-    private static byte[] Skin(bool opaqueGarbage=false,int triangles=3,int batches=1,int shadows=1)
+    private static byte[] Skin(bool opaqueGarbage=false,int triangles=3,int batches=1,int shadows=1,uint maxBones=0)
     {
         var triangleAt=62;var propertiesAt=triangleAt+triangles*2;var sectionsAt=propertiesAt+12;var batchAt=sectionsAt+96;var shadowAt=batchAt+batches*24;var b=new byte[shadowAt+shadows*12];"SKIN"u8.CopyTo(b);
         U32(b,4,3);U32(b,8,56);U16(b,56,2);U16(b,58,0);U16(b,60,1);U32(b,12,(uint)triangles);U32(b,16,(uint)triangleAt);for(var i=0;i<triangles;i++)U16(b,triangleAt+i*2,(ushort)(i%3));
         U32(b,20,3);U32(b,24,(uint)propertiesAt);U32(b,28,2);U32(b,32,(uint)sectionsAt);
         for(var i=0;i<2;i++){var at=sectionsAt+i*48;U16(b,at+6,3);U16(b,at+10,3);U16(b,at+12,60);U16(b,at+16,2);}
-        U32(b,36,(uint)batches);U32(b,40,(uint)batchAt);U32(b,48,(uint)shadows);U32(b,52,(uint)shadowAt);
+        U32(b,36,(uint)batches);U32(b,40,(uint)batchAt);U32(b,44,maxBones);U32(b,48,(uint)shadows);U32(b,52,(uint)shadowAt);
         for(var i=0;i<batches;i++){var at=batchAt+i*24;if(opaqueGarbage)Array.Fill(b,(byte)255,at,24);else{U16(b,at+8,ushort.MaxValue);U16(b,at+14,1);}}
         if(opaqueGarbage)Array.Fill(b,(byte)255,shadowAt,shadows*12);return b;
     }

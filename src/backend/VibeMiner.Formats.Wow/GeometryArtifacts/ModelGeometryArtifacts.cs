@@ -33,7 +33,7 @@ public static partial class ModelGeometryArtifacts
             }
             if (model.BoneFileDataIds.Count > 8192 || model.AnimationFiles.Count > 8192 || model.SkinFileDataIds.Count + model.LodSkinFileDataIds.Count > 32)
                 throw Limit("Model dependency metadata exceeds the initial delivery profile.");
-            if (!model.IsChunked || model.Version != 274 || model.SkeletonFileDataId != 0 || model.BoneFileDataIds.Any(id => id != 0))
+            if (M2GeometrySkinReader.ProfileRefusal(model) is not null)
                 throw Unsupported("The artifact requires the finite geometry-only model profile.");
             if (model.SkinFileDataIds.Count == 0 || model.SkinFileDataIds[0] != binding.SkinFileDataId
                 || binding.Model.DecodedBytes != model.SourceBytes || binding.Skin.DecodedBytes != skin.SourceBytes)

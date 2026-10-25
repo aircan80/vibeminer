@@ -142,8 +142,8 @@ public static class M2Appearance
             if (material.BlendMode >= 2) { blended++; if (sections[b.SectionIndex].TriangleCount != 0) firstBlended ??= i; continue; }
             if (b.TextureCount is 0 or > 2) { decline = Refuse(M2AppearanceRefusal.MultiTexture, i, null, "The batch combines " + b.TextureCount + " texture stages; one or two are drawn."); break; }
             var stages = b.TextureCount;
-            if ((material.Flags & ~KnownRenderFlags) != 0 || b.Flags is not (0 or 0x10) && !(stages == 2 && b.Flags is 0x80 or 0x90) || b.Flags2 != 0 || b.MaterialLayer != 0)
-            { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, null, "The batch needs a render flag, batch flag or layer outside the appearance profile."); break; }
+            if (OutsideProfile(material, b, stages) is { } outside)
+            { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, null, outside); break; }
             if (M2Combiners.Admit(stages, b.ShaderId, out var combinerName) is not { } profile)
             { decline = Refuse(M2AppearanceRefusal.CombinerUnsupported, i, null, "The batch combines its textures with " + combinerName + ", which is not drawn."); break; }
             if (b.TextureComboIndex + stages > parsedModel.TextureCombos.Count || Enumerable.Range(b.TextureComboIndex, stages).Any(c => parsedModel.TextureCombos[c] >= parsedModel.Textures.Count))
@@ -198,13 +198,25 @@ public static class M2Appearance
         }
         if (decline is null && draws.Count == 0)
             decline = firstBlended is { } layer
-                ? new(M2AppearanceRefusal.BlendUnsupported, layer, null, "Every batch with surface triangles is a blended layer; no opaque or alpha-key surface is left to draw.")
+                ? new(M2AppearanceRefusal.BlendUnsupported, layer, null, "Every batch with surface triangles is a blended layer (the first blends with mode "
+                    + parsedModel.Materials[batches[layer].MaterialIndex].BlendMode + "); no opaque or alpha-key surface is left to draw.")
                 : new(M2AppearanceRefusal.MaterialUnsupported, null, null, "No batch draws any declared surface triangle.");
         var unbatched = 0; for (var i = 0; i < sections.Count; i++) if (!batched[i] && sections[i].TriangleCount != 0) unbatched++;
         var effects = new M2AppearanceEffects((int)Declaration(parsedModel, "particles").Count, (int)Declaration(parsedModel, "ribbons").Count,
             (int)Declaration(parsedModel, "lights").Count, (int)parsedSkin.ShadowBatchDeclaration.Count, decline is null ? unbatched : 0,
             decline is null ? blended : 0, decline is null ? envTransforms : 0);
         return decline is null ? new(draws.ToArray(), textures.Values.ToArray(), null, effects) : new([], [], decline, effects);
+    }
+    // Names the first render flag, batch flag, second field or layer value outside the profile, in that order.
+    private static string? OutsideProfile(M2Material material, M2Batch b, int stages)
+    {
+        if ((material.Flags & ~KnownRenderFlags) is var render and not 0)
+            return $"The batch material uses render flags 0x{render:X2}; only 0x01, 0x04, 0x08 and 0x10 are drawn.";
+        if (b.Flags is not (0 or 0x10) && !(stages == 2 && b.Flags is 0x80 or 0x90))
+            return $"The batch has batch flags 0x{b.Flags:X2}, outside the appearance profile.";
+        if (b.Flags2 != 0) return $"The batch's second raw field is {b.Flags2}; only 0 is drawn.";
+        if (b.MaterialLayer != 0) return $"The batch is material layer {b.MaterialLayer}; only layer 0 is drawn.";
+        return null;
     }
     private static M2ArrayDeclaration Declaration(M2Model model, string name) =>
         model.Declarations.SingleOrDefault(d => d.Name == name) ?? throw Error("INVALID", "The parsed model lacks its " + name + " declaration.");
