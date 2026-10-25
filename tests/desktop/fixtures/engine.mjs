@@ -152,19 +152,30 @@ function summaryRevision() {
 }
 // D066/D093: the authored manifest ledger lists keys 16, 32, … (value × 16); once measured-scope exists, the measured
 // ledger adds five files ROOT lists outside it, between manifest keys, and download.check checks those five.
+// long-ordinals (#77), written before Open: the authored keys start at 0x10000000, and the measured ledger puts
+// 2,879,940 more ROOT-only files (keys 8, 24, …) before them, so the first manifest row is object 2,879,941, as on retail.
 const measuredLedgerId = 'e'.repeat(64), rootOnlyAfter = [3, 25, 48, 55, 59];
-const manifestKey = index => ((index + 1) * 16).toString(16).padStart(32, '0');
-const rootOnlyKeys = rootOnlyAfter.map(n => (n * 16 + 8).toString(16).padStart(32, '0'));
+const longOrdinals = () => existsSync(path.join(directory, 'long-ordinals')), longRun = 2879940, keyBase = () => longOrdinals() ? 0x10000000 : 0;
+const manifestKey = index => ((index + 1) * 16 + keyBase()).toString(16).padStart(32, '0');
+const rootOnlyKeys = () => rootOnlyAfter.map(n => (n * 16 + 8 + keyBase()).toString(16).padStart(32, '0'));
+const leadingRun = measured => measured && longOrdinals() ? longRun : 0;
 let downloadCheck = null;
 function ledgerRows(snapshot, measured) {
   const manifest = Array.from({ length: Number(snapshot.download.objectCount) }, (_, index) => ({ key: manifestKey(index), open: true, verified: index < 10 }));
-  const rows = measured ? [...manifest, ...rootOnlyKeys.map(key => ({ key, open: false, verified: false }))].sort((a, b) => a.key < b.key ? -1 : 1) : manifest;
-  return rows.map((row, index) => ({ id: String(index + 1), encodingKey: row.key, encodedBytes: '100', verifiedAtAssessment: row.verified, checkedAtOpen: row.open,
+  const rows = measured ? [...manifest, ...rootOnlyKeys().map(key => ({ key, open: false, verified: false }))].sort((a, b) => a.key < b.key ? -1 : 1) : manifest;
+  const run = leadingRun(measured);
+  return rows.map((row, index) => ({ id: String(index + 1 + run), encodingKey: row.key, encodedBytes: '100', verifiedAtAssessment: row.verified, checkedAtOpen: row.open,
     check: row.open || !measured || !downloadCheck ? null : downloadCheck.found[row.key] ?? 'notStored' }));
 }
 // D081: an authored definition fetched from WoWDBDefs. The revision is a sample, not an upstream commit.
 const FETCHED = { revision: 'a50ca6ffbcfe17d604327c9078993675f7ae831f', fetchedAt: '2026-10-23T12:00:00Z' }, FETCHED_SHA = 'ab'.repeat(32);
 const fetchEnabled = () => settingsSnapshot().fetchTableDefinitions.value;
+// One row of the measured ledger, the leading long-ordinals run included, without listing that run.
+function ledgerAt(rows, run, index) {
+  if (index >= run) return rows[index - run];
+  const key = (index * 16 + 8).toString(16).padStart(32, '0');
+  return { id: String(index + 1), encodingKey: key, encodedBytes: '100', verifiedAtAssessment: false, checkedAtOpen: false, check: downloadCheck ? downloadCheck.found[key] ?? 'notStored' : null };
+}
 function settingsSnapshot() {
   const file = path.join(directory, 'settings.json'), stored = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
   const saved = name => stored?.values?.[name] ?? (name === 'communityBuildHistory' ? stored?.value : undefined);
@@ -434,7 +445,7 @@ async function dispatch(request) {
       const check = jobs.find(job => job.coverage.presenceState === 'assessing') ?? jobs.find(job => job.coverage.presenceState === 'assessed') ?? jobs.find(job => job.coverage.presenceState === 'interrupted');
       return { productId, buildIdentity, state: 'measured', download: { ledgerId: d.ledgerId, scope: d.scope, objectCount: d.objectCount, totalEncodedBytes: d.totalEncodedBytes,
         storedObjects: best?.coverage.presentObjects ?? '0', storedBytes: best?.coverage.presentBytes ?? '0', countState: 'current', countProblem: null, updatedAt: d.assessedAt, unresolvableRootContent: '0', scopeState: 'manifestOnly', scopeProblem: null, changesPending: false, manifestLedgerId: d.ledgerId,
-        ...(existsSync(path.join(directory, 'measured-scope')) ? { ledgerId: measuredLedgerId, scope: 'downloadManifestAndRootAllVariants', scopeState: 'measured', objectCount: String(Number(d.objectCount) + rootOnlyKeys.length), totalEncodedBytes: String(BigInt(d.totalEncodedBytes) + BigInt(rootOnlyKeys.length * 100)) } : {}),
+        ...(existsSync(path.join(directory, 'measured-scope')) ? { ledgerId: measuredLedgerId, scope: 'downloadManifestAndRootAllVariants', scopeState: 'measured', objectCount: String(Number(d.objectCount) + rootOnlyKeys().length + leadingRun(true)), totalEncodedBytes: String(BigInt(d.totalEncodedBytes) + BigInt((rootOnlyKeys().length + leadingRun(true)) * 100)) } : {}),
         presence: check ? { state: check.coverage.presenceState, assessedAt: check.coverage.presenceAssessedAt, observedObjects: check.coverage.observedObjects, missingObjects: check.coverage.missingObjects, corruptObjects: check.coverage.corruptObjects }
           : { state: 'notAssessed', assessedAt: null, observedObjects: '0', missingObjects: '0', corruptObjects: '0' },
         downloadAll: jobs.some(job => job.mode === 'downloadAll' && !job.paused), running: jobs.some(job => ['preparing', 'running'].includes(job.state)), sourceRegions: regions, ...scripted } };
@@ -466,12 +477,14 @@ async function dispatch(request) {
     if (!snapshot?.download || snapshot.download.ledgerId !== params.ledgerId && !measured) return fail(id, 'DOWNLOAD_NOT_FOUND', 'This exact authored download ledger is unavailable.');
     if (existsSync(path.join(directory, 'hold-download-page'))) await waitForRelease('release-download-page', shutdown.signal);
     if (existsSync(path.join(directory, 'download-page-error'))) return fail(id, 'LOCAL_READ_FAILED', 'Authored saved download ledger read failed.');
-    const all = ledgerRows(snapshot, measured);
-    const start = params.from !== undefined ? all.findIndex(row => row.encodingKey >= params.from) : Number(params.after || 0);
-    const after = start < 0 ? all.length : start, entries = all.slice(after, after + params.limit);
+    const rows = ledgerRows(snapshot, measured), run = leadingRun(measured), total = run + rows.length;
+    const runEnd = run ? BigInt(`0x${ledgerAt(rows, run, run - 1).encodingKey}`) : -1n, from = params.from === undefined ? null : BigInt(`0x${params.from}`);
+    const found = from === null ? -1 : from <= runEnd ? Number(from <= 8n ? 0n : (from - 8n + 15n) / 16n) : (index => index < 0 ? -1 : run + index)(rows.findIndex(row => row.encodingKey >= params.from));
+    const start = from !== null ? found : Number(params.after || 0);
+    const after = start < 0 ? total : start, entries = Array.from({ length: Math.max(0, Math.min(params.limit, total - after)) }, (_, i) => ledgerAt(rows, run, after + i));
     return reply(id, { productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion, ledgerId: params.ledgerId,
-      assessedAt: snapshot.download.assessedAt, entries, totalCount: String(all.length), nextCursor: after + entries.length < all.length && entries.length ? entries.at(-1).id : null,
-      manifestLedgerId: snapshot.download.ledgerId, lastCheck: measured && downloadCheck ? { checkedAt: downloadCheck.checkedAt, checkedObjects: String(rootOnlyKeys.length), verifiedObjects: '1', notStoredObjects: String(rootOnlyKeys.length - 2), missingObjects: '1', corruptObjects: '0' } : null });
+      assessedAt: snapshot.download.assessedAt, entries, totalCount: String(total), nextCursor: after + entries.length < total && entries.length ? entries.at(-1).id : null,
+      manifestLedgerId: snapshot.download.ledgerId, lastCheck: measured && downloadCheck ? { checkedAt: downloadCheck.checkedAt, checkedObjects: String(rootOnlyKeys().length), verifiedObjects: '1', notStoredObjects: String(rootOnlyKeys().length - 2), missingObjects: '1', corruptObjects: '0' } : null });
   }
   if (method === 'download.check') {
     // One authored Check of the five files outside the manifest: the first is verified, the second missing, the rest not
@@ -481,13 +494,13 @@ async function dispatch(request) {
     if (params.ledgerId !== measuredLedgerId) return fail(id, 'DOWNLOAD_CHECK_NOT_NEEDED', 'Open’s assessment covered every object of this download manifest.');
     const controller = new AbortController(); active.set(id, controller);
     try {
-      const total = rootOnlyKeys.length;
+      const total = rootOnlyKeys().length;
       send({ type: 'progress', requestId: id, sequence: 1, stage: 'Checking files not checked at Open', region: params.sourceRegion, completed: 0, total, unit: 'objects' });
       send({ type: 'progress', requestId: id, sequence: 2, stage: 'Checking files not checked at Open', region: params.sourceRegion, completed: 1, total, unit: 'objects' });
       if (existsSync(path.join(directory, 'hold-download-check'))) { writeFileSync(path.join(directory, 'waiting-download-check'), id); await waitForRelease('release-download-check', controller.signal); }
       if (controller.signal.aborted) throw new Error('canceled');
       send({ type: 'progress', requestId: id, sequence: 3, stage: 'Checking files not checked at Open', region: params.sourceRegion, completed: total, total, unit: 'objects' });
-      downloadCheck = { checkedAt: new Date().toISOString(), found: { [rootOnlyKeys[0]]: 'verified', [rootOnlyKeys[1]]: 'missing' } };
+      downloadCheck = { checkedAt: new Date().toISOString(), found: { [rootOnlyKeys()[0]]: 'verified', [rootOnlyKeys()[1]]: 'missing' } };
       return reply(id, { productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion, ledgerId: params.ledgerId, manifestLedgerId: snapshot.download.ledgerId,
         checkedAt: downloadCheck.checkedAt, checkedObjects: String(total), verifiedObjects: '1', notStoredObjects: String(total - 2), missingObjects: '1', corruptObjects: '0' });
     } catch { return fail(id, 'CANCELED', 'Check stopped. Nothing new was recorded; an earlier check stays as it was.', true); }

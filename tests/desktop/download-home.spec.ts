@@ -241,6 +241,56 @@ test('Files switches to the measured ledger in place and a Check covers the file
     expect(cancels.map(call => call.params.requestId)).not.toContain(checks[2].id);
   } finally { await session.close(); }
 });
+// #77: retail's measured ledger has about 2.88M objects, so almost every row's ordinal has seven digits. The Object column
+// shows it whole, on one line, at every size and text scale, and the column header still starts above it.
+test('the Object column shows seven-digit ordinals whole at every size and text scale (#77)', async () => {
+  test.setTimeout(90_000);
+  const session = await launch(true);
+  try {
+    const { page, app } = session;
+    await mkdir(path.join(root, 'artifacts/size-first'), { recursive: true });
+    await writeFile(path.join(session.data, 'long-ordinals'), 'long');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 800));
+    await page.locator('.build-row').first().click(); await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(session.data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
+    await page.getByRole('button', { name: 'Browse in Files' }).click();
+    await expect(page.getByText('Object 1', { exact: true })).toBeVisible();
+    await writeFile(path.join(session.data, 'measured-scope'), 'measured');
+    await expect(page.getByText('Object 2879941', { exact: true })).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByRole('heading', { name: 'Encoded object 2879941' })).toBeVisible();
+    for (const [width, height] of [[1280, 800], [1440, 1100], [600, 480]] as const) for (const scale of [1, 2]) {
+      await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height), { width, height });
+      await page.evaluate(font => { document.documentElement.style.fontSize = `${font}px`; }, 15 * scale);
+      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+      const label = `${width}×${height} at ${scale * 100}%`;
+      const cells = await page.locator('.dh-files:not([hidden]) .dh-list-scroll [role="option"] .dh-fid').evaluateAll(cells => cells.map(cell => {
+        const range = document.createRange(); range.selectNodeContents(cell);
+        const text = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
+        return { text: cell.textContent, lines: new Set([...range.getClientRects()].map(r => Math.round(r.top))).size, cut: text.width > box.width + .5 || cell.scrollWidth > cell.clientWidth };
+      }));
+      expect(cells.length, label).toBeGreaterThan(0);
+      expect(cells.filter(cell => cell.cut || cell.lines !== 1).map(cell => cell.text), `${label}: cut or wrapped ordinals`).toEqual([]);
+      expect(cells[0].text, label).toBe('Object 2879941');
+      // The column header's Object sits over the ordinals.
+      const head = await page.locator('.dh-files:not([hidden]) .dh-fthead > span').first().evaluate(span => Math.round(span.getBoundingClientRect().left));
+      const first = await page.locator('.dh-files:not([hidden]) .dh-list-scroll [role="option"] .dh-fid').first().evaluate(span => Math.round(span.getBoundingClientRect().left));
+      expect(Math.abs(head - first), `${label}: header and ordinal start together`).toBeLessThanOrEqual(1);
+      // The wider Object column never costs the key its digits: all 32 show, on one line where they fit, else wrapped. At
+      // 600×480 and 100% they fit on one line (a 7rem Object cut the last one, UI review on #77).
+      const keys = await page.locator('.dh-files:not([hidden]) .dh-list-scroll [role="option"] .dh-okey').evaluateAll(cells => cells.map(cell => {
+        const range = document.createRange(); range.selectNodeContents(cell);
+        const text = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
+        return { text: cell.textContent ?? '', lines: new Set([...range.getClientRects()].map(r => Math.round(r.top))).size,
+          cut: text.width > box.width + .5 || cell.scrollWidth > cell.clientWidth };
+      }));
+      expect(keys.length, label).toBe(cells.length);
+      expect(keys.filter(key => key.cut || !/^[0-9a-f]{32}$/.test(key.text)).map(key => key.text), `${label}: cut keys`).toEqual([]);
+      if (width === 600 && scale === 1) expect(keys.filter(key => key.lines !== 1).map(key => key.text), `${label}: wrapped keys`).toEqual([]);
+      await page.screenshot({ path: path.join(root, 'artifacts/size-first', `download-objects-long-ordinals-${width}x${height}-${scale * 100}.png`) });
+    }
+  } finally { await session.close(); }
+});
 test('focus on View task in a Check note moves to Check when the Check ends, in its own and in another build\'s note (#38, D093)', async () => {
   test.setTimeout(90_000);
   const session = await launch(true);

@@ -533,12 +533,15 @@
 
 /* Files: membership and object lists use their own column sets. */
 .desktop-home .dh-mcols{display:grid;grid-template-columns:6.066667rem minmax(9.333333rem,2fr) 5.6rem 7rem minmax(6.533333rem,1fr) 6.533333rem;align-items:center;column-gap:.802667rem;padding:0 .802667rem}
-.desktop-home .dh-ocols{display:grid;grid-template-columns:5.133333rem minmax(12rem,3fr) 7rem minmax(8.4rem,1fr);align-items:center;column-gap:.802667rem;padding:0 .802667rem}
+/* Object fits a seven-digit ordinal and a little more ("Object 2879941" is 6.46rem; retail has about 2.88M objects, #77). */
+.desktop-home .dh-ocols{display:grid;grid-template-columns:7rem minmax(12rem,3fr) 7rem minmax(8.4rem,1fr);align-items:center;column-gap:.802667rem;padding:0 .802667rem}
 .desktop-home .dh-files [role="option"] .dh-mono{font-size:var(--fs-s)}
 .desktop-home .dh-files [role="option"]>span.dh-wrap{white-space:normal;overflow-wrap:anywhere;overflow:visible;padding:.28rem 0}
 .desktop-home.dh-compact .dh-mcols{grid-template-columns:minmax(5.133333rem,1fr) minmax(6.533333rem,1.6fr) minmax(4.2rem,.7fr) minmax(5.133333rem,1fr) minmax(4.666667rem,.9fr)}
 .desktop-home.dh-compact .dh-mcols>:nth-child(5){display:none}
-.desktop-home.dh-compact .dh-ocols{grid-template-columns:minmax(4.2rem,.8fr) minmax(6.533333rem,2fr) minmax(5.133333rem,1fr) minmax(5.133333rem,1fr)}
+/* At 200% and on small windows Object keeps just the room of a seven-digit ordinal, so the key beside it keeps its 32
+   digits on one line where it can; the key wraps rather than being cut (#77). */
+.desktop-home.dh-compact .dh-ocols{grid-template-columns:minmax(6.533333rem,.8fr) minmax(6.533333rem,2fr) minmax(5.133333rem,1fr) minmax(5.133333rem,1fr)}
 .desktop-home .dh-files .dh-pane-foot .dh-btn{white-space:nowrap}
 /* Narrow (#52, D093): below 28rem the four object columns don't fit, so each row and the header take two lines: Object and
    its local state, then the key across the row. The encoded size, in the inspector, is left out, so three whole rows
