@@ -112,6 +112,48 @@ public sealed class Blp2DecoderTests
         bytes[11]=17;Put(bytes,84,7);Assert.Equal("BLP_INVALID",await Code(bytes));
     }
 
+    // D100 (#80): newer retail icons carry mip byte 0x10 with one declared level, as 0x00 does; 0x11 is 0x01 with the same bit.
+    // Bit 0 alone decides whether further levels may be declared. Every other value stays unsupported.
+    [Fact]
+    public async Task Mip_byte_bit_0x10_is_kept_but_only_bit_0x01_admits_further_levels()
+    {
+        var single=Build(2,8,7,4,4,[[255,255,0,0,0,0,0,0,..Block(0x07E0,0x07E0,0)]]);single[11]=0x10;
+        using(var input=new AsyncInput(single)){var image=await Blp2Decoder.DecodeAsync(input);Assert.Equal(0x10,image.MipFlags);Assert.Equal(new byte[]{0,255,0,255},Pixel(image,3,3));}
+        var plain=single.ToArray();plain[11]=0;using(var input=new AsyncInput(plain))Assert.Equal(0,(await Blp2Decoder.DecodeAsync(input)).MipFlags);
+        var two=Build(2,1,0,4,4,[Block(0xF800,0,0),Block(0x07E0,0,0)]);
+        foreach(var (flags,expected) in new[]{(0x10,"BLP_INVALID"),(0x00,"BLP_INVALID"),(0x02,"BLP_UNSUPPORTED"),(0x12,"BLP_UNSUPPORTED"),(0x20,"BLP_UNSUPPORTED"),(0x21,"BLP_UNSUPPORTED"),(0x30,"BLP_UNSUPPORTED"),(0xFF,"BLP_UNSUPPORTED")})
+        {var changed=two.ToArray();changed[11]=(byte)flags;Assert.Equal(expected,await Code(changed));}
+        foreach(var flags in new[]{0x01,0x11}){var changed=two.ToArray();changed[11]=(byte)flags;using var input=new AsyncInput(changed);Assert.Equal(2,(await Blp2Decoder.DecodeAsync(input,1)).Mips.Count);}
+        Assert.All(new[]{0x00,0x01,0x10,0x11},flags=>Assert.True(Blp2Decoder.IsMipFlags(flags)));Assert.False(Blp2Decoder.IsMipFlags(0x12));
+        Assert.True(Blp2Decoder.AllowsMipLevels(0x11));Assert.False(Blp2Decoder.AllowsMipLevels(0x10));
+    }
+
+    // D100 (#80): three more header profiles seen live decode exactly as their nearest supported profile. Palette 125364 (Classic)
+    // and raw BGRA icon 4559256 (retail) carry alpha encoding 8, which neither format reads; BC3 texture 892475 (retail) has alpha
+    // depth 72, which BC3 never reads. Authored stand-ins; no game bytes.
+    [Theory]
+    [InlineData(1,0,8,1,0,0)][InlineData(2,72,7,2,8,7)][InlineData(3,1,8,3,8,0)]
+    public async Task Observed_profiles_decode_as_their_supported_counterpart(byte encoding,byte depth,byte alphaEncoding,byte sameEncoding,byte sameDepth,byte sameAlphaEncoding)
+    {
+        byte[] payload=encoding switch{1=>[1,2,3,4],2=>[0x10,0x80,0x24,0x92,0x49,0x24,0x92,0x49,..Block(0xF800,0x001F,0x1B1B1B1B)],_=>[20,10,200,255,240,60,50,0,1,2,3,255,9,8,7,0]};
+        var (width,height)=encoding==2?(4,4):(2,2);
+        using var input=new AsyncInput(Build(encoding,depth,alphaEncoding,width,height,[payload]));var image=await Blp2Decoder.DecodeAsync(input);
+        using var reference=new AsyncInput(Build(sameEncoding,sameDepth,sameAlphaEncoding,width,height,[payload]));var expected=await Blp2Decoder.DecodeAsync(reference);
+        Assert.Equal(expected.Encoding,image.Encoding);Assert.Equal(expected.Rgba,image.Rgba);Assert.Equal((depth,alphaEncoding),(image.AlphaDepth,image.AlphaEncoding));
+        Assert.True(Blp2Decoder.IsSupported(image.Encoding,depth,alphaEncoding));
+    }
+
+    [Theory]
+    // Neighbours of the observed profiles stay refused, each named by its three header bytes.
+    [InlineData(1,1,8)][InlineData(1,8,8)][InlineData(1,0,7)][InlineData(2,71,7)][InlineData(2,72,1)][InlineData(2,0,7)][InlineData(2,8,8)]
+    [InlineData(3,0,0)][InlineData(3,0,8)][InlineData(3,8,8)][InlineData(3,1,0)]
+    public async Task Unobserved_neighbouring_profiles_stay_refused_with_their_bytes_named(byte encoding,byte depth,byte alphaEncoding)
+    {
+        using var source=new AsyncInput(Build(encoding,depth,alphaEncoding,1,1,[new byte[encoding==2?16:encoding==3?4:2]]));
+        var error=await Assert.ThrowsAsync<DiscoveryException>(()=>Blp2Decoder.DecodeAsync(source));
+        Assert.Equal("BLP_UNSUPPORTED",error.Code);Assert.Contains($"colour encoding {encoding} with alpha depth {depth} and alpha encoding {alphaEncoding}",error.Message);
+    }
+
     [Fact]
     public async Task Rectangular_mip_dimensions_clamp_each_axis_independently()
     {

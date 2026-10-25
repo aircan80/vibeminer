@@ -26,17 +26,26 @@ Palette images carry a 1,024-byte BGRA palette at offset 148. Other encodings ma
 | Encoding | Alpha depth | Alpha encoding | Decoded as |
 | --- | --- | --- | --- |
 | 1 (palette) | 0, 1, 4, 8 | 0 | Paletted |
+| 1 (palette) | 0 | 8 | Paletted, opaque (D100) |
 | 2 | 0, 1 | 0 | BC1 (DXT1) |
 | 2 | 4, 8 | 1 | BC2 (DXT3) |
-| 2 | 8 | 7 | BC3 (DXT5) |
+| 2 | 8, 72 | 7 | BC3 (DXT5); 72 since D100 |
 | 3 | 8 | 0 | Raw BGRA, stored alpha kept |
+| 3 | 1 | 8 | Raw BGRA, stored alpha kept (D100) |
 
-Every other combination is `BLP_UNSUPPORTED`, including BLP1, JPEG and raw BGRA with depth 0 (not guessed as opaque).
+Every other combination is `BLP_UNSUPPORTED`, naming its three bytes. That includes BLP1, JPEG and raw BGRA with depth 0 (not guessed as opaque).
+
+The D100 rows are the only other profiles seen in the #80 survey, each decoded exactly as its neighbour:
+
+- Alpha encoding 8 appears only with palette and raw BGRA, where that byte plays no part in decoding: palette alpha comes from the alpha depth, raw BGRA keeps its stored alpha byte. Seen on Classic creature skin 125364 (512² palette, depth 0, no alpha plane, palette alpha bytes all 0, drawn opaque) and retail icon 4559256 (64² BGRA, depth 1, stored alpha only 0 and 255).
+- BC3 keeps its alpha in its blocks and never reads the alpha depth. Retail texture 892475 (128² BC3, depth 72 = `0x48`) has exact BC3 block lengths, normal colour blocks and alpha 0 in every block, which is kept.
+- Other depths or encodings next to these (palette depth 1 with 8, BGRA depth 1 with 0, BC3 depth 71, BC with 8 and so on) were not seen and stay refused.
 
 ## Mips
 
-- Mip byte must be 0, 1 or `0x11`. Its upper bits get no meaning. The value is returned as `MipFlags`.
-- The mip **count comes from the descriptors**, not the mip byte. Byte 0 with more than one declared level is an error.
+- Mip byte must be `0x00`, `0x01`, `0x10` or `0x11` (D100). Bit `0x01` allows levels after the first; without it, more than one declared level is an error. Bit `0x10` gets no meaning and changes nothing. The value is returned as `MipFlags`.
+- The mip **count comes from the descriptors**, not the mip byte.
+- Observed (#80), 2,680 BLPs on wow_classic_ptr 5.5.4.67849 and wowxptr 12.1.5.70340: `0x01` and `0x11` always with every level down to 1×1; `0x00` and `0x10` always with one level. `0x10` is on 141 of 800 newer retail icons (BC1 and BC3) and 2 of 798 older ones, none of the 397 Classic icons here (#73's sample had one); `0x00` on 25 newer retail icons.
 - The structure of all 16 descriptor pairs is checked: offset and length both zero or both nonzero, present levels form a contiguous prefix, no level beyond the terminal 1×1. A structure error refuses the whole container.
 - Each declared level's length gets a storage class (`Blp2Mip.Storage`, D096):
   - **exact**: palette `w×h + ceil(w×h×depth/8)`; BC1 8 bytes per 4×4 block; BC2/BC3 16 bytes per block; BGRA `w×h×4`.

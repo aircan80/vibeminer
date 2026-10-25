@@ -48,7 +48,7 @@ public static partial class Blp2Decoder
         if (U(4) != 1) throw Error("UNSUPPORTED", "Only BLP2 direct/palette/block content is supported; JPEG is unsupported.");
         var alphaDepth = header[9]; var alphaEncoding = header[10];
         var encoding = SelectEncoding(header[8], alphaDepth, alphaEncoding);
-        if (header[11] is not (0 or 1 or 17)) throw Error("UNSUPPORTED", "The BLP2 mip-presence flag is unsupported.");
+        if (!IsMipFlags(header[11])) throw Error("UNSUPPORTED", "BLP mip byte 0x" + header[11].ToString("x2") + " is not supported; only 0x00, 0x01, 0x10 and 0x11 are.");
         var width = Dimension(U(12), limits); var height = Dimension(U(16), limits);
         var minimumOffset = encoding == Blp2Encoding.Paletted ? HeaderBytes + PaletteBytes : HeaderBytes;
         if (sourceLength < minimumOffset) throw Error("INVALID", "BLP2 palette is truncated.");
@@ -58,7 +58,7 @@ public static partial class Blp2Decoder
             token.ThrowIfCancellationRequested(); var offset = U(20 + level * 4); var count = U(84 + level * 4);
             if (offset == 0 && count == 0) { absent = true; continue; }
             if (offset == 0 || count == 0 || absent) throw Error("INVALID", "BLP mip descriptors must form a nonempty contiguous prefix with paired offsets and lengths.");
-            if (level > 0 && header[11] == 0) throw Error("INVALID", "The BLP mip flag excludes additional declared levels.");
+            if (level > 0 && !AllowsMipLevels(header[11])) throw Error("INVALID", "The BLP mip flag excludes additional declared levels.");
             if (level > 0 && Math.Max(width, height) >> (level - 1) <= 1)
                 throw Error("INVALID", "The BLP declares mip levels beyond its terminal one-pixel level.");
             var mipWidth = Math.Max(1, width >> level); var mipHeight = Math.Max(1, height >> level);
@@ -100,14 +100,27 @@ public static partial class Blp2Decoder
 
     private static int Dimension(uint value, Blp2Limits limits)
     { if (value == 0) throw Error("INVALID", "BLP dimensions must be positive."); if (value > limits.MaxDimension) throw Error("LIMIT", "BLP dimensions exceed policy."); return (int)value; }
-    private static Blp2Encoding SelectEncoding(byte encoding, byte depth, byte alphaEncoding) => encoding switch
+    /// <summary>Mip byte (header offset 11): bit 0 allows levels after the first; bit 4 is kept but changes nothing (D100).</summary>
+    public static bool IsMipFlags(int flags) => flags is 0x00 or 0x01 or 0x10 or 0x11;
+    public static bool AllowsMipLevels(int flags) => (flags & 0x01) != 0;
+    /// <summary>Whether a decoded encoding was read from one of the supported header profiles (see docs/formats/blp.md).</summary>
+    public static bool IsSupported(Blp2Encoding encoding, int alphaDepth, int alphaEncoding) =>
+        alphaDepth is >= 0 and <= 255 && alphaEncoding is >= 0 and <= 255 && Profile(encoding switch
+        { Blp2Encoding.Paletted => 1, Blp2Encoding.Bgra8 => 3, _ => 2 }, (byte)alphaDepth, (byte)alphaEncoding) == encoding;
+    private static Blp2Encoding SelectEncoding(byte encoding, byte depth, byte alphaEncoding) => Profile(encoding, depth, alphaEncoding)
+        ?? throw Error("UNSUPPORTED", "BLP colour encoding " + encoding + " with alpha depth " + depth + " and alpha encoding " + alphaEncoding + " is not supported.");
+    // Only observed profiles. Palette and raw BGRA carry alpha encoding 0 or 8; 8 changes nothing there. BC3's alpha is in its
+    // blocks, so its depth byte is not read; 72 is the one other depth seen (D100).
+    private static Blp2Encoding? Profile(byte encoding, byte depth, byte alphaEncoding) => encoding switch
     {
         1 when depth is 0 or 1 or 4 or 8 && alphaEncoding == 0 => Blp2Encoding.Paletted,
+        1 when depth == 0 && alphaEncoding == 8 => Blp2Encoding.Paletted,
         2 when depth is 0 or 1 && alphaEncoding == 0 => Blp2Encoding.Bc1,
         2 when depth is 4 or 8 && alphaEncoding == 1 => Blp2Encoding.Bc2,
-        2 when depth == 8 && alphaEncoding == 7 => Blp2Encoding.Bc3,
+        2 when depth is 8 or 72 && alphaEncoding == 7 => Blp2Encoding.Bc3,
         3 when depth == 8 && alphaEncoding == 0 => Blp2Encoding.Bgra8,
-        _ => throw Error("UNSUPPORTED", "BLP color encoding/alpha depth/alpha encoding combination is unsupported.")
+        3 when depth == 1 && alphaEncoding == 8 => Blp2Encoding.Bgra8,
+        _ => null
     };
     private static Blp2MipStorage Storage(uint count, int width, int height, Blp2Encoding encoding, int alphaDepth)
     {

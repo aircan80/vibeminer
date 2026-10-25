@@ -30,6 +30,43 @@ public sealed class IconArtifactsTests
         finally {Directory.Delete(directory,true);}
     }
 
+    // D100 (#80): mip byte 0x10 (most newer retail icons) and palette alpha encoding 8 build the same pixels, and their proofs
+    // validate again when the retained PNG is reused.
+    [Theory]
+    [InlineData(false,11,0x10)][InlineData(true,10,8)]
+    public async Task Newly_admitted_header_profiles_build_identical_pixels_and_their_proofs_revalidate(bool mips,int at,byte value)
+    {
+        await using var h=new Harness();
+        var baseline=await h.Assets.BuildAsync(await PublishSource(h.Objects,Blp(mips)));
+        var bytes=Blp(mips);bytes[at]=value;var source=await PublishSource(h.Objects,bytes);var built=await h.Assets.BuildAsync(source);
+        Assert.Equal(await Pixels(h.Assets,baseline),await Pixels(h.Assets,built));
+        Assert.Equal(at==11?value:mips?1:0,built.Proof.MipFlags);Assert.Equal(at==10?value:0,built.Proof.AlphaEncoding);
+        Assert.Equal(built,await h.Assets.BuildAsync(source));
+    }
+
+    // D100: a retained PNG is only read under a proof the decoder could have produced. Each forgery below is a fully consistent
+    // artifact (its own proof embedded in a stored PNG with the right pixels, ID and key), so only the proof checks refuse it.
+    [Theory]
+    [InlineData("bc2-alpha-encoding-7")][InlineData("bgra-depth-0")][InlineData("mip-flags-0x12")][InlineData("mip-flags-0x10-on-mip-1")]
+    public async Task Forged_proofs_outside_the_decoder_profiles_are_refused_on_open(string forgery)
+    {
+        await using var h=new Harness();var source=await PublishSource(h.Objects,Blp(mips:true));
+        var artifact=await h.Assets.BuildAsync(source,forgery=="mip-flags-0x10-on-mip-1"?1:0);var rgba=await Pixels(h.Assets,artifact);
+        var proof=forgery switch
+        {
+            "bc2-alpha-encoding-7"=>artifact.Proof with{SourceEncoding="Bc2",AlphaDepth=8,AlphaEncoding=7},
+            "bgra-depth-0"=>artifact.Proof with{SourceEncoding="Bgra8",AlphaDepth=0,AlphaEncoding=0},
+            "mip-flags-0x12"=>artifact.Proof with{MipFlags=0x12},
+            _=>artifact.Proof with{MipFlags=0x10}
+        };
+        var stored=await PublishBytes(h.Objects,await Encode(proof,rgba));
+        var forged=artifact with{ArtifactId=IconArtifacts.ProofId(proof),Sha256=stored.Sha,ByteLength=stored.Length,Proof=proof};
+        Assert.Equal("ASSET_INVALID",await Code(async()=>{await using var ignored=await h.Assets.OpenVerifiedAsync(forged);}));
+        // Control: the same forgery with the genuine proof values opens.
+        var genuine=await PublishBytes(h.Objects,await Encode(artifact.Proof,rgba));
+        await using(var opened=await h.Assets.OpenVerifiedAsync(artifact with{Sha256=genuine.Sha,ByteLength=genuine.Length}))Assert.True(opened.CanRead);
+    }
+
     [Fact]
     public async Task Stable_request_key_excludes_dates_routes_but_binds_immutable_source_and_selected_mip()
     {

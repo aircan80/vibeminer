@@ -185,17 +185,10 @@ public sealed partial class IconArtifacts(VerifiedObjectStore objects)
             || proof.Width * (long)proof.Height > MaxPixels || proof.Width != Math.Max(1, proof.BaseWidth >> proof.MipLevel)
             || proof.Height != Math.Max(1, proof.BaseHeight >> proof.MipLevel)
             || proof.MipLevel > 0 && (Math.Max(proof.BaseWidth, proof.BaseHeight) >> (proof.MipLevel - 1)) <= 1
-            || proof.MipFlags is not (0 or 1 or 17) || proof.MipLevel > 0 && proof.MipFlags == 0)
+            || !Blp2Decoder.IsMipFlags(proof.MipFlags) || proof.MipLevel > 0 && !Blp2Decoder.AllowsMipLevels(proof.MipFlags))
             throw Error("INVALID", "The icon proof has inconsistent key/mip/pixel geometry.");
-        var admitted = proof.SourceEncoding switch
-        {
-            "Paletted" => proof.AlphaDepth is 0 or 1 or 4 or 8 && proof.AlphaEncoding == 0,
-            "Bc1" => proof.AlphaDepth is 0 or 1 && proof.AlphaEncoding == 0,
-            "Bc2" => proof.AlphaDepth is 4 or 8 && proof.AlphaEncoding == 1,
-            "Bc3" => proof.AlphaDepth == 8 && proof.AlphaEncoding == 7,
-            "Bgra8" => proof.AlphaDepth == 8 && proof.AlphaEncoding == 0,
-            _ => false
-        };
+        var admitted = proof.SourceEncoding is "Paletted" or "Bc1" or "Bc2" or "Bc3" or "Bgra8"
+            && Blp2Decoder.IsSupported(Enum.Parse<Blp2Encoding>(proof.SourceEncoding), proof.AlphaDepth, proof.AlphaEncoding);
         if (!admitted) throw Error("INVALID", "The icon proof names an unsupported source encoding combination.");
     }
 }
