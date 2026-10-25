@@ -35,6 +35,21 @@ internal sealed partial class DownloadLedger
     }
     internal async Task<IReadOnlyList<string>> AssessAsync(DownloadLedgerArtifact artifact,IReadOnlyDictionary<string,long> candidates,CancellationToken token)
     {
+        var keys=AssessmentKeys(candidates,token);
+        await using var input=await OpenLedgerAsync(artifact,token);
+        if(!Known(artifact)){await ValidateRowsAsync(input,artifact,token,null);Remember(artifact);}
+        input.Position=HeaderBytes;
+        await using var cursor=new DownloadLedgerOrderedCursor(new LedgerRunReader(input,artifact.ByteLength-HeaderBytes),artifact);
+        return await MatchAsync(cursor,keys,token);
+    }
+    /// <summary>The same assessment over an open page session, so a page read hashes each ledger once.</summary>
+    internal static async Task<IReadOnlyList<string>> AssessAsync(DownloadLedgerReadSession session,IReadOnlyDictionary<string,long> candidates,CancellationToken token)
+    {
+        var keys=AssessmentKeys(candidates,token);
+        return await MatchAsync(session.OpenOrderedCursor(),keys,token);
+    }
+    private static LedgerValue[] AssessmentKeys(IReadOnlyDictionary<string,long> candidates,CancellationToken token)
+    {
         ArgumentNullException.ThrowIfNull(candidates);token.ThrowIfCancellationRequested();
         if(candidates.Count>10000)throw Error("DOWNLOAD_LEDGER_LIMIT","Retained-object assessment exceeds its bounded candidate count.");
         var keys=new LedgerValue[candidates.Count];var index=0;
@@ -42,18 +57,33 @@ internal sealed partial class DownloadLedger
         {if(!Canonical(key,32)||bytes<0||bytes>0xffffffffffL)throw Error("DOWNLOAD_LEDGER_INVALID","A retained-object candidate has an invalid exact identity or size.");keys[index++]=LedgerValue.Parse(key,bytes);}
         try{Array.Sort(keys,new LedgerValueComparer(token));}
         catch(InvalidOperationException error)when(error.InnerException is OperationCanceledException&&token.IsCancellationRequested){throw new OperationCanceledException(token);}
-        await using var input=await OpenLedgerAsync(artifact,token);
-        if(!Known(artifact)){await ValidateRowsAsync(input,artifact,token,null);Remember(artifact);}
-        input.Position=HeaderBytes;var reader=new LedgerRunReader(input,artifact.ByteLength-HeaderBytes);
-        var matched=new List<string>();index=0;
-        while(index<keys.Length&&await reader.NextAsync(token))
+        return keys;
+    }
+    private static async Task<IReadOnlyList<string>> MatchAsync(DownloadLedgerOrderedCursor cursor,LedgerValue[] keys,CancellationToken token)
+    {
+        var matched=new List<string>();var index=0;
+        while(index<keys.Length&&await cursor.NextAsync(token))
         {
-            var row=reader.Current;
+            var row=cursor.Current;
             while(index<keys.Length&&keys[index].CompareKey(row)<0)index++;
             if(index==keys.Length)break;
             if(keys[index].SameKey(row)){if(keys[index].Bytes==row.Bytes)matched.Add(row.Key);index++;}
         }
         return matched;
+    }
+    /// <summary>
+    /// A read session for bounded page reads: the CAS hash on every open, the row proof only once per process for the
+    /// same descriptor, as <see cref="ReadPageAsync"/> does.
+    /// </summary>
+    internal async Task<DownloadLedgerReadSession> OpenPageSessionAsync(DownloadLedgerArtifact artifact,CancellationToken token)
+    {
+        var input=await OpenLedgerAsync(artifact,token);
+        try
+        {
+            if(!Known(artifact)){await ValidateRowsAsync(input,artifact,token,null);Remember(artifact);}
+            input.Position=HeaderBytes;return new(input,artifact);
+        }
+        catch{await input.DisposeAsync();throw;}
     }
     private Task<FileStream> OpenLedgerAsync(DownloadLedgerArtifact artifact,CancellationToken token) =>
         OpenLedgerAsync(artifact,resources,workContext,token);

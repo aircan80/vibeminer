@@ -12,7 +12,7 @@ import followExample from '../../../contracts/examples/table-follow.json';
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { EngineClient, type EngineProcess } from '../src/main/engine-client';
+import { CHECK_IDLE_MS, EngineClient, type EngineProcess } from '../src/main/engine-client';
 import {itemsSnapshot as classificationItems} from '../../../tests/desktop/fixtures/items.mjs';
 import {classificationBatch} from '../../../tests/desktop/fixtures/classifications.mjs';
 import fixture from '../../../contracts/examples/discovery-page.json';
@@ -321,8 +321,49 @@ describe('bounded local engine transport', () => {
     child.reply('download-open', value); await expect(opening).resolves.toEqual(value);
     const params = { productId: value.build.productId, buildIdentity: value.build.id, sourceRegion: value.sourceReference.region, ledgerId: value.download.ledgerId, limit: 50 };
     const read = client.request('download.read', params, 'download-page');
-    const page = { ...params, assessedAt: value.download.assessedAt, totalCount: '60', entries: [{ id: '1', encodingKey: '1'.repeat(32), encodedBytes: '100', verifiedAtAssessment: true }], nextCursor: '1' }; delete (page as any).limit;
+    const page = { ...params, assessedAt: value.download.assessedAt, totalCount: '60', entries: [{ id: '1', encodingKey: '1'.repeat(32), encodedBytes: '100', verifiedAtAssessment: true, checkedAtOpen: true, check: null }], nextCursor: '1', manifestLedgerId: value.download.ledgerId, lastCheck: null }; delete (page as any).limit;
     child.reply('download-page', page); await expect(read).resolves.toEqual(page);
+  });
+  // D093: the measured ledger's pages, read from a key, and a Check of the files Open never assessed.
+  it('accepts measured pages read from a key and exact Check results, and refuses contradictory ones', async () => {
+    const { child, client } = setup(); const value = structuredClone(downloadWorkspace);
+    const opening = client.request('workspace.open', { productId: value.build.productId, buildIdentity: value.build.id, sourceRegion: value.sourceReference.region }, 'measured-open');
+    child.reply('measured-open', value); await opening;
+    const context = { productId: value.build.productId, buildIdentity: value.build.id, sourceRegion: value.sourceReference.region };
+    const measured = { ...context, ledgerId: 'e'.repeat(64), limit: 2, from: '2'.repeat(32) };
+    const rows = [{ id: '7', encodingKey: '2'.repeat(32), encodedBytes: '100', verifiedAtAssessment: false, checkedAtOpen: true, check: null }, { id: '8', encodingKey: '3'.repeat(32), encodedBytes: '200', verifiedAtAssessment: false, checkedAtOpen: false, check: 'missing' }];
+    const page = { ...context, ledgerId: measured.ledgerId, assessedAt: value.download.assessedAt, totalCount: '61', entries: rows, nextCursor: '8', manifestLedgerId: value.download.ledgerId, lastCheck: { checkedAt: '2026-10-19T08:30:00.0000000+00:00', checkedObjects: '1', verifiedObjects: '0', notStoredObjects: '0', missingObjects: '1', corruptObjects: '0' } };
+    const read = client.request('download.read', measured, 'measured-page'); child.reply('measured-page', page); await expect(read).resolves.toEqual(page);
+    // A file outside the manifest with an outcome but no completed Check is a protocol error, not a page.
+    const refused = client.request('download.read', measured, 'measured-broken'); child.reply('measured-broken', { ...page, lastCheck: null });
+    await expect(refused).rejects.toMatchObject({ code: 'PROTOCOL_ERROR' });
+  });
+  it('sends a Check only to an engine with download-check-v1 and validates its result', async () => {
+    const { child, client } = setup(); const hello = client.hello();
+    child.reply(child.requests[0].id, { protocolVersion: 1, engineVersion: 'authored', capabilities: ['download-check-v1'] }); await hello;
+    const params = { productId: 'wow', buildIdentity: 'd'.repeat(64), sourceRegion: 'us', ledgerId: 'e'.repeat(64) };
+    await expect(client.request('download.check', { ...params, ledgerId: 'short' }, 'bad-check')).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    const result = { ...params, manifestLedgerId: 'a'.repeat(64), checkedAt: '2026-10-19T08:30:00.0000000+00:00', checkedObjects: '2', verifiedObjects: '0', notStoredObjects: '1', missingObjects: '1', corruptObjects: '0' };
+    const checking = client.request('download.check', params, 'check'); child.reply('check', result); await expect(checking).resolves.toEqual(result);
+    const wrong = client.request('download.check', params, 'check-sum'); child.reply('check-sum', { ...result, missingObjects: '0' }); await expect(wrong).rejects.toMatchObject({ code: 'PROTOCOL_ERROR' });
+  });
+  it('keeps a Check alive while it reports progress and times it out only after a silence of CHECK_IDLE_MS', async () => {
+    vi.useFakeTimers();
+    const { child, client } = setup(); const hello = client.hello();
+    child.reply(child.requests[0].id, { protocolVersion: 1, engineVersion: 'authored', capabilities: ['download-check-v1'] }); await hello;
+    const checking = client.request('download.check', { productId: 'wow', buildIdentity: 'd'.repeat(64), sourceRegion: 'us', ledgerId: 'e'.repeat(64) }, 'long-check');
+    let outcome: string | null = null; checking.then(() => { outcome = 'done'; }, error => { outcome = error.code; });
+    const report = (sequence: number) => child.stdout.write(JSON.stringify({ protocolVersion: 1, type: 'progress', requestId: 'long-check', sequence, stage: 'Checking files not checked at Open', region: 'us', completed: sequence, total: 215, unit: 'objects' }) + '\n');
+    // Three times the idle budget in all, but never silent for that long.
+    for (let sequence = 1; sequence <= 3; sequence++) { await vi.advanceTimersByTimeAsync(CHECK_IDLE_MS - 60_000); report(sequence); }
+    await vi.advanceTimersByTimeAsync(CHECK_IDLE_MS - 60_000);
+    expect(outcome).toBeNull();
+    await vi.advanceTimersByTimeAsync(60_001);
+    expect(outcome).toBe('ENGINE_TIMEOUT');
+  });
+  it('refuses a Check before the engine reports download-check-v1', async () => {
+    const { client } = setup();
+    await expect(client.request('download.check', { productId: 'wow', buildIdentity: 'd'.repeat(64), sourceRegion: 'us', ledgerId: 'e'.repeat(64) }, 'unsupported-check')).rejects.toMatchObject({ code: 'UNSUPPORTED' });
   });
   it.each(['total', 'bothBranches', 'metadataRole', 'source'])('rejects inconsistent download admission %s', async variant => {
     const { child, client } = setup(); const value = structuredClone(downloadWorkspace);

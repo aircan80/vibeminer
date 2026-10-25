@@ -36,7 +36,12 @@ public sealed record BuildStoredCoverage(string LedgerId, string Scope, long Obj
     long StoredObjects, long StoredBytes, StoredCountState CountState, RetentionProblem? CountProblem, string UpdatedAt,
     BuildPresenceCheck Presence, bool DownloadAll, bool Running, IReadOnlyList<string> SourceRegions,
     long UnresolvableRootContent = 0, string ScopeState = "manifestOnly", RetentionProblem? ScopeProblem = null,
-    bool ChangesPending = false);
+    bool ChangesPending = false)
+{
+    private readonly string? manifestLedgerId;
+    /// <summary>The admitted download manifest ledger that <see cref="LedgerId"/> stands for; the same ledger until measured (D093).</summary>
+    public string ManifestLedgerId { get => manifestLedgerId ?? LedgerId; init => manifestLedgerId = value; }
+}
 
 public sealed record BuildDownloadSummary(string ProductId, string BuildIdentity, BuildDownloadState State,
     BuildStoredCoverage? Download);

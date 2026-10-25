@@ -88,6 +88,12 @@
     "downloadPage": {
       "$ref": "#/definitions/DownloadPage"
     },
+    "downloadCheckParams": {
+      "$ref": "#/definitions/DownloadCheckParams"
+    },
+    "downloadCheckResult": {
+      "$ref": "#/definitions/DownloadCheckResult"
+    },
     "tableCatalogPage": {
       "$ref": "#/definitions/TableCatalogPage"
     },
@@ -1105,6 +1111,7 @@
             "download.read",
             "download.summaries",
             "download.changes",
+            "download.check",
             "tables.catalog",
             "tables.definition",
             "tables.prepare",
@@ -1188,6 +1195,22 @@
             "properties": {
               "params": {
                 "$ref": "#/definitions/DownloadChangesParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "download.check"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/DownloadCheckParams"
               }
             }
           }
@@ -3584,13 +3607,35 @@
         },
         "verifiedAtAssessment": {
           "type": "boolean"
+        },
+        "checkedAtOpen": {
+          "description": "False for a file ROOT lists outside the admitted download manifest: Open's assessment never covered it (D093).",
+          "type": "boolean"
+        },
+        "check": {
+          "description": "What the latest completed Check found for a file not checked at Open; null before one, and always null for a file Open assessed (D093).",
+          "anyOf": [
+            {
+              "enum": [
+                "verified",
+                "notStored",
+                "missing",
+                "corrupt"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "id",
         "encodingKey",
         "encodedBytes",
-        "verifiedAtAssessment"
+        "verifiedAtAssessment",
+        "checkedAtOpen",
+        "check"
       ],
       "additionalProperties": false
     },
@@ -3638,6 +3683,22 @@
               "type": "null"
             }
           ]
+        },
+        "manifestLedgerId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "The admitted download manifest ledger whose Open assessment the page carries; the same as ledgerId for the manifest's own pages (D093)."
+        },
+        "lastCheck": {
+          "description": "The latest completed Check of a measured ledger and its counts; null for a manifest page or before a Check (D093).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DownloadCheckSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -3648,7 +3709,146 @@
         "assessedAt",
         "entries",
         "totalCount",
-        "nextCursor"
+        "nextCursor",
+        "manifestLedgerId",
+        "lastCheck"
+      ],
+      "additionalProperties": false
+    },
+    "DownloadCheckSummary": {
+      "title": "DownloadCheckSummary",
+      "description": "When a completed Check finished and what it found; the four outcomes add up to checkedObjects (D093).",
+      "type": "object",
+      "properties": {
+        "checkedAt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40
+        },
+        "checkedObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "verifiedObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "notStoredObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "missingObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "corruptObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        }
+      },
+      "required": [
+        "checkedAt",
+        "checkedObjects",
+        "verifiedObjects",
+        "notStoredObjects",
+        "missingObjects",
+        "corruptObjects"
+      ],
+      "additionalProperties": false
+    },
+    "DownloadCheckParams": {
+      "title": "DownloadCheckParams",
+      "description": "Check the files a measured ledger adds to its admitted manifest (D093). Long-running, with progress; cancel it with request.cancel.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sourceRegion": {
+          "type": "string",
+          "pattern": "^[a-z]{2,8}$"
+        },
+        "ledgerId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "sourceRegion",
+        "ledgerId"
+      ],
+      "additionalProperties": false
+    },
+    "DownloadCheckResult": {
+      "title": "DownloadCheckResult",
+      "description": "One completed Check (D093). checkedObjects is every file the measured ledger adds to its manifest; the four outcomes add up to it.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sourceRegion": {
+          "type": "string",
+          "pattern": "^[a-z]{2,8}$"
+        },
+        "ledgerId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "manifestLedgerId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "checkedAt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40
+        },
+        "checkedObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "verifiedObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "notStoredObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "missingObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "corruptObjects": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "sourceRegion",
+        "ledgerId",
+        "manifestLedgerId",
+        "checkedAt",
+        "checkedObjects",
+        "verifiedObjects",
+        "notStoredObjects",
+        "missingObjects",
+        "corruptObjects"
       ],
       "additionalProperties": false
     },
@@ -5909,6 +6109,11 @@
         },
         "changesPending": {
           "type": "boolean"
+        },
+        "manifestLedgerId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "The admitted download manifest ledger that ledgerId stands for; the same ledger until the file list is measured (D093)."
         }
       },
       "required": [
@@ -5928,7 +6133,8 @@
         "unresolvableRootContent",
         "scopeState",
         "scopeProblem",
-        "changesPending"
+        "changesPending",
+        "manifestLedgerId"
       ],
       "additionalProperties": false
     },

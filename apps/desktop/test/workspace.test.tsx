@@ -450,7 +450,7 @@ describe('verified inventory opening and preserved discovery', () => {
   function downloadSnapshot(): WorkspaceSnapshot { return { ...snapshot(), ...downloadFixture, build: snapshot().build, sourceReference: snapshot().sourceReference } as WorkspaceSnapshot; }
   function downloadPage(after = '0'): DownloadPage {
     const result = downloadSnapshot(); const id = String(BigInt(after) + 1n);
-    return { productId: result.build.productId, buildIdentity: result.build.id, sourceRegion: result.sourceReference.region, ledgerId: result.download!.ledgerId, assessedAt: result.download!.assessedAt, totalCount: '60', nextCursor: id === '60' ? null : id, entries: [{ id, encodingKey: BigInt(id).toString(16).padStart(32, '0'), encodedBytes: '100', verifiedAtAssessment: Number(id) <= 10 }] };
+    return { productId: result.build.productId, buildIdentity: result.build.id, sourceRegion: result.sourceReference.region, ledgerId: result.download!.ledgerId, assessedAt: result.download!.assessedAt, totalCount: '60', nextCursor: id === '60' ? null : id, manifestLedgerId: result.download!.ledgerId, lastCheck: null, entries: [{ id, encodingKey: BigInt(id).toString(16).padStart(32, '0'), encodedBytes: '100', verifiedAtAssessment: Number(id) <= 10, checkedAtOpen: true, check: null }] };
   }
   it('opens measured download Home without a ROOT catalog and discloses exact scope and receipts', async () => {
     const { bridge } = setup(); vi.mocked(bridge.open).mockResolvedValue(success(downloadSnapshot())); await begin();
@@ -506,7 +506,7 @@ it('keeps exact background table controls in unified activity across Discovery a
 // D071: Files before and after the build's file catalog is prepared in the background, and its Downloads & activity task.
 describe('file catalog prepared after Open', () => {
   const opened = (): WorkspaceSnapshot => ({ ...snapshot(), ...downloadFixture, build: snapshot().build, sourceReference: snapshot().sourceReference } as WorkspaceSnapshot);
-  const objects = (): DownloadPage => { const result = opened(); return { productId: result.build.productId, buildIdentity: result.build.id, sourceRegion: 'us', ledgerId: result.download!.ledgerId, assessedAt: result.download!.assessedAt, totalCount: '60', nextCursor: '1', entries: [{ id: '1', encodingKey: '1'.padStart(32, '0'), encodedBytes: '100', verifiedAtAssessment: false }] }; };
+  const objects = (): DownloadPage => { const result = opened(); return { productId: result.build.productId, buildIdentity: result.build.id, sourceRegion: 'us', ledgerId: result.download!.ledgerId, assessedAt: result.download!.assessedAt, totalCount: '60', nextCursor: '1', manifestLedgerId: result.download!.ledgerId, lastCheck: null, entries: [{ id: '1', encodingKey: '1'.padStart(32, '0'), encodedBytes: '100', verifiedAtAssessment: false, checkedAtOpen: true, check: null }] }; };
   const status = (patch: Partial<FileCatalogStatus>): FileCatalogStatus => ({ productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', buildVersion: base.version, state: 'pending', stage: 'queued', completed: null, total: null, attempts: 0, catalog: null, problem: null, waitingFor: null, ...patch });
   const ready = status({ state: 'ready', stage: null, catalog: { generation: '7', preparedAt: '2026-10-21T12:00:00.0000000+00:00', rootFileCount: '1', installFileCount: '1', rootMembershipCount: '2', installMembershipCount: '1', uniqueContentCount: '2', unresolvedMembershipCount: '1', storedMembershipCount: '0' } });
   function start(replies: FileCatalogStatus[], listed: FileCatalogStatus[] = []) {
@@ -723,10 +723,10 @@ describe('file catalog prepared after Open', () => {
     let answer!: (value: unknown) => void;
     fileCatalog.mockImplementation(() => new Promise(done => { answer = done; }) as never);
     await begin(); await screen.findByRole('heading', { name: 'Build overview' });
-    const row = await screen.findByText('File list');
+    const row = await screen.findByText('File list', { ignore: 'button, script, style' });
     await waitFor(() => expect(row.nextElementSibling).toHaveTextContent('Checking…'));
     await act(async () => answer(success(status({ stage: 'reading' }))));
-    await waitFor(() => expect(screen.getByText('File list').nextElementSibling).toHaveTextContent('Preparing…'));
+    await waitFor(() => expect(screen.getByText('File list', { ignore: 'button, script, style' }).nextElementSibling).toHaveTextContent('Preparing…'));
   });
   it('on Home, Retry status hands focus to the File catalog heading once the read succeeds', async () => {
     const { fileCatalog } = start([]);

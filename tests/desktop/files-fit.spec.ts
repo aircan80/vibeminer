@@ -7,7 +7,7 @@ import { launch, root, size, text } from './helpers';
 // keeps a whole row in view under the notes, nothing in the pane overflows, and the footer with its page controls sits
 // above the status bar. The authored engine advertises file-catalog-v1 and tables-follow-v1.
 const entries = ['browse', 'follow'] as const;
-const states = ['preparing', 'retrying', 'not-confirmed', 'stopped', 'failed', 'full', 'unsupported', 'ready-offered', 'ready-list'] as const;
+const states = ['preparing', 'retrying', 'not-confirmed', 'stopped', 'failed', 'full', 'unsupported', 'ready-offered', 'ready-list', 'measured', 'checked'] as const;
 const sizes = [[1280, 800], [1440, 1100]] as const;
 const scales = [1, 2] as const;
 type Entry = typeof entries[number]; type State = typeof states[number];
@@ -63,6 +63,13 @@ async function reach(page: Page, data: string, entry: Entry, state: State) {
       if (entry === 'browse') await expect(page.getByRole('listbox', { name: 'Files, one row per FileDataID' }).getByRole('option').first()).toContainText('800001');
       else { await expect(page.getByRole('searchbox', { name: 'Search by FileDataID or content key' })).toHaveValue('9'); await expect(pane.getByText('No files match', { exact: true })).toBeVisible(); }
     }
+  }
+  // D093: the measured ledger lands, so the Check note sits under the file list note; checked has run one Check.
+  if (state === 'measured' || state === 'checked') {
+    await writeFile(path.join(data, 'measured-scope'), 'measured');
+    const note = page.getByRole('group', { name: '5 files not checked at Open' });
+    await expect(note).toBeVisible({ timeout: 40_000 });
+    if (state === 'checked') { await note.getByRole('button', { name: 'Check 5 files' }).click(); await expect(note.getByRole('status')).toContainText('1 verified · 3 not stored · 1 missing · 0 corrupt.'); }
   }
   if (state === 'retrying' || state === 'preparing') await expect(page.getByRole('note', { name: 'Preparing file list…' })).toBeVisible();
   if (state === 'failed' || state === 'full' || state === 'unsupported') await expect(page.getByRole('note', { name: 'File list not prepared' })).toBeVisible();
@@ -139,5 +146,5 @@ for (const entry of entries) for (const state of states) {
 }
 
 test('the fit matrix covers every entry, state, size and text scale', () => {
-  expect(entries.length * states.length * sizes.length * scales.length).toBe(72);
+  expect(entries.length * states.length * sizes.length * scales.length).toBe(88);
 });

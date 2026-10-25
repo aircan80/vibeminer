@@ -35,6 +35,8 @@ export function validChangesParams(value: unknown): value is DownloadChangesPara
 export function storedCoverageValid(d: BuildStoredCoverage): boolean {
   const numbers = [d.objectCount, d.totalEncodedBytes, d.storedObjects, d.storedBytes, d.presence.observedObjects, d.presence.missingObjects, d.presence.corruptObjects, d.unresolvableRootContent];
   if (!hash.test(d.ledgerId) || d.scope !== 'downloadManifestAllVariants' && d.scope !== 'downloadManifestAndRootAllVariants' || !numbers.every(decimal) || !instant(d.updatedAt)) return false;
+  // The admitted manifest the figure stands on (D093): another ledger only once the file list is measured.
+  if (typeof d.manifestLedgerId !== 'string' || !hash.test(d.manifestLedgerId) || d.scopeState !== 'measured' && d.manifestLedgerId !== d.ledgerId) return false;
   // Only a measured file list widens the scope or reports files it could not resolve; until then the figure is not current.
   if ((d.scopeState === 'measured') !== (d.scope === 'downloadManifestAndRootAllVariants')) return false;
   if (d.scope === 'downloadManifestAllVariants' && d.unresolvableRootContent !== '0') return false;

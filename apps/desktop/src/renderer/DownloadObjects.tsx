@@ -1,29 +1,77 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import type { DownloadObjectEntry, DownloadPage, DownloadSummary, FileCatalogStatus, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import type { DownloadCheckResult, DownloadCheckSummary, DownloadObjectEntry, DownloadPage, DownloadSummary, FileCatalogStatus, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
 import { downloadPageMatches, type DownloadReadParams } from '../shared/download';
 import { exactBytes, exactCount, readableBytes } from '../shared/inventory';
 import { CatalogPageControls, FileTargetNotice, FilesFrame, ReturnHome, useListbox } from './FilesCatalog';
 import type { FileTarget } from './table-follow-view';
-import { useCoveredSide } from './HomeShell';
+import { useCoveredSide, useShell } from './HomeShell';
 import { ActivityLink } from './DownloadActivity';
+import type { DownloadCheckController } from './useDownloadCheck';
 
-// Files for a download-sized build: the research file catalog isn't prepared, so the list shows the download manifest's unique encoded objects.
-export function DownloadObjects({ snapshot, summary, bridge, active, onReopen, onReturn, fileTarget, onReturnToTable, catalog = null }: { snapshot: WorkspaceSnapshot; summary: DownloadSummary; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void; fileTarget?: FileTarget | null; onReturnToTable?: () => void; catalog?: CatalogView | null }) {
+/** The measured ledger that stands for the opening manifest once ROOT is measured (D066): the build summary names it. */
+export type MeasuredLedger = Readonly<{ ledgerId: string; objectCount: string }>;
+type Ledger = Readonly<{ ledgerId: string; objectCount: string; measured: boolean }>;
+type Movement = 'initial' | 'next' | 'previous' | 'first' | 'switch' | 'refresh';
+type PageRequest = Readonly<{ ledger: Ledger; after?: string; from?: string; movement: Movement }>;
+/** This view's Check as the App-level controller reports it (D093). `elsewhere` is a Check of another ledger still running. */
+type CheckState = { status: 'running' | 'stopping'; taskKey: string; completed: number | null; total: number | null }
+  | { status: 'done'; result: DownloadCheckResult } | { status: 'stopped' } | { status: 'busy' } | { status: 'failed'; code: string; message: string }
+  | { status: 'elsewhere'; taskKey: string; build: string };
+const PAGE = 50;
+
+/**
+ * What a row's local column says: Open's assessment for manifest files, "Not checked at Open" or a Check's outcome for the
+ * rest (D093). The label carries the colour; the explanation after it, in the inspector, does not.
+ */
+export function localState(entry: DownloadObjectEntry): { label: string; tone: string; explanation: string } {
+  if (entry.checkedAtOpen) return entry.verifiedAtAssessment ? { label: 'Verified locally', tone: 'dh-ok', explanation: ' at assessment' } : { label: 'Not verified locally', tone: 'dh-dim', explanation: ' at assessment' };
+  switch (entry.check) {
+    case 'verified': return { label: 'Verified at check', tone: 'dh-ok', explanation: ': the stored copy matches its receipt' };
+    case 'notStored': return { label: 'Not stored at check', tone: 'dh-dim', explanation: ': there is no stored copy here' };
+    case 'missing': return { label: 'Missing at check', tone: 'dh-bad-t', explanation: ': a receipt names it, but the stored file is gone' };
+    case 'corrupt': return { label: 'Corrupt at check', tone: 'dh-bad-t', explanation: ': the stored bytes failed verification' };
+    default: return { label: 'Not checked at Open', tone: 'dh-warn-t', explanation: ': Open assessed the download manifest only' };
+  }
+}
+/** A completed Check's counts, the same words in the note whether it ran now or was read back with the page. */
+const outcomes = (value: Pick<DownloadCheckSummary, 'verifiedObjects' | 'notStoredObjects' | 'missingObjects' | 'corruptObjects'>) =>
+  `${exactCount(value.verifiedObjects)} verified · ${exactCount(value.notStoredObjects)} not stored · ${exactCount(value.missingObjects)} missing · ${exactCount(value.corruptObjects)} corrupt.`;
+
+// Files for a download-sized build: the research file catalog isn't prepared, so the list shows the download ledger's unique
+// encoded objects. Once the build's file list is measured (D066) that is the ledger with every file ROOT lists; the ones
+// outside the manifest are not checked at Open until a Check covers them (D093).
+export function DownloadObjects({ snapshot, summary, measured = null, measuring = false, bridge, active, onReopen, onReturn, fileTarget, onReturnToTable, catalog = null, checkAvailable = false, checker, onLedger, focusCheck = 0, onCheckFocused, viewSwitch }: { focusCheck?: number; onCheckFocused?: () => void; viewSwitch?: ReactNode; snapshot: WorkspaceSnapshot; summary: DownloadSummary; measured?: MeasuredLedger | null | 'pending'; measuring?: boolean; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void; fileTarget?: FileTarget | null; onReturnToTable?: () => void; catalog?: CatalogView | null; checkAvailable?: boolean; checker?: DownloadCheckController; onLedger?: (ledger: MeasuredLedger | null) => void }) {
+  // `measured` is 'pending' until the build's summary has been read, so the first page is read from the right ledger.
+  const wanted: Ledger | null = measured === 'pending' ? null : measured ? { ...measured, measured: true } : { ledgerId: summary.ledgerId, objectCount: summary.objectCount, measured: false };
+  const [ledger, setLedger] = useState<Ledger | null>(null);
   const [page, setPage] = useState<DownloadPage | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ code: string; message: string; retryable: boolean } | null>(null);
   const [cursor, setCursor] = useState<string | undefined>();
-  const [history, setHistory] = useState<(string | undefined)[]>([]);
   const heading = useRef<HTMLHeadingElement>(null), retry = useRef<HTMLButtonElement>(null);
   const focusAfterRead = useRef<HTMLElement | null>(null);
-  const alive = useRef(true), request = useRef(0), loading = useRef(false);
-  const latestCursor = useRef(cursor); latestCursor.current = cursor;
-  type Movement = 'initial' | 'next' | 'previous' | 'first';
-  const attempt = useRef<{ after: string | undefined; movement: Movement }>({ after: undefined, movement: 'initial' });
-  const context: DownloadReadParams = { productId: snapshot.build.productId, buildIdentity: snapshot.build.id, sourceRegion: snapshot.sourceReference.region, ledgerId: summary.ledgerId, limit: 50 };
-  const list = useListbox<DownloadObjectEntry>(page?.entries ?? [], entry => entry.id);
-  const covered = useCoveredSide();
+  const alive = useRef(true), request = useRef(0), loading = useRef(false), failedSwitch = useRef<string | null>(null);
+  const attempt = useRef<PageRequest | null>(null);
+  const list = useListbox<DownloadObjectEntry>(page?.entries ?? [], entry => entry.encodingKey);
+  const covered = useCoveredSide(), { compact } = useShell();
+  const shown = ledger ?? wanted;
+  const current = shown ?? { ledgerId: summary.ledgerId, objectCount: summary.objectCount, measured: false };
+  const outside = current.measured ? BigInt(current.objectCount) - BigInt(summary.objectCount) : 0n;
+  // The Check belongs to the App (D093): it keeps running when Files or the build is left, and shows in Downloads & activity.
+  const op = checker?.operation ?? null;
+  const ours = !!op && op.intent.ledgerId === current.ledgerId && op.intent.productId === snapshot.build.productId && op.intent.buildIdentity === snapshot.build.id && op.intent.sourceRegion === snapshot.sourceReference.region;
+  const runningOp = !!op && (op.status === 'pending' || op.status === 'stopping');
+  // Another build's Check, named by product and version; a build of the same version adds its region when that differs,
+  // and the first characters of its build configuration.
+  const otherBuild = (intent: NonNullable<typeof op>['intent']) => `${intent.productId} ${intent.buildVersion}${intent.buildVersion !== snapshot.build.version ? ''
+    : ` (${intent.sourceRegion !== snapshot.sourceReference.region ? `${intent.sourceRegion.toUpperCase()}, ` : ''}build config ${intent.buildConfig.slice(0, 8)})`}`;
+  const check: CheckState | null = !op ? null : !ours ? runningOp ? { status: 'elsewhere', taskKey: `downloadCheck:${op.id}`, build: otherBuild(op.intent) } : null
+    : runningOp ? { status: op.status === 'stopping' ? 'stopping' : 'running', taskKey: `downloadCheck:${op.id}`, completed: op.progress?.completed ?? null, total: op.progress?.total ?? null }
+    : op.status === 'succeeded' && op.result ? { status: 'done', result: op.result }
+    : op.status === 'canceled' ? { status: 'stopped' }
+    : op.error?.code === 'DOWNLOAD_CHECK_BUSY' ? { status: 'busy' }
+    : { status: 'failed', code: op.error?.code ?? 'ENGINE_UNAVAILABLE', message: op.error?.message ?? 'The check could not be completed.' };
   useLayoutEffect(() => {
     const previous = focusAfterRead.current;
     if (!previous || error) return;
@@ -31,43 +79,154 @@ export function DownloadObjects({ snapshot, summary, bridge, active, onReopen, o
     if (!heading.current?.closest('[hidden]') && (document.activeElement === document.body || document.activeElement === previous)) heading.current?.focus({ preventScroll: true });
   }, [page, error]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current++; }; }, []);
-  useEffect(() => { if (active) { heading.current?.focus({ preventScroll: true }); if (!page && !loading.current) void read(undefined, 'initial'); } }, [active]);
-  async function read(after: string | undefined, movement: Movement) {
+  // Opened from Build overview's Check line: focus goes to the Check (below), not the heading.
+  // The request is cleared by its owner once served (onCheckFocused), so a later return to this view focuses the heading.
+  const served = useRef(0);
+  useEffect(() => { if (active && !focusCheck) heading.current?.focus({ preventScroll: true }); }, [active]);
+  useEffect(() => { if (active && wanted && !page && !loading.current) void read({ ledger: wanted, movement: 'initial' }); }, [active, wanted?.ledgerId]);
+  useEffect(() => { onLedger?.(ledger?.measured ? { ledgerId: ledger.ledgerId, objectCount: ledger.objectCount } : null); }, [ledger?.ledgerId]);
+  // The measurement landed while these rows were shown: read the measured ledger from the first row on screen, so the page
+  // and the picked row stay where they were. Rows of the two ledgers are never mixed; the old page stays until the new one
+  // has been read and checked.
+  useEffect(() => {
+    if (!page || !ledger || !wanted?.measured || wanted.ledgerId === ledger.ledgerId || busy || loading.current || failedSwitch.current === wanted.ledgerId) return;
+    const first = page.entries[0]?.encodingKey;
+    void read({ ledger: wanted, movement: 'switch', ...(first ? { from: first } : {}) });
+  }, [page, ledger?.ledgerId, wanted?.ledgerId, busy]);
+  // A Check finished: the rows on screen are read again once no other read is running, so they carry its outcome; the page
+  // and the pick stay where they are. A page read meanwhile already brings it.
+  const refreshed = useRef<string | null>(null);
+  useEffect(() => {
+    if (check?.status !== 'done' || !page || !ledger || busy || loading.current) return;
+    const { ledgerId, checkedAt } = check.result;
+    if (ledger.ledgerId !== ledgerId || page.lastCheck?.checkedAt === checkedAt || refreshed.current === checkedAt) return;
+    refreshed.current = checkedAt;
+    void read({ ledger, movement: 'refresh', ...(cursor === undefined ? {} : { after: cursor }) });
+  }, [check?.status === 'done' ? check.result.checkedAt : null, page, busy]);
+  const paramsOf = (target: Ledger, limit = PAGE): DownloadReadParams => ({ productId: snapshot.build.productId, buildIdentity: snapshot.build.id, sourceRegion: snapshot.sourceReference.region, ledgerId: target.ledgerId, limit });
+  async function read(next: PageRequest) {
     if (loading.current) return;
-    attempt.current = { after, movement };
+    attempt.current = next;
     const generation = ++request.current;
     loading.current = true; setBusy(true);
-    const params = { ...context, ...(after === undefined ? {} : { after }) };
+    const params = { ...paramsOf(next.ledger), ...(next.after === undefined ? {} : { after: next.after }), ...(next.from === undefined ? {} : { from: next.from }) };
+    const picked = list.picked() ? list.selected?.entry : undefined;
     try {
       const reply = await bridge.download(params);
       if (!alive.current || generation !== request.current) return;
-      if (!reply.ok) { setError(reply.error); return; }
-      if (!downloadPageMatches(reply.value, params, summary)) { setError({ code: 'DOWNLOAD_CONTEXT_MISMATCH', message: 'This page belongs to a different ledger or assessment. Previous rows are preserved.', retryable: false }); return; }
+      if (!reply.ok) { if (next.movement === 'switch') failedSwitch.current = next.ledger.ledgerId; setError(reply.error); return; }
+      if (!downloadPageMatches(reply.value, params, { assessedAt: summary.assessedAt, objectCount: next.ledger.objectCount })) { if (next.movement === 'switch') failedSwitch.current = next.ledger.ledgerId; setError({ code: 'DOWNLOAD_CONTEXT_MISMATCH', message: 'This page belongs to a different ledger or assessment. Previous rows are preserved.', retryable: false }); return; }
       if (document.activeElement === retry.current) focusAfterRead.current = retry.current;
-      setPage(reply.value); setCursor(after); setError(null);
-      if (movement === 'next') setHistory(previous => [...previous.slice(-127), latestCursor.current]);
-      if (movement === 'previous') setHistory(previous => previous.slice(0, -1));
-      if (movement === 'first') setHistory([]);
+      const value = reply.value, start = value.entries.length ? (BigInt(value.entries[0].id) - 1n).toString() : next.from !== undefined ? value.totalCount : next.after ?? '0';
+      failedSwitch.current = null;
+      setPage(value); setLedger(next.ledger); setCursor(start === '0' ? undefined : start); setError(null);
+      // A row picked before the switch keeps its pick: read it again from the measured ledger when it is off this page.
+      if (next.movement === 'switch' && picked && !value.entries.some(entry => entry.encodingKey === picked.encodingKey)) {
+        const one = { ...paramsOf(next.ledger, 1), from: picked.encodingKey };
+        const again = await bridge.download(one).catch(() => null);
+        if (alive.current && generation === request.current && again?.ok && downloadPageMatches(again.value, one, { assessedAt: summary.assessedAt, objectCount: next.ledger.objectCount }) && again.value.entries[0]?.encodingKey === picked.encodingKey) list.replace(again.value.entries[0]);
+      }
     } catch { if (alive.current && generation === request.current) setError({ code: 'ENGINE_UNAVAILABLE', message: 'The saved download ledger could not be read. Previous rows are preserved.', retryable: true }); }
     finally { if (alive.current && generation === request.current) { loading.current = false; setBusy(false); } }
   }
-  const first = page?.entries.length ? BigInt(cursor ?? '0') + 1n : null;
+  const runCheck = () => { if (checker && current.measured) void checker.start({ productId: snapshot.build.productId, buildIdentity: snapshot.build.id, sourceRegion: snapshot.sourceReference.region, ledgerId: current.ledgerId, buildVersion: snapshot.build.version, buildConfig: snapshot.build.buildConfig, files: outside.toString() }); };
+  const stopCheck = () => { if (op && ours) checker?.stop(op.id); };
+  const first = page?.entries.length ? BigInt(page.entries[0].id) : null;
   const count = busy ? 'Reading the saved download ledger…' : page ? `${page.entries.length} encoded objects on this page · ${exactCount(page.totalCount)} total${page.entries.length ? ` · objects ${first}–${first! + BigInt(page.entries.length) - 1n}` : ''}` : 'No download-object page has been read yet.';
   const shortCount = !busy && page && page.entries.length ? `Objects ${first}–${first! + BigInt(page.entries.length) - 1n} of ${exactCount(page.totalCount)}` : count;
   const selected = list.selected;
+  const previousCursor = cursor === undefined ? undefined : BigInt(cursor) <= BigInt(PAGE) ? undefined : (BigInt(cursor) - BigInt(PAGE)).toString();
+  const measuredPage = !!page && page.ledgerId !== page.manifestLedgerId;
   // A followed FileDataID's notice sits in the list's scroll area above the note, so the two line up beside its scrollbar.
   const target = fileTarget && <FileTargetNotice target={fileTarget} ready={canShow(catalog)}/>;
-  return <FilesFrame fileTarget={fileTarget} onReturnToTable={onReturnToTable} active={active} pane={list.pane} onPane={list.setPane} headingRef={heading} sub="Download manifest · unique encoded objects · all published variants" covered={covered}
-    notices={<>{error && <div className="dh-notice dh-error" role="alert"><div className="dh-text"><strong>{error.code}</strong>{error.message} This view keeps the exact build, source, ledger and assessment. Reopen this build to obtain a new assessment.<div className="dh-row">{error.retryable && <button ref={retry} className="dh-btn dh-small" aria-disabled={busy} onClick={() => { if (!busy) void read(attempt.current.after, attempt.current.movement); }}>Retry page</button>}<button className="dh-btn dh-small" onClick={onReopen}>Reopen this build</button></div></div></div>}
+  // At 200% the notes above the rows leave no room for another, so the Check note moves to the Selected object pane, and the
+  // pane head, which has room beside the title then, points there (and says how a running Check is going).
+  const noteShown = measuredPage && outside > 0n;
+  const checkNote = (placement: 'list' | 'inspector') => noteShown && compact === (placement === 'inspector') &&
+    <CheckNote placement={placement} noteRef={placement === 'inspector' ? inspectorNote : listNote} outside={outside} state={check} lastCheck={page!.lastCheck} available={checkAvailable && !!checker?.available} onCheck={runCheck} onStop={stopCheck}/>;
+  // The pointer's own pane hides as it shows Selected object, so focus goes to the Check note there, never to the body:
+  // its Check or Stop button, or the note itself when it offers none.
+  const inspectorNote = useRef<HTMLDivElement>(null), listNote = useRef<HTMLDivElement>(null), focusNote = useRef(false);
+  // A Check line on Build overview asked for the Check: once its note is shown (at 200% in Selected object), focus it.
+  useLayoutEffect(() => {
+    if (!focusCheck || focusCheck === served.current || !active) return;
+    if (compact && list.pane !== 'inspector') { list.setPane('inspector'); return; }
+    const note = compact ? inspectorNote.current : listNote.current;
+    if (!note) return;
+    served.current = focusCheck; onCheckFocused?.();
+    (note.querySelector<HTMLElement>('button') ?? note).focus();
+  });
+  useLayoutEffect(() => {
+    if (!focusNote.current || list.pane !== 'inspector' || !inspectorNote.current) return;
+    focusNote.current = false;
+    (inspectorNote.current.querySelector<HTMLElement>('button') ?? inspectorNote.current).focus({ preventScroll: false });
+  });
+  const pointer = noteShown && compact && <span className="dh-check-pointer"><strong className="dh-warn-t">{exactCount(outside.toString())} not checked at Open</strong>
+    {check?.status === 'running' && check.completed !== null && check.total !== null ? <> · Checking {exactCount(String(check.completed))} of {exactCount(String(check.total))}…</> : null}
+    {' · '}<button className="dh-linkbtn" onClick={() => { focusNote.current = true; list.setPane('inspector'); }}>{check?.status === 'running' || check?.status === 'stopping' ? 'Check in Selected object' : 'Check them in Selected object'}</button></span>;
+  const sub = current.measured ? 'Download manifest and every file ROOT lists · unique encoded objects · all published variants' : `Download manifest · unique encoded objects · all published variants${measuring ? ' · files outside it are being measured' : ''}`;
+  const selectedState = selected ? localState(selected.entry) : null;
+  return <FilesFrame fileTarget={fileTarget} onReturnToTable={onReturnToTable} active={active} pane={list.pane} onPane={list.setPane} headingRef={heading} sub={sub} covered={covered}
+    head={<><h1 ref={heading} id="files-heading" tabIndex={-1}>Files</h1>{viewSwitch}<span className="dh-sub">{sub}</span>{pointer}</>}
+    notices={<>{error && <div className="dh-notice dh-error" role="alert"><div className="dh-text"><strong>{error.code}</strong>{error.message} This view keeps the exact build, source, ledger and assessment. Reopen this build to obtain a new assessment.<div className="dh-row">{error.retryable && <button ref={retry} className="dh-btn dh-small" aria-disabled={busy} onClick={() => { if (!busy && attempt.current) { failedSwitch.current = null; void read(attempt.current); } }}>Retry page</button>}<button className="dh-btn dh-small" onClick={onReopen}>Reopen this build</button></div></div></div>}
 </>}
-    list={page && page.entries.length > 0 ? <div className="dh-list-scroll" aria-busy={busy}>{target}<CatalogNotPrepared withObjects catalog={catalog} onReopen={onReopen}/><div className="dh-ocols dh-fthead" aria-hidden="true"><span>Object</span><span>Encoding key (EKey)</span><span>Encoded size</span><span>Local at assessment</span></div>
-      <div {...list.props} aria-label={`Download objects, one row per encoding key, assessed ${summary.assessedAt}`}>{page.entries.map((entry, index) => <div key={entry.id} {...list.option(index)} className={`dh-ocols${list.option(index).className}`}><span className="dh-fid">Object {entry.id}</span><span className="dh-mono">{entry.encodingKey}</span><span>{readableBytes(entry.encodedBytes)}</span><span>{entry.verifiedAtAssessment ? <span className="dh-ok">Verified locally</span> : <span className="dh-dim">Not verified locally</span>}</span></div>)}</div></div>
-      : <div className="dh-pane-scroll">{target}<CatalogNotPrepared withObjects catalog={catalog} onReopen={onReopen}/><div className="dh-local-wait"><div className="dh-state-box dh-plain" role="status"><strong>{busy ? 'Reading the saved download ledger…' : page ? page.totalCount === '0' ? 'No encoded objects' : 'No more encoded objects' : 'Download objects not read yet'}</strong><p>{page ? page.totalCount === '0' ? 'The published manifest declares zero encoded objects.' : 'No more encoded objects follow this cursor.' : 'Reads at most 50 unique encoded objects per page from the saved assessment.'}</p></div></div></div>}
-    foot={<>{onReturn && <ReturnHome onReturn={onReturn}/>}<span role="status" aria-live="polite"><span className="dh-note-long">{count}</span><span className="dh-note-inline">{shortCount}</span></span>{catalog && <CatalogReady catalog={catalog}/>}<span className="dh-spacer"/><CatalogPageControls busy={busy} canFirst={cursor !== undefined} canPrevious={history.length > 0} canNext={!!page?.nextCursor} onFirst={() => void read(undefined, 'first')} onPrevious={() => void read(history.at(-1), 'previous')} onNext={() => { if (page?.nextCursor) void read(page.nextCursor, 'next'); }}/></>}
-    inspector={selected ? <><div className="dh-insp-head"><div className="dh-label">Object inspector</div><h2 id="files-inspector-heading" className="dh-selectable">Encoded object {selected.entry.id}</h2><p>{selected.onPage ? 'Download manifest · encoded object' : 'Outside the current page · same saved assessment'}</p></div>
-      <div className="dh-insp-body"><dl className="dh-facts"><dt>Encoding key</dt><dd className="dh-mono dh-selectable">{selected.entry.encodingKey}</dd><dt>Encoded length</dt><dd>{exactBytes(selected.entry.encodedBytes)}</dd><dt>Local object</dt><dd>{selected.entry.verifiedAtAssessment ? <><span className="dh-ok">Verified locally</span> at assessment</> : 'Not verified locally at assessment'}</dd><dt>Assessed</dt><dd>{new Date(summary.assessedAt).toLocaleString()}</dd><dt>Download ledger</dt><dd className="dh-mono dh-selectable">{summary.ledgerId}</dd><dt>Scope</dt><dd>All published variants</dd><dt>Locale / platform</dt><dd>Not selected</dd></dl>
-        <p className="dh-tiny">Encoded objects are not filenames, ROOT memberships or installed files. Not verified locally is not evidence that an object is unavailable upstream. No global search, sorting, payload download or upstream availability check is performed.</p></div></>
-      : <><div className="dh-insp-head"><div className="dh-label">Object inspector</div><h2 id="files-inspector-heading">No object selected</h2></div><div className="dh-insp-body"><p className="dh-reason" style={{ fontSize: 'var(--fs-m)' }}>Choose a row. Each page reads at most 50 unique encoded objects from the saved assessment.</p></div></>}/>;
+    list={page && page.entries.length > 0 ? <div className="dh-list-scroll" aria-busy={busy}>{target}<CatalogNotPrepared withObjects catalog={catalog} onReopen={onReopen}/>{checkNote('list')}<div className="dh-ocols dh-fthead" aria-hidden="true"><span>Object</span><span>Encoding key (EKey)</span><span>Encoded size</span><span>{measuredPage ? 'Local status' : 'Local at assessment'}</span></div>
+      <div {...list.props} aria-label={`Download objects, one row per encoding key, assessed ${summary.assessedAt}`}>{page.entries.map((entry, index) => { const state = localState(entry); return <div key={entry.encodingKey} {...list.option(index)} className={`dh-ocols${list.option(index).className}`}><span className="dh-fid">Object {entry.id}</span><span className="dh-mono">{entry.encodingKey}</span><span>{readableBytes(entry.encodedBytes)}</span><span className="dh-wrap dh-ostate"><span className={state.tone}>{state.label}</span></span></div>; })}</div></div>
+      : <div className="dh-pane-scroll">{target}<CatalogNotPrepared withObjects catalog={catalog} onReopen={onReopen}/>{checkNote('list')}<div className="dh-local-wait"><div className="dh-state-box dh-plain" role="status"><strong>{busy || !page && !wanted ? 'Reading the saved download ledger…' : page ? page.totalCount === '0' ? 'No encoded objects' : 'No more encoded objects' : 'Download objects not read yet'}</strong><p>{page ? page.totalCount === '0' ? 'The published manifest declares zero encoded objects.' : 'No more encoded objects follow this cursor.' : `Reads at most ${PAGE} unique encoded objects per page from the saved assessment.`}</p></div></div></div>}
+    foot={<>{onReturn && <ReturnHome onReturn={onReturn}/>}<span role="status" aria-live="polite"><span className="dh-note-long">{count}</span><span className="dh-note-inline">{shortCount}</span></span>{catalog && <CatalogReady catalog={catalog}/>}<span className="dh-spacer"/><CatalogPageControls busy={busy} canFirst={cursor !== undefined} canPrevious={cursor !== undefined} canNext={!!page?.nextCursor} onFirst={() => { if (shown) void read({ ledger: shown, movement: 'first' }); }} onPrevious={() => { if (shown) void read({ ledger: shown, movement: 'previous', ...(previousCursor === undefined ? {} : { after: previousCursor }) }); }} onNext={() => { if (page?.nextCursor && shown) void read({ ledger: shown, movement: 'next', after: page.nextCursor }); }}/></>}
+    inspector={selected && selectedState ? <><div className="dh-insp-head"><div className="dh-label">Object inspector</div><h2 id="files-inspector-heading" className="dh-selectable">Encoded object {selected.entry.id}</h2><p>{!selected.onPage ? 'Outside the current page · same saved assessment' : selected.entry.checkedAtOpen ? 'Download manifest · encoded object' : 'Listed by ROOT outside the download manifest · encoded object'}</p></div>
+      <div className="dh-insp-body">{checkNote('inspector')}<dl className="dh-facts"><dt>Encoding key</dt><dd className="dh-mono dh-selectable">{selected.entry.encodingKey}</dd><dt>Encoded length</dt><dd>{exactBytes(selected.entry.encodedBytes)}</dd><dt>Local object</dt><dd><span className={selectedState.tone}>{selectedState.label}</span>{selectedState.explanation}</dd><dt>Assessed</dt><dd>{new Date(summary.assessedAt).toLocaleString()}</dd>{!selected.entry.checkedAtOpen && <><dt>Checked</dt><dd>{page?.lastCheck ? new Date(page.lastCheck.checkedAt).toLocaleString() : 'Not yet'}</dd></>}<dt>Download ledger</dt><dd className="dh-mono dh-selectable">{current.ledgerId}</dd>{current.measured && <><dt>Manifest ledger</dt><dd className="dh-mono dh-selectable">{summary.ledgerId}</dd></>}<dt>Scope</dt><dd>{current.measured ? 'Download manifest and every file ROOT lists · all published variants' : 'All published variants'}</dd><dt>Locale / platform</dt><dd>Not selected</dd></dl>
+        <p className="dh-tiny">Encoded objects are not filenames, ROOT memberships or installed files. Not verified locally is not evidence that an object is unavailable upstream.{current.measured ? ' Open assessed the download manifest only; a Check verifies the stored copies of the files ROOT lists outside it.' : ''} No global search, sorting, payload download or upstream availability check is performed.</p></div></>
+      : <><div className="dh-insp-head"><div className="dh-label">Object inspector</div><h2 id="files-inspector-heading">No object selected</h2></div><div className="dh-insp-body">{checkNote('inspector')}<p className="dh-reason" style={{ fontSize: 'var(--fs-m)' }}>Choose a row. Each page reads at most {PAGE} unique encoded objects from the saved assessment.</p></div></>}/>;
+}
+
+/**
+ * The files a measured ledger adds to the manifest: how many were not checked at Open, what the latest Check found (its
+ * counts are saved with it), and Check or Stop. One button changes between the two, so focus stays on it through the whole
+ * Check. While it runs the note turns mint and points to its task in Downloads & activity, as file list preparation does.
+ */
+function CheckNote({ placement, noteRef, outside, state, lastCheck, available, onCheck, onStop }: { placement: 'list' | 'inspector'; noteRef?: RefObject<HTMLDivElement | null>; outside: bigint; state: CheckState | null; lastCheck: DownloadCheckSummary | null; available: boolean; onCheck: () => void; onStop: () => void }) {
+  const count = exactCount(outside.toString()), files = outside === 1n ? 'file' : 'files';
+  const active = state?.status === 'running' || state?.status === 'stopping';
+  const done = state?.status === 'done' ? state.result : null;
+  const progress = active && state.completed !== null && state.total !== null ? `Checking ${exactCount(String(state.completed))} of ${exactCount(String(state.total))} ${files}…` : active ? 'Starting the check…' : '';
+  const earlier = lastCheck ? <><span className="dh-note-long">Last checked {new Date(lastCheck.checkedAt).toLocaleString()}: </span><span className="dh-note-inline">Last checked: </span>{outcomes(lastCheck)}</> : null;
+  // At 200% the outcome drops its date, so it and the button keep to the title's line where they fit.
+  const outcome = state?.status === 'stopping' ? 'Stopping the check…'
+    : done ? <><span className="dh-note-long">Checked {new Date(done.checkedAt).toLocaleString()}: </span><span className="dh-note-inline">Checked: </span>{outcomes(done)}</>
+    : state?.status === 'stopped' ? <>Check stopped. Nothing new was recorded{lastCheck ? '; the earlier check stays' : ''}.</>
+    : state?.status === 'busy' ? 'Another check is still finishing; try again shortly.'
+    : state?.status === 'elsewhere' ? `A check of ${state.build} is running; one runs at a time.`
+    : state?.status === 'failed' ? `The check failed: ${state.message} (${state.code})`
+    : active ? '' : earlier ?? '';
+  const title = useId();
+  // When a Check ends, its Stop or View task button goes. If focus was on it, it moves to the button that took its place
+  // (Check), or to the note itself, never to the body. Focus the reader moved elsewhere stays there.
+  const own = useRef<HTMLDivElement | null>(null), inside = useRef(false);
+  useLayoutEffect(() => {
+    const focused = document.activeElement;
+    if (!inside.current || !own.current || focused && focused !== document.body) return;
+    (own.current.querySelector<HTMLElement>('button') ?? own.current).focus({ preventScroll: true });
+  });
+  const onFocus = () => { inside.current = true; };
+  const onBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget as Node | null, left = event.target as Node;
+    if (next) { inside.current = !!own.current?.contains(next); return; }
+    // No new target: the button was removed (restored above), or focus left the window.
+    queueMicrotask(() => { if (left.isConnected) inside.current = false; });
+  };
+  const setBox = (element: HTMLDivElement | null) => { own.current = element; if (noteRef) (noteRef as { current: HTMLDivElement | null }).current = element; };
+  const taskKey = state?.status === 'running' || state?.status === 'stopping' || state?.status === 'elsewhere' ? state.taskKey : null;
+  const box = <div ref={setBox} onFocus={onFocus} onBlur={onBlur} tabIndex={-1} className={`dh-state-box dh-inline-head${active ? '' : ' dh-plain'}`} role="group" aria-labelledby={title}>
+    <strong id={title}>{count} {files} not checked at Open</strong>
+    <p className={placement === 'list' ? 'dh-note-long dh-dim' : 'dh-dim'}>ROOT lists {outside === 1n ? 'it' : 'them'} outside the download manifest, and Open assessed only the manifest. Check hashes each stored copy against its receipt, in the background; nothing is downloaded.{active ? ' Progress is in Downloads & activity.' : ''}</p>
+    {progress && <p className="dh-check-progress">{progress}</p>}
+    {(active || state?.status === 'stopped') && earlier && <p className="dh-dim dh-check-earlier">{earlier}</p>}
+    <p role="status" aria-live="polite" className={state?.status === 'failed' ? 'dh-bad-t' : undefined}>{outcome}</p>
+    {(available || taskKey) && <div className="dh-row">{available && state?.status !== 'elsewhere' && <button className="dh-btn dh-small" aria-disabled={state?.status === 'stopping'} onClick={() => { if (state?.status === 'running') onStop(); else if (!active) onCheck(); }}>{active ? 'Stop checking' : lastCheck || done ? `Check ${count} ${files} again` : `Check ${count} ${files}`}</button>}
+      {taskKey && <ActivityLink taskKey={taskKey}/>}</div>}
+  </div>;
+  return placement === 'list' ? <div className="dh-local-wait dh-catalog-missing dh-check-note">{box}</div> : <div className="dh-check-note dh-check-inspector">{box}</div>;
 }
 
 // Files with no readable list: no download ledger and no prepared catalog. A calm capability limit, with no producer to offer.
@@ -235,6 +394,8 @@ export function CatalogNotPrepared({ withObjects = false, problem, catalog = nul
         {staleRetry}{catalog!.taskKey && <span className="dh-note-long"><ActivityLink taskKey={catalog!.taskKey}/></span>}</>)}</>);
   }
   // At 200% Show file list sits here beside the title, so the footer keeps one row; at 100% it is in the footer.
+  // A reader who switched to the download objects on purpose has the Files view switch; no second offer of the list.
+  if (status?.state === 'ready' && !catalog?.onShow) return null;
   if (status?.state === 'ready')
     return frame('File list ready', '', <p>{staleMark}<span className="dh-dim dh-note-long">Show it from the footer below, one row per file.</span>
       {catalog?.onShow && <button className="dh-btn dh-small dh-compact-only" onClick={catalog.onShow}>Show file list</button>}{staleRetry}</p>);

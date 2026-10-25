@@ -24,7 +24,7 @@ import path from 'node:path';
 import { EngineClient, EngineFailure } from './engine-client';
 import { validProduct, validRead, validReadAll, validRequestId, validOpen } from '../shared/bridge';
 import { validTablesCatalog, validTableDefinition } from '../shared/tables';
-import { validDownloadRead } from '../shared/download';
+import { validDownloadRead, validDownloadCheck } from '../shared/download';
 import { validSummariesParams, validChangesParams } from '../shared/download-summary';
 import { validInventoryRead, validInventoryFiles, validInventoryFile, validFileCatalog, validFileCatalogSet } from '../shared/inventory';
 import type { BridgeReply } from '../shared/bridge';
@@ -120,6 +120,7 @@ function registerBridge(): void {
       else if (method === 'tables.catalog') { if (!validTablesCatalog(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded definition catalogue query.'); }
       else if (method === 'tables.definition') { if (!validTableDefinition(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact provider table identity.'); }
       else if (method === 'download.read') { if (!validDownloadRead(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded download-object query.'); }
+      else if (method === 'download.check') { if (!validDownloadCheck(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact measured download ledger.'); }
       else if (method === 'download.summaries') { if (!validSummariesParams(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one to 100 distinct exact builds.'); }
       else if (method === 'download.changes') { if (!validChangesParams(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Name the summary revision of the last read.'); }
       else if (method === 'inventory.read') { if (!validInventoryRead(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded inventory query.'); }

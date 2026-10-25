@@ -18,8 +18,17 @@ internal sealed record DownloadScopeBinding(string RootSha256, string EncodingSh
     internal static readonly DownloadScopeBinding ManifestOnly = new("", "", DiscoveryCatalog.DownloadScope, 0);
 }
 
+/// <summary>
+/// One admitted manifest assessment. <c>Measured</c> is the ledger the request named when it is the measured ledger that
+/// stands for this manifest (D066), with its latest completed Check, if any (D093); null for the manifest itself.
+/// </summary>
 internal sealed record StoredDownloadAdmission(DownloadLedgerArtifact Artifact,
-    IReadOnlyList<string> VerifiedKeys, string AssessedAt, IReadOnlyDictionary<string, long> VerifiedLengths);
+    IReadOnlyList<string> VerifiedKeys, string AssessedAt, IReadOnlyDictionary<string, long> VerifiedLengths,
+    DownloadLedgerArtifact? Measured = null, DownloadCheckRecord? Check = null)
+{
+    /// <summary>The ledger whose members the page lists.</summary>
+    internal DownloadLedgerArtifact Listed => Measured ?? Artifact;
+}
 
 public sealed partial class DiscoveryCatalog
 {
@@ -233,24 +242,37 @@ public sealed partial class DiscoveryCatalog
     internal Task<StoredDownloadAdmission> ReadDownloadAdmissionAsync(DownloadReadRequest request, CancellationToken token) => Schedule(() =>
     {
         WorkspaceService.Validate(new(request.ProductId, request.BuildIdentity, request.SourceRegion));
-        if (!DownloadHash(request.LedgerId, 64) || request.Limit is < 1 or > 100 || request.After is not null && !CanonicalOrdinal(request.After))
+        if (!DownloadHash(request.LedgerId, 64) || request.Limit is < 1 or > 100 || request.After is not null && !CanonicalOrdinal(request.After) ||
+            request.From is not null && (request.After is not null || !DownloadHash(request.From, 32)))
             throw new DiscoveryException("INVALID_REQUEST", "The download ledger identity or page bounds are invalid.");
+        var saved = ReadDownloadAdmission(request.ProductId, request.BuildIdentity, request.SourceRegion, request.LedgerId, token);
+        if (request.After is not null && DownloadNumber(request.After) > saved.Listed.ObjectCount)
+            throw new DiscoveryException("INVALID_CURSOR", "The download cursor exceeds its immutable ledger.");
+        return saved;
+    }, token);
+
+    /// <summary>
+    /// The newest admission of this exact build and region whose manifest is <paramref name="ledger"/>, or whose manifest
+    /// the measured ledger <paramref name="ledger"/> stands for (D066). The assessment is always the manifest's own.
+    /// </summary>
+    private StoredDownloadAdmission ReadDownloadAdmission(string product, string build, string region, string ledger, CancellationToken token)
+    {
         using var command = Command("""
-            SELECT d.verified_keys,d.assessed_at,d.summary,length(d.verified_keys),length(d.summary)
+            SELECT d.verified_keys,d.assessed_at,d.summary,length(d.verified_keys),length(d.summary),d.artifact_sha256
             FROM download_admissions d JOIN workspace_admissions a ON a.id=d.admission_id
-            WHERE a.product=$p AND a.build_id=$b AND a.region=$r AND a.profile=$profile AND d.artifact_sha256=$h
+            WHERE a.product=$p AND a.build_id=$b AND a.region=$r AND a.profile=$profile AND (d.artifact_sha256=$h OR d.artifact_sha256 IN
+                (SELECT manifest FROM root_scopes WHERE product=$p AND build_id=$b AND state='measured' AND ledger=$h))
             ORDER BY a.id DESC LIMIT 1
-            """, null, ("$p", request.ProductId), ("$b", request.BuildIdentity), ("$r", request.SourceRegion),
-            ("$profile", DownloadProfile), ("$h", request.LedgerId));
-        string keysJson, assessedAt, summaryJson;
+            """, null, ("$p", product), ("$b", build), ("$r", region), ("$profile", DownloadProfile), ("$h", ledger));
+        string keysJson, assessedAt, summaryJson, manifest;
         using (var reader = command.ExecuteReader())
         {
             if (!reader.Read()) throw new DiscoveryException("DOWNLOAD_NOT_READY", "This exact build has no admitted scoped download ledger.");
             if (reader.GetInt64(3) > 400_000 || reader.IsDBNull(4) || reader.GetInt64(4) > 8192)
                 throw DownloadIntegrity("A saved download assessment exceeds its bounded projection.");
-            keysJson = reader.GetString(0); assessedAt = reader.GetString(1); summaryJson = reader.GetString(2);
+            keysJson = reader.GetString(0); assessedAt = reader.GetString(1); summaryJson = reader.GetString(2); manifest = reader.GetString(5);
         }
-        var artifact = ReadDownloadArtifact(request.LedgerId, null) ?? throw DownloadIntegrity("An admitted download ledger descriptor is missing.");
+        var artifact = ReadDownloadArtifact(manifest, null) ?? throw DownloadIntegrity("An admitted download ledger descriptor is missing.");
         var keys = Deserialize<string[]>(keysJson); var summary = Deserialize<DownloadSummary>(summaryJson);
         if (keys.Length > MaxDownloadAssessmentKeys || keys.Length > artifact.ObjectCount ||
             keys.Distinct(StringComparer.Ordinal).Count() != keys.Length || keys.Any(key => !DownloadHash(key, 32)) || !DownloadUtc(assessedAt) ||
@@ -261,10 +283,17 @@ public sealed partial class DiscoveryCatalog
         var assessment = DownloadAssessment(keys, null, token);
         if (DownloadNumber(summary.VerifiedEncodedBytes) != assessment.Bytes)
             throw DownloadIntegrity("A download assessment differs from its immutable object receipt lengths.");
-        if (request.After is not null && DownloadNumber(request.After) > artifact.ObjectCount)
-            throw new DiscoveryException("INVALID_CURSOR", "The download cursor exceeds its immutable ledger.");
-        return new StoredDownloadAdmission(artifact, Array.AsReadOnly(keys), assessedAt, assessment.Lengths);
-    }, token);
+        DownloadLedgerArtifact? measured = null; DownloadCheckRecord? check = null;
+        if (manifest != ledger)
+        {
+            // The measured ledger is the manifest plus the files ROOT lists outside it, so it is strictly larger.
+            measured = ReadDownloadArtifact(ledger, null) ?? throw DownloadIntegrity("A measured download ledger descriptor is missing.");
+            if (measured.ObjectCount <= artifact.ObjectCount || measured.TotalEncodedBytes < artifact.TotalEncodedBytes)
+                throw DownloadIntegrity("A measured download ledger does not extend its admitted manifest.");
+            check = ReadDownloadCheck(ledger, manifest, null);
+        }
+        return new StoredDownloadAdmission(artifact, Array.AsReadOnly(keys), assessedAt, assessment.Lengths, measured, check);
+    }
 
     // Kept as an internal compatibility name; these are physical encoded objects, not invented metadata roles.
     internal Task<IReadOnlyList<RetainedEncodedObject>> ReadRetainedMetadataAsync(CancellationToken token) =>

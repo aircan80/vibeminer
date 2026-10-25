@@ -23,7 +23,7 @@ export function parseFileSearch(text: string): Search | 'invalid' {
   return 'invalid';
 }
 // Files (docs/design/desktop-home, #20): one row per ROOT FileDataID or install name, filters, and an inspector with every membership.
-export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileTarget, onReturnToTable }: { source: FilesSource; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void; fileTarget?: FileTarget | null; onReturnToTable?: () => void }) {
+export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileTarget, onReturnToTable, viewSwitch }: { viewSwitch?: ReactNode; source: FilesSource; bridge: DiscoveryBridge; active: boolean; onReopen: () => void; onReturn?: () => void; fileTarget?: FileTarget | null; onReturnToTable?: () => void }) {
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState<Search>(null);
   const [invalid, setInvalid] = useState(false);
@@ -105,7 +105,7 @@ export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileT
     ? `${page.entries.length} ${shownNarrowed ? 'matching ' : ''}files on this page${page.totalCount !== null ? ` · ${exactCount(page.totalCount)} files in this ${shownFamily === 'all' ? 'catalog' : shownFamily === 'root' ? 'ROOT' : 'install manifest'}` : ''}${page.scanLimited && page.nextCursor ? ` · searched through ${position(page.nextCursor)}, more may match` : ''}`
     : page.scanLimited && page.nextCursor ? `No match yet · searched through ${position(page.nextCursor)}` : '0 files';
   const head = <>
-    <h1 ref={heading} id="files-heading" tabIndex={-1}>Files</h1>
+    <h1 ref={heading} id="files-heading" tabIndex={-1}>Files</h1>{viewSwitch && <>{viewSwitch}<span className="dh-head-break" aria-hidden="true"/></>}
     <input ref={searchInput} className="dh-control dh-fsearch" type="search" value={draft} placeholder="FileDataID or CKey" aria-label="Search by FileDataID or content key" aria-keyshortcuts="Control+F" aria-invalid={invalid || undefined} aria-describedby={invalid ? 'files-search-help' : undefined}
       onChange={event => { setDraft(event.target.value); if (invalid) setInvalid(false); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); applySearch(); } }} onBlur={applySearch}/>
     <button ref={filtersButton} className="dh-btn dh-fbtn" aria-expanded={filtersOpen} aria-controls="file-filters" onClick={() => setFiltersOpen(open => !open)}>Filters{activeCount > 0 && <><span className="dh-visually-hidden">, {activeCount} active</span><span className="dh-fcount" aria-hidden="true">{activeCount}</span></>}<span className="dh-chev" aria-hidden="true">{filtersOpen ? '▴' : '▾'}</span></button>
@@ -233,8 +233,13 @@ export function useListbox<T>(entries: readonly T[], key: (entry: T) => string) 
   const optionId = (i: number) => `${id}-option-${i}`;
   function select(i: number) { const entry = entries[Math.max(0, Math.min(entries.length - 1, i))]; if (!entry) return; const next = entries.indexOf(entry); latest.current = entry; picked.current = true; setSelected(entry); requestAnimationFrame(() => document.getElementById(optionId(next))?.scrollIntoView({ block: 'nearest' })); }
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) { const target = ({ ArrowDown: active + 1, ArrowUp: active - 1, Home: 0, End: entries.length - 1, PageDown: active + 10, PageUp: active - 10 } as Record<string, number>)[event.key]; if (target === undefined || !entries.length) return; event.preventDefault(); select(target); }
-  return { pane, setPane, selected: selected === null ? null : { entry: selected, onPage: index >= 0 }, // For a new result set: keep the row the user picked, otherwise follow the new first row.
+  // The same key on a newer page is the newer row (fresh ordinal and flags); a pick off the page stays as it was read.
+  return { pane, setPane, selected: selected === null ? null : { entry: index >= 0 ? entries[index] : selected, onPage: index >= 0 }, // For a new result set: keep the row the user picked, otherwise follow the new first row.
     refresh: () => { if (picked.current) return; latest.current = null; setSelected(null); },
+    /** A newer read of the picked row, e.g. from another ledger: it replaces the pick only while that row is still picked. */
+    replace: (entry: T) => { if (picked.current && latest.current !== null && key(latest.current) === key(entry)) { latest.current = entry; setSelected(entry); } },
+    /** Whether the user picked the selected row, rather than it following the first row of the page. */
+    picked: () => picked.current,
     /** A new destination, such as a FileDataID followed from Tables: forget the earlier pick too. */
     reset: () => { picked.current = false; latest.current = null; setSelected(null); },
     props: { role: 'listbox', tabIndex: 0, 'aria-activedescendant': entries.length ? optionId(active) : undefined, onKeyDown },

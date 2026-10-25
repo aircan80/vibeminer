@@ -1,0 +1,13 @@
+{
+  "productId": "wow",
+  "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "sourceRegion": "us",
+  "ledgerId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "manifestLedgerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "checkedAt": "2026-10-19T08:30:00.0000000+00:00",
+  "checkedObjects": "2",
+  "verifiedObjects": "0",
+  "notStoredObjects": "1",
+  "missingObjects": "1",
+  "corruptObjects": "0"
+}

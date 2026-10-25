@@ -30,7 +30,8 @@
         "unresolvableRootContent": "10",
         "scopeState": "measured",
         "scopeProblem": null,
-        "changesPending": false
+        "changesPending": false,
+        "manifestLedgerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       }
     },
     {
@@ -62,7 +63,8 @@
         "unresolvableRootContent": "0",
         "scopeState": "measuring",
         "scopeProblem": null,
-        "changesPending": true
+        "changesPending": true,
+        "manifestLedgerId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       }
     },
     {
@@ -102,7 +104,8 @@
           "message": "This build's file list could not be read, so the figure covers its download manifest only.",
           "retryable": false
         },
-        "changesPending": false
+        "changesPending": false,
+        "manifestLedgerId": "abababababababababababababababababababababababababababababababab"
       }
     },
     {

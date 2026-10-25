@@ -39,7 +39,7 @@ it('shows the exact build, source and locale in the status bar and no activity e
 });
 
 it('moves the Files selection with arrow keys from one listbox tab stop and keeps it in the inspector across pages',async()=>{
- const page=(after?:string):DownloadPage=>{const start=Number(after??0);return {productId:w.build.productId,buildIdentity:w.build.id,sourceRegion:w.sourceReference.region,ledgerId:w.download!.ledgerId,assessedAt:w.download!.assessedAt,entries:Array.from({length:start?2:3},(_,i)=>({id:String(start+i+1),encodingKey:String(start+i+1).padStart(32,'0'),encodedBytes:'100',verifiedAtAssessment:i===0})),totalCount:'5',nextCursor:start?null:'3'};};
+ const page=(after?:string):DownloadPage=>{const start=Number(after??0);return {productId:w.build.productId,buildIdentity:w.build.id,sourceRegion:w.sourceReference.region,ledgerId:w.download!.ledgerId,assessedAt:w.download!.assessedAt,entries:Array.from({length:start?2:3},(_,i)=>({id:String(start+i+1),encodingKey:String(start+i+1).padStart(32,'0'),encodedBytes:'100',verifiedAtAssessment:i===0,checkedAtOpen:true,check:null})),totalCount:'5',nextCursor:start?null:'3',manifestLedgerId:w.download!.ledgerId,lastCheck:null};};
  const bridge={download:vi.fn(async(p:{after?:string})=>({ok:true,value:page(p.after)}))} as unknown as DiscoveryBridge;
  Element.prototype.scrollIntoView=vi.fn();
  render(<DownloadObjects snapshot={w} summary={{...w.download!,objectCount:'5'}} bridge={bridge} active onReopen={()=>{}}/>);

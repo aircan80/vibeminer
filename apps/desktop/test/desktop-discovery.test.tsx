@@ -39,7 +39,9 @@ async function ready(bridge = bridgeMock()) { render(<App bridge={bridge}/>); aw
 const authored = authoredSummaries as DownloadSummaries;
 /** A current running figure: 4 of 10 objects, 410 of 1000 bytes. */
 function stored(patch: Partial<BuildStoredCoverage> = {}): BuildStoredCoverage {
-  return { ...structuredClone(authored.summaries[0].download!), objectCount: '10', totalEncodedBytes: '1000', storedObjects: '4', storedBytes: '410', countState: 'current', countProblem: null, running: false, ...patch };
+  const value: BuildStoredCoverage = { ...structuredClone(authored.summaries[0].download!), objectCount: '10', totalEncodedBytes: '1000', storedObjects: '4', storedBytes: '410', countState: 'current', countProblem: null, running: false, ...patch };
+  // Until the file list is measured, the figure stands on the manifest ledger itself (D093).
+  return value.scopeState === 'measured' || patch.manifestLedgerId ? value : { ...value, manifestLedgerId: value.ledgerId };
 }
 const measured = (build: { productId: string; id: string }, download: BuildStoredCoverage): BuildDownloadSummary => ({ productId: build.productId, buildIdentity: build.id, state: 'measured', download });
 const revision = (count: number) => `${'0123456789abcdef'}-${count}`;

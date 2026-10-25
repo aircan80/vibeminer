@@ -31,7 +31,7 @@ internal static class DownloadSummaryWire
             },
             d.DownloadAll, d.Running, d.SourceRegions, unresolvableRootContent = N(d.UnresolvableRootContent),
             scopeState = d.ScopeState is "measuring" or "measured" or "manifestOnly" ? d.ScopeState : throw Invalid(), scopeProblem = d.ScopeProblem,
-            d.ChangesPending
+            d.ChangesPending, d.ManifestLedgerId
         } : null
     };
 

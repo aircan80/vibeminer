@@ -245,6 +245,19 @@ test('download-size Home separates measured DL scope from unavailable research c
   assert.equal(validator('DownloadPage')({ ...page, entries: Array(101).fill(page.entries[0]) }), false);
   assert.equal(validator('DownloadPage')({ ...page, entries: [{ ...page.entries[0], id: '0' }] }), false);
   validate('EngineRequest', { protocolVersion: 1, id: 'download', method: 'download.read', params: {} });
+  // D093: every row says whether Open assessed it, and only a known outcome or null is a Check outcome.
+  for (const patch of [{ checkedAtOpen: undefined }, { check: 'stale' }, { check: undefined }])
+    assert.equal(validator('DownloadObjectEntry')({ ...page.entries[2], ...patch }), false, JSON.stringify(patch));
+  for (const patch of [{ manifestLedgerId: 'short' }, { lastCheck: { ...page.lastCheck, checkedAt: 'yesterday' } }, { manifestLedgerId: undefined }, { lastCheck: undefined }, { lastCheck: { ...page.lastCheck, missingObjects: 1 } }, { lastCheck: { checkedAt: page.lastCheck.checkedAt } }])
+    assert.equal(validator('DownloadPage')({ ...page, ...patch }), false, JSON.stringify(patch));
+  const check = await load('download-check');
+  validate('DownloadCheckResult', check);
+  for (const patch of [{ checkedObjects: 2 }, { manifestLedgerId: undefined }, { checkedAt: null }, { extra: true }])
+    assert.equal(validator('DownloadCheckResult')({ ...check, ...patch }), false, JSON.stringify(patch));
+  const checkParams = { productId: check.productId, buildIdentity: check.buildIdentity, sourceRegion: check.sourceRegion, ledgerId: check.ledgerId };
+  validate('EngineRequest', { protocolVersion: 1, id: 'check', method: 'download.check', params: checkParams });
+  for (const params of [{}, { ...checkParams, limit: 1 }, { ...checkParams, ledgerId: 'short' }])
+    assert.equal(validator('EngineRequest')({ protocolVersion: 1, id: 'check', method: 'download.check', params }), false, JSON.stringify(params));
 });
 
 test('Tables provider metadata cannot claim acquired files or readable rows', async () => {
@@ -425,7 +438,8 @@ test('Download summaries keep exact counts, the three build states and a bounded
   for (const patch of [{ state: 'downloaded' }, { download: { ...measured.download, storedBytes: 410 } }, { download: { ...measured.download, countState: 'checked' } },
     { download: { ...measured.download, scope: 'enUS' } }, { download: { ...measured.download, sourceRegions: [] } },
     { download: { ...measured.download, presence: { ...measured.download.presence, state: 'verified' } } }, { download: { ...measured.download, percent: '41%' } },
-    { download: { ...measured.download, unresolvableRootContent: undefined } }, { download: { ...measured.download, unresolvableRootContent: 10 } }])
+    { download: { ...measured.download, unresolvableRootContent: undefined } }, { download: { ...measured.download, unresolvableRootContent: 10 } },
+    { download: { ...measured.download, manifestLedgerId: undefined } }, { download: { ...measured.download, manifestLedgerId: 'short' } }])
     assert.equal(validator('BuildDownloadSummary')({ ...measured, ...patch }), false);
   assert.equal(validator('DownloadSummaries')({ ...value, summaries: Array(101).fill(value.summaries[4]) }), false);
   // Every read names the revision it was taken at, and a change wait answers one (D077).
@@ -714,6 +728,14 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.ok(!changes.error, JSON.stringify(changes.error));
   validate('DownloadChanges', changes.result);
   assert.equal(changes.result.revision, summaries.result.revision);
+  // D093: a Check needs an admitted measured ledger; a page read from a key is refused together with an ordinal cursor.
+  assert.ok(hello.result.capabilities.includes('download-check-v1'));
+  const checkQuery = { productId: 'wow', buildIdentity: 'a'.repeat(64), sourceRegion: 'us', ledgerId: 'e'.repeat(64) };
+  assert.equal((await request('download.check', checkQuery)).error?.code, 'DOWNLOAD_NOT_READY');
+  assert.equal((await request('download.check', { ...checkQuery, limit: 1 })).error?.code, 'INVALID_REQUEST');
+  assert.equal((await request('download.read', { ...checkQuery, limit: 1, from: '1'.repeat(32) })).error?.code, 'DOWNLOAD_NOT_READY');
+  assert.equal((await request('download.read', { ...checkQuery, limit: 1, from: '1'.repeat(32), after: '1' })).error?.code, 'INVALID_REQUEST');
+  assert.equal((await request('download.read', { ...checkQuery, limit: 1, from: 'ABC' })).error?.code, 'INVALID_REQUEST');
   assert.ok(hello.result.capabilities.includes('items-v1'));
   assert.ok(hello.result.capabilities.includes('item-icons-v1'));
   assert.ok(hello.result.capabilities.includes('item-classifications-v1'));

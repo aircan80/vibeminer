@@ -77,7 +77,7 @@ public sealed class TableDataStorageTests
         using (var db = h.OpenDb()) { using var c = db.CreateCommand(); c.CommandText = CatalogMigrationFixture.RemoveV9 + "DROP TABLE encoded_objects; DROP TABLE content_locators; DROP TABLE table_admissions; DROP TABLE table_artifacts; DROP TABLE content_objects; PRAGMA user_version=6"; c.ExecuteNonQuery(); }
         h.Catalog = await DiscoveryCatalog.OpenAsync(h.Directory);
         Assert.True(await h.Catalog.HasAdmissionAsync(h.Context, default)); Assert.Null(await h.Catalog.FindContentAsync(Source().EncodingKey, default));
-        using var check = h.OpenDb(); using var command = check.CreateCommand(); command.CommandText = "PRAGMA user_version"; Assert.Equal(19L, command.ExecuteScalar());
+        using var check = h.OpenDb(); using var command = check.CreateCommand(); command.CommandText = "PRAGMA user_version"; Assert.Equal(20L, command.ExecuteScalar());
     }
 
     [Fact]

@@ -405,7 +405,7 @@ public sealed partial class DiscoveryCatalog : IDownloadSummaryStore
             var code = failure is DiscoveryException typed ? typed.Code : "STORED_COVERAGE_INTEGRITY";
             return new(build.ProductId, build.BuildIdentity, BuildDownloadState.Measured, new(effective.Sha256, scope.Scope, effective.ObjectCount,
                 effective.TotalEncodedBytes, 0, 0, StoredCountState.Unavailable, StoredFailure(code), DateTimeOffset.UtcNow.ToString("O"),
-                new("notAssessed", null, 0, 0, 0), false, false, regions, scope.Unresolvable, scope.State, scope.Problem));
+                new("notAssessed", null, 0, 0, 0), false, false, regions, scope.Unresolvable, scope.State, scope.Problem) { ManifestLedgerId = ledger });
         }
     }
 
@@ -459,7 +459,8 @@ public sealed partial class DiscoveryCatalog : IDownloadSummaryStore
         return new(build.ProductId, build.BuildIdentity, BuildDownloadState.Measured, new(ledger, scope.Scope, artifact.ObjectCount,
             artifact.TotalEncodedBytes, storedCount, storedBytes, state, problem, updatedAt, presence,
             jobs.Any(j => j.Mode == RetentionMode.DownloadAll && !j.Paused),
-            jobs.Any(j => j.State is RetentionState.Preparing or RetentionState.Running), regions, scope.Unresolvable, scope.State, scope.Problem, pending));
+            jobs.Any(j => j.State is RetentionState.Preparing or RetentionState.Running), regions, scope.Unresolvable, scope.State, scope.Problem, pending)
+            { ManifestLedgerId = manifest });
     }
 
     internal static RetentionProblem StoredFailure(string code) => new(code,

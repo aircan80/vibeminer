@@ -1,3 +1,4 @@
+import type { DownloadCheckController } from './useDownloadCheck';
 import type {ItemEffectsLoading} from './useItemEffects';
 import type {CreatureDisplays} from './useCreatureDisplay';
 import type {GeometryFlow} from './useCreatureGeometry';
@@ -20,7 +21,9 @@ import { encodedPercentage, exactBytes, exactCount, isInventoryWorkspace, readab
 import type { Opening } from './useWorkspaceFlow';
 import { BuildAreas, useHomeFocus, type BuildArea } from './BuildAreas';
 import { TablesExplorer } from './TablesExplorer';
-import { DownloadObjects, FilesUnavailable, catalogStage } from './DownloadObjects';
+import { DownloadObjects, FilesUnavailable, catalogStage, type MeasuredLedger } from './DownloadObjects';
+import { useDownloadSummaries } from './useDownloadSummaries';
+import { summaryKey } from '../shared/download-summary';
 import { FilesCatalog, inventorySource, type FilesSource } from './FilesCatalog';
 import { useFileCatalog, type useFileCatalogTasks } from './useFileCatalog';
 import type { CatalogView } from './DownloadObjects';
@@ -28,11 +31,13 @@ export type FileCatalogTasks = ReturnType<typeof useFileCatalogTasks>;
 import { HomeShell, useCoveredSide, type ShellArea } from './HomeShell';
 
 type Evidence = 'source' | 'metadata' | 'measurement';
+export type FilesView = 'catalog' | 'objects';
+const noViews = new Map<string, FilesView>();
 type Pane = 'overview' | 'files' | 'tables' | 'items' | 'creatures';
 const shellArea: Record<Pane, ShellArea> = { overview: 'home', files: 'files', tables: 'tables', items: 'items', creatures: 'creatures' };
 const joined = (values: string[]) => values.length ? values.map(x => x.toUpperCase()).join(', ') : 'no recorded region';
 // Home after a build opens (docs/design/desktop-home): one shell for the download-sized and the catalog-prepared workspace.
-export function DownloadHome({ catalogTasks, activityNavigation, creatureGeometry, effectsLoading, effectsAvailable=false, creatureDisplays, creatureDisplayAvailable=false, creaturesLoading, creaturesAvailable=false, classificationsLoading, classificationsAvailable=false, subclassAvailable=false, iconsLoading, iconsAvailable=false, itemsLoading, itemsAvailable=false, retention, operation: op, catalogBuild, fixtureLabel, bridge, onChoose, onReopen, evidence, tableLoading }: { catalogTasks?: FileCatalogTasks; activityNavigation?:{area:'tables'|'items'|'creatures'|'files';sequence:number}|null;creatureGeometry?:GeometryFlow;effectsLoading?:ItemEffectsLoading;effectsAvailable?:boolean; creatureDisplays?:CreatureDisplays;creatureDisplayAvailable?:boolean; creaturesLoading?:CreaturesLoading;creaturesAvailable?:boolean; classificationsLoading?:Classifications;classificationsAvailable?:boolean;subclassAvailable?:boolean; iconsLoading?:IconsLoading;iconsAvailable?:boolean; itemsLoading?: ItemsLoading; itemsAvailable?: boolean; retention?: RetentionController; tableLoading: TableLoading; operation: Opening & { result: WorkspaceSnapshot }; catalogBuild?: Build | null; fixtureLabel?: string | null; bridge: DiscoveryBridge; onChoose: () => void; onReopen: () => void; evidence: (mode: Evidence, close: () => void) => ReactNode }) {
+export function DownloadHome({ filesViews = noViews, downloadCheck, catalogTasks, activityNavigation, creatureGeometry, effectsLoading, effectsAvailable=false, creatureDisplays, creatureDisplayAvailable=false, creaturesLoading, creaturesAvailable=false, classificationsLoading, classificationsAvailable=false, subclassAvailable=false, iconsLoading, iconsAvailable=false, itemsLoading, itemsAvailable=false, retention, operation: op, catalogBuild, fixtureLabel, bridge, onChoose, onReopen, evidence, tableLoading }: { filesViews?: Map<string, FilesView>; downloadCheck?: DownloadCheckController; catalogTasks?: FileCatalogTasks; activityNavigation?:{area:'tables'|'items'|'creatures'|'files';sequence:number}|null;creatureGeometry?:GeometryFlow;effectsLoading?:ItemEffectsLoading;effectsAvailable?:boolean; creatureDisplays?:CreatureDisplays;creatureDisplayAvailable?:boolean; creaturesLoading?:CreaturesLoading;creaturesAvailable?:boolean; classificationsLoading?:Classifications;classificationsAvailable?:boolean;subclassAvailable?:boolean; iconsLoading?:IconsLoading;iconsAvailable?:boolean; itemsLoading?: ItemsLoading; itemsAvailable?: boolean; retention?: RetentionController; tableLoading: TableLoading; operation: Opening & { result: WorkspaceSnapshot }; catalogBuild?: Build | null; fixtureLabel?: string | null; bridge: DiscoveryBridge; onChoose: () => void; onReopen: () => void; evidence: (mode: Evidence, close: () => void) => ReactNode }) {
   const snapshot = op.result, summary = snapshot.download, inventory = isInventoryWorkspace(snapshot) ? snapshot : null;
   const [pane, setPane] = useState<Pane>('overview');
   // The build's file catalog prepared after Open (D071). A legacy full catalog snapshot carries its own generation; any other
@@ -46,16 +51,34 @@ export function DownloadHome({ catalogTasks, activityNavigation, creatureGeometr
   // the user, so async completion never moves focus; it is shown directly the next time Files opens.
   const [adopted, setAdopted] = useState<string | null>(null);
   useEffect(() => { if (catalogKey && pane !== 'files') setAdopted(catalogKey); }, [catalogKey, pane]);
-  const shownCatalog = catalogKey && adopted === catalogKey ? catalogSource : null;
+  // D093: the download objects stay reachable once the file list is ready. Files switches between the two; the choice is
+  // kept for this build for the session, and without one the file list is still adopted once, as above.
+  const choiceKey = `${snapshot.build.productId}:${snapshot.build.id}`;
+  const [choice, setChoice] = useState<FilesView | null>(() => filesViews.get(choiceKey) ?? null);
+  const focusSwitch = useRef(false);
+  const choose = (next: FilesView, focus: boolean) => { filesViews.set(choiceKey, next); setChoice(next); if (focus) focusSwitch.current = true; };
+  const shownCatalog = choice === 'objects' && summary ? null : choice === 'catalog' ? catalogSource : catalogKey && adopted === catalogKey ? catalogSource : null;
+  // The switch's own button goes with the view it was in; focus moves to the same switch in the view that replaced it.
+  useEffect(() => { if (!focusSwitch.current) return; focusSwitch.current = false; document.querySelector<HTMLElement>('.dh-files:not([hidden]) [aria-label="Files view"] button[aria-pressed="true"]')?.focus({ preventScroll: true }); });
   const catalogTaskKey = `fileCatalog:${snapshot.build.productId}:${snapshot.build.id}`;
   const [catalogNotice, setCatalogNotice] = useState('');
   const catalogView: CatalogView | null = inventory || !bridge.fileCatalog || !catalogTasks ? null : {
     status: catalog, error: catalogRead.error || catalogNotice, busy: catalogTasks?.busy === `${snapshot.build.productId}|${snapshot.build.id}`,
     taskKey: catalogTasks?.catalogs.some(c => c.buildIdentity === snapshot.build.id && c.productId === snapshot.build.productId) ? catalogTaskKey : null,
-    ...(catalogKey ? { onShow: () => setAdopted(catalogKey) } : {}),
+    ...(catalogKey ? { onShow: () => { setAdopted(catalogKey); choose('catalog', false); } } : {}),
     onAction: async action => { const result = await catalogTasks?.act({ productId: snapshot.build.productId, buildIdentity: snapshot.build.id, action }); setCatalogNotice(typeof result === 'string' ? result : ''); await catalogRead.retry(); },
     onRetryRead: () => { setCatalogNotice(''); return catalogRead.retry(); },
   };
+  // The build's stored figure names the measured ledger once every file ROOT lists is measured (D066, D093). Files reads
+  // it while it shows the download objects, so a measurement that lands then switches the list in place.
+  const features = retention?.features ?? [];
+  const scopeWatch = !!summary && !inventory && !!bridge.downloadSummaries && features.includes('download-summary-v1');
+  const builds = useRef<Build[]>([]); if (builds.current[0] !== snapshot.build) builds.current = [snapshot.build];
+  const stored = useDownloadSummaries(bridge, scopeWatch ? builds.current : [], pane === 'overview' || pane === 'files' && !shownCatalog, scopeWatch, '');
+  const figure = stored.summaries.get(summaryKey(snapshot.build.productId, snapshot.build.id))?.download ?? null;
+  const measured: MeasuredLedger | null | 'pending' = !scopeWatch || !summary ? null : figure ? (figure.scopeState === 'measured' && figure.manifestLedgerId === summary.ledgerId && figure.ledgerId !== summary.ledgerId ? { ledgerId: figure.ledgerId, objectCount: figure.objectCount } : null) : stored.readAt === null && !stored.error ? 'pending' : null;
+  const measuring = !!figure && figure.scopeState === 'measuring' && figure.manifestLedgerId === summary?.ledgerId;
+  const [listed, setListed] = useState<MeasuredLedger | null>(null);
   const itemSource=useItemSourceNavigation(pane,setPane);
   useEffect(()=>{if(activityNavigation)setPane(activityNavigation.area);},[activityNavigation?.sequence]);
   const [dialog, setDialog] = useState<Evidence | null>(null);
@@ -68,6 +91,15 @@ export function DownloadHome({ catalogTasks, activityNavigation, creatureGeometr
   const [fileTarget, setFileTarget] = useState<FileTarget | null>(null), fileSeq = useRef(0);
   const openFile = useCallback((target: Omit<FileTarget, 'seq'>) => { setFileTarget({ ...target, seq: ++fileSeq.current }); setFromHome(false); setPane('files'); }, []);
   const returnToTable = () => { setFileTarget(null); setPane('tables'); };
+  // Build overview's line about files not checked at Open opens Download objects with focus on the Check.
+  const outsideFiles = summary && measured && measured !== 'pending' ? BigInt(measured.objectCount) - BigInt(summary.objectCount) : 0n;
+  const [checkFocus, setCheckFocus] = useState(0);
+  // Each request has its own number; the view clears it once served, so leaving and coming back never replays it.
+  const checkRequests = useRef(0);
+  function openCheck() { choose('objects', false); setCheckFocus(++checkRequests.current); files(); }
+  const viewSwitch = summary && !inventory && catalogView ? <div className="dh-segmented dh-files-view" role="group" aria-label="Files view">
+    <button aria-pressed={!!shownCatalog} aria-disabled={!catalogSource} onClick={() => { if (catalogSource && !shownCatalog) choose('catalog', true); }}>All files</button>
+    <button aria-pressed={!shownCatalog} onClick={() => { if (shownCatalog) choose('objects', true); }}>Download objects</button></div> : null;
   function files() { origin.current = { element: document.activeElement as HTMLElement, scroll: grid.current?.scrollTop ?? 0 }; setFromHome(true); setFileTarget(null); setPane('files'); }
   function go(next: Pane) { setFromHome(false); setFileTarget(null); setPane(next); }
   const retentionTarget=summary?{productId:snapshot.build.productId,buildIdentity:snapshot.build.id,sourceRegion:snapshot.sourceReference.region,ledgerId:summary.ledgerId}:null;
@@ -78,20 +110,20 @@ export function DownloadHome({ catalogTasks, activityNavigation, creatureGeometr
   const areas=<BuildAreas active={pane as BuildArea} onHome={()=>{setFromHome(false);setFileTarget(null);home();}} onTables={()=>go('tables')} onFiles={()=>go('files')} onItems={items?()=>go('items'):undefined} onCreatures={creatures?()=>go('creatures'):undefined}/>;
   const assessed=summary?new Date(summary.assessedAt).toLocaleString():null;
   const status=pane==='overview'?<span className="dh-secondary">{inventory?<>Catalog generation <strong>{inventory.inventory.generation}</strong> · {exactCount(inventory.inventory.membershipCount)} memberships</>:assessed?<>Assessed <strong>{assessed}</strong></>:'Download size unknown'}</span>
-    :pane==='files'?<span className="dh-secondary">{inventory?<>Catalog generation <strong>{inventory.inventory.generation}</strong> · {exactCount(inventory.inventory.membershipCount)} memberships</>:shownCatalog&&catalog?.catalog?<>File catalog generation <strong>{shownCatalog.generation}</strong> · {exactCount((BigInt(catalog.catalog.rootMembershipCount)+BigInt(catalog.catalog.installMembershipCount)).toString())} memberships</>:summary?<>Download manifest · <strong>{exactCount(summary.objectCount)}</strong> encoded objects</>:'File catalog not prepared'}</span>:null;
+    :pane==='files'?<span className="dh-secondary">{inventory?<>Catalog generation <strong>{inventory.inventory.generation}</strong> · {exactCount(inventory.inventory.membershipCount)} memberships</>:shownCatalog&&catalog?.catalog?<>File catalog generation <strong>{shownCatalog.generation}</strong> · {exactCount((BigInt(catalog.catalog.rootMembershipCount)+BigInt(catalog.catalog.installMembershipCount)).toString())} memberships</>:listed?<>Download manifest and every listed file · <strong>{exactCount(listed.objectCount)}</strong> encoded objects</>:summary?<>Download manifest · <strong>{exactCount(summary.objectCount)}</strong> encoded objects</>:'File catalog not prepared'}</span>:null;
   return <HomeShell snapshot={snapshot} catalogBuild={catalogBuild} label={op.label} retention={retention} onChoose={onChoose} area={shellArea[pane]} areas={areas} fixtureLabel={fixtureLabel} status={status} dialog={dialog && evidence(dialog, () => setDialog(null))}>
     <section className="dh-home" hidden={pane !== 'overview'} aria-labelledby="home-heading">
       <div className="dh-pane-head"><h1 ref={heading} id="home-heading" tabIndex={-1}>Build overview</h1><span className="dh-sub">{snapshot.sourceReference.region.toUpperCase()} download source · advertised in {joined(snapshot.build.advertisedRegions)} · measurements cover every published variant</span><span className="dh-spacer"/><HomeUtilities onMetadata={() => setDialog('metadata')} onSource={() => setDialog('source')}/></div>
       <div className="dh-home-grid" ref={grid}>
-        <section className="dh-panel" aria-labelledby="home-sizes"><div className="dh-panel-head"><h2 id="home-sizes">Download sizes</h2><span className="dh-scope">Encoded bytes</span></div><div className="dh-panel-body">{inventory ? <InventorySizes inventory={inventory.inventory}/> : <DownloadSizes snapshot={snapshot} onReopen={onReopen}/>}</div><div className="dh-panel-foot"><button className="dh-btn dh-small" onClick={() => setDialog('measurement')}>Scope and measurement details</button></div></section>
-        <section className="dh-panel" aria-labelledby="home-catalog"><div className="dh-panel-head"><h2 id="home-catalog" tabIndex={-1}>File catalog</h2><span className="dh-scope">ROOT and install manifests</span></div><div className="dh-panel-body">{inventory ? <CatalogFacts inventory={inventory.inventory}/> : catalogView && catalog?.state !== 'notOpened' ? <FileCatalogFacts view={catalogView} objects={!!summary}/> : <><div className="dh-metric"><span className="dh-mlabel">Catalog memberships</span><strong className="dh-unknown">Not prepared</strong><span className="dh-exact">No membership count is inferred</span></div><p className="dh-reason">{summary ? 'Files lists the download manifest’s encoded objects for now. Tables, Items and Creatures prepare their own data.' : 'Tables, Items and Creatures prepare their own data.'}</p></>}</div><div className="dh-panel-foot"><button className="dh-btn dh-small" onClick={files}>Browse in Files</button></div></section>
+        <section className="dh-panel" aria-labelledby="home-sizes"><div className="dh-panel-head"><h2 id="home-sizes">Download sizes</h2><span className="dh-scope">Encoded bytes</span></div><div className="dh-panel-body">{inventory ? <InventorySizes inventory={inventory.inventory}/> : <><DownloadSizes snapshot={snapshot} onReopen={onReopen}/>{outsideFiles > 0n && <p className="dh-check-line"><strong className="dh-warn-t">{exactCount(outsideFiles.toString())} {outsideFiles === 1n ? 'file' : 'files'} not checked at Open</strong> · <button className="dh-linkbtn" onClick={openCheck}>Check</button></p>}</>}</div><div className="dh-panel-foot"><button className="dh-btn dh-small" onClick={() => setDialog('measurement')}>Scope and measurement details</button></div></section>
+        <section className="dh-panel" aria-labelledby="home-catalog"><div className="dh-panel-head"><h2 id="home-catalog" tabIndex={-1}>File catalog</h2><span className="dh-scope">ROOT and install manifests</span></div><div className="dh-panel-body">{inventory ? <CatalogFacts inventory={inventory.inventory}/> : catalogView && catalog?.state !== 'notOpened' ? <FileCatalogFacts view={catalogView} objects={!!summary}/> : <><div className="dh-metric"><span className="dh-mlabel">Catalog memberships</span><strong className="dh-unknown">Not prepared</strong><span className="dh-exact">No membership count is inferred</span></div><p className="dh-reason">{summary ? 'Files lists the download manifest’s encoded objects for now. Tables, Items and Creatures prepare their own data.' : 'Tables, Items and Creatures prepare their own data.'}</p></>}</div><div className="dh-panel-foot"><button className="dh-btn dh-small" onClick={() => { if (catalogSource) choose('catalog', false); files(); }}>Browse in Files</button></div></section>
         <section className="dh-panel dh-wide" aria-labelledby="home-storage"><div className="dh-panel-head"><h2 id="home-storage">Local content &amp; shared storage</h2><span className="dh-scope">{inventory ? 'Published inventory scope · exact build' : 'Download manifest scope · exact build'}</span></div><div className="dh-panel-body"><div className="dh-storage-cols"><div>{inventory ? <InventoryStorage inventory={inventory.inventory}/> : <DownloadStorage snapshot={snapshot}/>}</div><div><RetentionModeBox flow={inventory ? undefined : retention} target={retentionTarget}/></div></div></div></section>
         <Readiness snapshot={snapshot} inventory={inventory?.inventory ?? null} catalog={catalog} catalogChecking={!!catalogView && !catalog} gameData={gameData} onMetadata={() => setDialog('metadata')}/>
       </div>
     </section>
     {inventory ? <FilesCatalog key={`${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}:${inventory.inventory.generation}`} source={inventorySource(inventory)} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
-      : shownCatalog ? <FilesCatalog key={`catalog:${catalogKey}`} source={shownCatalog} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
-      : summary ? <DownloadObjects key={`${snapshot.build.id}:${summary.ledgerId}:${summary.assessedAt}`} snapshot={snapshot} summary={summary} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} catalog={catalogView} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
+      : shownCatalog ? <FilesCatalog key={`catalog:${catalogKey}`} viewSwitch={viewSwitch} source={shownCatalog} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
+      : summary ? <DownloadObjects key={`${snapshot.build.id}:${summary.ledgerId}:${summary.assessedAt}`} snapshot={snapshot} summary={summary} measured={measured} measuring={measuring} checkAvailable={features.includes('download-check-v1')} checker={downloadCheck} focusCheck={checkFocus} onCheckFocused={() => setCheckFocus(0)} viewSwitch={viewSwitch} onLedger={setListed} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} catalog={choice === 'objects' && catalogView ? { ...catalogView, onShow: undefined } : catalogView} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
       : <FilesUnavailable snapshot={snapshot} active={pane === 'files'} onReturn={fromHome ? returnHome : undefined} onReopen={onReopen} catalog={catalogView} fileTarget={fileTarget} onReturnToTable={returnToTable}/>}
     {items&&<div className="dh-area-scroll" hidden={pane!=='items'}><ItemsBrowser effectsLoading={effectsLoading} effectsAvailable={effectsAvailable} effectsSource={itemSource} classificationsLoading={classificationsLoading} classificationsAvailable={classificationsAvailable} subclassAvailable={subclassAvailable} iconsLoading={iconsLoading} iconsAvailable={iconsAvailable} key={`items:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}`} workspace={snapshot} bridge={bridge} active={pane==='items'} flow={itemsLoading!} focusRequest={itemsLoading!.viewRequest} onSource={itemSource.open}/></div>}
     {creatures&&<div className="dh-area-scroll" hidden={pane!=='creatures'}><CreaturesBrowser displays={creatureDisplays} displayAvailable={creatureDisplayAvailable} geometry={creatureGeometry} key={`creatures:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}`} workspace={snapshot} bridge={bridge} active={pane==='creatures'} flow={creaturesLoading!} focusRequest={creaturesLoading!.viewRequest} onSource={(source,id)=>itemSource.open(source,id,'creatures')}/></div>}

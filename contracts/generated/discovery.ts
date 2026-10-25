@@ -247,6 +247,8 @@ export interface DiscoveryContract {
   fileCatalogList?: FileCatalogList;
   fileCatalogSetParams?: FileCatalogSetParams;
   downloadPage: DownloadPage;
+  downloadCheckParams?: DownloadCheckParams;
+  downloadCheckResult?: DownloadCheckResult;
   tableCatalogPage: TableCatalogPage;
   tableDefinitionSnapshot: TableDefinitionSnapshot;
   tableDataSnapshot: TableDataSnapshot;
@@ -528,6 +530,7 @@ export interface EngineRequest1 {
     | 'download.read'
     | 'download.summaries'
     | 'download.changes'
+    | 'download.check'
     | 'tables.catalog'
     | 'tables.definition'
     | 'tables.prepare'
@@ -929,12 +932,64 @@ export interface DownloadPage {
   entries: DownloadObjectEntry[];
   totalCount: string;
   nextCursor: string | null;
+  /**
+   * The admitted download manifest ledger whose Open assessment the page carries; the same as ledgerId for the manifest's own pages (D093).
+   */
+  manifestLedgerId: string;
+  /**
+   * The latest completed Check of a measured ledger and its counts; null for a manifest page or before a Check (D093).
+   */
+  lastCheck: DownloadCheckSummary | null;
 }
 export interface DownloadObjectEntry {
   id: string;
   encodingKey: string;
   encodedBytes: string;
   verifiedAtAssessment: boolean;
+  /**
+   * False for a file ROOT lists outside the admitted download manifest: Open's assessment never covered it (D093).
+   */
+  checkedAtOpen: boolean;
+  /**
+   * What the latest completed Check found for a file not checked at Open; null before one, and always null for a file Open assessed (D093).
+   */
+  check: ('verified' | 'notStored' | 'missing' | 'corrupt') | null;
+}
+/**
+ * When a completed Check finished and what it found; the four outcomes add up to checkedObjects (D093).
+ */
+export interface DownloadCheckSummary {
+  checkedAt: string;
+  checkedObjects: string;
+  verifiedObjects: string;
+  notStoredObjects: string;
+  missingObjects: string;
+  corruptObjects: string;
+}
+/**
+ * Check the files a measured ledger adds to its admitted manifest (D093). Long-running, with progress; cancel it with request.cancel.
+ */
+export interface DownloadCheckParams {
+  productId: string;
+  buildIdentity: string;
+  sourceRegion: string;
+  ledgerId: string;
+}
+/**
+ * One completed Check (D093). checkedObjects is every file the measured ledger adds to its manifest; the four outcomes add up to it.
+ */
+export interface DownloadCheckResult {
+  productId: string;
+  buildIdentity: string;
+  sourceRegion: string;
+  ledgerId: string;
+  manifestLedgerId: string;
+  checkedAt: string;
+  checkedObjects: string;
+  verifiedObjects: string;
+  notStoredObjects: string;
+  missingObjects: string;
+  corruptObjects: string;
 }
 export interface TableCatalogPage {
   productId: string;
@@ -1536,6 +1591,10 @@ export interface BuildStoredCoverage {
   scopeState: 'measuring' | 'measured' | 'manifestOnly';
   scopeProblem: RetentionProblem | null;
   changesPending: boolean;
+  /**
+   * The admitted download manifest ledger that ledgerId stands for; the same ledger until the file list is measured (D093).
+   */
+  manifestLedgerId: string;
 }
 export interface BuildPresenceCheck {
   state: 'notAssessed' | 'assessing' | 'assessed' | 'interrupted';

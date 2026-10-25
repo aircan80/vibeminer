@@ -39,10 +39,11 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
     }
     /// <summary>
     /// Catalog schema version. Version 16 is the first with per-ledger stored coverage (D065), version 17 the first with
-    /// the Files columns and indexes (D068), version 18 the first with file catalogs prepared after Open (D071). Version-16
-    /// and version-17 catalogs upgrade in place.
+    /// the Files columns and indexes (D068), version 18 the first with file catalogs prepared after Open (D071), version 19
+    /// the first with retained Creature appearances (D088), version 20 the first with saved Checks of files Open did not
+    /// assess (D093). Version-16 to version-19 catalogs upgrade in place.
     /// </summary>
-    internal const int CatalogVersion = 19;
+    internal const int CatalogVersion = 20;
     /// <summary>
     /// Written once when a fresh catalog is created. Older catalogs (build-identity-v2 at version 15, or none at all)
     /// never have it and are refused, never migrated.
@@ -71,7 +72,8 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         // Each step commits its own user_version. A fresh catalog interrupted between steps resumes here.
         Action[] steps = [UpgradeWorkspace, UpgradeInventory, UpgradeInventoryCheckpoints, UpgradeDownloads, UpgradeTablesData,
             UpgradeEncodedReceipts, UpgradeRetention, UpgradeItemIcons, UpgradeItemClassifications, UpgradeCreatures,
-            UpgradeItemEffects, UpgradeCreatureGeometry, UpgradeStoredCoverage, CompleteStoredCoverage, UpgradeInventoryFiles, UpgradeFileCatalogs, UpgradeCreatureGeometryAppearance];
+            UpgradeItemEffects, UpgradeCreatureGeometry, UpgradeStoredCoverage, CompleteStoredCoverage, UpgradeInventoryFiles, UpgradeFileCatalogs, UpgradeCreatureGeometryAppearance,
+            UpgradeDownloadChecks];
         for (var current = Math.Max(version, 2); current < CatalogVersion; current++) steps[current - 2]();
     }
     /// <summary>Read-only recognition: returns the version, or refuses a catalog this engine must not read or change.</summary>

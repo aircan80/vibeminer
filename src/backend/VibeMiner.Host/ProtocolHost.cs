@@ -172,6 +172,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     if (settings is not null) capabilities.Add("settings-v1");
                     if (preparedData is not null) capabilities.Add("prepared-data-v1");
                     if (downloadSummaries is not null) capabilities.Add("download-summary-v1");
+                    if (downloads is not null) capabilities.Add("download-check-v1");
                     if (items is not null) capabilities.Add("items-v1");
                     if (itemIcons is not null && iconLeases is not null) capabilities.Add("item-icons-v1");
                     if (itemClassifications is not null) capabilities.Add("item-classifications-v1");
@@ -340,13 +341,25 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     }
                     break;
                 case "download.read":
-                    RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "ledgerId", "limit", "after");
+                    RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "ledgerId", "limit", "after", "from");
                     if (downloads is null) throw new DiscoveryException("DOWNLOAD_UNAVAILABLE", "Download-object queries are unavailable.");
                     var downloadLimit = 50;
                     if (parameters.TryGetProperty("limit", out var downloadSize) && (downloadSize.ValueKind != JsonValueKind.Number || !downloadSize.TryGetInt32(out downloadLimit)))
                         throw new DiscoveryException("INVALID_REQUEST", "The page size must be an integer.");
                     result = await downloads.ReadAsync(new(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"), RequiredString(parameters, "sourceRegion"),
-                        RequiredString(parameters, "ledgerId"), downloadLimit, OptionalString(parameters, "after")), request.Cancellation.Token);
+                        RequiredString(parameters, "ledgerId"), downloadLimit, OptionalString(parameters, "after"), OptionalString(parameters, "from")), request.Cancellation.Token);
+                    break;
+                case "download.check":
+                    RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "ledgerId");
+                    if (downloads is null) throw new DiscoveryException("DOWNLOAD_UNAVAILABLE", "Download-object queries are unavailable.");
+                    var check = new DownloadCheckRequest(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"),
+                        RequiredString(parameters, "sourceRegion"), RequiredString(parameters, "ledgerId"));
+                    long checkSequence = 0;
+                    result = await downloads.CheckAsync(check, progress => WriteAsync(output, new
+                    {
+                        protocolVersion = 1, type = "progress", requestId = id, sequence = Interlocked.Increment(ref checkSequence),
+                        stage = "Checking files not checked at Open", region = check.SourceRegion, completed = progress.Completed, total = progress.Total, unit = "objects"
+                    }), request.Cancellation.Token);
                     break;
                 case "download.summaries":
                     RequireOnly(parameters, "builds");
@@ -676,7 +689,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
             await ReplyAsync(output, id, result, maximumBytes, frameKind);
             pendingGeometryLease = null; // Opaque ownership transfers only after actual terminal Flush.
         }
-        catch (OperationCanceledException) { await TryErrorAsync(output, id, "CANCELED", method == "workspace.open" ? "Opening canceled." : method == "discovery.refreshAll" ? "Discovery canceled. Products checked before stopping keep their new results." : method == "tables.prepare" ? "Table loading canceled." : "Operation canceled.", true, maximumBytes, frameKind); }
+        catch (OperationCanceledException) { await TryErrorAsync(output, id, "CANCELED", method == "workspace.open" ? "Opening canceled." : method == "discovery.refreshAll" ? "Discovery canceled. Products checked before stopping keep their new results." : method == "tables.prepare" ? "Table loading canceled." : method == "download.check" ? "Check stopped. Nothing new was recorded; an earlier check stays as it was." : "Operation canceled.", true, maximumBytes, frameKind); }
         catch (DiscoveryException ex) { await TryErrorAsync(output, id, ex.Code, ex.Message, ex.Retryable, maximumBytes, frameKind); }
         catch (Exception ex)
         {

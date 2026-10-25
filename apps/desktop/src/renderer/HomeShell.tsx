@@ -12,7 +12,8 @@ import './desktop-home.css';
 // Whatever takes focus in the shell outside the panel, by keyboard or programmatically, is scrolled into the shell's view; the panel
 // scrolls its own content.
 // Text-relative breakpoints are measured here, as on Discovery, because Chromium does not always re-run rem container queries when only the root text size changes.
-const MEDIUM_REM=78.4,COMPACT_REM=65.333333;
+// Narrow (#52, D093): below 28rem the Files object rows take two lines, so their local state stays in view.
+const MEDIUM_REM=78.4,COMPACT_REM=65.333333,NARROW_REM=28;
 type Shell={compact:boolean;statusSlot:HTMLElement|null};
 const ShellContext=createContext<Shell>({compact:false,statusSlot:null});
 export function useShell(){return useContext(ShellContext);}
@@ -23,9 +24,9 @@ export function useCoveredSide(){const ui=useDownloadActivity(),{compact}=useShe
 export type ShellArea='home'|'tables'|'files'|'items'|'creatures';
 export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,areas,status,fixtureLabel,children,dialog}:{snapshot:WorkspaceSnapshot;catalogBuild?:Build|null;label:string;retention?:RetentionController;onChoose:()=>void;area:ShellArea;areas:ReactNode;status?:ReactNode;fixtureLabel?:string|null;children:ReactNode;dialog?:ReactNode}){
  const host=useRef<HTMLDivElement>(null),shell=useRef<HTMLDivElement>(null),toolbar=useRef<HTMLElement>(null),statusBar=useRef<HTMLElement>(null),areaNode=useRef<HTMLElement>(null);
- const [size,setSize]=useState<{compact:boolean;medium:boolean}>({compact:false,medium:false}),[statusSlot,setStatusSlot]=useState<HTMLElement|null>(null),[scrolling,setScrolling]=useState(false);
+ const [size,setSize]=useState<{compact:boolean;medium:boolean;narrow:boolean}>({compact:false,medium:false,narrow:false}),[statusSlot,setStatusSlot]=useState<HTMLElement|null>(null),[scrolling,setScrolling]=useState(false);
  useLayoutEffect(()=>{
-  const measure=()=>{const node=host.current;if(!node)return;const root=parseFloat(getComputedStyle(document.documentElement).fontSize)||15,width=node.clientWidth;if(width<=0)return;const next={compact:width<COMPACT_REM*root,medium:width<MEDIUM_REM*root};setSize(old=>old.compact===next.compact&&old.medium===next.medium?old:next);};
+  const measure=()=>{const node=host.current;if(!node)return;const root=parseFloat(getComputedStyle(document.documentElement).fontSize)||15,width=node.clientWidth;if(width<=0)return;const next={compact:width<COMPACT_REM*root,medium:width<MEDIUM_REM*root,narrow:width<NARROW_REM*root};setSize(old=>old.compact===next.compact&&old.medium===next.medium&&old.narrow===next.narrow?old:next);};
   measure();
   const resize=typeof ResizeObserver==='undefined'?null:new ResizeObserver(measure);if(host.current)resize?.observe(host.current);
   const text=new MutationObserver(measure);text.observe(document.documentElement,{attributes:true,attributeFilter:['style','class']});window.addEventListener('resize',measure);
@@ -100,7 +101,7 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   return()=>{observer?.disconnect();panel.style.scrollPaddingTop='';};
  },[expanded]);
  const summary=ui&&ui.entry&&!ui.expanded?ui.summary:null;
- return <ShellContext.Provider value={{compact:size.compact,statusSlot}}><div ref={host} className={`desktop-home${size.compact?' dh-compact dh-medium':size.medium?' dh-medium':''}${scrolling?' dh-shell-scroll':''}${expanded?' dh-panel-open':''}`} data-area={area}>
+ return <ShellContext.Provider value={{compact:size.compact,statusSlot}}><div ref={host} className={`desktop-home${size.compact?' dh-compact dh-medium':size.medium?' dh-medium':''}${size.narrow?' dh-narrow':''}${scrolling?' dh-shell-scroll':''}${expanded?' dh-panel-open':''}`} data-area={area}>
   <a className="dh-skip" href="#dh-area">Skip to content</a>
   <div ref={shell} className="dh-app">
    <BuildHeader ref={toolbar} snapshot={snapshot} catalogBuild={catalogBuild} label={label} retention={retention} onChoose={onChoose} areas={areas} area={area}/>

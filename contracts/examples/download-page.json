@@ -2,22 +2,43 @@
   "productId": "wow",
   "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
   "sourceRegion": "us",
-  "ledgerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "ledgerId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
   "assessedAt": "2026-10-18T12:00:01Z",
   "entries": [
     {
       "id": "1",
       "encodingKey": "11111111111111111111111111111111",
       "encodedBytes": "100",
-      "verifiedAtAssessment": true
+      "verifiedAtAssessment": true,
+      "checkedAtOpen": true,
+      "check": null
     },
     {
       "id": "2",
       "encodingKey": "22222222222222222222222222222222",
       "encodedBytes": "150",
-      "verifiedAtAssessment": false
+      "verifiedAtAssessment": false,
+      "checkedAtOpen": true,
+      "check": null
+    },
+    {
+      "id": "3",
+      "encodingKey": "33333333333333333333333333333333",
+      "encodedBytes": "200",
+      "verifiedAtAssessment": false,
+      "checkedAtOpen": false,
+      "check": "missing"
     }
   ],
-  "totalCount": "3",
-  "nextCursor": "2"
+  "totalCount": "4",
+  "nextCursor": "3",
+  "manifestLedgerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "lastCheck": {
+    "checkedAt": "2026-10-19T08:30:00.0000000+00:00",
+    "checkedObjects": "2",
+    "verifiedObjects": "0",
+    "notStoredObjects": "1",
+    "missingObjects": "1",
+    "corruptObjects": "0"
+  }
 }
