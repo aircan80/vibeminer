@@ -610,6 +610,22 @@ public sealed class RetentionDriverTests
     }
 
     [Fact]
+    public async Task Progress_guard_outlasts_slow_stepping_work_but_fails_a_stall_or_steps_past_the_work()
+    {
+        var stall = TimeSpan.FromSeconds(1); long steps = 0;
+        // Slow work that keeps stepping runs past the stall bound and still completes.
+        var slow = Task.Run(async () => { var clock = Stopwatch.StartNew(); while (clock.Elapsed < stall * 2) { Interlocked.Increment(ref steps); await Task.Delay(10); } return 7; });
+        Assert.Equal(7, (await WhileProgressing(slow, () => Interlocked.Read(ref steps), long.MaxValue, stall)).Result);
+        // Work that stops stepping fails after the stall bound; work stepping past its cap fails at once.
+        await Assert.ThrowsAsync<TimeoutException>(() => WhileProgressing(new TaskCompletionSource<int>().Task, () => 3, 10, stall));
+        var runaway = Signal(); long extra = 0;
+        var past = Task.Run(async () => { while (!runaway.Task.IsCompleted) { Interlocked.Increment(ref extra); await Task.Delay(1); } return 0; });
+        var started = Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<Xunit.Sdk.XunitException>(() => WhileProgressing(past, () => Interlocked.Read(ref extra), 5, Deadline));
+        Assert.True(started.Elapsed < Deadline); runaway.SetResult(); await past;
+    }
+
+    [Fact]
     public async Task Real_authored_257_member_cohort_includes_large_ranged_payload_and_bounded_catalog_batches()
     {
         await using var fixture = await SharedAcquisitionIntegrationTests.Fixture.CreateAsync();
@@ -636,7 +652,11 @@ public sealed class RetentionDriverTests
         try
         {
             await service.SetAsync(new(target, RetentionAction.DownloadAll));
-            Assert.Equal(RetentionPassOutcome.Completed, (await observed.NextSettlement()).Outcome);
+            // The pass is 258 payload requests and 257 credited members, and its wall time grows with machine load (#71), so the
+            // hang guard bounds each stretch without one of those steps rather than the whole pass.
+            var settled = await WhileProgressing(observed.UnboundedSettlement(),
+                () => fixture.Handler.Requests.Count - requests + observed.CreditSizes.Sum(), 258 + 257);
+            Assert.Equal(RetentionPassOutcome.Completed, settled.Result.Outcome);
             var snapshot = await service.ReadAsync(target); started.Stop();
             Assert.Equal(257, snapshot.Coverage.PresentObjects); Assert.Equal(payloadBytes, snapshot.Coverage.ReceiptBytes);
             Assert.Equal(payloadBytes, snapshot.WireBytesThisSession);
@@ -644,7 +664,7 @@ public sealed class RetentionDriverTests
             Assert.All(observed.CreditSizes, size => Assert.InRange(size, 1, 64));
             Assert.Equal(1, plans.ConfigurationLoads); Assert.Empty(Directory.EnumerateFiles(Path.Combine(fixture.Path, "staging-v1")));
             output.WriteLine($"Authored 257 members: 256 x 41 bytes plus one 5 MiB+9 byte BLTE; encoded DL {encodedDlBytes} bytes; {payloadBytes} retained/payload wire bytes; {fixture.Handler.Requests.Count - requests} payload requests.");
-            output.WriteLine($"Runtime {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}; CPUs {Environment.ProcessorCount}; elapsed {started.Elapsed.TotalSeconds:F3}s; process peak working set {Process.GetCurrentProcess().PeakWorkingSet64}; measured allocation delta {GC.GetTotalAllocatedBytes() - allocated}; max catalog credit batch {observed.CreditSizes.Max()}; config loads {plans.ConfigurationLoads}.");
+            output.WriteLine($"Runtime {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}; CPUs {Environment.ProcessorCount}; elapsed {started.Elapsed.TotalSeconds:F3}s; longest stretch without a request or credit {settled.LongestStall.TotalSeconds:F3}s; process peak working set {Process.GetCurrentProcess().PeakWorkingSet64}; measured allocation delta {GC.GetTotalAllocatedBytes() - allocated}; max catalog credit batch {observed.CreditSizes.Max()}; config loads {plans.ConfigurationLoads}.");
             output.WriteLine("Controlled in-memory HTTP handler, fresh disposable SQLite/CAS, warm configurations, no native archive sources; process peak includes fixture/opening and the test runner. No throughput or foreground-latency promise.");
         }
         finally { await service.ShutdownAsync(default); }
@@ -677,6 +697,24 @@ public sealed class RetentionDriverTests
     private static void Big(Stream output, long value, int width)
     { Span<byte> bytes = stackalloc byte[8]; BinaryPrimitives.WriteInt64BigEndian(bytes, value); output.Write(bytes[(8 - width)..]); }
 
+    // A hang guard for long real-adapter work: Deadline bounds every stretch in which the step count doesn't move, not the work's wall
+    // time. The count is capped by the work, so work that never ends can't outlive the guard by stepping forever: past the cap it fails
+    // at once, and the total wait is at most (cap + 1) stalls.
+    private static async Task<(T Result, TimeSpan LongestStall)> WhileProgressing<T>(Task<T> work, Func<long> steps, long cap, TimeSpan? stall = null)
+    {
+        var deadline = stall ?? Deadline; var last = steps(); var since = Stopwatch.StartNew(); var longest = TimeSpan.Zero;
+        while (await Task.WhenAny(work, Task.Delay(TimeSpan.FromMilliseconds(100))) != work)
+        {
+            var now = steps();
+            Assert.True(now <= cap, $"{now} steps exceed the work's {cap}.");
+            if (now != last) { last = now; longest = TimeSpan.FromTicks(Math.Max(longest.Ticks, since.Elapsed.Ticks)); since.Restart(); }
+            else if (since.Elapsed > deadline) throw new TimeoutException($"No step for {deadline.TotalSeconds:F1} s at {now} of {cap} steps.");
+        }
+        longest = TimeSpan.FromTicks(Math.Max(longest.Ticks, since.Elapsed.Ticks));
+        Assert.True(steps() <= cap, $"{steps()} steps exceed the work's {cap}.");
+        return (await work, longest);
+    }
+
     private sealed class ObservedCatalog(IRetentionDriverCatalog inner) : IRetentionDriverCatalog
     {
         private readonly HashSet<(string, long)> seen = [];
@@ -703,7 +741,8 @@ public sealed class RetentionDriverTests
             if (SettlementAfterCommitFailures > 0) { SettlementAfterCommitFailures--; throw ResponseLoss(); }
             if (seen.Add((binding.JobId, binding.Generation))) settled.Writer.TryWrite(new(binding, outcome, problem));
         }
-        internal Task<Settlement> NextSettlement() => settled.Reader.ReadAsync().AsTask().WaitAsync(Deadline);
+        internal Task<Settlement> NextSettlement() => UnboundedSettlement().WaitAsync(Deadline);
+        internal Task<Settlement> UnboundedSettlement() => settled.Reader.ReadAsync().AsTask();
         private static DiscoveryException ResponseLoss() => new("AUTHORED_RESPONSE_LOSS", "The authored commit response was lost.", true);
     }
 
