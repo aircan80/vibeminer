@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using VibeMiner.Domain;
@@ -28,15 +29,12 @@ public sealed class ItemEffectsConfigurationBudgetTests(ITestOutputHelper output
     public void Maximum_dense_fields_tokens_and_bytes_keep_the_parse_graph_bounded()
     {
         var bytes = Dense(2048, 6144, 131072);
-        _ = ItemEffectsConfigurationBudget.ParseBuild(bytes, default); // Warm runtime metadata outside observations.
-        var baseline = GC.GetTotalMemory(true); var allocated = GC.GetAllocatedBytesForCurrentThread();
-        var parsed = ItemEffectsConfigurationBudget.ParseBuild(bytes, default);
-        var totalAllocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
-        var retained = GC.GetTotalMemory(true) - baseline;
-        Assert.Equal(2048, parsed.Fields.Count); Assert.Equal(8192, parsed.Fields.Count + parsed.Fields.Values.Sum(values => values.Count));
-        Assert.InRange(retained, 0, 2L << 20);
-        output.WriteLine("maxConfig bytes={0}; fields={1}; tokens8192; cumulativeAllocated={2}; sampledRetainedGraphDelta={3}. One parse only; not transient-live/RSS proof.", bytes.Length, parsed.Fields.Count, totalAllocated, retained);
-        GC.KeepAlive(parsed);
+        var parse = MeasureParse(bytes, static parsed =>
+        {
+            Assert.Equal(2048, parsed.Fields.Count); Assert.Equal(8192, parsed.Fields.Count + parsed.Fields.Values.Sum(values => values.Count));
+        });
+        parse.RequireWithin(2L << 20);
+        output.WriteLine("maxConfig bytes={0}; fields2048; tokens8192; cumulativeAllocated={1}; releasedGraph={2}; growthWhileHeld={3}. One parse only; not transient-live/RSS proof.", bytes.Length, parse.Allocated, parse.Released, parse.Growth);
     }
 
     [Fact]
@@ -47,19 +45,28 @@ public sealed class ItemEffectsConfigurationBudgetTests(ITestOutputHelper output
             string.Concat(Enumerable.Range(0, 12283).Select(index => index % 2 == 0 ? ' ' : '\t')) + "x x\t \n";
         Assert.Equal(TactConfigurationParser.MaxLineChars, longLine.Length - 1);
         var bytes = Dense(2047, 6141, 131072 - longLine.Length).Concat(Encoding.ASCII.GetBytes(longLine)).ToArray();
-        _ = ItemEffectsConfigurationBudget.ParseBuild(bytes, default);
-        var baseline = GC.GetTotalMemory(true); var allocated = GC.GetAllocatedBytesForCurrentThread();
-        var parsed = ItemEffectsConfigurationBudget.ParseBuild(bytes, default);
-        var totalAllocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
-        var retained = GC.GetTotalMemory(true) - baseline;
-        Assert.Equal(131072, bytes.Length); Assert.Equal(2048, parsed.Fields.Count);
-        Assert.Equal(8192, parsed.Fields.Count + parsed.Fields.Values.Sum(values => values.Count));
+        Assert.Equal(131072, bytes.Length);
         Assert.Equal(16384, bytes.Count(value => value is (byte)' ' or (byte)'\t'));
-        Assert.Equal(53239, parsed.Fields["last"][0].Length);
-        Assert.Equal(["x", "x"], parsed.Fields["last"].Skip(1));
-        Assert.InRange(retained, 0, 2L << 20);
-        output.WriteLine("maxSeparatorConfig bytes={0}; fields2048/tokens8192/lineChars65536; cumulativeAllocated={1}; sampledRetainedGraphDelta={2}. Split scratch transient remains separately accounted.", bytes.Length, totalAllocated, retained);
-        GC.KeepAlive(parsed);
+        var parse = MeasureParse(bytes, static parsed =>
+        {
+            Assert.Equal(2048, parsed.Fields.Count);
+            Assert.Equal(8192, parsed.Fields.Count + parsed.Fields.Values.Sum(values => values.Count));
+            Assert.Equal(53239, parsed.Fields["last"][0].Length);
+            Assert.Equal(["x", "x"], parsed.Fields["last"].Skip(1));
+        });
+        parse.RequireWithin(2L << 20);
+        output.WriteLine("maxSeparatorConfig bytes={0}; fields2048/tokens8192/lineChars65536; cumulativeAllocated={1}; releasedGraph={2}; growthWhileHeld={3}. Split scratch transient remains separately accounted.", bytes.Length, parse.Allocated, parse.Released, parse.Growth);
+    }
+
+    [Fact]
+    public void Parse_graph_measurement_holds_when_earlier_work_is_freed_during_the_parse()
+    {
+        // Stands in for an earlier test's leftovers: live at the baseline, freed mid-measurement (#67).
+        var leftover = Leftover(4 << 20);
+        var parse = MeasureParse(Dense(2048, 6144, 131072), parsed => { leftover.Value = null; Assert.Equal(2048, parsed.Fields.Count); });
+        Assert.True(parse.Growth < 0, $"The freed leftover must show up as negative growth; growth={parse.Growth}.");
+        parse.RequireWithin(2L << 20);
+        Assert.True(parse.Released > 0, $"The held parse graph must be measured; released={parse.Released}.");
     }
 
     [Fact]
@@ -166,6 +173,51 @@ public sealed class ItemEffectsConfigurationBudgetTests(ITestOutputHelper output
             ? receipt with { ByteLength = TactConfigurationParser.MaxBytes + 1, Sha256 = new('0', 64) } : receipt).ToArray() };
         Assert.Equal("ITEM_EFFECTS_LIMIT", (await Assert.ThrowsAsync<DiscoveryException>(() => Validate(h, oversized))).Code);
         Assert.True((await h.Store.AuthorizeItemEffectsAsync(new(h.Request, ready.ArtifactId, "1"), default)).Item.Admitted);
+    }
+
+    /// <summary>
+    /// Charges the parse graph by what dropping it releases, between settled samples. A plain
+    /// GC.GetTotalMemory(true) delta from a baseline read -549,984 bytes on Linux (#67): leftovers
+    /// of earlier tests were still counted at the baseline and freed during the parse.
+    /// </summary>
+    private static ParseSample MeasureParse(byte[] bytes, Action<TactConfiguration> check)
+    {
+        Warm(bytes);
+        var before = ManagedHeap.Settled();
+        var (held, allocated) = ParseAndHold(bytes, check);
+        var dropped = ManagedHeap.Settled();
+        return new(held - dropped, held - before, allocated);
+    }
+
+    // Separate frames, so no unoptimized JIT temporary of the caller keeps either parse alive.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static StrongBox<byte[]?> Leftover(int bytes) => new(new byte[bytes]);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void Warm(byte[] bytes) => _ = ItemEffectsConfigurationBudget.ParseBuild(bytes, default);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (long Held, long Allocated) ParseAndHold(byte[] bytes, Action<TactConfiguration> check)
+    {
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        var parsed = ItemEffectsConfigurationBudget.ParseBuild(bytes, default);
+        allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
+        check(parsed);
+        var held = ManagedHeap.Settled();
+        GC.KeepAlive(parsed);
+        return (held, allocated);
+    }
+
+    private readonly record struct ParseSample(long Released, long Growth, long Allocated)
+    {
+        // Released is the graph itself. Growth from the settled pre-parse sample also catches
+        // parser state that outlives the result; it has no lower bound because earlier work
+        // can still be freed in between.
+        public void RequireWithin(long limit)
+        {
+            Assert.InRange(Released, 0, limit);
+            Assert.True(Growth <= limit, $"Parse grew the settled heap by {Growth} bytes.");
+        }
     }
 
     private static Task Validate(Harness h, ItemEffectsItemsAuthority authority) => (Task)typeof(ItemsStore)

@@ -94,7 +94,7 @@ public sealed class ItemEffectsStoreResourceTests(ITestOutputHelper output)
         _ = await f.Store.ReadNamesAsync(request, default);
         using var admissionDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (f.Store.Pressure.Operations != 0) { admissionDeadline.Token.ThrowIfCancellationRequested(); await Task.Yield(); }
-        var armedHeap = SettledHeap(); Volatile.Write(ref armed, true);
+        var armedHeap = ManagedHeap.Settled(); Volatile.Write(ref armed, true);
         var pending = Enumerable.Range(0, 4).Select(_ => f.Store.ReadNamesAsync(request, default)).ToArray();
         await using var blocker = new SqliteConnection("Data Source=" + Path.Combine(f.H.DirectoryPath, "discovery-v1.sqlite3"));
         await blocker.OpenAsync(); SqliteTransaction? transaction = null;
@@ -112,14 +112,14 @@ public sealed class ItemEffectsStoreResourceTests(ITestOutputHelper output)
             // sample has no lower bound: earlier work freed in between (finalizers, pool trimming,
             // leftover tasks) made it read -3 to -9 MB on Linux CI (#36). Its ceiling still
             // catches a copy that leaves its frame in state the store keeps.
-            var queuedHeap = SettledHeap(); var bridgeSlots = f.Store.Pressure.BridgeSlots; var targetSlots = f.Store.Pressure.TargetSlots;
+            var queuedHeap = ManagedHeap.Settled(); var bridgeSlots = f.Store.Pressure.BridgeSlots; var targetSlots = f.Store.Pressure.TargetSlots;
             transaction.Rollback(); transaction.Dispose(); transaction = null;
             await RequireReadyAsync(pending);
             Assert.Equal(4, queuedCopies);
             pending = [];
             using var retireDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             while (f.Store.Pressure.Operations != 0) { retireDeadline.Token.ThrowIfCancellationRequested(); await Task.Yield(); }
-            var retiredHeap = SettledHeap(); var released = queuedHeap - retiredHeap; var retained = retiredHeap - armedHeap;
+            var retiredHeap = ManagedHeap.Settled(); var released = queuedHeap - retiredHeap; var retained = retiredHeap - armedHeap;
             Assert.InRange(released, 0, 48L << 20);
             if (leakFrames) Assert.True(retained > 48L << 20, $"Parked frames must count as retained; retained={retained}.");
             else Assert.True(retained <= 48L << 20, $"Retired copies left {retained} bytes behind.");
@@ -138,25 +138,6 @@ public sealed class ItemEffectsStoreResourceTests(ITestOutputHelper output)
     {
         foreach (var task in pending) Assert.Equal(ItemEffectNameState.Ready, Assert.Single((await task).Outcomes).State);
         Assert.All(pending, task => Assert.True(task.IsCompleted));
-    }
-
-    /// <summary>
-    /// Live managed heap after full blocking collections stop changing. GC.GetTotalMemory(true)
-    /// stops once two samples are within 5%, which on a 150 MB test process leaves up to ~8 MB of
-    /// finalizer-held or trimmed garbage in the "settled" number.
-    /// </summary>
-    private static long SettledHeap()
-    {
-        long previous = -1, change = 0;
-        for (var attempt = 0; attempt < 16; attempt++)
-        {
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-            GC.WaitForPendingFinalizers();
-            var current = GC.GetTotalMemory(false);
-            if (previous >= 0 && (change = Math.Abs(current - previous)) < 64 << 10) return current;
-            previous = current;
-        }
-        throw new Xunit.Sdk.XunitException($"Managed heap did not settle after 16 full collections; last change {change} bytes.");
     }
 
     [Fact]
