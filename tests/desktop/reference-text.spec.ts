@@ -237,7 +237,8 @@ test('a failed text definition read stays visible with its retry, and at 200% th
     await expect(notice.locator('strong')).toHaveText('ItemClass text not loaded');
     await expect(classCell(page, '1')).toHaveText('3 · text unavailable');
     const retry = notice.getByRole('button', { name: 'Retry ItemClass definition', exact: true });
-    await expect(retry).toBeInViewport({ ratio: 1 });
+    // The shell may scroll at this size (D099): Tab reaches Retry and brings it wholly into view.
+    await retry.focus(); await expect(retry).toBeInViewport({ ratio: 1 });
     const rowFits = () => page.locator('.dh-data:not([hidden]) .dh-grid-scroll').evaluate(grid => {
       const row = grid.querySelector('tbody tr')!.getBoundingClientRect(), box = grid.getBoundingClientRect();
       return row.bottom <= box.top + grid.clientHeight + 1;
@@ -250,8 +251,9 @@ test('a failed text definition read stays visible with its retry, and at 200% th
       throw error;
     }
     expect(await notice.evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
-    // The partial notice has no action, so at this size it steps aside; the Partial fact stays in the records foot.
-    await expect(page.locator('.dh-data:not([hidden])>.dh-notice:not(.dh-keep)').filter({ hasText: 'Readable rows available · Partial' })).toBeHidden();
+    // The Partial notice stays whole, never hidden or a scroll box (D099), and the records foot repeats the fact.
+    const partial = page.locator('.dh-data:not([hidden])>.dh-notice.partial-scope');
+    await expect(partial).toBeVisible(); expect(await partial.evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
     await expect(page.locator('.dh-tables .dh-foot-count')).toContainText('· enUS · Partial');
     await captures(page, app, 'definition-failed');
     await bothFonts(app, page, 'definition failure');
@@ -263,7 +265,7 @@ test('a failed text definition read stays visible with its retry, and at 200% th
   } finally { await session.close(); }
 });
 
-test('at 200% in both fonts a batch failure and a row error keep their Retry, and Partial is the only notice that steps aside', async () => {
+test('at 200% in both fonts a batch failure and a row error keep their Retry, and no notice steps aside', async () => {
   const session = await launch(true, false, false, false, false, false, false, false, false, true);
   try {
     const { page, app, data } = session;
@@ -289,7 +291,7 @@ test('at 200% in both fonts a batch failure and a row error keep their Retry, an
     await expect(page.getByRole('region', { name: 'Item admitted table rows', exact: true })).toBeFocused();
     const load = page.getByRole('region', { name: 'ItemClass text', exact: true }).getByRole('button', { name: 'Load text (≈8.0 MB)', exact: true });
     await expect(load).toHaveAttribute('aria-disabled', 'false');
-    // A failed page read at the tightest size keeps its error and Retry; it never steps aside like Partial.
+    // A failed page read at the tightest size keeps its error and Retry, and Partial stays too (D099).
     await page.evaluate(() => { document.documentElement.style.fontSize = '30px'; }); await setCiFont(page, true);
     await writeFile(path.join(data, 'table-rows-error'), 'error');
     await page.getByRole('button', { name: 'Next page of records', exact: true }).click();
@@ -297,7 +299,7 @@ test('at 200% in both fonts a batch failure and a row error keep their Retry, an
     await expect(rowError).toBeVisible();
     await expect(rowError.getByRole('button', { name: 'Retry table read', exact: true })).toBeInViewport({ ratio: 1 });
     await expect(load).toBeVisible();
-    await expect(page.locator('.dh-data:not([hidden])>.dh-notice.dh-yieldable')).toBeHidden();
+    await expect(page.locator('.dh-data:not([hidden])>.dh-notice.partial-scope')).toBeVisible();
     await actionsFit(page, 'row error ci font');
     await captures(page, app, 'row-error');
     await setCiFont(page, false);

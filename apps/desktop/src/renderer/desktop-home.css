@@ -200,7 +200,6 @@
 .desktop-home .dh-chip-x:hover{background:#d5eadf}
 .desktop-home.dh-compact .dh-follow-bar>span:last-child:not(.dh-chip-filter){display:none}
 .desktop-home .dh-data>.dh-notice.dh-keep{overflow:visible;flex:none}
-.desktop-home .dh-data>.dh-notice.dh-yield{display:none}
 .desktop-home .text-load-reason{font-size:var(--fs-s)}
 /* The code opens the detail line at normal weight, as the reference does; the heading stays plain words. */
 .desktop-home .reference-code{font-weight:400;margin-right:.28rem}
@@ -409,6 +408,11 @@
 .desktop-home.dh-shell-scroll .dh-tables,.desktop-home.dh-shell-scroll .dh-files{grid-template-rows:auto auto}
 .desktop-home.dh-shell-scroll :is(.dh-tables,.dh-files) :is(.dh-pane,.dh-inspector,.dh-data){overflow:visible}
 .desktop-home.dh-shell-scroll :is(.dh-tables,.dh-files) :is(.dh-cat-list,.dh-grid-scroll,.dh-list-scroll){flex:none;min-height:0;max-height:calc(100vh - 2.7rem - 1px)}
+/* D099: the Data grid and the pager under it fit the shell's view between its scroll padding, with the floating activity entry's
+   clearance while there is an activity entry, so revealing a row never scrolls the sticky column header off screen. The grid keeps
+   its header and three rows (--dh-grid-need, measured by the Data view) when that leaves too little, but never outgrows the view. */
+.desktop-home.dh-shell-scroll .dh-tables .dh-data>.dh-grid-scroll{max-height:min(calc(100vh - 2.7rem - 1px),max(var(--dh-grid-need,0px),calc(100vh - 2.7rem - 1px - var(--dh-pager,0px))))}
+:root:has(.dv-chip,.download-activity-floating) .desktop-home.dh-shell-scroll .dh-tables .dh-data>.dh-grid-scroll{max-height:min(calc(100vh - 5.6rem - 3px),max(var(--dh-grid-need,0px),calc(100vh - 5.6rem - 3px - var(--dh-pager,0px))))}
 .desktop-home .dh-area{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;min-width:0;outline:none}
 .desktop-home .dh-area>*{grid-area:1/1;min-height:0;min-width:0}
 .desktop-home .dh-area>.dh-home{display:grid}
@@ -458,12 +462,15 @@
 :root:has(.desktop-home.dh-shell-scroll) .download-activity-floating>span{display:block;position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 /* While it shows, the shell's bottom scroll padding clears it as well as the status bar, so a focused control, row or active option the
    shell or its lists scroll into view stays above it (#66): 2.633333rem + 1px to its bottom, one 1.5 line of .8rem text, .35rem padding
-   and a 1px border, then the shell's usual .533333rem gap. */
+   and a 1px border, then the shell's usual .533333rem gap. When it starts floating, the shell reveals the focused control again with
+   that clearance (#60). */
 :root:has(.desktop-home.dh-shell-scroll) .download-activity-floating strong{line-height:1.5}
 :root:has(.download-activity-floating) .desktop-home.dh-shell-scroll .dh-app{scroll-padding-bottom:calc(5.066667rem + 3px)}
 /* The areas that take their natural height end with that much room again, less the status bar's share, so their last controls (a
-   pager on the right) can scroll above the entry too. */
-:root:has(.download-activity-floating) .desktop-home.dh-shell-scroll:is([data-area="home"],[data-area="tables"],[data-area="files"],[data-area="items"]) .dh-area{padding-bottom:calc(2.9rem + 2px)}
+   pager on the right) can scroll above the entry too. The room is there whenever there is an activity entry (the header's compact
+   entry or the floating one), not only while it floats: the entry starts floating once the header has scrolled away, and room added
+   only then came too late for a pager already at the shell's end (#60). */
+:root:has(.dv-chip,.download-activity-floating) .desktop-home.dh-shell-scroll:is([data-area="home"],[data-area="tables"],[data-area="files"],[data-area="items"]) .dh-area{padding-bottom:calc(2.9rem + 2px)}
 
 /* Activity panel docked after the entry: below the header, above the status bar, over the side column or inspector. */
 .desktop-home aside.download-activity-panel{top:var(--dh-panel-top,5.5rem);bottom:var(--dh-panel-bottom,1.633333rem);right:var(--dh-panel-right,0);left:auto;width:var(--panel-w);border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:-8px 0 24px rgba(36,59,58,.08);font-size:var(--fs-m);z-index:3}
@@ -611,7 +618,7 @@
 .desktop-home .dh-data-bar{flex-wrap:nowrap;white-space:nowrap;overflow:hidden}
 .desktop-home .dh-data-bar .dh-locale-note{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .desktop-home .dh-data-bar .dh-scope-note,.desktop-home .dh-data-bar .activity-task-link{flex:none}
-.desktop-home .dh-data>.dh-notice{overflow:auto}
+.desktop-home .dh-data>.dh-notice{overflow:visible}
 .desktop-home .dh-data>.dh-grid-scroll{min-height:0}
 .desktop-home .dh-insp-foot:empty{display:none}
 .desktop-home .dh-insp-details .dh-admission{margin:.746667rem 0 0;max-height:none}
@@ -637,10 +644,12 @@
 .desktop-home.dh-compact .dh-records .dh-pane-foot .dh-foot-count{flex:1 1 auto}
 .desktop-home.dh-compact .dh-records>.dh-pane-head{padding-top:.233333rem;padding-bottom:.233333rem;min-height:0}
 .desktop-home.dh-compact .dh-titlerow{padding-top:.186667rem;padding-bottom:.186667rem}
-/* Keyboard-selected rows scroll into view below the sticky two-line column header. */
-.desktop-home .dh-records-grid tbody tr{scroll-margin-top:2.8rem}
+/* Keyboard-selected rows scroll into view below the sticky column header, at the height the Data view measures (D099). */
+.desktop-home .dh-records-grid tbody tr{scroll-margin-top:calc(var(--dh-grid-head,2.466667rem) + .333333rem)}
 /* The corner header stays above the sticky Record ID cells of scrolled rows. */
 .desktop-home .dh-records-grid thead th:first-child{z-index:3}
+/* The grid keeps its sticky headers' stacking to itself, so the open activity panel paints over all of them (#60). */
+.desktop-home .dh-grid-scroll{isolation:isolate}
 .desktop-home .dh-records-grid tbody th:first-child{z-index:1}
 /* Settings entry (docs/design/desktop-settings): a plain toolbar button with a sliders icon, after Choose build. */
 .desktop-home .settings-entry svg{width:.933333rem;height:.933333rem;flex:none;color:var(--muted)}

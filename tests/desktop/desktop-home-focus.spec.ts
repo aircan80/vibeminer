@@ -104,7 +104,7 @@ test('at 200% an Items source record keeps the records head, notices and Return 
     const layout = await page.evaluate(() => { const records = document.querySelector<HTMLElement>('.dh-records')!, foot = records.querySelector(':scope>.dh-pane-foot')!.getBoundingClientRect(), head = records.querySelector(':scope>.dh-pane-head')!.getBoundingClientRect(), ret = records.querySelector('.dh-return-link')!.getBoundingClientRect(), notices = [...records.querySelectorAll('.dh-data:not([hidden])>.dh-notice')].map(n => n.getBoundingClientRect()); return { scroll: records.scrollTop, headTop: Math.round(head.top - records.getBoundingClientRect().top), retPinned: ret.top >= head.bottom - 1 && ret.bottom <= foot.top, noticesClear: notices.every(n => n.bottom <= foot.top + 1) }; });
     const row = await page.locator('.dh-data:not([hidden]) tbody tr').first().evaluate(el => { const r = el.getBoundingClientRect(), g = el.closest('.dh-grid-scroll')!.getBoundingClientRect(); const head = el.closest('table')!.querySelector('thead')!.getBoundingClientRect(), data = el.closest('.dh-data')!.getBoundingClientRect(), foot = document.querySelector('.dh-records>.dh-pane-foot')!.getBoundingClientRect(); return r.top >= head.bottom - 1 && r.bottom <= Math.min(g.bottom, data.bottom, foot.top) + 1 && r.height > 20; }); expect(row).toBe(true);
     expect(layout).toEqual({ scroll: 0, headTop: 0, retPinned: true, noticesClear: true });
-    // Nothing is dropped at enlarged text: the whole Partial notice (scrolling within its bound), the Record ID label and the pager count stay.
+    // Nothing is dropped at enlarged text: the whole Partial notice (never a scroll box, D099), the Record ID label and the pager count stay.
     const partial = page.locator('.dh-data:not([hidden])>.dh-notice').filter({ hasText: 'Readable rows available · Partial' });
     await expect(partial).toBeVisible(); await expect(partial).toContainText('Protected sections not loaded; results cover admitted rows only.'); await expect(partial).toContainText('Declared physical records');
     await expect(page.locator('.dh-records .dh-idfilter label')).toBeVisible(); await expect(page.locator('.dh-records .dh-idfilter label')).toHaveText('Record ID');
@@ -115,13 +115,14 @@ test('at 200% an Items source record keeps the records head, notices and Return 
     await size(session, 1440, 1100);
     expect(await page.evaluate(() => document.querySelector<HTMLElement>('.dh-records')!.scrollTop)).toBe(0);
     await expect(partial).toContainText('Declared physical records'); await expect(page.locator('.dh-records .dh-return-link')).toBeVisible();
-    // The notice takes the space it needs when the window fits it; when it can't, it is clamped to whole lines and named for its scroll box.
+    // The notice takes the space it needs, whether the window fits it or the shell scrolls instead (D099).
     await expect(page.getByRole('region', { name: 'Readable rows available · Partial' })).toBeVisible();
     expect(await partial.evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);
     await size(session, 1280, 800);
     const measure = () => partial.evaluate(el => { const style = getComputedStyle(el), line = parseFloat(getComputedStyle(el.querySelector('.dh-text')!).lineHeight), pad = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth), lines = (el.getBoundingClientRect().height - pad) / line; return { clamped: el.scrollHeight > el.clientHeight + 1, whole: Math.abs(lines - Math.round(lines)) < .05, lines: Math.round(lines) }; });
-    // 1280x800 at 200% cannot fit the whole Partial notice above one record row, so it is always clamped here.
-    const clamp = await measure(); expect(clamp).toMatchObject({ clamped: true, whole: true }); expect(clamp.lines).toBeGreaterThanOrEqual(1);
+    // 1280x800 at 200% cannot fit the whole Partial notice above three record rows, so the shell scrolls and the notice stays whole.
+    await expect(page.locator('.desktop-home.dh-shell-scroll')).toHaveCount(1);
+    const whole = await measure(); expect(whole).toMatchObject({ clamped: false, whole: true }); expect(whole.lines).toBeGreaterThanOrEqual(3);
     expect(await page.evaluate(() => [(window as any).__recordsScrolled, document.querySelector<HTMLElement>('.dh-records')!.scrollTop])).toEqual([0, 0]);
     // 100%: the pager is one line with the buttons on the right and single spaces.
     await text(page, 1);
