@@ -215,7 +215,9 @@ describe('reference text in the Data grid and inspector',{timeout:30000},()=>{
   const {bridge}=setup({large:true,prepare:Promise.resolve({ok:false,error:{code:'NETWORK_UNAVAILABLE',message:'Authored offline.',retryable:true}})});
   await screen.findByRole('button',{name:'Inspect record 0'});
   const notice=await screen.findByRole('region',{name:'ItemClass text'});
-  fireEvent.click(await within(notice).findByRole('button',{name:'Load text (≈8.0 MB)'}));
+  const load=await within(notice).findByRole('button',{name:'Load text (≈8.0 MB)'});
+  await waitFor(()=>expect(load).toHaveAttribute('aria-disabled','false'));
+  fireEvent.click(load);
   await waitFor(()=>expect(notice.querySelector('strong')!.textContent).toBe('ItemClass text could not be loaded'));
   expect(notice.querySelector('.reference-code code')!.textContent).toBe('(NETWORK_UNAVAILABLE)');
   expect(within(notice).getByRole('button',{name:'Retry ItemClass text'})).toBeVisible();
@@ -260,9 +262,18 @@ describe('reference text in the Data grid and inspector',{timeout:30000},()=>{
  });
  it('keeps a stopped load in its notice with a scoped Retry that reads differently from never loaded',async()=>{
   const {bridge,makeReady}=setup({large:true,prepare:Promise.resolve({ok:false,error:{code:'CANCELED',message:'Authored stop.',retryable:true}})});
+  const definition=deferred<BridgeReply<TableDefinitionSnapshot>>();vi.mocked(bridge.tableDefinition).mockReturnValueOnce(definition.promise);
   await screen.findByRole('button',{name:'Inspect record 0'});
   const notice=await screen.findByRole('region',{name:'ItemClass text'});
-  fireEvent.click(await within(notice).findByRole('button',{name:'Load text (≈8.0 MB)'}));
+  // Load text shows before the ItemClass definition arrives and ignores clicks until then (#51).
+  const load=await within(notice).findByRole('button',{name:'Load text (≈8.0 MB)'});
+  expect(load).toHaveAttribute('aria-disabled','true');
+  expect(within(notice).getByText('Reading the ItemClass definition…')).toBeVisible();
+  fireEvent.click(load);
+  expect(bridge.tablePrepare).not.toHaveBeenCalled();
+  await act(async()=>definition.resolve(ok({...classDefinition,productId:item.productId,buildIdentity:item.buildIdentity,sourceRegion:item.sourceRegion})));
+  await waitFor(()=>expect(load).toHaveAttribute('aria-disabled','false'));
+  fireEvent.click(load);
   await waitFor(()=>expect(within(notice).getByText('ItemClass text not loaded · loading stopped')).toBeVisible());
   expect(cell('1').textContent).toBe('3 · loading stopped');
   fireEvent.click(screen.getByRole('button',{name:'Inspect record 1'}));
