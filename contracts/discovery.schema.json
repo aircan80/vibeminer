@@ -345,6 +345,15 @@
     },
     "storageMeasurement": {
       "$ref": "#/definitions/StorageMeasurement"
+    },
+    "preparedDataList": {
+      "$ref": "#/definitions/PreparedDataList"
+    },
+    "preparedDataFreeParams": {
+      "$ref": "#/definitions/PreparedDataFreeParams"
+    },
+    "preparedDataFreed": {
+      "$ref": "#/definitions/PreparedDataFreed"
     }
   },
   "required": [
@@ -1097,7 +1106,9 @@
             "creatures.geometry.close",
             "settings.read",
             "settings.set",
-            "settings.storage.measure"
+            "settings.storage.measure",
+            "settings.storage.builds",
+            "settings.storage.free"
           ]
         },
         "params": {
@@ -1541,6 +1552,38 @@
             "properties": {
               "params": {
                 "$ref": "#/definitions/SettingsEmptyParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "settings.storage.builds"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/SettingsEmptyParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "settings.storage.free"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/PreparedDataFreeParams"
               }
             }
           }
@@ -3177,7 +3220,7 @@
     },
     "FileCatalogSetParams": {
       "title": "FileCatalogSetParams",
-      "description": "inventory.catalog.set: stop a pending preparation, or resume a stopped or failed one.",
+      "description": "inventory.catalog.set: stop a pending preparation, or resume a stopped, failed or removed one.",
       "type": "object",
       "properties": {
         "productId": {
@@ -3204,7 +3247,7 @@
     },
     "FileCatalogStatus": {
       "title": "FileCatalogStatus",
-      "description": "inventory.catalog reply (D071). pending carries its stage (and written memberships while writing); ready carries the sealed catalog Files reads; failed (after three attempts) and unsupported carry the cause, and the next Open retries both.",
+      "description": "inventory.catalog reply (D071). pending carries its stage (and written memberships while writing); ready carries the sealed catalog Files reads; failed (after three attempts) and unsupported carry the cause, and the next Open retries both. removed: freed from Settings (D085); the next Open or resume prepares it again.",
       "type": "object",
       "properties": {
         "productId": {
@@ -3236,7 +3279,8 @@
             "stopped",
             "ready",
             "failed",
-            "unsupported"
+            "unsupported",
+            "removed"
           ]
         },
         "stage": {
@@ -16555,6 +16599,239 @@
       "title": "SettingsEmptyParams",
       "type": "object",
       "properties": {},
+      "additionalProperties": false
+    },
+    "PreparedDataFreeParams": {
+      "title": "PreparedDataFreeParams",
+      "description": "settings.storage.free: one opened build whose file catalog is freed (D085).",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity"
+      ],
+      "additionalProperties": false
+    },
+    "PreparedFileCatalog": {
+      "title": "PreparedFileCatalog",
+      "description": "A build's file catalog: its state (none when it was never queued) and the bytes and count of its files on disk, measured when read. Only this build uses them.",
+      "type": "object",
+      "properties": {
+        "state": {
+          "enum": [
+            "none",
+            "pending",
+            "stopped",
+            "ready",
+            "failed",
+            "unsupported",
+            "removed"
+          ]
+        },
+        "bytes": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "files": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        }
+      },
+      "required": [
+        "state",
+        "bytes",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "PreparedTables": {
+      "title": "PreparedTables",
+      "description": "The table row files the build's admissions use, each counted once, and the bytes another build also uses. Kept by settings.storage.free.",
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "sharedBytes": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        }
+      },
+      "required": [
+        "count",
+        "bytes",
+        "sharedBytes"
+      ],
+      "additionalProperties": false
+    },
+    "PreparedDownloads": {
+      "title": "PreparedDownloads",
+      "description": "The build's stored download figure (D065). Stored objects are shared with every build that lists them. Kept by settings.storage.free.",
+      "type": "object",
+      "properties": {
+        "state": {
+          "enum": [
+            "notMeasured",
+            "counting",
+            "current",
+            "unavailable"
+          ]
+        },
+        "storedObjects": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "storedBytes": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "storedObjects",
+        "storedBytes"
+      ],
+      "additionalProperties": false
+    },
+    "PreparedBuild": {
+      "title": "PreparedBuild",
+      "description": "What one opened build holds locally (D085).",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "buildVersion": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastOpenedAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "fileCatalog": {
+          "$ref": "#/definitions/PreparedFileCatalog"
+        },
+        "tables": {
+          "$ref": "#/definitions/PreparedTables"
+        },
+        "downloads": {
+          "$ref": "#/definitions/PreparedDownloads"
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "buildVersion",
+        "lastOpenedAt",
+        "fileCatalog",
+        "tables",
+        "downloads"
+      ],
+      "additionalProperties": false
+    },
+    "PreparedDataList": {
+      "title": "PreparedDataList",
+      "description": "settings.storage.builds: every opened build, most recently opened first, at most 256; truncated when more were opened.",
+      "type": "object",
+      "properties": {
+        "builds": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/definitions/PreparedBuild"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "measuredAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        }
+      },
+      "required": [
+        "builds",
+        "truncated",
+        "measuredAt"
+      ],
+      "additionalProperties": false
+    },
+    "PreparedDataFreed": {
+      "title": "PreparedDataFreed",
+      "description": "settings.storage.free reply: the bytes and files deleted and the file catalog as measured after.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "freedBytes": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "freedFiles": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "fileCatalog": {
+          "$ref": "#/definitions/PreparedFileCatalog"
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "freedBytes",
+        "freedFiles",
+        "fileCatalog"
+      ],
       "additionalProperties": false
     }
   }

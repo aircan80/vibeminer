@@ -139,5 +139,19 @@
     "catalog": null,
     "problem": null,
     "waitingFor": null
+  },
+  {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "buildVersion": "12.1.5.70448",
+    "state": "removed",
+    "stage": null,
+    "completed": null,
+    "total": null,
+    "attempts": 0,
+    "catalog": null,
+    "problem": null,
+    "waitingFor": null
   }
 ]

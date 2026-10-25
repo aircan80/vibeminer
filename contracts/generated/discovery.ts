@@ -18,7 +18,7 @@ export type CreatureGeometryDependency = 'metadata' | 'model' | 'skin' | 'artifa
 export type EngineRequest = EngineRequest1;
 export type WorkspaceSnapshot = WorkspaceSnapshot1;
 /**
- * inventory.catalog reply (D071). pending carries its stage (and written memberships while writing); ready carries the sealed catalog Files reads; failed (after three attempts) and unsupported carry the cause, and the next Open retries both.
+ * inventory.catalog reply (D071). pending carries its stage (and written memberships while writing); ready carries the sealed catalog Files reads; failed (after three attempts) and unsupported carry the cause, and the next Open retries both. removed: freed from Settings (D085); the next Open or resume prepares it again.
  */
 export type FileCatalogStatus = FileCatalogStatus1;
 export type TableDefinitionSnapshot = TableDefinitionSnapshot1;
@@ -292,6 +292,9 @@ export interface DiscoveryContract {
   settingsSnapshot?: SettingsSnapshot;
   settingsSetParams?: SettingsSetParams;
   storageMeasurement?: StorageMeasurement;
+  preparedDataList?: PreparedDataList;
+  preparedDataFreeParams?: PreparedDataFreeParams;
+  preparedDataFreed?: PreparedDataFreed;
 }
 export interface Product {
   id: string;
@@ -509,7 +512,9 @@ export interface EngineRequest1 {
     | 'creatures.geometry.close'
     | 'settings.read'
     | 'settings.set'
-    | 'settings.storage.measure';
+    | 'settings.storage.measure'
+    | 'settings.storage.builds'
+    | 'settings.storage.free';
   params: {
     [k: string]: unknown;
   };
@@ -799,7 +804,7 @@ export interface FileCatalogStatus1 {
   buildIdentity: string;
   sourceRegion: string;
   buildVersion: string | null;
-  state: 'notOpened' | 'pending' | 'stopped' | 'ready' | 'failed' | 'unsupported';
+  state: 'notOpened' | 'pending' | 'stopped' | 'ready' | 'failed' | 'unsupported' | 'removed';
   stage: ('queued' | 'paused' | 'acquiring' | 'waiting' | 'reading' | 'writing' | 'sealing') | null;
   completed: string | null;
   total: string | null;
@@ -852,7 +857,7 @@ export interface FileCatalogList {
   catalogs: FileCatalogStatus[];
 }
 /**
- * inventory.catalog.set: stop a pending preparation, or resume a stopped or failed one.
+ * inventory.catalog.set: stop a pending preparation, or resume a stopped, failed or removed one.
  */
 export interface FileCatalogSetParams {
   productId: string;
@@ -3280,4 +3285,68 @@ export interface StorageMeasurement {
   skipped: string;
   startedAt: SettingsTimestamp;
   measuredAt: SettingsTimestamp;
+}
+/**
+ * settings.storage.builds: every opened build, most recently opened first, at most 256; truncated when more were opened.
+ */
+export interface PreparedDataList {
+  /**
+   * @maxItems 256
+   */
+  builds: PreparedBuild[];
+  truncated: boolean;
+  measuredAt: SettingsTimestamp;
+}
+/**
+ * What one opened build holds locally (D085).
+ */
+export interface PreparedBuild {
+  productId: string;
+  buildIdentity: string;
+  buildVersion: string | null;
+  lastOpenedAt: string;
+  fileCatalog: PreparedFileCatalog;
+  tables: PreparedTables;
+  downloads: PreparedDownloads;
+}
+/**
+ * A build's file catalog: its state (none when it was never queued) and the bytes and count of its files on disk, measured when read. Only this build uses them.
+ */
+export interface PreparedFileCatalog {
+  state: 'none' | 'pending' | 'stopped' | 'ready' | 'failed' | 'unsupported' | 'removed';
+  bytes: string;
+  files: number;
+}
+/**
+ * The table row files the build's admissions use, each counted once, and the bytes another build also uses. Kept by settings.storage.free.
+ */
+export interface PreparedTables {
+  count: number;
+  bytes: string;
+  sharedBytes: string;
+}
+/**
+ * The build's stored download figure (D065). Stored objects are shared with every build that lists them. Kept by settings.storage.free.
+ */
+export interface PreparedDownloads {
+  state: 'notMeasured' | 'counting' | 'current' | 'unavailable';
+  storedObjects: string | null;
+  storedBytes: string | null;
+}
+/**
+ * settings.storage.free: one opened build whose file catalog is freed (D085).
+ */
+export interface PreparedDataFreeParams {
+  productId: string;
+  buildIdentity: string;
+}
+/**
+ * settings.storage.free reply: the bytes and files deleted and the file catalog as measured after.
+ */
+export interface PreparedDataFreed {
+  productId: string;
+  buildIdentity: string;
+  freedBytes: string;
+  freedFiles: number;
+  fileCatalog: PreparedFileCatalog;
 }

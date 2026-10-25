@@ -64,7 +64,11 @@ try
         storedCoverage.Start(); rootScopes.Start(); fileCatalogs.Start();
         var host = new ProtocolHost(discovery, workspace, new InventoryService(catalog),
             new DownloadService(new DownloadQuery(catalog, objects)), new TablesService(new TablesCatalog(catalog)), tables, retention,
-            downloadSummaries: new DownloadSummaryService(catalog));
+            downloadSummaries: new DownloadSummaryService(catalog),
+            // Settings, the data folder measurement and prepared data per build (D085) use the real services too.
+            settings: new SettingsService(new JsonSettingsStore(directory), new DataDirectoryMeasurer(directory),
+                new DownloadLimitSettings(resources.MaximumHttp, resources.MaximumBackgroundHttp, null, false)),
+            preparedData: new PreparedDataService(catalog));
         await host.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
     }
     finally { await retention.ShutdownAsync(); }

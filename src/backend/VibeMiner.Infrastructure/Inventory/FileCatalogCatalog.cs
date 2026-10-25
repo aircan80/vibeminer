@@ -58,7 +58,7 @@ public sealed partial class DiscoveryCatalog
     private readonly Channel<bool> fileCatalogSignal = Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
     { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
     private readonly LinkedList<long> attachedCatalogs = new();
-    /// <summary>Raised after a user stop commits, with product and build, so a running preparation of that build stops now.</summary>
+    /// <summary>Raised after a user stop or free (D085) commits, with product and build, so a running preparation of that build stops now.</summary>
     internal event Action<string, string>? FileCatalogStopped;
 
     private void UpgradeFileCatalogs()
@@ -173,8 +173,8 @@ public sealed partial class DiscoveryCatalog
 
     /// <summary>
     /// Inside an Open's admission transaction: queue the build's file catalog unless one is pending or ready, and make it the
-    /// most recently opened, so it goes first. A failed, unsupported or stopped one is queued again; its staging file, if
-    /// any, stays for the next attempt to check and continue. A ready one whose file or registry row is gone is queued from
+    /// most recently opened, so it goes first. A failed, unsupported, stopped or removed (D085) one is queued again; its
+    /// staging file, if any, stays for the next attempt to check and continue. A ready one whose file or registry row is gone is queued from
     /// the start.
     /// </summary>
     private void EnsureFileCatalog(string product, string build, string now, SqliteTransaction transaction)
@@ -183,7 +183,7 @@ public sealed partial class DiscoveryCatalog
         (string, object?)[] key = [("$p", product), ("$b", build), ("$t", now), ("$o", opened)];
         Execute("INSERT OR IGNORE INTO file_catalogs VALUES($p,$b,'pending',1,0,NULL,0,NULL,'queued',NULL,$o,$t)", transaction, key);
         Execute("UPDATE file_catalogs SET opened=$o WHERE product=$p AND build_id=$b", transaction, key);
-        Execute("UPDATE file_catalogs SET state='pending',generation=generation+1,attempts=0,stage='queued',problem=NULL,updated_at=$t WHERE product=$p AND build_id=$b AND state IN ('failed','unsupported','stopped')",
+        Execute("UPDATE file_catalogs SET state='pending',generation=generation+1,attempts=0,stage='queued',problem=NULL,updated_at=$t WHERE product=$p AND build_id=$b AND state IN ('failed','unsupported','stopped','removed')",
             transaction, key);
         if (Scalar("SELECT inventory FROM file_catalogs WHERE product=$p AND build_id=$b AND state='ready'", transaction, key) is long ready &&
             (Scalar("SELECT 1 FROM inventory_generations WHERE id=$g AND build_id=$b AND state='ready' AND profile=$profile", transaction,
@@ -538,8 +538,9 @@ public sealed partial class DiscoveryCatalog
 
     /// <summary>
     /// The user's Stop or Resume (D071). Stop leaves the build stopped with its written rows, cancels a running preparation
-    /// and is undone by Resume or the next Open; Resume, or Retry of a failed one, queues it again first in line. An
-    /// unsupported file list is not retried this way: reading the same bytes again cannot help.
+    /// and is undone by Resume or the next Open; Resume, or Retry of a failed one, queues it again first in line. Resume of
+    /// a removed one (D085) prepares it again from the beginning. An unsupported file list is not retried this way: reading
+    /// the same bytes again cannot help.
     /// </summary>
     public Task<FileCatalogStatus> SetFileCatalogAsync(FileCatalogSetRequest request, CancellationToken token) => Schedule(() =>
     {
@@ -549,9 +550,9 @@ public sealed partial class DiscoveryCatalog
         {
             var state = (string?)Scalar("SELECT state FROM file_catalogs WHERE product=$p AND build_id=$b", transaction, ("$p", request.ProductId), ("$b", request.BuildIdentity))
                 ?? throw new DiscoveryException("FILE_CATALOG_NOT_FOUND", "This build has no file list preparation. Open the build first.");
-            var allowed = stop ? state == "pending" : state is "stopped" or "failed";
+            var allowed = stop ? state == "pending" : state is "stopped" or "failed" or "removed";
             if (!allowed) throw new DiscoveryException("FILE_CATALOG_STATE", stop ? "This build's file list is not being prepared." : state == "unsupported"
-                ? "This build's file list cannot be read; trying again would read the same bytes." : "This build's file list is not stopped or failed.");
+                ? "This build's file list cannot be read; trying again would read the same bytes." : "This build's file list is not stopped, failed or removed.");
             var now = DateTimeOffset.UtcNow.ToString("O");
             if (stop) Execute("UPDATE file_catalogs SET state='stopped',generation=generation+1,stage='queued',updated_at=$t WHERE product=$p AND build_id=$b", transaction,
                 ("$t", now), ("$p", request.ProductId), ("$b", request.BuildIdentity));
@@ -566,20 +567,54 @@ public sealed partial class DiscoveryCatalog
         return ReadFileCatalog(new(request.ProductId, request.BuildIdentity, region));
     }, token);
 
+    /// <summary>Generations whose files one cleanup pass may skip because they could not be deleted.</summary>
+    internal const int FileCatalogCleanupSkipBound = 256;
+    /// <summary>File catalogs remembered as already logged as undeletable; beyond this, further ones are not logged.</summary>
+    private const int UndeletableLogBound = 4096;
+    // Worker-thread state, touched only inside catalog operations.
+    private readonly HashSet<long> undeletableCatalogs = [];
+    private int undeletableLogLines;
+    /// <summary>Tests and diagnostics only: log lines written for file catalogs cleanup could not delete.</summary>
+    internal int UndeletableLogLines => Volatile.Read(ref undeletableLogLines);
+
     /// <summary>
     /// Removes one file catalog no build stands on (an abandoned or unreferenced staging generation, or a file no
-    /// generation row names): its file, then its registry row. False when nothing is left.
+    /// generation row names): its file, then its registry row. False when nothing is left. With <paramref name="skipped"/>,
+    /// a generation whose files cannot be deleted (a lock, a permission) keeps its registry row, is added to the set and
+    /// is not tried again in this pass, so one stuck file never holds back the others or the worker (D085); without it,
+    /// the failure is thrown.
     /// </summary>
-    internal Task<bool> CleanupFileCatalogsAsync(CancellationToken token) => Schedule(() =>
+    internal Task<bool> CleanupFileCatalogsAsync(CancellationToken token, ISet<long>? skipped = null) => Schedule(() =>
     {
-        if (Scalar("""
-            SELECT id FROM inventory_generations i WHERE profile=$profile AND state IN ('staging','abandoned')
-                AND NOT EXISTS(SELECT 1 FROM file_catalogs f WHERE f.inventory=i.id) ORDER BY id LIMIT 1
-            """, null, ("$profile", FileCatalogProfile)) is long g)
+        bool Delete(long id)
         {
-            DeleteFileCatalogFile(g);
-            Execute("DELETE FROM inventory_generations WHERE id=$g AND profile=$profile AND state IN ('staging','abandoned') AND NOT EXISTS(SELECT 1 FROM file_catalogs WHERE inventory=$g)",
-                null, ("$g", g), ("$profile", FileCatalogProfile));
+            try { DeleteFileCatalogFile(id); undeletableCatalogs.Remove(id); return true; }
+            catch (Exception failure) when (skipped is not null && failure is IOException or UnauthorizedAccessException or SqliteException)
+            {
+                skipped.Add(id);
+                // A file that stays stuck is tried every retry delay for as long as the engine runs: one log line per file.
+                if (undeletableCatalogs.Count < UndeletableLogBound && undeletableCatalogs.Add(id))
+                {
+                    undeletableLogLines++;
+                    EngineLog.Write($"File catalog {id} could not be deleted yet; cleanup keeps trying without logging it again ({Cause(failure)}).");
+                }
+                return false;
+            }
+        }
+        if (skipped?.Count >= FileCatalogCleanupSkipBound) return false;
+        // Skipped generations are the lowest ones this pass picked, so one more than them names the next to try.
+        long? next = null;
+        using (var command = Command("""
+            SELECT id FROM inventory_generations i WHERE profile=$profile AND state IN ('staging','abandoned')
+                AND NOT EXISTS(SELECT 1 FROM file_catalogs f WHERE f.inventory=i.id) ORDER BY id LIMIT $n
+            """, null, ("$profile", FileCatalogProfile), ("$n", (skipped?.Count ?? 0) + 1)))
+        using (var r = command.ExecuteReader())
+            while (r.Read()) if (skipped is null || !skipped.Contains(r.GetInt64(0))) { next = r.GetInt64(0); break; }
+        if (next is long g)
+        {
+            if (Delete(g))
+                Execute("DELETE FROM inventory_generations WHERE id=$g AND profile=$profile AND state IN ('staging','abandoned') AND NOT EXISTS(SELECT 1 FROM file_catalogs WHERE inventory=$g)",
+                    null, ("$g", g), ("$profile", FileCatalogProfile));
             return true;
         }
         if (!Directory.Exists(fileCatalogDirectory)) return false;
@@ -587,15 +622,15 @@ public sealed partial class DiscoveryCatalog
         {
             token.ThrowIfCancellationRequested();
             var name = Path.GetFileNameWithoutExtension(path);
-            if (!long.TryParse(name.AsSpan(6), NumberStyles.None, CultureInfo.InvariantCulture, out var id)) continue;
+            if (!long.TryParse(name.AsSpan(6), NumberStyles.None, CultureInfo.InvariantCulture, out var id) || skipped?.Contains(id) == true) continue;
             if (Scalar("SELECT 1 FROM inventory_generations WHERE id=$g AND profile=$profile", null, ("$g", id), ("$profile", FileCatalogProfile)) is not null) continue;
-            DeleteFileCatalogFile(id);
+            Delete(id);
             return true;
         }
         return false;
     }, token);
 
-    private static readonly string[] FileCatalogStates = ["pending", "stopped", "ready", "failed", "unsupported"];
+    private static readonly string[] FileCatalogStates = ["pending", "stopped", "ready", "failed", "unsupported", "removed"];
 
     /// <summary>
     /// The file catalog of one opened build, for Files: one row, at most one bounded summary and the build it waits for,
@@ -667,6 +702,10 @@ public sealed partial class DiscoveryCatalog
                     waitingFor: stage == "queued" ? RunningFileCatalog(request) : stage == "waiting" ? MeasuringRootScope() : null);
             case "stopped":
                 return Status("stopped", attempts: (int)attempts, problem: problem);
+            case "removed":
+                // Freed by the user (D085): no rows and no file are left; the next Open or Resume prepares it again.
+                if (inventory is not null || problem is not null) throw StoredIntegrity();
+                return Status("removed");
             default:
                 return Status(state, attempts: (int)attempts, problem: problem ?? throw StoredIntegrity());
         }

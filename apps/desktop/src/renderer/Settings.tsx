@@ -4,6 +4,7 @@ import type { SettingsSnapshot, StorageMeasurement } from '../shared/settings';
 import { exactBytes, exactCount, readableBytes } from '../shared/inventory';
 import { ActivityTrigger, useDownloadActivity } from './DownloadActivity';
 import { summaryLine } from './download-activity-state';
+import { PreparedDataSetting } from './PreparedData';
 import brand from '../../../../branding/vibeminer.svg';
 import './settings.css';
 
@@ -31,7 +32,7 @@ type Measure = { phase: 'measuring'; asked: boolean } | { phase: 'measured'; val
 const failure = <T,>(reply: BridgeReply<T>): Problem | null => reply.ok ? null : { code: reply.error.code, message: reply.error.message, retryable: reply.error.retryable };
 const thrown = { code: 'ENGINE_UNAVAILABLE', message: 'The local engine is unavailable. Restart VibeMiner to reconnect.', retryable: true };
 
-export function SettingsView({ bridge, origin, fixtureLabel, onBack }: { bridge: DiscoveryBridge; origin: SettingsOrigin; fixtureLabel?: string | null; onBack: () => void }) {
+export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedDataChanged }: { bridge: DiscoveryBridge; origin: SettingsOrigin; fixtureLabel?: string | null; onBack: () => void; onPreparedDataChanged?: () => void }) {
   const ui = useDownloadActivity();
   const [snapshot, setSnapshot] = useState<SettingsSnapshot | null>(null);
   const [community, setCommunity] = useState<Community>({ phase: 'reading' });
@@ -185,10 +186,11 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack }: { bridge:
                   <dt>Size on disk</dt><dd>{sizeFact}</dd>
                   <dt>Measured</dt><dd>{measuredFact ?? <span className="st-dim">Not measured yet</span>}</dd>
                 </dl>
-                <dl className="st-effects"><dt>Changes</dt><dd>Read-only for now. The size is the whole folder, every build together, not a build’s download size from Home.</dd></dl>
+                <dl className="st-effects"><dt>Changes</dt><dd>The folder can’t be moved yet. The size is the whole folder, every build together, not a build’s download size from Home. A build’s file list can be freed below.</dd></dl>
               </div>
               <div className="st-ctl"><div className="st-ctl-row"><button ref={copy} className="st-btn" aria-describedby="settings-storage-name" disabled={!bridge.storageCopyPath} onClick={() => { void storageAction('copy'); }}>Copy path</button><button className="st-btn" disabled={!bridge.storageShowFolder} onClick={() => { void storageAction('show'); }}>Show in folder</button></div><span className="st-save-line" id="settings-storage-line" role="status">{storageNote}</span></div>
             </div>
+            <PreparedDataSetting bridge={bridge} onFreed={() => { onPreparedDataChanged?.(); if (alive.current) void measureNow(true); }}/>
           </section>
           <section aria-labelledby="settings-group-downloads"><h2 className="st-label st-group-h" id="settings-group-downloads">Downloads</h2>
             <div className="st-setting" id="settings-row-limits">

@@ -12,7 +12,7 @@ import type {IconBatchParams,IconBatch} from './item-icons';
 import type { ItemsContext, ItemsSnapshot, ItemsReadiness, ItemsPage, ItemInspectResult } from '../../../../contracts/generated/discovery';
 import type { ItemsPageParams, ItemInspectParams } from './items';
 import type { RetentionSet } from './retention';
-import type { SettingsSnapshot, SettingsSetParams, StorageMeasurement } from './settings';
+import type { SettingsSnapshot, SettingsSetParams, StorageMeasurement, PreparedDataList, PreparedDataFreed, PreparedDataFreeParams } from './settings';
 import type { RetentionTarget, RetentionSnapshot, RetentionList, DownloadSummaries, DownloadSummariesParams, DownloadChanges, DownloadChangesParams } from '../../../../contracts/generated/discovery';
 import type { TableDataParams, TableRowsParams } from './table-data';
 import type { TableReferenceTextPage, TableFollowPage } from '../../../../contracts/generated/discovery';
@@ -26,7 +26,7 @@ export type ReadParams = { productId: string; filter?: DiscoveryFilter; limit?: 
 /** Cross-product read. Without productId it reads every registered product. */
 export type ReadAllParams = { productId?: string; filter?: DiscoveryFilter; limit?: number; cursor?: string };
 export type OpenParams = { productId: string; buildIdentity: string; sourceRegion: string };
-export type RequestMethod = 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'workspace.open' | 'inventory.read' | 'inventory.files' | 'inventory.file' | 'inventory.catalog' | 'inventory.catalogs' | 'inventory.catalog.set' | 'download.read' | 'download.summaries' | 'download.changes' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'tables.referenceText' | 'tables.follow' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'settings.read' | 'settings.set' | 'settings.storage.measure' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
+export type RequestMethod = 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'workspace.open' | 'inventory.read' | 'inventory.files' | 'inventory.file' | 'inventory.catalog' | 'inventory.catalogs' | 'inventory.catalog.set' | 'download.read' | 'download.summaries' | 'download.changes' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'tables.referenceText' | 'tables.follow' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'settings.read' | 'settings.set' | 'settings.storage.measure' | 'settings.storage.builds' | 'settings.storage.free' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
 export type BridgeReply<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; retryable: boolean } };
 export interface DiscoveryBridge {
   onGeometryRetirement?(listener:(notice:GeometryViewRetirement)=>void):()=>void;
@@ -61,6 +61,10 @@ export interface DiscoveryBridge {
   settingsSet?(params: SettingsSetParams): Promise<BridgeReply<SettingsSnapshot>>;
   /** One cancellable walk of the engine data folder; cancel it with cancel(requestId). */
   storageMeasure?(requestId: string): Promise<BridgeReply<StorageMeasurement>>;
+  /** Prepared data of every opened build, measured now (D085); cancel it with cancel(requestId). Needs prepared-data-v1. */
+  storageBuilds?(requestId: string): Promise<BridgeReply<PreparedDataList>>;
+  /** Frees one opened build's file catalog, stopping its preparation first if one runs (D085). */
+  storageFree?(params: PreparedDataFreeParams): Promise<BridgeReply<PreparedDataFreed>>;
   /** Main copies the engine data folder path; the renderer never handles paths itself. */
   storageCopyPath?(): Promise<BridgeReply<{ copied: true }>>;
   storageShowFolder?(): Promise<BridgeReply<{ shown: true }>>;

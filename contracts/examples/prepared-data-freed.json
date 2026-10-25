@@ -1,0 +1,11 @@
+{
+  "productId": "wow",
+  "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "freedBytes": "1234567168",
+  "freedFiles": 3,
+  "fileCatalog": {
+    "state": "removed",
+    "bytes": "0",
+    "files": 0
+  }
+}

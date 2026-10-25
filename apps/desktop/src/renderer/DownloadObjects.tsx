@@ -133,6 +133,7 @@ export const canShow = (catalog: CatalogView | null): boolean => catalog?.status
 export function catalogFoot(catalog: FileCatalogStatus | null): string {
   if (catalog?.state === 'pending') return 'Preparing file list…';
   if (catalog?.state === 'stopped') return 'File list preparation stopped';
+  if (catalog?.state === 'removed') return 'File list freed';
   if (catalog?.state === 'ready') return '';
   return catalog?.state === 'failed' || catalog?.state === 'unsupported' ? 'File list not prepared' : 'Catalog not prepared';
 }
@@ -241,6 +242,11 @@ export function CatalogNotPrepared({ withObjects = false, problem, catalog = nul
     return frame('File list preparation stopped', ' dh-plain', <><p className="dh-note-long">The rows written so far are kept, so it continues where it stopped. {missing} need the file list. {objects}</p>
       <p className="dh-note-short">{staleMark}Rows written so far are kept.</p>
       {actions(<><button className="dh-btn dh-small" aria-disabled={catalog!.busy} onClick={act(() => catalog!.busy ? undefined : catalog!.onAction('resume'))}>Resume preparing file list{name}</button>{staleRetry}</>)}</>);
+  // Freed from Settings (D085): prepared again only when asked, here or by the next Open.
+  if (status?.state === 'removed')
+    return frame('File list freed', ' dh-plain', <><p className="dh-note-long">It was freed in Settings to save disk space. Preparing it again runs in the background; opening the build again does it too. {missing} need the file list. {objects}</p>
+      <p className="dh-note-short">{staleMark}Freed in Settings to save disk space.</p>
+      {actions(<><button className="dh-btn dh-small" aria-disabled={catalog!.busy} onClick={act(() => catalog!.busy ? undefined : catalog!.onAction('resume'))}>Prepare file list again{name}</button>{staleRetry}</>)}</>);
   if (status?.state === 'failed' || status?.state === 'unsupported') {
     // Unsupported: the same bytes would be read again, so neither Retry nor Reopen is offered.
     const p = status.problem!, full = p.code === 'STORAGE_FULL', retry = status.state === 'failed', reopen = retry && onReopen;

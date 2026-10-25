@@ -141,3 +141,21 @@
 /* App level: Preparation and Home sit in a box-less wrapper so their own layout is unchanged; it hides while Settings shows. */
 .app-view{display:contents}
 .app-view[hidden]{display:none}
+
+/* Prepared data per build (D085): one entry per opened build, its control in the same column as the settings above. */
+.settings-screen .st-builds,.settings-screen .st-builds-note{grid-column:1/-1;max-width:59.546667rem}
+.settings-screen .st-builds{list-style:none;margin:.746667rem 0 0;padding:0;border-top:1px solid var(--line-soft)}
+.settings-screen p.st-builds-note{margin:.746667rem 0 0;font-size:var(--fs-m)}
+.settings-screen .st-notice.st-builds-note{margin-top:.746667rem;max-width:42.933333rem}
+.settings-screen .st-build{display:grid;grid-template-columns:minmax(0,42.933333rem) 14.933333rem;column-gap:1.68rem;padding:.653333rem 0;border-bottom:1px solid var(--line-soft)}
+.settings-screen .st-build:last-child{border-bottom:0}
+.settings-screen .st-build h4{margin:0;font-size:var(--fs-m);font-weight:700;line-height:1.35}
+.settings-screen .st-build h4:focus{outline:none}
+.settings-screen .st-build h4:focus-visible{outline:3px solid var(--focus)}
+.settings-screen .st-build h4 .st-dim{font-weight:400}
+.settings-screen .st-build dl.st-facts{margin-top:.326667rem}
+.settings-screen .st-build .st-notice{margin-top:.56rem}
+.settings-screen .st-confirm{display:flex;flex-direction:column;gap:.326667rem}
+.settings-screen .st-confirm-text{font-size:var(--fs-m)}
+.settings-screen.st-compact .st-build{grid-template-columns:minmax(0,1fr)}
+.settings-screen.st-compact .st-build .st-ctl{margin-top:.42rem}

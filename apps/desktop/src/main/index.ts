@@ -14,7 +14,7 @@ import {authorizedIconImage} from './icon-provenance';
 import {validIconBatch,validIconView} from '../shared/item-icons';
 import { validItemsContext, validItemsPage, validItemInspect } from '../shared/items';
 import { validRetentionTarget, validRetentionSet } from '../shared/retention';
-import { validSettingsSet, validEmpty } from '../shared/settings';
+import { validSettingsSet, validEmpty, validPreparedDataFree } from '../shared/settings';
 import { validTableData, validTableRows } from '../shared/table-data';
 import { validTableFollow } from '../shared/table-follow';
 import { app, BrowserWindow, clipboard, ipcMain, nativeImage, protocol, session, shell } from 'electron';
@@ -93,7 +93,8 @@ function registerBridge(): void {
       }
       if (method === 'settings.read') { if (!validEmpty(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid settings query.'); }
       else if (method === 'settings.set') { if (!validSettingsSet(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one known setting value.'); }
-      else if (method === 'settings.storage.measure') { if (!validEmpty(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Invalid storage measurement request.'); }
+      else if (method === 'settings.storage.measure' || method === 'settings.storage.builds') { if (!validEmpty(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Invalid storage measurement request.'); }
+      else if (method === 'settings.storage.free') { if (!validPreparedDataFree(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact opened build.'); }
       else if (method === 'desktop.capabilities' || method === 'retention.list' || method === 'products.list') { if (!params || typeof params !== 'object' || Object.keys(params).length) throw new EngineFailure('INVALID_REQUEST', 'Invalid product query.'); }
       else if(method==='items.effects.data'||method==='items.effects.prepare'){if(!validItemEffectsSelection(params)||method==='items.effects.prepare'&&!validRequestId(requestId))throw new EngineFailure('INVALID_REQUEST','Choose one exact admitted Item.');}
       else if(method==='items.effects.page'){if(!validItemEffectsPage(params))throw new EngineFailure('INVALID_REQUEST','Choose one bounded exact effects page.');}

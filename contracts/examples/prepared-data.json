@@ -1,0 +1,90 @@
+{
+  "builds": [
+    {
+      "productId": "wow",
+      "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "buildVersion": "1.2.3.12345",
+      "lastOpenedAt": "2026-10-20T13:10:00.0000000+00:00",
+      "fileCatalog": {
+        "state": "ready",
+        "bytes": "1234567168",
+        "files": 3
+      },
+      "tables": {
+        "count": 4,
+        "bytes": "73400320",
+        "sharedBytes": "52428800"
+      },
+      "downloads": {
+        "state": "current",
+        "storedObjects": "1204",
+        "storedBytes": "51749982208"
+      }
+    },
+    {
+      "productId": "wow",
+      "buildIdentity": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "buildVersion": "1.2.3.12300",
+      "lastOpenedAt": "2026-10-19T09:00:00.0000000+00:00",
+      "fileCatalog": {
+        "state": "pending",
+        "bytes": "401604608",
+        "files": 3
+      },
+      "tables": {
+        "count": 0,
+        "bytes": "0",
+        "sharedBytes": "0"
+      },
+      "downloads": {
+        "state": "counting",
+        "storedObjects": "1",
+        "storedBytes": "4096"
+      }
+    },
+    {
+      "productId": "wow_classic",
+      "buildIdentity": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "buildVersion": "1.2.0.12000",
+      "lastOpenedAt": "2026-10-18T08:00:00.0000000+00:00",
+      "fileCatalog": {
+        "state": "removed",
+        "bytes": "0",
+        "files": 0
+      },
+      "tables": {
+        "count": 1,
+        "bytes": "52428800",
+        "sharedBytes": "52428800"
+      },
+      "downloads": {
+        "state": "unavailable",
+        "storedObjects": null,
+        "storedBytes": null
+      }
+    },
+    {
+      "productId": "wow",
+      "buildIdentity": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "buildVersion": null,
+      "lastOpenedAt": "2026-10-17T08:00:00.0000000+00:00",
+      "fileCatalog": {
+        "state": "none",
+        "bytes": "0",
+        "files": 0
+      },
+      "tables": {
+        "count": 0,
+        "bytes": "0",
+        "sharedBytes": "0"
+      },
+      "downloads": {
+        "state": "notMeasured",
+        "storedObjects": null,
+        "storedBytes": null
+      }
+    }
+  ],
+  "truncated": false,
+  "measuredAt": "2026-10-20T13:12:04.0000000+00:00"
+}

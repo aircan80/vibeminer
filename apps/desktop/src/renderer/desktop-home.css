@@ -274,6 +274,9 @@
 .desktop-home.dh-compact .dh-catalog-missing>.dh-inline-head{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.56rem}
 .desktop-home.dh-compact .dh-catalog-missing>.dh-inline-head>p{margin:0}
 .desktop-home.dh-compact .dh-catalog-missing>.dh-inline-head>.dh-row{flex-basis:100%;margin-top:.28rem}
+/* A note's action names the build ("Resume preparing file list for …"); in a narrow pane its label wraps inside the note. */
+.desktop-home .dh-catalog-missing .dh-row{min-width:0}
+.desktop-home .dh-catalog-missing .dh-row .dh-btn{flex:0 1 auto;max-width:100%;min-width:0;height:auto;min-height:1.773333rem;padding-top:.14rem;padding-bottom:.14rem;white-space:normal;overflow-wrap:anywhere;text-align:left}
 /* At 200% the ready note carries Show file list; the footer keeps only the polite announcement, visually hidden, so
    Return, the count and the page controls keep one row. */
 .desktop-home.dh-compact .dh-wide-only{display:none}

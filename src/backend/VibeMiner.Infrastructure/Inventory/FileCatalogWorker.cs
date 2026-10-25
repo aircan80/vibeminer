@@ -104,11 +104,11 @@ public sealed class FileCatalogWorker : IAsyncDisposable
             try
             {
                 if (fresh) { await catalog.ResetFileCatalogStagesAsync(stop.Token); fresh = false; }
-                // One bounded slice per catalog operation, so interactive SQL interleaves.
-                while (await catalog.CleanupFileCatalogsAsync(stop.Token)) { }
+                var leftovers = await CleanupAsync(stop.Token);
                 var outcome = await PrepareNextAsync(stop.Token);
                 // A retry waits its delay, but a newly opened build, a resume or a pause change ends the wait early.
-                if (outcome == FileCatalogOutcome.Retry) await WaitForRetryAsync();
+                // Files cleanup could not delete are tried again the same way: after the delay, or at the next wake-up.
+                if (outcome == FileCatalogOutcome.Retry || outcome == FileCatalogOutcome.Idle && leftovers) await WaitForRetryAsync();
                 else if (outcome == FileCatalogOutcome.Idle) await catalog.WaitForFileCatalogAsync(stop.Token);
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
@@ -137,6 +137,18 @@ public sealed class FileCatalogWorker : IAsyncDisposable
         try { await Task.WhenAll(delay, wake); }
         catch (OperationCanceledException) when (!stop.IsCancellationRequested) { }
         stop.Token.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>
+    /// One cleanup pass, one bounded slice per catalog operation so interactive SQL interleaves. A file that cannot be
+    /// deleted is skipped for this pass, never stopping the worker; true when such leftovers remain, so the loop looks
+    /// again after the retry delay instead of waiting for the next Open (D085).
+    /// </summary>
+    internal async Task<bool> CleanupAsync(CancellationToken token)
+    {
+        var skipped = new HashSet<long>();
+        while (await catalog.CleanupFileCatalogsAsync(token, skipped)) { }
+        return skipped.Count > 0;
     }
 
     internal enum FileCatalogOutcome { Idle, Ready, Unsupported, Failed, Retry, Restarted, Superseded, Stopped, Paused, Yielded }

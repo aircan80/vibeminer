@@ -14,7 +14,8 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
     CreatureDisplayMetadataService? creatureDisplays = null, ItemEffectsService? itemEffects = null,
     CreatureGeometryService? creatureGeometry = null, CreatureGeometryLeases? geometryLeases = null,
     SettingsService? settings = null,
-    DownloadSummaryService? downloadSummaries = null, TableReferenceTextService? referenceText = null, TableFollowService? follow = null)
+    DownloadSummaryService? downloadSummaries = null, TableReferenceTextService? referenceText = null, TableFollowService? follow = null,
+    PreparedDataService? preparedData = null)
 {
     public const int MaxFrameBytes = 1024 * 1024;
     public const int MaxClassificationFrameBytes = 512 * 1024;
@@ -169,6 +170,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     if (tableData is not null && follow is not null) capabilities.Add("tables-follow-v1");
                     if (retention is not null) capabilities.Add("retention-v1");
                     if (settings is not null) capabilities.Add("settings-v1");
+                    if (preparedData is not null) capabilities.Add("prepared-data-v1");
                     if (downloadSummaries is not null) capabilities.Add("download-summary-v1");
                     if (items is not null) capabilities.Add("items-v1");
                     if (itemIcons is not null && iconLeases is not null) capabilities.Add("item-icons-v1");
@@ -650,6 +652,16 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     RequireOnly(parameters);
                     if (settings is null) throw new DiscoveryException("SETTINGS_UNAVAILABLE", "Settings are unavailable.");
                     result = SettingsWire.Measurement(await settings.MeasureAsync(request.Cancellation.Token));
+                    break;
+                case "settings.storage.builds":
+                    RequireOnly(parameters);
+                    if (preparedData is null) throw new DiscoveryException("PREPARED_DATA_UNAVAILABLE", "Prepared data per build is unavailable.");
+                    result = await preparedData.ListAsync(request.Cancellation.Token);
+                    break;
+                case "settings.storage.free":
+                    RequireOnly(parameters, "productId", "buildIdentity");
+                    if (preparedData is null) throw new DiscoveryException("PREPARED_DATA_UNAVAILABLE", "Prepared data per build is unavailable.");
+                    result = await preparedData.FreeAsync(new(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity")), request.Cancellation.Token);
                     break;
                 case "workspace.open":
                     RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion");

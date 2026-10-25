@@ -189,7 +189,7 @@ test('inventory.files and inventory.file requests validate their bounded params'
 
 test('File catalog status keeps one shape per state and bounded requests (D071)', async () => {
   const states = JSON.parse(await readFile(path.join(root, 'contracts/examples/file-catalog-status.json'), 'utf8'));
-  assert.deepEqual(states.map(status => `${status.state}/${status.stage ?? ''}`), ['pending/writing', 'pending/queued', 'pending/paused', 'stopped/', 'ready/', 'failed/', 'unsupported/', 'notOpened/']);
+  assert.deepEqual(states.map(status => `${status.state}/${status.stage ?? ''}`), ['pending/writing', 'pending/queued', 'pending/paused', 'stopped/', 'ready/', 'failed/', 'unsupported/', 'notOpened/', 'removed/']);
   for (const status of states) validate('FileCatalogStatus', status);
   const [writing, retrying, , stopped, ready, failed, unsupported, notOpened] = states;
   for (const invalid of [
@@ -396,6 +396,26 @@ test('Settings keep unreadable values apart from saved ones and take only a know
     assert.equal(validator('EngineRequest')(request('settings.set', params)), false, JSON.stringify(params));
   assert.equal(validator('EngineRequest')(request('settings.read', { path: '/tmp' })), false);
   assert.equal(validator('EngineRequest')(request('settings.storage.measure', { root: '/' })), false);
+});
+
+test('Prepared data per build is measured per build and frees one exact build (D085)', async () => {
+  const listed = JSON.parse(await readFile(path.join(root, 'contracts/examples/prepared-data.json'), 'utf8'));
+  const freed = JSON.parse(await readFile(path.join(root, 'contracts/examples/prepared-data-freed.json'), 'utf8'));
+  validate('PreparedDataList', listed); validate('PreparedDataFreed', freed);
+  assert.deepEqual(listed.builds.map(build => build.fileCatalog.state), ['ready', 'pending', 'removed', 'none']);
+  const [ready] = listed.builds;
+  for (const patch of [{ fileCatalog: { ...ready.fileCatalog, bytes: 1234567168 } }, { fileCatalog: { ...ready.fileCatalog, state: 'notOpened' } },
+    { fileCatalog: { ...ready.fileCatalog, path: '/x' } }, { tables: { ...ready.tables, sharedBytes: '-1' } }, { downloads: { ...ready.downloads, state: 'measured' } },
+    { buildIdentity: 'D'.repeat(64) }, { region: 'us' }])
+    assert.equal(validator('PreparedBuild')({ ...ready, ...patch }), false, JSON.stringify(patch));
+  assert.equal(validator('PreparedDataList')({ ...listed, builds: Array(257).fill(ready) }), false);
+  assert.equal(validator('PreparedDataFreed')({ ...freed, freedBytes: '01' }), false);
+  const request = (method, params) => ({ protocolVersion: 1, id: method, method, params });
+  validate('EngineRequest', request('settings.storage.builds', {}));
+  validate('EngineRequest', request('settings.storage.free', { productId: 'wow', buildIdentity: 'd'.repeat(64) }));
+  for (const params of [{}, { productId: 'wow' }, { productId: 'wow', buildIdentity: 'd'.repeat(64), sourceRegion: 'us' }, { productId: 'wow', buildIdentity: 'd'.repeat(64), path: '/tmp' }])
+    assert.equal(validator('EngineRequest')(request('settings.storage.free', params)), false, JSON.stringify(params));
+  assert.equal(validator('EngineRequest')(request('settings.storage.builds', { limit: 1 })), false);
 });
 
 test('Download summaries keep exact counts, the three build states and a bounded request', async () => {
@@ -765,6 +785,14 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.ok(!measured.error, JSON.stringify(measured.error));
   validate('StorageMeasurement', measured.result);
   assert.ok(BigInt(measured.result.bytes) > 0n, 'The catalog and settings file are in the measured folder.');
+  assert.ok(hello.result.capabilities.includes('prepared-data-v1'));
+  const prepared = await request('settings.storage.builds');
+  assert.ok(!prepared.error, JSON.stringify(prepared.error));
+  validate('PreparedDataList', prepared.result);
+  assert.deepEqual([prepared.result.builds, prepared.result.truncated], [[], false], 'A fresh catalog has no opened build.');
+  assert.equal((await request('settings.storage.free', { productId: 'wow', buildIdentity: 'a'.repeat(64) })).error?.code, 'PREPARED_DATA_NOT_FOUND');
+  assert.equal((await request('settings.storage.free', { productId: 'wow', buildIdentity: 'a'.repeat(64), path: '/' })).error?.code, 'INVALID_REQUEST');
+  assert.equal((await request('settings.storage.builds', { limit: 1 })).error?.code, 'INVALID_REQUEST');
   assert.ok(hello.result.capabilities.includes('inventory-files-v1'));
   assert.ok(hello.result.capabilities.includes('file-catalog-v1'));
   const catalogScope = { productId: 'wow', buildIdentity: 'a'.repeat(64), sourceRegion: 'us' };

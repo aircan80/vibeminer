@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FileCatalogList, FileCatalogSetParams, FileCatalogStatus, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
 import { fileCatalogListMatches, fileCatalogMatches, fileCatalogSetMatches } from '../shared/inventory';
@@ -57,12 +57,15 @@ export function useFileCatalog(bridge: DiscoveryBridge, snapshot: WorkspaceSnaps
 /**
  * The preparations Downloads & activity lists, one task per build (D071): read every second while one is pending, every
  * five seconds otherwise, never overlapping. Stop and Resume go through {@link act}, which reads the list again at once.
+ * A file list freed from Settings (D085) calls {@link changed}: `revision` moves, so the open build reads its status again
+ * even though a ready or removed one is never in this list.
  */
 export function useFileCatalogTasks(bridge: DiscoveryBridge, enabled: boolean, nudge: string) {
   const [catalogs, setCatalogs] = useState<readonly FileCatalogStatus[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [again, setAgain] = useState(0);
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     const read = bridge.fileCatalogs;
     if (!enabled || !read) { setCatalogs([]); return; }
@@ -96,5 +99,6 @@ export function useFileCatalogTasks(bridge: DiscoveryBridge, enabled: boolean, n
       return reply.value;
     } finally { setBusy(null); setAgain(n => n + 1); }
   }
-  return { catalogs, error, busy, act };
+  const changed = useCallback(() => { setRevision(n => n + 1); setAgain(n => n + 1); }, []);
+  return { catalogs, error, busy, act, revision, changed };
 }

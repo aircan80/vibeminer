@@ -543,6 +543,277 @@ public sealed class FileCatalogTests
             Assert.Equal(saved[role], await h.Catalog.FindMetadataAsync(h.Data.Metadata[role].EncodingKey, default));
     }
 
+    // D085 (#46): freeing a build's prepared file catalog from Settings.
+    private static long OnDisk(Harness h, long generation) =>
+        new[] { "", "-wal", "-shm", "-journal" }.Select(suffix => new FileInfo(h.Catalog.FileCatalogPath(generation) + suffix)).Where(file => file.Exists).Sum(file => file.Length);
+    private static async Task<PreparedBuild> Prepared(Harness h, string build) =>
+        (await h.Catalog.ListPreparedDataAsync(default)).Builds.Single(b => b.BuildIdentity == build);
+
+    [Fact]
+    public async Task Free_deletes_a_ready_file_catalog_measured_on_disk_and_the_next_Open_prepares_it_again()
+    {
+        await using var h = await Harness.Create(InventoryFixture.Create(rootGap: true));
+        await h.Open();
+        Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Ready, await h.Worker.PrepareNextAsync(default));
+        var generation = long.Parse((await h.Status()).Catalog!.Generation);
+        var listed = await Prepared(h, h.Data.BuildIdentity);
+        Assert.Equal(("ready", "1.2.3.12345"), (listed.FileCatalog.State, listed.BuildVersion));
+        // Measured on disk, not estimated from the row count.
+        Assert.Equal(OnDisk(h, generation).ToString(), listed.FileCatalog.Bytes);
+        Assert.True(listed.FileCatalog.Files >= 1);
+        Assert.NotEqual("notMeasured", listed.Downloads.State);
+        Assert.NotNull(listed.Downloads.StoredBytes);
+
+        // The file is still attached after its seal, so its -wal is on disk; detaching merges it into the catalog file.
+        Assert.True(File.Exists(h.Catalog.FileCatalogPath(generation) + "-wal"));
+        var freed = await new PreparedDataService(h.Catalog).FreeAsync(new("wow", h.Data.BuildIdentity), default);
+        // Freed is what was on disk, -wal and -shm included: the figure the list showed, not the merged file alone.
+        Assert.Equal((listed.FileCatalog.Bytes, listed.FileCatalog.Files), (freed.FreedBytes, freed.FreedFiles));
+        Assert.Equal(("removed", "0", 0), (freed.FileCatalog.State, freed.FileCatalog.Bytes, freed.FileCatalog.Files));
+        Assert.Equal(0L, OnDisk(h, generation));
+        Assert.Equal(0L, await h.Count($"SELECT count(*) FROM inventory_generations WHERE id={generation}"));
+        var removed = await h.Status();
+        Assert.Equal(("removed", (string?)null, (FileCatalogSummary?)null), (removed.State, removed.Stage, removed.Catalog));
+        // Not a task in Downloads & activity, and the freed generation is no longer readable.
+        Assert.Empty((await h.Catalog.ListFileCatalogsAsync(default)).Catalogs);
+        Assert.Equal("INVENTORY_NOT_FOUND", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Files(generation.ToString(), new()))).Code);
+        Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Idle, await h.Worker.PrepareNextAsync(default));
+        // Freeing again has nothing left to delete.
+        var nothing = await h.Catalog.FreePreparedDataAsync(new("wow", h.Data.BuildIdentity), default);
+        Assert.Equal(("0", 0, "removed"), (nothing.FreedBytes, nothing.FreedFiles, nothing.FileCatalog.State));
+
+        await h.Open();
+        Assert.Equal(("pending", "queued"), ((await h.Status()).State, (await h.Status()).Stage));
+        Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Ready, await h.Worker.PrepareNextAsync(default));
+        var again = (await h.Status()).Catalog!;
+        Assert.NotEqual(generation.ToString(), again.Generation);
+        Assert.Equal(5, (await h.Files(again.Generation, new())).Entries.Count);
+    }
+
+    [Fact]
+    public async Task Free_while_preparing_stops_it_deletes_its_rows_and_its_late_writes_are_fenced_out()
+    {
+        await using var h = await Harness.Create(InventoryFixture.Create(rootGap: true), batch: 2);
+        await h.Open();
+        long staging = 0; PreparedDataFreed? freed = null;
+        h.AfterBatch = async (written, _) =>
+        {
+            if (written != 2) return;
+            staging = await h.Count("SELECT inventory FROM file_catalogs");
+            Assert.Equal("pending", (await Prepared(h, h.Data.BuildIdentity)).FileCatalog.State);
+            freed = await h.Catalog.FreePreparedDataAsync(new("wow", h.Data.BuildIdentity), default);
+        };
+        Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Stopped, await h.Worker.PrepareNextAsync(default));
+        Assert.True(long.Parse(freed!.FreedBytes) > 0);
+        Assert.Equal("removed", (await h.Status()).State);
+        Assert.Equal(0L, OnDisk(h, staging));
+        Assert.Equal(0L, await h.Count("SELECT count(*) FROM inventory_generations WHERE profile='files-root-install-v1'"));
+        Assert.Equal(0L, await h.Count("SELECT count(*) FROM file_catalogs WHERE inventory IS NOT NULL OR written<>0"));
+        // Resume prepares it again from the beginning.
+        var resumed = await h.Catalog.SetFileCatalogAsync(new("wow", h.Data.BuildIdentity, "resume"), default);
+        Assert.Equal(("pending", "queued"), (resumed.State, resumed.Stage));
+        var batches = new List<long>(); h.AfterBatch = (written, _) => { batches.Add(written); return Task.CompletedTask; };
+        Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Ready, await h.Worker.PrepareNextAsync(default));
+        Assert.Equal([2L, 4L, 6L], batches);
+    }
+
+    [Fact]
+    public async Task Free_cancelled_before_it_commits_changes_nothing_and_a_build_never_opened_has_nothing_to_free()
+    {
+        await using var h = await Harness.Create(InventoryFixture.Create(rootGap: true));
+        await h.Open();
+        Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Ready, await h.Worker.PrepareNextAsync(default));
+        var generation = long.Parse((await h.Status()).Catalog!.Generation);
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new PreparedDataService(h.Catalog).FreeAsync(new("wow", h.Data.BuildIdentity), cancelled.Token));
+        Assert.Equal("ready", (await h.Status()).State);
+        Assert.True(OnDisk(h, generation) > 0);
+        Assert.Equal("PREPARED_DATA_NOT_FOUND", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Catalog.FreePreparedDataAsync(new("wow", Other), default))).Code);
+        Assert.Equal("INVALID_REQUEST", (await Assert.ThrowsAsync<DiscoveryException>(() => new PreparedDataService(h.Catalog).FreeAsync(new("wow", "not-a-build"), default))).Code);
+    }
+
+    [Fact]
+    public async Task Free_leaves_other_builds_and_shared_table_rows_alone_and_the_list_counts_shared_rows_once()
+    {
+        await using var h = await Harness.Create(InventoryFixture.Create(rootGap: true));
+        await h.Open();
+        Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Ready, await h.Worker.PrepareNextAsync(default));
+        await OtherBuild(h, 0);
+        // The other build's own file catalog generation, with a file of its own.
+        await h.Sql($"INSERT INTO inventory_generations(build_id,region,state,profile,source) VALUES('{Other}','us','staging','files-root-install-v1','{{}}')");
+        var otherGeneration = await h.Count($"SELECT id FROM inventory_generations WHERE build_id='{Other}'");
+        await h.Sql($"UPDATE file_catalogs SET inventory={otherGeneration} WHERE build_id='{Other}'");
+        Directory.CreateDirectory(Path.GetDirectoryName(h.Catalog.FileCatalogPath(otherGeneration))!);
+        await File.WriteAllBytesAsync(h.Catalog.FileCatalogPath(otherGeneration), new byte[4096]);
+        // Row files: A (100 bytes) under two interpretation keys of this build, B (50 bytes) used by both builds.
+        string Artifact(string sha, int length) => $$"""{"contentKey":"x","sha256":"{{sha}}","byteLength":{{length}}}""";
+        var (a, b) = (new string('a', 64), new string('b', 64));
+        await h.Sql($"""
+            INSERT INTO table_artifacts VALUES('k1','{Artifact(a, 100)}'),('k2','{Artifact(b, 50)}'),('k3','{Artifact(a, 100)}');
+            INSERT INTO table_admissions VALUES('{h.Data.BuildIdentity}','us','r','T1','enUS','k1','s','a','2026-10-19T00:00:00Z'),
+                ('{h.Data.BuildIdentity}','us','r','T2','enUS','k2','s','a','2026-10-19T00:00:00Z'),('{h.Data.BuildIdentity}','us','r','T3','enUS','k3','s','a','2026-10-19T00:00:00Z'),
+                ('{Other}','us','r','T2','enUS','k2','s','a','2026-10-19T00:00:00Z');
+            """);
+        var list = await h.Catalog.ListPreparedDataAsync(default);
+        // Most recently opened first.
+        Assert.Equal([Other, h.Data.BuildIdentity], list.Builds.Select(build => build.BuildIdentity));
+        Assert.False(list.Truncated);
+        var mine = list.Builds[1];
+        Assert.Equal((2, "150", "50"), (mine.Tables.Count, mine.Tables.Bytes, mine.Tables.SharedBytes));
+        var other = list.Builds[0];
+        Assert.Equal(("pending", "4096", 1), (other.FileCatalog.State, other.FileCatalog.Bytes, other.FileCatalog.Files));
+        Assert.Equal((1, "50", "50"), (other.Tables.Count, other.Tables.Bytes, other.Tables.SharedBytes));
+        Assert.Equal(("notMeasured", (string?)null), (other.Downloads.State, other.Downloads.StoredBytes));
+
+        await h.Catalog.FreePreparedDataAsync(new("wow", h.Data.BuildIdentity), default);
+        Assert.True(File.Exists(h.Catalog.FileCatalogPath(otherGeneration)));
+        Assert.Equal(("pending", "staging"), (await h.Text($"SELECT state FROM file_catalogs WHERE build_id='{Other}'"), await h.Text($"SELECT state FROM inventory_generations WHERE id={otherGeneration}")));
+        // Table rows are kept: they live in the shared object store.
+        Assert.Equal(4L, await h.Count("SELECT count(*) FROM table_admissions"));
+        Assert.Equal((2, "150", "50"), ((await Prepared(h, h.Data.BuildIdentity)).Tables.Count, (await Prepared(h, h.Data.BuildIdentity)).Tables.Bytes, (await Prepared(h, h.Data.BuildIdentity)).Tables.SharedBytes));
+    }
+
+    /// <summary>Takes a pending file catalog wake-up, if there is one, without waiting.</summary>
+    private static async Task<bool> Woken(DiscoveryCatalog catalog)
+    {
+        using var now = new CancellationTokenSource(); now.Cancel();
+        try { await catalog.WaitForFileCatalogAsync(now.Token); return true; } catch (OperationCanceledException) { return false; }
+    }
+
+    [Fact]
+    public async Task The_measurement_and_the_free_take_the_newest_generations_so_the_current_one_is_never_left_out()
+    {
+        await using var h = await Harness.Create(InventoryFixture.Create(rootGap: true));
+        await h.Open();
+        // Seventeen older generations no cleanup has removed yet, all before the one the worker seals.
+        for (var i = 0; i < 17; i++)
+            await h.Sql($"INSERT INTO inventory_generations(build_id,region,state,profile,source) VALUES('{h.Data.BuildIdentity}','us','abandoned','files-root-install-v1','{{}}')");
+        Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Ready, await h.Worker.PrepareNextAsync(default));
+        var generation = long.Parse((await h.Status()).Catalog!.Generation);
+        var listed = await Prepared(h, h.Data.BuildIdentity);
+        Assert.Equal(OnDisk(h, generation).ToString(), listed.FileCatalog.Bytes);
+        Assert.True(OnDisk(h, generation) > 0);
+        await Woken(h.Catalog);
+        var freed = await h.Catalog.FreePreparedDataAsync(new("wow", h.Data.BuildIdentity), default);
+        Assert.Equal(listed.FileCatalog.Bytes, freed.FreedBytes);
+        Assert.Equal(0L, OnDisk(h, generation));
+        // Free deletes the newest 16 and wakes the worker, whose cleanup removes the two older ones it left.
+        Assert.True(await Woken(h.Catalog));
+        Assert.Equal(2L, await h.Count($"SELECT count(*) FROM inventory_generations WHERE build_id='{h.Data.BuildIdentity}'"));
+        Assert.False(await h.Worker.CleanupAsync(default));
+        Assert.Equal(0L, await h.Count($"SELECT count(*) FROM inventory_generations WHERE build_id='{h.Data.BuildIdentity}'"));
+    }
+
+    [Fact]
+    public async Task A_file_that_cannot_be_deleted_stays_registered_as_abandoned_and_cleanup_deletes_it_later()
+    {
+        // A privileged process may delete in a read-only folder, and Windows has no Unix file modes.
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess) return;
+        await using var h = await Harness.Create(InventoryFixture.Create(rootGap: true));
+        await h.Open();
+        Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Ready, await h.Worker.PrepareNextAsync(default));
+        var generation = long.Parse((await h.Status()).Catalog!.Generation);
+        // A folder the engine cannot delete in: a read-only directory refuses unlink on Linux and macOS.
+        var folder = Path.GetDirectoryName(h.Catalog.FileCatalogPath(generation))!;
+        File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        // Take the wake-up Open left, so only one the free sends can be seen below.
+        await Woken(h.Catalog);
+        Assert.False(await Woken(h.Catalog));
+        try
+        {
+            var failure = await Assert.ThrowsAsync<DiscoveryException>(() => h.Catalog.FreePreparedDataAsync(new("wow", h.Data.BuildIdentity), default));
+            Assert.Equal(("STORAGE_FREE_INCOMPLETE", true), (failure.Code, failure.Retryable));
+            Assert.NotNull(failure.Cause);
+            var left = (await Prepared(h, h.Data.BuildIdentity)).FileCatalog.Files;
+            Assert.Equal($"The file list is freed, but {left} {(left == 1 ? "file" : "files")} of it couldn’t be deleted yet. VibeMiner deletes {(left == 1 ? "it" : "them")} later.", failure.Message);
+            // The worker is woken so its cleanup tries again now.
+            Assert.True(await Woken(h.Catalog));
+            Assert.Equal("removed", (await h.Status()).State);
+            Assert.Equal("abandoned", await h.Text($"SELECT state FROM inventory_generations WHERE id={generation}"));
+            Assert.Equal("removed", (await Prepared(h, h.Data.BuildIdentity)).FileCatalog.State);
+            // The row shows what is actually left on disk now (the -wal was merged into the file on detach).
+            Assert.Equal(OnDisk(h, generation).ToString(), (await Prepared(h, h.Data.BuildIdentity)).FileCatalog.Bytes);
+            Assert.True(OnDisk(h, generation) > 0);
+            // The worker's cleanup skips the stuck file and says leftovers remain, so it looks again after its retry
+            // delay; it never stops the worker, which still takes other builds.
+            Assert.True(await h.Worker.CleanupAsync(default));
+            Assert.Equal("abandoned", await h.Text($"SELECT state FROM inventory_generations WHERE id={generation}"));
+            Assert.Equal(FileCatalogWorker.FileCatalogOutcome.Idle, await h.Worker.PrepareNextAsync(default));
+        }
+        finally { File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
+        // Once deletion is possible, the worker's next pass removes the leftovers with no second Free.
+        Assert.False(await h.Worker.CleanupAsync(default));
+        Assert.Equal(0L, OnDisk(h, generation));
+        Assert.Equal(0L, await h.Count($"SELECT count(*) FROM inventory_generations WHERE id={generation}"));
+    }
+
+    /// <summary>
+    /// An abandoned file catalog generation of the build with a catalog file, and, when stuck, a directory at its -wal path,
+    /// which no file delete can remove (on every OS, privileged or not).
+    /// </summary>
+    private static async Task<long> Abandoned(Harness h, bool stuck)
+    {
+        await h.Sql($"INSERT INTO inventory_generations(build_id,region,state,profile,source) VALUES('{h.Data.BuildIdentity}','us','abandoned','files-root-install-v1','{{}}')");
+        var g = await h.Count("SELECT max(id) FROM inventory_generations");
+        Directory.CreateDirectory(h.Catalog.FileCatalogDirectory);
+        await File.WriteAllBytesAsync(h.Catalog.FileCatalogPath(g), new byte[4096]);
+        if (stuck) Directory.CreateDirectory(h.Catalog.FileCatalogPath(g) + "-wal");
+        return g;
+    }
+    private static Task<long> Registered(Harness h, long g) => h.Count($"SELECT count(*) FROM inventory_generations WHERE id={g}");
+
+    [Fact]
+    public async Task Cleanup_skips_a_lower_generation_it_cannot_delete_and_still_removes_newer_ones_logging_the_stuck_one_once()
+    {
+        await using var h = await Harness.Create(InventoryFixture.Create(rootGap: true));
+        var stuck = await Abandoned(h, stuck: true);
+        var newer = await Abandoned(h, stuck: false);
+        Assert.True(await h.Worker.CleanupAsync(default));
+        Assert.Equal((1L, 0L), (await Registered(h, stuck), await Registered(h, newer)));
+        Assert.False(File.Exists(h.Catalog.FileCatalogPath(newer)));
+        // Tried again on every pass, but logged once for as long as it stays stuck.
+        Assert.True(await h.Worker.CleanupAsync(default));
+        Assert.Equal(1, h.Catalog.UndeletableLogLines);
+        Directory.Delete(h.Catalog.FileCatalogPath(stuck) + "-wal");
+        Assert.False(await h.Worker.CleanupAsync(default));
+        Assert.Equal(0L, await Registered(h, stuck));
+    }
+
+    [Fact]
+    public async Task One_cleanup_pass_skips_at_most_256_stuck_generations_and_the_next_pass_continues()
+    {
+        await using var h = await Harness.Create(InventoryFixture.Create(rootGap: true));
+        var stuck = new List<long>();
+        for (var i = 0; i < DiscoveryCatalog.FileCatalogCleanupSkipBound; i++) stuck.Add(await Abandoned(h, stuck: true));
+        var last = await Abandoned(h, stuck: false);
+        // The pass stops at the bound, so the generation after 256 stuck ones waits for a pass with fewer stuck ones.
+        Assert.True(await h.Worker.CleanupAsync(default));
+        Assert.Equal(1L, await Registered(h, last));
+        Assert.Equal(DiscoveryCatalog.FileCatalogCleanupSkipBound, h.Catalog.UndeletableLogLines);
+        Directory.Delete(h.Catalog.FileCatalogPath(stuck[0]) + "-wal");
+        Assert.True(await h.Worker.CleanupAsync(default));
+        Assert.Equal((0L, 0L), (await Registered(h, stuck[0]), await Registered(h, last)));
+    }
+
+    [Fact]
+    public async Task With_a_stuck_file_left_the_idle_worker_looks_again_after_its_retry_delay_and_removes_it_once_it_can()
+    {
+        var clock = new ManualClock();
+        await using var h = await Harness.Create(InventoryFixture.Create(rootGap: true), clock: clock, retryDelay: TimeSpan.FromMinutes(1));
+        var stuck = await Abandoned(h, stuck: true);
+        h.Worker.Start();
+        // Idle with nothing to prepare, waiting on its retry delay (or a wake-up), not on a wake-up alone.
+        await Until(async () => h.Catalog.FileCatalogWaiters > 0 && h.Catalog.UndeletableLogLines == 1);
+        await Task.Delay(100);
+        Assert.Equal(1, h.Catalog.FileCatalogWaiters);
+        Directory.Delete(h.Catalog.FileCatalogPath(stuck) + "-wal");
+        await Task.Delay(100);
+        // Nothing wakes it: the leftover stays until the delay runs out.
+        Assert.Equal(1L, await Registered(h, stuck));
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await Until(async () => await Registered(h, stuck) == 0);
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
         private readonly TempDirectory directory = new();

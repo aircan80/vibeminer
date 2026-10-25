@@ -42,7 +42,7 @@ Production build opening and bounded object pages use [download-size Home](downl
 
 [Table data](table-data-v1.md) adds explicit demand preparation, verified local readiness and bounded exact artifact row pages with enUS scope, source receipts and coverage.
 
-[Settings](settings-v1.md) are app-wide values the engine saves in its data folder, plus a cancellable measurement of that folder's size.
+[Settings](settings-v1.md) are app-wide values the engine saves in its data folder, plus a cancellable measurement of that folder's size and of each opened build's prepared data, and freeing one build's file catalog.
 
 [Table reference text](table-reference-text-v1.md) adds batched, local text for declared references on one row page, from a reviewed allowlist.
 

@@ -62,7 +62,8 @@ try
             new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects,
             creatureGeometry: creatureGeometry, geometryLeases: geometryLeases, settings: settings,
             downloadSummaries: new DownloadSummaryService(catalog),
-            referenceText: new TableReferenceTextService(tableStore), follow: new TableFollowService(tableStore));
+            referenceText: new TableReferenceTextService(tableStore), follow: new TableFollowService(tableStore),
+            preparedData: new PreparedDataService(catalog));
         await host.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
     }
     finally { await retention.ShutdownAsync(); }

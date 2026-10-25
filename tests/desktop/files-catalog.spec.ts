@@ -75,6 +75,12 @@ test('preparation is one Downloads & activity task with its stage; Stop names it
     await page.getByRole('button', { name: 'Browse in Files' }).click();
     const stopped = page.getByRole('note', { name: 'File list preparation stopped' });
     await expect(stopped).toContainText('The rows written so far are kept');
+    // At 600×480 and 200% the action names its build and wraps inside the note instead of running past the pane (#46).
+    await size(app, 600, 480); await text(page, 2);
+    const resume = stopped.getByRole('button', { name: /^Resume preparing file list for / });
+    const [note, button] = await Promise.all([stopped.boundingBox(), resume.boundingBox()]);
+    expect(button!.x + button!.width).toBeLessThanOrEqual(note!.x + note!.width + 0.5);
+    await text(page, 1); await size(app, 1280, 800);
     // Enter on Resume: the note's new action takes focus, not the document body.
     await stopped.getByRole('button', { name: /^Resume preparing file list for / }).focus(); await page.keyboard.press('Enter');
     const preparing = page.getByRole('note', { name: 'Preparing file list…' });
