@@ -114,11 +114,15 @@ public sealed class CreaturesStoreTests
         await h.RefreshOpening(); Assert.Equal("CREATURES_STALE", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Catalog.ReauthorizeCreaturesAsync(h.Opening, old, default))).Code);
     }
     [Fact]
-    public async Task AnUnlistedBuildFailsBeforeAnyCreatureDownload()
+    public async Task ABuildNoDefinitionOpensFailsBeforeAnyCreatureDownloadAndNamesTheSwitch()
     {
-        // D080 lets Tables open an unlisted build by layout; Creatures still needs a listed build and must not download first.
-        await using var h = await Harness.Create(missing: true, version: "12.1.5.70575");
-        Assert.Equal("SCHEMA_BUILD_NOT_LISTED", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Context, Progress, default))).Code);
+        // D101: Creatures starts as Tables does. With fetching off (no fetcher here) and no bundled block on the build's
+        // version line, it fails before any download and says the Settings switch would let it try WoWDBDefs.
+        await using var h = await Harness.Create(missing: true, version: "99.0.0.1");
+        var failure = await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Context, Progress, default));
+        Assert.Equal("SCHEMA_BUILD_NOT_LISTED", failure.Code); Assert.Equal(new TableDefinitionProblem(CreaturesPolicy.Table, "off"), failure.Definition);
+        Assert.Contains("off in Settings", failure.Message); Assert.Contains("so Creatures can’t open on this build", failure.Message);
+        Assert.Equal("SCHEMA_BUILD_NOT_LISTED", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.ReadAsync(h.Context, default))).Code);
         Assert.Empty(h.ReadTables); Assert.Empty(h.PreparedTables);
     }
     [Fact]

@@ -10,6 +10,8 @@ public sealed partial class ItemEffectsStore : IItemEffectsStore, IAsyncDisposab
     private readonly DiscoveryCatalog catalog;
     private readonly VerifiedObjectStore objects;
     private readonly ItemsStore items;
+    // D101: the bridge, effect and spell name tables are read with the definition Tables chooses, as Items is.
+    private readonly TableDefinitionSources definitions;
     private readonly TableDataService tables;
     private readonly AcquisitionResources resources;
     private readonly TimeProvider clock;
@@ -28,7 +30,7 @@ public sealed partial class ItemEffectsStore : IItemEffectsStore, IAsyncDisposab
         TableDataService tables, AcquisitionResources resources) : this(catalog, objects, items, tables, resources, TimeProvider.System) { }
     internal ItemEffectsStore(DiscoveryCatalog catalog, VerifiedObjectStore objects, ItemsStore items,
         TableDataService tables, AcquisitionResources resources, TimeProvider clock, ItemEffectsStoreStagingHooks? stagingHooks = null, Action<string>? observeResources = null, Func<StoredTableAdmission, CancellationToken, Task<FileStream>>? openSource = null)
-    { this.catalog = catalog; this.objects = objects; this.items = items; this.tables = tables; this.resources = resources; this.clock = clock; this.stagingHooks = stagingHooks; this.observeResources = observeResources; this.openSource = openSource; }
+    { this.catalog = catalog; this.objects = objects; this.items = items; definitions = items.Definitions; this.tables = tables; this.resources = resources; this.clock = clock; this.stagingHooks = stagingHooks; this.observeResources = observeResources; this.openSource = openSource; }
 
     internal (int Operations, int Preparations, int Queries, int BridgeSlots, int TargetSlots, int BridgePins, int TargetPins, bool Builder) Pressure
     { get { lock (gate) return (active.Count, preparations, queries, bridges.Count, targets.Count, bridges.Sum(slot => slot.Pins), targets.Sum(slot => slot.Pins), builder); } }

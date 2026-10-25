@@ -1,6 +1,6 @@
 import type {CreaturesContext,CreaturesSnapshot,CreatureSummary,CreatureDisplayMetadataResult,CreatureDisplayTarget,OpeningSourceReference} from '../../../../contracts/generated/discovery';
 import {validCreatureContext,creatureKey,validCreatureProbability} from './creatures';
-import {validRecordId,tableDataMatches,isPartialSource} from './table-data';
+import {validRecordId,tableDataMatches,isPartialSource,reviewedDefinition,reviewedRevision} from './table-data';
 export type CreatureDisplayParams=CreaturesContext&{artifactId:string;creatureId:string;slot:number};
 export type DisplayAuthority={core:CreaturesSnapshot;summary:CreatureSummary;opening:OpeningSourceReference};
 const hash=/^[0-9a-f]{64}$/,decimal=/^(0|[1-9][0-9]{0,18})$/,utf8=new TextEncoder();
@@ -9,7 +9,7 @@ export const displayKey=(p:CreatureDisplayParams)=>`${creatureKey(p)}|${p.artifa
 export function validCreatureDisplay(v:unknown):v is CreatureDisplayParams{if(!v||typeof v!=='object')return false;const{artifactId,creatureId,slot,...context}=v as CreatureDisplayParams;return validCreatureContext(context)&&typeof artifactId==='string'&&hash.test(artifactId)&&typeof creatureId==='string'&&validRecordId(creatureId)&&Number.isInteger(slot)&&slot>=0&&slot<4;}
 // Retail layout first, then the Classic layout the engine also accepts (D089).
 const profiles=[{role:'display',table:'bfdaf9f1',file:'1108759',layouts:['7275F5F6','F75F884C'],definition:'64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425',field:'ModelID',max:65535n},{role:'model',table:'7f695fa5',file:'1365368',layouts:['0F5449F8','3FFEE408'],definition:'ace9dfbb1acdec0eae7899273a4e983d851d2de8d6471fd8eb95ac8e70584e2a',field:'FileDataID',max:4294967295n}]as const;
-function targetMatches(t:CreatureDisplayTarget,index:number,p:CreatureDisplayParams,id:string,unsupported:boolean){const profile=profiles[index],s=t.snapshot;if(t.role!==profile.role||!tableDataMatches(s,{...p,tableId:profile.table})||s.association.fileDataId!==profile.file||s.definitionSha256!==profile.definition||s.providerRevision!=='b9a63096cdd99b26967f17f9515377ae62cadfd7'||s.decoderRevision!==(isPartialSource(s.source)?'wdc5-values-v7+table-admission-projection-v3':'wdc5-values-v7+table-admission-v3'))return false;
+function targetMatches(t:CreatureDisplayTarget,index:number,p:CreatureDisplayParams,id:string,unsupported:boolean){const profile=profiles[index],s=t.snapshot;if(t.role!==profile.role||!tableDataMatches(s,{...p,tableId:profile.table})||s.association.fileDataId!==profile.file||!reviewedDefinition(s,profile.definition)||s.decoderRevision!==(isPartialSource(s.source)?'wdc5-values-v7+table-admission-projection-v3':'wdc5-values-v7+table-admission-v3')&&!(s.fetchedDefinition&&s.tableId==='bfdaf9f1'&&s.layoutHash==='7275F5F6'&&s.decoderRevision===reviewedRevision(s)))return false;
  if(t.matchCount===null)return unsupported&&t.row===null;
  if(typeof t.matchCount!=='string'||!decimal.test(t.matchCount)||BigInt(t.matchCount)>BigInt(s.rowCount)||!(profile.layouts as readonly string[]).includes(s.layoutHash))return false;
  if(t.matchCount!=='1')return t.row===null;

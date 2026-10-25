@@ -193,7 +193,9 @@ public sealed partial class DiscoveryCatalog
     // Store eligibility checks decide whether to rebuild it; new admissions always use the current reader.
     private static bool SupportedPartialAdmissionRevision(TableRowsArtifact artifact, bool requireCurrentRevision) =>
         artifact.Binding.DecoderRevision == TableDataStore.AdmissionRevision(artifact.Header.TableHash, artifact.Binding.DefinitionSha256,
-            artifact.Binding.ProviderRevision, projected: true) || (!requireCurrentRevision && artifact.Binding.DecoderRevision is
+            artifact.Binding.ProviderRevision, projected: true) ||
+        artifact.Binding.DecoderRevision == TableDataStore.ItemEffectProjectionDecoderRevision &&
+            TableDataStore.MayBeFetchedReviewedAdmission(artifact.Header.TableHash, artifact.Header.LayoutHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision) || (!requireCurrentRevision && artifact.Binding.DecoderRevision is
             ("wdc5-fixed-values-v3+table-admission-projection-v1" or "wdc5-values-v4+table-admission-projection-v1" or "wdc5-values-v5+table-admission-projection-v1" or "wdc5-values-v6+table-admission-projection-v1" or "wdc5-values-v7+table-admission-projection-v2" or TableDataStore.ProjectionDecoderRevision));
 
     private void ValidateTableSourceAssociation(ContentReceipt source, SelectedFileAssociation association, Microsoft.Data.Sqlite.SqliteTransaction? transaction)
@@ -211,8 +213,9 @@ public sealed partial class DiscoveryCatalog
     private static void ValidateTableArtifact(TableRowsArtifact artifact)
     {
         if (artifact.Binding.DecoderRevision is TableDataStore.ItemEffectDecoderRevision or TableDataStore.ItemEffectProjectionDecoderRevision &&
-            !TableDataStore.IsItemEffectAdmission(artifact.Header.TableHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision))
-            throw TableIntegrity("The scoped ItemEffect interpretation cannot identify another table or provider definition.");
+            !TableDataStore.IsItemEffectAdmission(artifact.Header.TableHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision) &&
+            !TableDataStore.MayBeFetchedReviewedAdmission(artifact.Header.TableHash, artifact.Header.LayoutHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision))
+            throw TableIntegrity("The scoped v4 interpretation cannot identify another table, layout or provider definition.");
         if (artifact.ContentKey != TableRowArtifacts.ContentKey(artifact.Binding) || !DownloadHash(artifact.Sha256, 64) ||
             artifact.ByteLength is < 64 or > VerifiedObjectStore.MaxObjectBytes || artifact.Header.Columns.Count is < 1 or > 512 ||
             artifact.Completion.PhysicalRows < 0 || artifact.Completion.CopyRows < 0 ||

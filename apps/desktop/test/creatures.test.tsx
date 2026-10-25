@@ -6,8 +6,12 @@ import type {DiscoveryBridge,BridgeReply} from '../src/shared/bridge';
 import type {CreaturesSnapshot} from '../../../contracts/generated/discovery';
 import {creaturesSnapshot,creaturesPage,creatureInspect} from '../../../tests/desktop/fixtures/creatures.mjs';
 import workspace from '../../../tests/desktop/fixtures/download-workspace.json';
+import definitionErrorsJson from '../../../contracts/examples/definition-errors.json';
+import type {EngineError} from '../../../contracts/generated/discovery';
+const definitionErrors=definitionErrorsJson as Record<keyof typeof definitionErrorsJson,EngineError>;
 import {CreaturesBrowser} from '../src/renderer/CreaturesBrowser';
 import {useCreaturesLoading,CreaturesLoadBanner} from '../src/renderer/useCreaturesLoading';
+import {SettingsProvider} from '../src/renderer/Settings';
 const ok=<T,>(value:T):BridgeReply<T>=>({ok:true,value}),deferred=<T,>()=>{let resolve!:(value:T)=>void;return{promise:new Promise<T>(r=>resolve=r),resolve:(value:T)=>resolve(value)};},context={productId:workspace.build.productId,buildIdentity:workspace.build.id,sourceRegion:workspace.sourceReference.region,researchLocale:'enUS' as const},s=creaturesSnapshot(context);
 function setup(ready=true){const held=deferred<BridgeReply<CreaturesSnapshot>>(),bridge={onProgress:()=>()=>{},creaturesData:vi.fn(async()=>ok({snapshot:ready?s:null,dependencyState:ready?'ready':'notPrepared',sourceArtifactId:ready?s.creatureSource.artifactId:null})),creaturesPrepare:vi.fn(()=>held.promise),creaturesPage:vi.fn(async p=>ok(creaturesPage(s,p))),creatureInspect:vi.fn(async p=>ok(creatureInspect(s,p))),cancel:vi.fn(async()=>ok({requested:true})),tablePrepare:vi.fn(),itemsPrepare:vi.fn()}as unknown as DiscoveryBridge;function Harness(){const flow=useCreaturesLoading(bridge),[area,setArea]=useState(true),[mounted,setMounted]=useState(true);return <><button onClick={()=>setArea(x=>!x)}>Switch area</button><button onClick={()=>setMounted(x=>!x)}>Choose another build</button>{(!area||!mounted)&&<CreaturesLoadBanner flow={flow} session/>}{mounted&&<CreaturesBrowser workspace={workspace as never} bridge={bridge} active={area} flow={flow}/>}</>;}render(<Harness/>);return{bridge,held};}
 beforeEach(()=>{vi.spyOn(window,'scrollTo').mockImplementation(()=>{});Element.prototype.scrollIntoView=vi.fn();});afterEach(()=>{cleanup();vi.restoreAllMocks();});
@@ -27,3 +31,38 @@ it('keeps cached evidence and its visible waiting intent withdrawable while anot
 it('keeps the exact page Retry anchor focused through pending work and another failure',async()=>{const{bridge}=setup();await screen.findByRole('button',{name:/^Inspect Creature 0:/});const problem={code:'LOCAL_READ_FAILED',message:'Authored repeated local read failure.',retryable:true};vi.mocked(bridge.creaturesPage!).mockResolvedValueOnce({ok:false,error:problem});fireEvent.click(screen.getByRole('button',{name:'Next Creature page'}));const retry=await screen.findByRole('button',{name:'Retry Creature page'}),held=deferred<BridgeReply<any>>();vi.mocked(bridge.creaturesPage!).mockReturnValueOnce(held.promise);retry.focus();fireEvent.click(retry);expect(retry).toHaveFocus();expect(retry).toHaveAttribute('aria-disabled','true');fireEvent.click(retry);expect(bridge.creaturesPage).toHaveBeenCalledTimes(3);await act(async()=>held.resolve({ok:false,error:problem}));expect(screen.getByRole('button',{name:'Retry Creature page'})).toBe(retry);expect(retry).toHaveFocus();expect(retry).toHaveAttribute('aria-disabled','false');expect(screen.getByRole('button',{name:/^Inspect Creature 0:/})).toBeVisible();});
 
 it('explains whitespace-only names and keeps long primary source text exactly available in a native disclosure',async()=>{const{bridge}=setup();const whitespace='\n\n\n\n   ';vi.mocked(bridge.creaturesPage!).mockImplementation(async p=>{const page=creaturesPage(s,{...p});for(const row of page.entries)if(row.id==='4')row.name.value=whitespace;return ok(page);});vi.mocked(bridge.creatureInspect!).mockImplementation(async p=>{const value=creatureInspect(s,p);if(p.creatureId==='4'){value.detail!.summary.name.value=whitespace;value.detail!.creatureRow.values[s.fields.name.columnIndex]=whitespace;}return ok(value);});await screen.findByRole('button',{name:/^Inspect Creature 4:/});fireEvent.click(screen.getByRole('button',{name:/^Inspect Creature 4:/}));await screen.findByText('Whitespace-only primary source name');const raw=whitespace;expect(document.querySelector('.creature-full-name pre')!.textContent).toBe(raw);fireEvent.click(screen.getByRole('button',{name:/^Inspect Creature 5:/}));await screen.findByRole('heading',{name:'Direct display declarations'});expect(document.querySelector('.creature-selected-title')).toHaveTextContent('Authored');expect(document.querySelector('.creature-full-name pre')!.textContent).toBe(creatureInspect(s,{creatureId:'5'}).detail!.summary.name.value);expect(screen.getByText('Creature ID 5 · research locale enUS.')).toBeVisible();});
+
+// D101 (#84): Creatures says when its table was read with a fetched WoWDBDefs definition, and a change of Fetch newer
+// table definitions checks it again, at once while shown and otherwise when the area shows next.
+it('says when a fetched definition read the Creature table and checks again when fetching is switched, even from another area',async()=>{
+ const commit='2'.repeat(40),fetched=structuredClone(s);
+ Object.assign(fetched.creatureSource,{definitionSha256:'e'.repeat(64),providerRevision:commit,fetchedDefinition:{revision:commit,fetchedAt:'2026-10-25T00:00:00Z'},fetchedBecause:'layoutMatch',schemaMatch:'layoutOnly',bundledFallback:false});
+ const{bridge}=setup();const data=vi.mocked(bridge.creaturesData!);data.mockImplementation(async()=>ok({snapshot:fetched,dependencyState:'ready',sourceArtifactId:fetched.creatureSource.artifactId}));
+ fireEvent.click(screen.getByRole('button',{name:'Choose another build'}));fireEvent.click(screen.getByRole('button',{name:'Choose another build'}));
+ const notice=await screen.findByRole('region',{name:/Creature · Definition from WoWDBDefs/});
+ expect(notice).toHaveTextContent(`only the WoWDBDefs block matches its layout ${fetched.creatureSource.layoutHash}.`);expect(notice).not.toHaveTextContent('Turn off Fetch newer table definitions');
+ // Switched off while another area shows: nothing happens until Creatures shows again, then it says why it needs attention.
+ fireEvent.click(screen.getByRole('button',{name:'Switch area'}));const calls=data.mock.calls.length;
+ data.mockImplementation(async()=>({ok:false,error:definitionErrors.creaturesFetchingOff}));
+ act(()=>{window.dispatchEvent(new CustomEvent('vibeminer-settings-changed',{detail:{name:'fetchTableDefinitions'}}));});
+ expect(data.mock.calls.length).toBe(calls);
+ fireEvent.click(screen.getByRole('button',{name:'Switch area'}));
+ expect((await screen.findAllByText(/so Creatures can’t open on this build/)).length).toBeGreaterThan(0);expect(screen.getByRole('heading',{name:'Client records need attention'})).toBeVisible();
+ // Another setting changes nothing; back on, it checks again and the records return without preparing.
+ data.mockImplementation(async()=>ok({snapshot:fetched,dependencyState:'ready',sourceArtifactId:fetched.creatureSource.artifactId}));
+ const before=data.mock.calls.length;act(()=>{window.dispatchEvent(new CustomEvent('vibeminer-settings-changed',{detail:{name:'somethingElse'}}));});expect(data.mock.calls.length).toBe(before);
+ act(()=>{window.dispatchEvent(new CustomEvent('vibeminer-settings-changed',{detail:{name:'fetchTableDefinitions'}}));});
+ await waitFor(()=>expect(screen.queryByRole('heading',{name:'Client records need attention'})).not.toBeInTheDocument());
+ expect(screen.getByRole('button',{name:/^Inspect Creature 0:/})).toBeVisible();expect(bridge.creaturesPrepare).not.toHaveBeenCalled();
+});
+
+// Review fix (#84): with fetching off on a build only a fetched definition opens, Creatures offers Open Settings.
+it('offers Open Settings when Creatures stop because fetching is off',async()=>{
+ const openHere=vi.fn(),error=definitionErrors.creaturesFetchingOff;
+ const bridge={onProgress:()=>()=>{},creaturesData:vi.fn(async()=>({ok:false,error})),creaturesPrepare:vi.fn(),cancel:vi.fn()}as unknown as DiscoveryBridge;
+ function Harness(){const flow=useCreaturesLoading(bridge);return <SettingsProvider value={{open:()=>{},register:()=>()=>{},openHere}}><CreaturesBrowser workspace={workspace as never} bridge={bridge} active flow={flow}/></SettingsProvider>;}
+ render(<Harness/>);
+ await screen.findByRole('heading',{name:'Client records need attention'});
+ expect(screen.queryByRole('button',{name:'Retry Creature preparation'})).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Open Settings'}));expect(openHere).toHaveBeenCalledTimes(1);expect(bridge.creaturesPrepare).not.toHaveBeenCalled();
+});

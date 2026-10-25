@@ -34,8 +34,8 @@ internal sealed class TableDefinitionFetchBudget
 /// <summary>
 /// Picks bundled or fetched definitions (D081). Exact build first: the bundled definition when it lists the build,
 /// otherwise a fetched one that lists it. Only when neither lists the build does #54's layout match (D080) apply, again
-/// bundled first. Fetched definitions are used only by Tables, only while the Settings switch reads as on, and only for
-/// tables with a bundled definition and a provider name. Everything else uses bundled definitions and no network.
+/// bundled first. Fetched definitions are used by Tables and by the features that read tables (D101), only while the
+/// Settings switch reads as on, and only for tables with a bundled definition and a provider name.
 /// </summary>
 public sealed class TableDefinitionSources(WoWDBDefsDefinitions? fetched = null, ITableDefinitionFetchPolicy? policy = null)
 {
@@ -103,28 +103,83 @@ public sealed class TableDefinitionSources(WoWDBDefsDefinitions? fetched = null,
         bool fetchEnabled, CancellationToken token) =>
         (await ChooseAsync(entry, bundled, build, null, fetchEnabled, null, token)).Definition ?? TableDefinition.Bundled(bundled);
 
-    /// <summary>Why nothing can read this build or layout, in words that say what still works and what to do next.</summary>
-    internal static DiscoveryException Unusable(TableCatalogEntry entry, string build, string? layout, TableDefinitionChoice choice, bool fetchEnabled)
+    /// <summary>Why nothing can read this build or layout, in words that say what still works and what to do next.
+    /// Feature names the feature that needs the table (D101); null is the Tables view.</summary>
+    internal static DiscoveryException Unusable(TableCatalogEntry entry, string build, string? layout, TableDefinitionChoice choice, bool fetchEnabled,
+        string? feature = null)
     {
         var name = entry.Name ?? entry.TableId;
         var lacks = layout is null ? $"doesn’t list build {build} or any layout on its version line" : $"has no block for this file’s layout {layout} on build {build}";
-        var others = "Tables the bundled definitions cover still open.";
+        // Tables says what still opens; a feature says that it can't open, since it needs this table.
+        var others = feature is null ? " Tables the bundled definitions cover still open." : "";
+        var stops = feature is null ? "this table can’t open" : $"{feature} can’t open on this build";
+        var featureStops = feature is null ? "" : $", so {stops}";
+        // Which table and how the switch read travel with the failure, so views decide from them, not from the words.
+        var problem = new TableDefinitionProblem(entry.TableId, fetchEnabled ? "on" : "off");
         if (!fetchEnabled)
             return new(layout is null ? "SCHEMA_BUILD_NOT_LISTED" : "DB2_SCHEMA_MISSING",
-                $"The pinned {name} definition {lacks}. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest {name} definition. {others}");
+                $"The pinned {name} definition {lacks}{featureStops}. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest {name} definition.{others}")
+            { Definition = problem };
         if (choice.Failure is { } failure)
         {
             var next = failure.Code switch
             {
-                "DEFINITION_FETCH_OFFLINE" => "Check the connection, then use Retry table data, or turn off Fetch newer table definitions in Settings.",
-                "DEFINITION_FETCH_FAILED" => "Retry table data asks again; if it still fails, try later.",
+                "DEFINITION_FETCH_OFFLINE" => feature is null
+                    ? "Check the connection, then use Retry table data, or turn off Fetch newer table definitions in Settings."
+                    : $"Check the connection, then retry {feature}.",
+                "DEFINITION_FETCH_FAILED" => feature is null ? "Retry table data asks again; if it still fails, try later." : $"Retrying {feature} asks again; if it still fails, try later.",
                 _ => $"A later VibeMiner or WoWDBDefs update may cover it.",
             };
-            return new(failure.Code, $"{failure.Message} The pinned {name} definition {lacks}, so this table can’t open. {others} {next}", failure.Retryable);
+            return new(failure.Code, $"{failure.Message} The pinned {name} definition {lacks}, so {stops}.{others} {next}", failure.Retryable) { Definition = problem };
         }
         var missing = layout is null ? $"lists build {build} or any layout on its version line" : $"has a block for layout {layout} on build {build}";
         return new(layout is null ? "SCHEMA_BUILD_NOT_LISTED" : "DB2_SCHEMA_MISSING", choice.Fetched is null
-            ? $"The pinned {name} definition {lacks}. {others}"
-            : $"Neither the pinned definition nor the {choice.Fetched.Described} {missing}. {others} A later WoWDBDefs update may cover it.");
+            ? $"The pinned {name} definition {lacks}{featureStops}.{others}"
+            : $"Neither the pinned definition nor the {choice.Fetched.Described} {missing}{featureStops}.{others} A later WoWDBDefs update may cover it.")
+            { Definition = problem };
+    }
+
+    // D101: features read tables with the definition Tables would choose, under the same switch. These helpers give a
+    // feature that choice for the rows it holds, from the cache only, and the same fail-closed start as Tables.
+
+    /// <summary>The bundled entry and definition a feature table needs; a feature only names tables with both.</summary>
+    internal static async Task<(TableCatalogEntry Entry, BundledTableDefinition Bundled)> FeatureTableAsync(string tableId, CancellationToken token)
+    {
+        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
+        var entry = provider.Entries.SingleOrDefault(value => value.TableId == tableId);
+        if (entry is null || !provider.Definitions.TryGetValue(tableId, out var bundled))
+            throw new DiscoveryException("DEFINITION_NOT_BUNDLED", "This table's definition is not bundled yet.");
+        return (entry, bundled);
+    }
+
+    /// <summary>The definition chosen now for a feature's admitted rows (D101), as Tables reads them.</summary>
+    internal Task<TableDefinition> ForFeatureRowsAsync(string tableId, string build, TableRowsArtifact artifact, CancellationToken token) =>
+        ForFeatureLayoutAsync(tableId, build, artifact.Header.LayoutHash, token);
+
+    /// <summary>The same choice for a file's layout, when a feature holds only the rows' snapshot.</summary>
+    internal async Task<TableDefinition> ForFeatureLayoutAsync(string tableId, string build, string layout, CancellationToken token)
+    {
+        var (entry, bundled) = await FeatureTableAsync(tableId, token);
+        return (await ChooseAsync(entry, bundled, build, layout, await FetchEnabledAsync(token), null, token)).Definition ?? TableDefinition.Bundled(bundled);
+    }
+
+    /// <summary>Admitted rows a feature may use: read with the definition chosen now and the current reader revision for it.
+    /// Null when they are stale, so the feature prepares again; never an interpretation error.</summary>
+    internal async Task<TableDefinition?> CurrentForFeatureAsync(StoredTableAdmission admission, string tableId, string build, CancellationToken token)
+    {
+        var (entry, bundled) = await FeatureTableAsync(tableId, token);
+        var definition = await ForRowsAsync(entry, bundled, build, admission.Artifact, await FetchEnabledAsync(token), token);
+        try { TableDataStore.Validate(admission, entry, definition, bundled, build); }
+        catch (DiscoveryException failure) when (failure.Code == "TABLE_INTERPRETATION_STALE") { return null; }
+        return definition;
+    }
+
+    /// <summary>Before a feature prepares or reads (D101): with fetching off, the bundled definition must list the build
+    /// or open it by layout, else it fails as Tables does, naming the Settings switch. With fetching on, preparing decides.</summary>
+    internal async Task RequireFeatureBuildAsync(string tableId, string feature, string build, CancellationToken token)
+    {
+        var (entry, bundled) = await FeatureTableAsync(tableId, token);
+        if (!TableDataStore.OpensBuild(bundled.Document, build, token) && !await FetchEnabledAsync(token))
+            throw Unusable(entry, build, null, new(null, null, null), false, feature);
     }
 }

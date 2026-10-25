@@ -1,5 +1,5 @@
 import {validGeometryParams,validGeometryRead,validGeometryOpen,validGeometryToken,creatureGeometryMatches,geometryLeaseMatches,validGeometryProgress,type GeometryParams,type GeometryReadParams,type GeometryOpenParams} from '../shared/creature-geometry';
-import type {CreatureGeometryResult,CreatureGeometryLeaseDescriptor} from '../../../../contracts/generated/discovery';
+import type {CreatureGeometryResult,CreatureGeometryLeaseDescriptor,EngineError,TableDefinitionProblem} from '../../../../contracts/generated/discovery';
 import {validItemEffectsSelection,validItemEffectsPage,validItemEffectDetails,validItemEffectNames,itemEffectsReadinessMatches,itemEffectsPageMatches,itemEffectDetailsMatch,itemEffectNamesMatch,type ItemEffectsSelectionParams,type ItemEffectsPageParams,type ItemEffectDetailsParams,type ItemEffectNamesParams} from '../shared/item-effects';
 import type {ItemEffectsReadiness,ItemEffectsPage,ItemEffectDetailsResult,ItemEffectNamesResult} from '../../../../contracts/generated/discovery';
 import {validCreatureDisplay,creatureDisplayMatches,type CreatureDisplayParams} from '../shared/creature-display';
@@ -38,7 +38,8 @@ const ajv = new Ajv({ strict: false });
 ajv.addSchema(schema);
 const check = (name: string, value: unknown) => ajv.getSchema(`${schema.$id}#/definitions/${name}`)!(value);
 export class EngineFailure extends Error {
-  constructor(public code: string, message: string, public retryable = false) { super(message); }
+  /** D101: which table no definition could read and how the Settings switch read, straight from the engine. */
+  constructor(public code: string, message: string, public retryable = false, public definition?: TableDefinitionProblem) { super(message); }
 }
 /** Host exit codes for a refused catalog (VibeMiner.Host Program.cs). The catalog file is left unchanged. */
 export const CATALOG_RESET_EXIT = 3, CATALOG_NEWER_EXIT = 4;
@@ -211,8 +212,8 @@ export class EngineClient extends EventEmitter {
     this.sequences.delete(message.id);
     clearTimeout(operation.timer);
     if (failed) {
-      const error = message.error as { code: string; message: string; retryable: boolean };
-      operation.reject(new EngineFailure(error.code, error.message, error.retryable));
+      const error = message.error as EngineError;
+      operation.reject(new EngineFailure(error.code, error.message, error.retryable, error.definition));
     } else operation.resolve(message.result);
   }
   private validResult(method: RequestMethod, result: unknown, expectedOpen?: OpenParams, expectedInventory?: InventoryReadParams, expectedDownload?: DownloadReadParams, expectedCatalog?: TablesCatalogParams, expectedDefinition?: TableDefinitionParams, expectedTableData?: TableDataParams, expectedTableRows?: TableRowsParams, expectedRetention?: RetentionTarget | RetentionSet, expectedItems?: ItemsContext | ItemsPageParams | ItemInspectParams,expectedIcon?:IconExpected,expectedClassifications?:ClassificationParams,expectedCreatures?:CreaturesContext|CreaturePageParams|CreatureInspectParams|CreatureDisplayParams,expectedEffects?:EffectsExpected,expectedGeometry?:GeometryExpected,expectedReadAll?:ReadAllParams,expectedSettings?:SettingsSetParams,expectedSummaries?:DownloadSummariesParams,expectedFiles?:InventoryFilesParams|InventoryFileParams,expectedFollow?:TableFollowParams,expectedCatalogSet?:FileCatalogSetParams,expectedFree?:PreparedDataFreeParams,expectedCheck?:DownloadCheckParams): boolean {

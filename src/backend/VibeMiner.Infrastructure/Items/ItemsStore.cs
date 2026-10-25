@@ -16,8 +16,12 @@ internal sealed record ItemsIconAuthorization(ItemsSnapshot Snapshot, IReadOnlyL
 
 /// <summary>Exact Items prerequisites reuse the application's one shared table producer.</summary>
 public sealed class ItemsStore(DiscoveryCatalog catalog, VerifiedObjectStore objects, TableDataService tables,
-    AcquisitionResources resources) : IItemsStore, IAsyncDisposable
+    AcquisitionResources resources, TableDefinitionSources? definitionSources = null) : IItemsStore, IAsyncDisposable
 {
+    // D101: Item and ItemSparse are read with the definition Tables chooses, under the same Settings switch.
+    private readonly TableDefinitionSources definitions = definitionSources ?? new();
+    /// <summary>The definition choice Items uses; features built on Items (effects, labels) choose the same way.</summary>
+    internal TableDefinitionSources Definitions => definitions;
     private readonly ItemsProjection projection = new(objects, resources);
     private readonly SemaphoreSlim sessionsGate = new(1, 1);
     private readonly Dictionary<ItemsContext, ItemsProjection.Session> sessions = [];
@@ -34,8 +38,8 @@ public sealed class ItemsStore(DiscoveryCatalog catalog, VerifiedObjectStore obj
     private bool closed;
 
     internal ItemsStore(DiscoveryCatalog catalog, VerifiedObjectStore objects, TableDataService tables,
-        AcquisitionResources resources, Func<ItemsProjection.Session, ValueTask> retireSession)
-        : this(catalog, objects, tables, resources) => this.retireSession = retireSession;
+        AcquisitionResources resources, Func<ItemsProjection.Session, ValueTask> retireSession, TableDefinitionSources? definitionSources = null)
+        : this(catalog, objects, tables, resources, definitionSources) => this.retireSession = retireSession;
 
     public async Task<ItemsReadiness> ReadAsync(ItemsContext context, CancellationToken token) => (await Probe(context, token)).Readiness;
     private async Task<(ItemsReadiness Readiness, TableDataSnapshot? Item, TableDataSnapshot? Sparse)> Probe(ItemsContext context, CancellationToken token)
@@ -79,11 +83,10 @@ public sealed class ItemsStore(DiscoveryCatalog catalog, VerifiedObjectStore obj
             ?? throw new DiscoveryException("ITEMS_PREREQUISITE_STALE", "The Item admission changed before feature preparation.");
         var sparseAdmission = await catalog.ReadTableAdmissionAsync(opening, ItemsProjection.SparseTable, context.ResearchLocale, token)
             ?? throw new DiscoveryException("ITEMS_PREREQUISITE_STALE", "The Sparse admission changed before feature preparation.");
-        // Items reads bundled definitions only (D081): rows Tables read with a fetched WoWDBDefs definition never feed it.
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
-        foreach (var (table, rows) in new[] { (ItemsProjection.ItemTable, itemAdmission.Artifact), (ItemsProjection.SparseTable, sparseAdmission.Artifact) })
-            if (rows.Binding.ProviderRevision != BundledTableDefinitions.Revision || !provider.Definitions.TryGetValue(table, out var own) || rows.Binding.DefinitionSha256 != own.Sha256)
-                throw new DiscoveryException("ITEMS_PREREQUISITE_STALE", "An Items table was read with a definition that isn’t bundled. Load Items again.", true);
+        // D101: both tables must still be read with the definition chosen now; a switch flipped meanwhile means load again.
+        foreach (var (table, rows) in new[] { (ItemsProjection.ItemTable, itemAdmission), (ItemsProjection.SparseTable, sparseAdmission) })
+            if (await definitions.CurrentForFeatureAsync(rows, table, opening.Build.Version, token) is null)
+                throw new DiscoveryException("ITEMS_PREREQUISITE_STALE", "An Items table was read with another definition than the one chosen now. Load Items again.", true);
         var binding = new ItemsProjectionBinding(context, item, sparse, itemAdmission.Artifact, sparseAdmission.Artifact);
         ItemsProjection.ValidateBinding(binding);
         var artifact = await catalog.FindItemsArtifactAsync(ItemsProjection.ContentKey(binding), token);
@@ -229,17 +232,11 @@ public sealed class ItemsStore(DiscoveryCatalog catalog, VerifiedObjectStore obj
         var artifact = authority.Items.Artifact;
         if (artifact.FeatureRevision != ItemsProjection.Revision)
             throw new DiscoveryException("ITEMS_ARTIFACT_STALE", "The selected Items feature requires its current interpretation.");
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
         foreach (var (table, admission) in new[] { (ItemsProjection.ItemTable, authority.Item), (ItemsProjection.SparseTable, authority.Sparse) })
         {
-            if (!provider.Definitions.TryGetValue(table, out var definition) || definition.Document.SelectBuild(opening.Build.Version, token: token).Blocks.Count == 0)
-                throw new DiscoveryException("SCHEMA_BUILD_NOT_LISTED", "The pinned Items definition does not list this exact build.");
-            var a = admission.Artifact;
-            if (a.Binding.DefinitionSha256 != definition.Sha256 || a.Binding.ProviderRevision != BundledTableDefinitions.Revision ||
-                a.Binding.DecoderRevision != (admission.Source.Projection is null ? TableDataStore.DecoderRevision : TableDataStore.ProjectionDecoderRevision) ||
-                a.Binding.SchemaSelectionSha256 != TableRowArtifacts.SchemaSelectionKey(definition.Document, opening.Build.Version, token))
+            await definitions.RequireFeatureBuildAsync(table, "Items", opening.Build.Version, token);
+            if (await definitions.CurrentForFeatureAsync(admission, table, opening.Build.Version, token) is null)
                 throw new DiscoveryException("ITEMS_ARTIFACT_STALE", "The selected Item or Sparse interpretation is no longer current.");
-            TableDataStore.ValidateInterpretation(a, definition.Document, opening.Build.Version);
         }
         // Receipts were bounded/authenticated together with source authority by the
         // catalog. Read their retained bytes directly, with no later eager SQL read
@@ -412,12 +409,12 @@ public sealed class ItemsStore(DiscoveryCatalog catalog, VerifiedObjectStore obj
     }
     private static ItemsReadiness Ready(ItemsSnapshot snapshot) => new(snapshot,
         new[] { snapshot.ItemSource, snapshot.SparseSource }.Select(source => new ItemsDependencyReadiness(source.TableId, "ready", source.ArtifactId)).ToArray());
-    private static TableDataRequest Table(ItemsContext context, string table) => new(context.ProductId, context.BuildIdentity, context.SourceRegion, table, context.ResearchLocale);
+    private static TableDataRequest Table(ItemsContext context, string table) =>
+        new(context.ProductId, context.BuildIdentity, context.SourceRegion, table, context.ResearchLocale, FetchedDefinitions: true, Feature: "Items");
     private static WorkspaceRequest Workspace(ItemsContext context) => new(context.ProductId, context.BuildIdentity, context.SourceRegion);
     private async Task<(bool Current, ItemsDependencyReadiness[] Dependencies)> CurrentSources(ItemsContext context,
         CapturedOpeningContext opening, ItemsProjectionArtifact? expected, CancellationToken token)
     {
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
         if (!opening.Build.ProductId.StartsWith("wow", StringComparison.Ordinal))
             throw new DiscoveryException("TABLE_PRODUCT_UNSUPPORTED", "Items currently requires a supported WoW table source.");
         var admissions = new StoredTableAdmission?[2]; var dependencies = new ItemsDependencyReadiness[2];
@@ -425,20 +422,9 @@ public sealed class ItemsStore(DiscoveryCatalog catalog, VerifiedObjectStore obj
         for (var i = 0; i < tableIds.Length; i++)
         {
             var table = tableIds[i]; var admission = await catalog.ReadTableAdmissionAsync(opening, table, context.ResearchLocale, token);
-            if (!provider.Definitions.TryGetValue(table, out var supported) || supported.Document.SelectBuild(opening.Build.Version, token: token).Blocks.Count == 0)
-                throw new DiscoveryException("SCHEMA_BUILD_NOT_LISTED", "The pinned Items definition does not list this exact build.");
-            if (admission is not null)
-            {
-                if (!provider.Definitions.TryGetValue(table, out var definition)) admission = null;
-                else
-                {
-                    var a = admission.Artifact;
-                    if (a.Binding.DefinitionSha256 != definition.Sha256 || a.Binding.ProviderRevision != BundledTableDefinitions.Revision ||
-                        a.Binding.DecoderRevision != (admission.Source.Projection is null ? TableDataStore.DecoderRevision : TableDataStore.ProjectionDecoderRevision) ||
-                        a.Binding.SchemaSelectionSha256 != TableRowArtifacts.SchemaSelectionKey(definition.Document, opening.Build.Version, token)) admission = null;
-                    else TableDataStore.ValidateInterpretation(a, definition.Document, opening.Build.Version);
-                }
-            }
+            // The same start as Tables (D101): with fetching off, a bundled definition must open the build.
+            await definitions.RequireFeatureBuildAsync(table, "Items", opening.Build.Version, token);
+            if (admission is not null && await definitions.CurrentForFeatureAsync(admission, table, opening.Build.Version, token) is null) admission = null;
             admissions[i] = admission; dependencies[i] = new(table, admission is null ? "notPrepared" : "ready", admission?.Artifact.ContentKey);
         }
         if (admissions[0] is not { } item || admissions[1] is not { } sparse) return (false, dependencies);

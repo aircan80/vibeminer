@@ -1076,12 +1076,37 @@
         },
         "retryable": {
           "type": "boolean"
+        },
+        "definition": {
+          "$ref": "#/definitions/TableDefinitionProblem"
         }
       },
       "required": [
         "code",
         "message",
         "retryable"
+      ],
+      "additionalProperties": false
+    },
+    "TableDefinitionProblem": {
+      "title": "TableDefinitionProblem",
+      "description": "Present on an error when no definition can read a table (D081, D101): the table, and the Settings switch as it read then (the same values as definitionFetch). Views decide their next step from it, never from the message.",
+      "type": "object",
+      "properties": {
+        "tableId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}$"
+        },
+        "definitionFetch": {
+          "enum": [
+            "on",
+            "off"
+          ]
+        }
+      },
+      "required": [
+        "tableId",
+        "definitionFetch"
       ],
       "additionalProperties": false
     },
@@ -10961,12 +10986,6 @@
                       "layoutHash": {
                         "const": "96F083AD"
                       },
-                      "definitionSha256": {
-                        "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
-                      },
-                      "providerRevision": {
-                        "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
-                      },
                       "association": {
                         "properties": {
                           "fileDataId": {
@@ -11076,7 +11095,39 @@
                         "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
                         "maxLength": 5
                       }
-                    }
+                    },
+                    "anyOf": [
+                      {
+                        "description": "Read with the reviewed bundled definition.",
+                        "not": {
+                          "required": [
+                            "fetchedDefinition"
+                          ]
+                        },
+                        "properties": {
+                          "definitionSha256": {
+                            "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
+                          },
+                          "providerRevision": {
+                            "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                          }
+                        }
+                      },
+                      {
+                        "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
+                        "required": [
+                          "fetchedDefinition"
+                        ],
+                        "properties": {
+                          "providerRevision": {
+                            "type": "string",
+                            "not": {
+                              "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                            }
+                          }
+                        }
+                      }
+                    ]
                   }
                 ]
               }
@@ -11108,12 +11159,6 @@
                       },
                       "layoutHash": {
                         "const": "4CA77678"
-                      },
-                      "definitionSha256": {
-                        "const": "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c"
-                      },
-                      "providerRevision": {
-                        "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
                       },
                       "association": {
                         "properties": {
@@ -11475,7 +11520,39 @@
                         "pattern": "^(0|[1-9][0-9]{0,5}|1000000)$",
                         "maxLength": 7
                       }
-                    }
+                    },
+                    "anyOf": [
+                      {
+                        "description": "Read with the reviewed bundled definition.",
+                        "not": {
+                          "required": [
+                            "fetchedDefinition"
+                          ]
+                        },
+                        "properties": {
+                          "definitionSha256": {
+                            "const": "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c"
+                          },
+                          "providerRevision": {
+                            "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                          }
+                        }
+                      },
+                      {
+                        "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
+                        "required": [
+                          "fetchedDefinition"
+                        ],
+                        "properties": {
+                          "providerRevision": {
+                            "type": "string",
+                            "not": {
+                              "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                            }
+                          }
+                        }
+                      }
+                    ]
                   }
                 ]
               }
@@ -11507,12 +11584,6 @@
                       },
                       "layoutHash": {
                         "const": "782EE721"
-                      },
-                      "definitionSha256": {
-                        "const": "d48ae2eb0455a30451cadda1c63627b9ad4ad4e9c4e473cd3444def1981fa667"
-                      },
-                      "providerRevision": {
-                        "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
                       },
                       "association": {
                         "properties": {
@@ -11591,7 +11662,39 @@
                         "pattern": "^(0|[1-9][0-9]{0,5}|1000000)$",
                         "maxLength": 7
                       }
-                    }
+                    },
+                    "anyOf": [
+                      {
+                        "description": "Read with the reviewed bundled definition.",
+                        "not": {
+                          "required": [
+                            "fetchedDefinition"
+                          ]
+                        },
+                        "properties": {
+                          "definitionSha256": {
+                            "const": "d48ae2eb0455a30451cadda1c63627b9ad4ad4e9c4e473cd3444def1981fa667"
+                          },
+                          "providerRevision": {
+                            "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                          }
+                        }
+                      },
+                      {
+                        "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
+                        "required": [
+                          "fetchedDefinition"
+                        ],
+                        "properties": {
+                          "providerRevision": {
+                            "type": "string",
+                            "not": {
+                              "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                            }
+                          }
+                        }
+                      }
+                    ]
                   }
                 ]
               }
@@ -11994,12 +12097,6 @@
                 "layoutHash": {
                   "const": "96F083AD"
                 },
-                "definitionSha256": {
-                  "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
-                },
-                "providerRevision": {
-                  "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
-                },
                 "association": {
                   "properties": {
                     "fileDataId": {
@@ -12109,7 +12206,39 @@
                   "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
                   "maxLength": 5
                 }
-              }
+              },
+              "anyOf": [
+                {
+                  "description": "Read with the reviewed bundled definition.",
+                  "not": {
+                    "required": [
+                      "fetchedDefinition"
+                    ]
+                  },
+                  "properties": {
+                    "definitionSha256": {
+                      "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
+                    },
+                    "providerRevision": {
+                      "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                    }
+                  }
+                },
+                {
+                  "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
+                  "required": [
+                    "fetchedDefinition"
+                  ],
+                  "properties": {
+                    "providerRevision": {
+                      "type": "string",
+                      "not": {
+                        "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                      }
+                    }
+                  }
+                }
+              ]
             }
           ]
         },
@@ -12956,12 +13085,6 @@
                 "layoutHash": {
                   "const": "96F083AD"
                 },
-                "definitionSha256": {
-                  "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
-                },
-                "providerRevision": {
-                  "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
-                },
                 "association": {
                   "properties": {
                     "fileDataId": {
@@ -13071,7 +13194,39 @@
                   "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
                   "maxLength": 5
                 }
-              }
+              },
+              "anyOf": [
+                {
+                  "description": "Read with the reviewed bundled definition.",
+                  "not": {
+                    "required": [
+                      "fetchedDefinition"
+                    ]
+                  },
+                  "properties": {
+                    "definitionSha256": {
+                      "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
+                    },
+                    "providerRevision": {
+                      "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                    }
+                  }
+                },
+                {
+                  "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
+                  "required": [
+                    "fetchedDefinition"
+                  ],
+                  "properties": {
+                    "providerRevision": {
+                      "type": "string",
+                      "not": {
+                        "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                      }
+                    }
+                  }
+                }
+              ]
             }
           ]
         },
@@ -18017,7 +18172,7 @@
             "problem"
           ],
           "additionalProperties": false,
-          "description": "Fetch newer table definitions from WoWDBDefs for the Tables view, exact build first (D081). On by default; an unreadable value reads as off."
+          "description": "Fetch newer table definitions from WoWDBDefs for Tables and the feature views, exact build first (D081, D101). On by default; an unreadable value reads as off."
         },
         "storage": {
           "type": "object",

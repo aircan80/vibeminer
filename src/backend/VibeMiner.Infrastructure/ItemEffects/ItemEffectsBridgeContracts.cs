@@ -144,7 +144,7 @@ internal static class ItemEffectsBridgePolicy
             if (b.BuildVersion is null || b.BuildVersion.Length is < 7 or > 43 || s.Coverage is null ||
                 s.ProductId != b.Context.ProductId || s.BuildIdentity != b.Context.BuildIdentity || s.SourceRegion != b.Context.SourceRegion || s.ResearchLocale != "enUS" || s.TableId != Table ||
                 r.Header.SchemaVersion != 5 || s.LayoutHash != Layout || !string.Equals(r.Header.TableHash, Table, StringComparison.OrdinalIgnoreCase) || r.Header.LayoutHash.ToUpperInvariant() != Layout ||
-                s.DefinitionSha256 != Definition || s.ProviderRevision != BundledTableDefinitions.Revision || s.DecoderRevision !=
+                !Hash(s.DefinitionSha256) || !Hash(s.ProviderRevision, 40) || s.DecoderRevision !=
                     (s.Source.Projection is null ? TableDataStore.DecoderRevision : TableDataStore.ProjectionDecoderRevision) ||
                 s.ArtifactId != r.ContentKey || r.ContentKey != TableRowArtifacts.ContentKey(r.Binding) || !Hash(r.Sha256) || r.ByteLength is < 64 or > VerifiedObjectStore.MaxObjectBytes ||
                 r.Binding.SourceSha256 != s.Source.Sha256 || r.Binding.DefinitionSha256 != s.DefinitionSha256 || r.Binding.ProviderRevision != s.ProviderRevision || r.Binding.Locale != "enUS" || r.Binding.DecoderRevision != s.DecoderRevision ||
@@ -179,19 +179,23 @@ internal static class ItemEffectsBridgePolicy
         if (artifact.Revision != Revision || !Hash(artifact.Sha256) || artifact.ContentKey != Convert.ToHexStringLower(SHA256.HashData(metadata)) ||
             artifact.ByteLength != checked(HeaderBytes + metadata.Length + Total(artifact.Binding) * TupleBytes) || artifact.ByteLength > MaxArtifactBytes) throw Invalid();
     }
+    // D101: the bridge is checked against the definition Tables chooses now, bundled or fetched; the reviewed layout and
+    // field profile below are what qualify it. Rows read with another definition are stale, not invalid.
     internal static async Task ValidateProfileAsync(ItemEffectsBridgeBinding binding, CancellationToken token,
-        Func<Action, CancellationToken, Task> cpuSlice)
+        Func<Action, CancellationToken, Task> cpuSlice, TableDefinitionSources definitions)
     {
         token.ThrowIfCancellationRequested();
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
-        await cpuSlice(() => ValidateProfile(binding, provider, token), token);
+        await cpuSlice(() => ValidateBinding(binding), token);
+        var definition = await definitions.ForFeatureRowsAsync(Table, binding.BuildVersion, binding.Rows, token);
+        if (binding.Source.DefinitionSha256 != definition.Sha256 || binding.Source.ProviderRevision != definition.Revision)
+            throw new DiscoveryException("ITEM_EFFECTS_BRIDGE_STALE", "The selected effects bridge source or index changed.", true);
+        await cpuSlice(() => ValidateProfile(binding, definition, token), token);
     }
-    private static void ValidateProfile(ItemEffectsBridgeBinding binding, BundledTableDefinitions provider, CancellationToken token)
+    private static void ValidateProfile(ItemEffectsBridgeBinding binding, TableDefinition definition, CancellationToken token)
     {
         ValidateBinding(binding); token.ThrowIfCancellationRequested();
-        if (!provider.Definitions.TryGetValue(Table, out var definition) || definition.Sha256 != Definition ||
-            binding.Rows.Binding.SchemaSelectionSha256 != TableRowArtifacts.SchemaSelectionKey(definition.Document, binding.BuildVersion, token)) throw Invalid();
-        var selected = definition.Document.SelectBuild(binding.BuildVersion, Layout, token);
+        if (binding.Rows.Binding.SchemaSelectionSha256 != TableRowArtifacts.SchemaSelectionKey(definition.Document, binding.BuildVersion, token)) throw Invalid();
+        var selected = definition.Document.SelectFile(binding.BuildVersion, Layout, token);
         if (selected.Blocks.Count != 1 || selected.Blocks[0].Fields.Count != 3) throw Invalid();
         var fields = selected.Blocks[0].Fields; var names = new[] { "ID", "ItemEffectID", "ItemID" };
         for (var i = 0; i < 3; i++)

@@ -57,7 +57,7 @@ public sealed partial class TableDataStore
             var configuration = await ReadBuildConfigurationAsync(context, token);
             ValidateSourceAssociation(configuration, admission.Association);
             var definition = await definitions.ForRowsAsync(entry, bundled, context.Build.Version, admission.Artifact, fetchEnabled, token);
-            Validate(admission, entry, definition, context.Build.Version);
+            Validate(admission, entry, definition, bundled, context.Build.Version);
             if (request.ArtifactId != admission.Artifact.ContentKey)
                 throw new DiscoveryException("TABLE_ARTIFACT_STALE", "This row page belongs to a different table interpretation. Reopen the table data.");
             // The exact rows tables.rows returns for this query, including its byte trimming.
@@ -135,7 +135,7 @@ public sealed partial class TableDataStore
         try
         {
             ValidateSourceAssociation(configuration, admission.Association);
-            Validate(admission, entry, await definitions.ForRowsAsync(entry, bundled, context.Build.Version, admission.Artifact, fetchEnabled, token), context.Build.Version);
+            Validate(admission, entry, await definitions.ForRowsAsync(entry, bundled, context.Build.Version, admission.Artifact, fetchEnabled, token), bundled, context.Build.Version);
         }
         catch (DiscoveryException failure) when (failure.Code == "TABLE_INTERPRETATION_STALE") { target.State = S.NotPrepared; return target; }
         catch (DiscoveryException failure) when (failure.Code == "TABLE_SOURCE_CONTEXT_MISMATCH") { return Fail(S.Unreadable, failure.Code, failure.Message); }

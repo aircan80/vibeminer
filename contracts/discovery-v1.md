@@ -8,7 +8,7 @@ Request: `{ "protocolVersion": 1, "id": "unique-string", "method": "products.lis
 
 Success: `{ "protocolVersion": 1, "id": "unique-string", "result": {} }`.
 
-Failure: `{ "protocolVersion": 1, "id": "unique-string", "error": { "code": "CANCELED", "message": "Discovery canceled.", "retryable": true } }`.
+Failure: `{ "protocolVersion": 1, "id": "unique-string", "error": { "code": "CANCELED", "message": "Discovery canceled.", "retryable": true } }`. When no definition can read a table (D081, D101), the error also has `definition: { tableId, definitionFetch }`: the table, and `on` or `off` as the Settings switch read. Views decide from it, never from the message; examples are in `contracts/examples/definition-errors.json`.
 
 Progress: `{ "protocolVersion": 1, "type": "progress", "requestId": "unique-string", "stage": "Downloading metadata", "sequence": 1, "region": null, "completed": null, "total": null, "unit": null }`.
 

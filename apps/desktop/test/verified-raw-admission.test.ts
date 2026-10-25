@@ -46,4 +46,28 @@ it.each([false,true])('rejects the wrong source-class revision and v4 attached t
 });
 it('recognizes the scoped v4 envelope on another selected layout without opting its verified columns into raw evidence',()=>{const{s,d,p}=authoredEffect();s.layoutHash=d.definition!.candidates[0]!.layoutHash='00000000';for(const ordinal of[3,6,8])s.columns[ordinal].interpretation=null;expect(tableDataMatches(s,p,d)).toBe(true);s.columns[3].interpretation={policy:'raw-physical-integer-v1',physicalBits:32,physicalSigned:false,candidateBits:16,candidateUnsigned:false,warning:'Authored wrong-layout raw annotation.'};expect(tableDataMatches(s,p,d)).toBe(false);});
 it('does not confuse a full source receipt with complete native table coverage',()=>{const{s,d,p}=authoredEffect();s.coverage=structuredClone(partialTemplate.coverage) as TableDataSnapshot['coverage'];s.rowCount=partialTemplate.rowCount;expect(tableDataMatches(s,p,d)).toBe(true);});
+// D101: a definition fetched from WoWDBDefs whose block for the reviewed layout is the reviewed one reads the same raw
+// columns (the engine checks the block); here it must name its own commit and never the pinned definition or revision.
+function fetched<T extends {s:TableDataSnapshot;d:TableDefinitionSnapshot}>(value:T):T{
+ const commit='2'.repeat(40),info={revision:commit,fetchedAt:'2026-10-25T00:00:00Z'};
+ Object.assign(value.s,{definitionSha256:'e'.repeat(64),providerRevision:commit,fetchedDefinition:info,fetchedBecause:'exactBuild',bundledFallback:false});
+ value.d.definition!.sha256='e'.repeat(64);value.d.definition!.fetched=info;
+ // Read with the reviewed rules, a fetched definition's rows carry v4 so they never share a key with rows it decoded without them.
+ if(value.s.tableId!=='4002a5b1')value.s.decoderRevision='wdc5-values-v7+table-admission-v4';return value;
+}
+it.each(['subclass','creature'] as const)('needs v4 for raw columns read with a fetched %s definition and refuses v4 on its bundled one',kind=>{
+ const v3=fetched(authored(kind));v3.s.decoderRevision='wdc5-values-v7+table-admission-v3';expect(tableDataMatches(v3.s,v3.p,v3.d)).toBe(false);
+ const bundled=authored(kind);bundled.s.decoderRevision='wdc5-values-v7+table-admission-v4';expect(tableDataMatches(bundled.s,bundled.p,bundled.d)).toBe(false);expect(tableDataMatches(bundled.s,bundled.p)).toBe(false);
+ const other=fetched(authored(kind));other.s.layoutHash=other.d.definition!.candidates[0]!.layoutHash='00000000';for(const c of other.s.columns)c.interpretation=null;expect(tableDataMatches(other.s,other.p,other.d)).toBe(false);
+});
+it.each(['subclass','creature','effect'] as const)('admits the reviewed raw columns read with a fetched %s definition only on the reviewed layout',kind=>{
+ const make=()=>fetched(kind==='effect'?authoredEffect():authored(kind));
+ const ok=make();expect(tableDataMatches(ok.s,ok.p,ok.d)).toBe(true);
+ if(kind==='effect')expect(tableDataMatches(ok.s,ok.p)).toBe(true);
+ const pinned=make();pinned.s.definitionSha256=pinned.d.definition!.sha256=kind==='effect'?'7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c':kind==='creature'?'64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425':'e06461a556669dd560dc8908e417fac9343894f4fd4d446e2d3dc721a908891c';
+ expect(tableDataMatches(pinned.s,pinned.p,pinned.d)).toBe(false);
+ const layout=make();layout.s.layoutHash=layout.d.definition!.candidates[0]!.layoutHash='00000000';expect(tableDataMatches(layout.s,layout.p,layout.d)).toBe(false);
+ if(kind==='effect'){const scope=make();scope.s.layoutHash=scope.d.definition!.candidates[0]!.layoutHash='00000000';for(const ordinal of[3,6,8])scope.s.columns[ordinal].interpretation=null;expect(tableDataMatches(scope.s,scope.p,scope.d)).toBe(false);}
+ const unfetched=make();delete unfetched.s.fetchedDefinition;delete unfetched.s.fetchedBecause;delete unfetched.s.bundledFallback;delete unfetched.d.definition!.fetched;unfetched.s.providerRevision=unfetched.d.provider.revision;expect(tableDataMatches(unfetched.s,unfetched.p,unfetched.d)).toBe(false);
+});
 it('preserves all existing Subclass v2/v3 and Creature v3 full/projection spellings',()=>{for(const kind of['subclass','creature']as const)for(const version of kind==='subclass'?[2,3]:[3])for(const projected of[false,true]){const{s,d,p}=authored(kind);if(projected){s.source=structuredClone(partialTemplate.source) as TableDataSnapshot['source'];s.coverage=structuredClone(partialTemplate.coverage) as TableDataSnapshot['coverage'];s.rowCount=partialTemplate.rowCount;s.association=structuredClone(partialTemplate.association) as TableDataSnapshot['association'];s.association.fileDataId=kind==='subclass'?'1261604':'1108759';}s.decoderRevision=`wdc5-values-v7+table-admission-${projected?'projection-':''}v${version}`;expect(tableDataMatches(s,p,d),`${kind}:${version}:${projected}`).toBe(true);}});

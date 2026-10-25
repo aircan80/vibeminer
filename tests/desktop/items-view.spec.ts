@@ -4,11 +4,11 @@ import path from 'node:path';
 import {launch,root} from './helpers';
 // Items view (docs/design/items-view, D098) in real Electron: two panes or one pane, facts with source links, roving sections,
 // the Tables round trip, and no horizontal page scroll at 1280×800 and 600×480, 100% and 200% text.
-async function opened(cached=true){
+async function opened(cached=true,flags:string[]=[]){
  const s=await launch(true,false,false,true,true,'subclass',false,false,true);
  await s.page.locator('.build-row').first().click();await s.page.getByRole('button',{name:'Open build',exact:true}).click();
  await writeFile(path.join(s.data,'release-open'),'release');await expect(s.page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();
- for(const flag of[...(cached?['cached-items']:[]),'icons-auto','labels-auto','cached-effects-links','cached-effects-inputs','cached-effects-names'])await writeFile(path.join(s.data,flag),'cached');
+ for(const flag of[...(cached?['cached-items']:[]),...flags,'icons-auto','labels-auto','cached-effects-links','cached-effects-inputs','cached-effects-names'])await writeFile(path.join(s.data,flag),'cached');
  await s.page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Items',exact:true}).click();
  if(cached)await expect(s.page.locator('#iv-opt-0')).toBeVisible();return s;
 }
@@ -39,6 +39,25 @@ test('Items view lays out as two panes or one, without page overflow, at 1280×8
     await page.keyboard.press('Enter');await expect(page.getByRole('heading',{name:'Authored sword 3',level:2})).toBeFocused();
     expect(await page.locator('.iv-grid>*').first().evaluate(el=>el.querySelector('section')?.getAttribute('aria-label')),tag).toBe('Effects');}
    expect(await overflow(page),tag).toBe(false);await shot(page,`detail-${tag}`);
+  }
+ }finally{await s.close();}
+});
+
+// D101 (#84): Items read with definitions fetched from WoWDBDefs says so above the list, in Tables' words, and the notice
+// fits without page overflow in both layouts at 100% and 200% text.
+test('Items read with fetched definitions say which tables they read, without page overflow at 1280×800 and 600×480, 100% and 200% text',async()=>{
+ test.setTimeout(120_000);const s=await opened(true,['items-fetched']);
+ try{const{page,app}=s;await size(app,page,1280,800,15);
+  const notice=page.getByRole('region',{name:/^Item and ItemSparse · Definition from WoWDBDefs \(fetched .*, a50ca6f\)$/});
+  await expect(notice).toBeVisible();await expect(notice).toContainText('the newest WoWDBDefs definitions do. Checked field by field.');
+  await expect(notice).toContainText('Turn off Fetch newer table definitions in Settings');
+  for(const[width,height]of sizes)for(const font of[15,30]){
+   await size(app,page,width,height,font);const tag=`${width}x${height}-${font/15*100}`;
+   expect(await overflow(page),tag).toBe(false);
+   // At 200% the notice is Tables' one-line compact form, so the list keeps its rows.
+   const box=page.locator('.feature-definition');await expect(box,tag).toBeVisible();
+   if(font===30){await expect(box.locator('strong'),tag).toHaveText(/^WoWDBDefs · .* · a50ca6f$/);expect((await box.boundingBox())!.height,tag).toBeLessThan(width===1280?130:160);}
+   await shot(page,`fetched-${tag}`);
   }
  }finally{await s.close();}
 });

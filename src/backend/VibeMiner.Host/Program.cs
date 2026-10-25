@@ -32,11 +32,11 @@ try
     var definitionSources = new TableDefinitionSources(new WoWDBDefsDefinitions(dataDirectory, definitionClient), settings);
     await using var tableStore = new TableDataStore(catalog, objects, client, acquisition, resources, definitionSources);
     await using var tableData = new TableDataService(tableStore);
-    await using var creaturesStore = new CreaturesStore(catalog, objects, tableData, resources);
+    await using var creaturesStore = new CreaturesStore(catalog, objects, tableData, resources, definitionSources);
     await using var creatures = new CreaturesService(creaturesStore);
     await using var creatureDisplayStore = new CreatureDisplayMetadataStore(catalog, objects, creaturesStore, tableData, resources);
     await using var creatureDisplays = new CreatureDisplayMetadataService(creatureDisplayStore);
-    await using var itemsStore = new ItemsStore(catalog, objects, tableData, resources);
+    await using var itemsStore = new ItemsStore(catalog, objects, tableData, resources, definitionSources);
     await using var items = new ItemsService(itemsStore);
     await using var effectsStore = new ItemEffectsStore(catalog, objects, itemsStore, tableData, resources);
     await using var itemEffects = new ItemEffectsService(effectsStore);

@@ -246,7 +246,7 @@ public sealed partial class ItemEffectsStore
     {
         var token = slot.IndexStop!.Token; var ownsBuilder = allowBuild && resolution.Index is null;
         var artifact = resolution.Index?.Artifact;
-        var module = new ItemEffectsBridgeArtifacts(CpuAsync);
+        var module = new ItemEffectsBridgeArtifacts(CpuAsync, definitionSources: definitions);
         try
         {
             if (artifact is null)

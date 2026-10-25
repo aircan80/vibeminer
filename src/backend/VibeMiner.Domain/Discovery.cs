@@ -11,7 +11,14 @@ public sealed class DiscoveryException(string code, string message, bool retryab
     public bool Retryable { get; } = retryable;
     /// <summary>The underlying storage or I/O cause, for logs and problem details; never shown as the message.</summary>
     public string? Cause { get; init; }
+    /// <summary>Set when no definition can read a table (D081, D101): which table, and whether fetching was on. Views
+    /// decide their next step from it, never from the message.</summary>
+    public TableDefinitionProblem? Definition { get; init; }
 }
+
+/// <summary>The table no definition could read, and the Settings switch as it read then ("on" or "off"), the same
+/// values as a table definition snapshot's definitionFetch.</summary>
+public sealed record TableDefinitionProblem(string TableId, string DefinitionFetch);
 
 public sealed record Product(string Id, string Label, string Description);
 public static class ProductRegistry

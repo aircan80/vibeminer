@@ -20,6 +20,16 @@ const validate = (name, value) => {
   assert.ok(check(value), `${name}: ${JSON.stringify(check.errors)}`);
 };
 
+// D101 (#84): definition failures carry the table and the Settings switch as fields; the example is the engine's output.
+test('definition failures conform to EngineError with their table and switch, and nothing else is accepted there', async () => {
+  const errors = JSON.parse(await readFile(path.join(root, 'contracts/examples/definition-errors.json'), 'utf8'));
+  assert.deepEqual(Object.keys(errors), ['creaturesFetchingOff', 'itemSparseNotListed', 'itemFetchOffline', 'itemsFetchingOff']);
+  for (const error of Object.values(errors)) validate('EngineError', error);
+  const check = validator('EngineError'), base = errors.itemsFetchingOff;
+  for (const definition of [{ tableId: '50238EC2', definitionFetch: 'off' }, { tableId: '50238ec2', definitionFetch: 'unreadable' }, { tableId: '50238ec2' }, { ...base.definition, name: 'Item' }])
+    assert.equal(check({ ...base, definition }), false, JSON.stringify(definition));
+});
+
 test('authored discovery fixtures conform to the canonical wire schema', async () => {
   for (const name of ['discovery-page', 'empty-page']) {
     validate('DiscoveryPage', JSON.parse(await readFile(path.join(root, `contracts/examples/${name}.json`), 'utf8')));

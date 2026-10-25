@@ -532,9 +532,9 @@ function fetchHtml(){
       <h3 id="fetch-name">Fetch newer table definitions from WoWDBDefs</h3>
       <p id="fetch-desc">A new game build can change a table’s layout before VibeMiner is updated. This fetches the newest community definition for just that table, so it can still open.</p>
       <dl class="effects">
-        <dt>When on</dt><dd>When no bundled definition lists a build, opening a table’s data in Tables fetches that one table’s newest definition, a small text file, from the WoWDBDefs project on GitHub. A definition that lists the exact build is used first, bundled before fetched; otherwise the bundled match by layout. It is kept in the storage folder, checked again at most once a day (sooner when it doesn’t list the build yet), and works offline after that. Definitions only describe columns; all game data still comes from Blizzard’s CDN. Such tables say <strong>Definition from WoWDBDefs</strong>.</dd>
-        <dt>When off</dt><dd>Only the definitions bundled with VibeMiner, matched by build or by layout. VibeMiner doesn’t contact GitHub, and a table they don’t cover can’t open.</dd>
-        <dt>Takes effect</dt><dd>The next time a table’s data opens. Nothing is fetched when you switch.</dd>
+        <dt>When on</dt><dd>When no bundled definition lists a build, opening a table’s data in Tables, or an area such as Items or Creatures that reads it, fetches that table’s newest definition, a small text file, from the WoWDBDefs project on GitHub. A definition that lists the exact build is used first, bundled before fetched; otherwise the bundled match by layout. It is kept in the storage folder, checked again at most once a day (sooner when it doesn’t list the build yet), and works offline after that. Definitions only describe columns; all game data still comes from Blizzard’s CDN. Tables and areas read this way say <strong>Definition from WoWDBDefs</strong>.</dd>
+        <dt>When off</dt><dd>Only the definitions bundled with VibeMiner, matched by build or by layout. VibeMiner doesn’t contact GitHub, and a table they don’t cover, or an area that needs it, can’t open.</dd>
+        <dt>Takes effect</dt><dd>Open tables and areas check again at once and load again if they need to; the others the next time they open.</dd>
         <dt>Source</dt><dd>WoWDBDefs contributors, <span class="mono">github.com/wowdev/WoWDBDefs</span>, CC BY-SA 4.0.</dd>
       </dl>
     </div>

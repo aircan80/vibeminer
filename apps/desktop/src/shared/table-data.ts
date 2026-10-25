@@ -44,25 +44,37 @@ function validNarrowing(column:TableDataColumn):boolean {
  return n===undefined || column.family==='integer' && !column.isId && !column.interpretation && n.storedBits===32 && (n.usedBits===8||n.usedBits===16);
 }
 const itemEffectRevision='wdc5-values-v7+table-admission-v4',itemEffectProjectionRevision='wdc5-values-v7+table-admission-projection-v4';
+const bundledProvider='b9a63096cdd99b26967f17f9515377ae62cadfd7';
+// The reviewed bundled definition, or (D101) a fetched one the engine reads with the same reviewed rules because its block
+// for the reviewed layout is identical. The engine checks that; here a fetched one only has to name its own commit.
+export const reviewedDefinition=(s:TableDataSnapshot,sha:string)=>s.fetchedDefinition
+ ?s.providerRevision!==bundledProvider&&s.definitionSha256!==sha:s.providerRevision===bundledProvider&&s.definitionSha256===sha;
 function itemEffectScope(s:TableDataSnapshot):boolean {
- return s.tableId==='4002a5b1'&&s.definitionSha256==='7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c'
-  &&s.providerRevision==='b9a63096cdd99b26967f17f9515377ae62cadfd7'&&s.association.fileDataId==='969941';
+ return s.tableId==='4002a5b1'&&reviewedDefinition(s,'7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c')
+  &&s.association.fileDataId==='969941'&&(!s.fetchedDefinition||s.layoutHash==='4CA77678');
 }
+// D101: a fetched definition read with the reviewed ItemSubClass or CreatureDisplayInfo raw rules carries v4, so its rows
+// never share a key with rows that definition decoded without them.
+const fetchedReviewedScope=(s:TableDataSnapshot)=>!!s.fetchedDefinition&&(s.tableId==='95d8638f'&&s.layoutHash==='1E67DB87'&&reviewedDefinition(s,'e06461a556669dd560dc8908e417fac9343894f4fd4d446e2d3dc721a908891c')
+ ||s.tableId==='bfdaf9f1'&&s.layoutHash==='7275F5F6'&&reviewedDefinition(s,'64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425'));
+export const reviewedRevision=(s:TableDataSnapshot)=>isPartialSource(s.source)?itemEffectProjectionRevision:itemEffectRevision;
 function validScopedAdmissionRevision(s:TableDataSnapshot):boolean {
  if(s.decoderRevision!==itemEffectRevision&&s.decoderRevision!==itemEffectProjectionRevision)return true;
  // The version envelope precedes actual-layout selection; it grants no raw field by itself.
- return itemEffectScope(s)&&s.decoderRevision===(isPartialSource(s.source)?itemEffectProjectionRevision:itemEffectRevision);
+ return (itemEffectScope(s)||fetchedReviewedScope(s))&&s.decoderRevision===reviewedRevision(s);
 }
 // These reviewed backend admissions preserve raw evidence for an exact pinned
 // definition/layout. No value decoding or general verified-field widening occurs here.
 function verifiedRawAdmission(s:TableDataSnapshot,fieldOrdinal:number,column:TableDataColumn):boolean {
  const i=column.interpretation;
- if(!i||i.physicalBits!==32||i.physicalSigned||s.providerRevision!=='b9a63096cdd99b26967f17f9515377ae62cadfd7')return false;
- const revision=s.decoderRevision,subclass=s.tableId==='95d8638f'&&s.definitionSha256==='e06461a556669dd560dc8908e417fac9343894f4fd4d446e2d3dc721a908891c'&&s.layoutHash==='1E67DB87'&&fieldOrdinal===6&&column.name==='PrerequisiteProficiency'&&i.candidateBits===8&&!i.candidateUnsigned;
- const creature=s.tableId==='bfdaf9f1'&&s.definitionSha256==='64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425'&&s.layoutHash==='7275F5F6'&&((fieldOrdinal===8&&column.name==='NPCSoundID')||(fieldOrdinal===12&&column.name==='ObjectEffectPackageID')||(fieldOrdinal===13&&column.name==='AnimReplacementSetID'))&&i.candidateBits===16&&i.candidateUnsigned;
+ if(!i||i.physicalBits!==32||i.physicalSigned)return false;
+ const revision=s.decoderRevision,subclass=s.tableId==='95d8638f'&&reviewedDefinition(s,'e06461a556669dd560dc8908e417fac9343894f4fd4d446e2d3dc721a908891c')&&s.layoutHash==='1E67DB87'&&fieldOrdinal===6&&column.name==='PrerequisiteProficiency'&&i.candidateBits===8&&!i.candidateUnsigned;
+ const creature=s.tableId==='bfdaf9f1'&&reviewedDefinition(s,'64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425')&&s.layoutHash==='7275F5F6'&&((fieldOrdinal===8&&column.name==='NPCSoundID')||(fieldOrdinal===12&&column.name==='ObjectEffectPackageID')||(fieldOrdinal===13&&column.name==='AnimReplacementSetID'))&&i.candidateBits===16&&i.candidateUnsigned;
  const effect=itemEffectScope(s)&&s.layoutHash==='4CA77678'&&i.candidateBits===16
   &&((fieldOrdinal===3&&column.name==='Charges'&&!i.candidateUnsigned)||((fieldOrdinal===6&&column.name==='SpellCategoryID')||(fieldOrdinal===8&&column.name==='ChrSpecializationID'))&&i.candidateUnsigned);
- return effect&&revision===(isPartialSource(s.source)?itemEffectProjectionRevision:itemEffectRevision)||subclass&&['wdc5-values-v7+table-admission-v2','wdc5-values-v7+table-admission-projection-v2','wdc5-values-v7+table-admission-v3','wdc5-values-v7+table-admission-projection-v3'].includes(revision)||creature&&['wdc5-values-v7+table-admission-v3','wdc5-values-v7+table-admission-projection-v3'].includes(revision);
+ // Fetched ItemSubClass and CreatureDisplayInfo rows read with the reviewed rules carry v4 (D101); bundled ones keep their v2/v3 spellings.
+ if((subclass||creature)&&s.fetchedDefinition)return revision===reviewedRevision(s);
+ return effect&&revision===reviewedRevision(s)||subclass&&['wdc5-values-v7+table-admission-v2','wdc5-values-v7+table-admission-projection-v2','wdc5-values-v7+table-admission-v3','wdc5-values-v7+table-admission-projection-v3'].includes(revision)||creature&&['wdc5-values-v7+table-admission-v3','wdc5-values-v7+table-admission-projection-v3'].includes(revision);
 }
 export const sameFetch = (a?: TableDefinitionFetched, b?: TableDefinitionFetched) => a === b || !!a && !!b && a.revision === b.revision && Date.parse(a.fetchedAt) === Date.parse(b.fetchedAt);
 /** True when the rows were read with another definition than the one shown: the engine fetched a newer one (D081) or

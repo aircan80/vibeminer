@@ -117,7 +117,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
             parameters = parameters.Clone();
         }
         catch (JsonException) { await ErrorAsync(output, id, "INVALID_REQUEST", "The request is not valid JSON."); return false; }
-        catch (DiscoveryException ex) { await ErrorAsync(output, id, ex.Code, ex.Message, ex.Retryable); return false; }
+        catch (DiscoveryException ex) { await ErrorAsync(output, id, ex.Code, ex.Message, ex.Retryable, definition: ex.Definition); return false; }
         catch (InvalidOperationException) { await ErrorAsync(output, id, "INVALID_REQUEST", "The request shape is invalid."); return false; }
         if (active.ContainsKey(id)) { await ErrorAsync(output, id, "DUPLICATE_ID", "This request ID is already active."); return false; }
         if (method == "shutdown")
@@ -136,7 +136,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                 if (requested) target!.Cancel();
                 await ReplyAsync(output, id, new { requested });
             }
-            catch (DiscoveryException ex) { await ErrorAsync(output, id, ex.Code, ex.Message); }
+            catch (DiscoveryException ex) { await ErrorAsync(output, id, ex.Code, ex.Message, definition: ex.Definition); }
             return false;
         }
         if (active.Count >= 32) { await ErrorAsync(output, id, "BUSY", "The engine has reached its active request limit.", true); return false; }
@@ -249,7 +249,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     if (tableData is null) throw new DiscoveryException("TABLE_DATA_UNAVAILABLE", "Table data loading is unavailable.");
                     var dataRequest = new TableDataRequest(RequiredString(parameters, "productId"), RequiredString(parameters, "buildIdentity"),
                         RequiredString(parameters, "sourceRegion"), RequiredString(parameters, "tableId"), RequiredString(parameters, "researchLocale"),
-                        FetchedDefinitions: true); // The Tables view only (D081).
+                        FetchedDefinitions: true); // Tables chooses by D081; features do the same (D101).
                     long dataSequence = 0;
                     result = method == "tables.data"
                         ? await tableData.ReadAsync(dataRequest, request.Cancellation.Token)
@@ -702,7 +702,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
             pendingGeometryLease = null; // Opaque ownership transfers only after actual terminal Flush.
         }
         catch (OperationCanceledException) { await TryErrorAsync(output, id, "CANCELED", method == "workspace.open" ? "Opening canceled." : method == "discovery.refreshAll" ? "Discovery canceled. Products checked before stopping keep their new results." : method == "tables.prepare" ? "Table loading canceled." : method == "download.check" ? "Check stopped. Nothing new was recorded; an earlier check stays as it was." : "Operation canceled.", true, maximumBytes, frameKind); }
-        catch (DiscoveryException ex) { await TryErrorAsync(output, id, ex.Code, ex.Message, ex.Retryable, maximumBytes, frameKind); }
+        catch (DiscoveryException ex) { await TryErrorAsync(output, id, ex.Code, ex.Message, ex.Retryable, maximumBytes, frameKind, ex.Definition); }
         catch (Exception ex)
         {
             await Console.Error.WriteLineAsync($"Engine request failed ({ex.GetType().Name}).");
@@ -766,11 +766,12 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
     private static string LimitCode(FrameKind kind) => kind switch
     { FrameKind.CreatureGeometry => "CREATURE_GEOMETRY_RESOURCE_LIMIT", FrameKind.Creatures => "CREATURES_RESULT_LIMIT", FrameKind.ItemEffects => "ITEM_EFFECTS_RESULT_LIMIT", _ => "ITEM_CLASSIFICATIONS_RESULT_LIMIT" };
     private static DiscoveryException CreaturesQueryBusy() => new("CREATURES_QUERY_BUSY", "Creature results are at their bounded publication capacity.", true);
-    private async Task TryErrorAsync(Stream output, string id, string code, string message, bool retryable, int maximumBytes = MaxFrameBytes, FrameKind frameKind = FrameKind.General)
+    private async Task TryErrorAsync(Stream output, string id, string code, string message, bool retryable, int maximumBytes = MaxFrameBytes, FrameKind frameKind = FrameKind.General,
+        TableDefinitionProblem? definition = null)
     {
         try
         {
-            try { await ErrorAsync(output, id, code, message, retryable, maximumBytes, frameKind); }
+            try { await ErrorAsync(output, id, code, message, retryable, maximumBytes, frameKind, definition); }
             catch (DiscoveryException ex) when (ex.Code == LimitCode(frameKind) && frameKind != FrameKind.General)
             {
                 await ErrorAsync(output, id, ex.Code, "The complete result exceeds its bounded frame limit.", false, maximumBytes, frameKind);
@@ -781,8 +782,14 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
     }
     private Task ReplyAsync(Stream output, string id, object result, int maximumBytes = MaxFrameBytes, FrameKind frameKind = FrameKind.General) =>
         WriteAsync(output, new { protocolVersion = 1, id, result }, maximumBytes, frameKind);
-    private Task ErrorAsync(Stream output, string? id, string code, string message, bool retryable = false, int maximumBytes = MaxFrameBytes, FrameKind frameKind = FrameKind.General) =>
-        WriteAsync(output, new { protocolVersion = 1, id, error = new { code, message, retryable } }, maximumBytes, frameKind);
+    private Task ErrorAsync(Stream output, string? id, string code, string message, bool retryable = false, int maximumBytes = MaxFrameBytes, FrameKind frameKind = FrameKind.General,
+        TableDefinitionProblem? definition = null) =>
+        WriteAsync(output, new { protocolVersion = 1, id, error = ErrorBody(code, message, retryable, definition) }, maximumBytes, frameKind);
+    /// <summary>An EngineError. <c>definition</c> is present only when no definition can read a table (D101).</summary>
+    internal static object ErrorBody(string code, string message, bool retryable, TableDefinitionProblem? definition = null) => definition is null
+        ? new { code, message, retryable }
+        : new { code, message, retryable, definition = new { tableId = definition.TableId, definitionFetch = definition.DefinitionFetch } };
+    internal static object ErrorBody(DiscoveryException error) => ErrorBody(error.Code, error.Message, error.Retryable, error.Definition);
     private async Task WriteAsync(Stream output, object value, int maximumBytes = MaxFrameBytes, FrameKind frameKind = FrameKind.General)
     {
         if (frameKind != FrameKind.General)

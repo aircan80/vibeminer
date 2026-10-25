@@ -1,9 +1,9 @@
 import {ActivityLink,useDownloadActivity} from './DownloadActivity';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { EngineProgress, TableDataSnapshot, TableDefinitionSnapshot, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
+import type { EngineProgress, TableDataSnapshot, TableDefinitionProblem, TableDefinitionSnapshot, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
 import { definitionChanged, tableDataMatches } from '../shared/table-data';
-export type TableFailure = {code:string;message:string;retryable:boolean};
+export type TableFailure = {code:string;message:string;retryable:boolean;definition?:TableDefinitionProblem};
 export type TableLatch = {kind:'stopped'|'failed';error:TableFailure|null};
 export type TableOperation = { id: string; definition: TableDefinitionSnapshot; status: 'pending'|'stopping'|'succeeded'|'failed'|'canceled'; progress: EngineProgress|null; result: TableDataSnapshot|null; error: TableFailure|null };
 export const tableIntentKey=(d:TableDefinitionSnapshot)=>[d.productId,d.buildIdentity,d.sourceRegion,d.entry.tableId,'enUS',d.provider.revision,d.definition?.sha256??''].join(':');

@@ -44,23 +44,23 @@ public sealed partial class ItemEffectsStore
         // This is the bounded original-authority read, never generic Tables readiness.
         var admission = await catalog.ReadItemEffectsSourceAsync(original.Opening, role, token);
         if (admission is null) return new(role, null, null, new(role, ItemEffectsSourceState.NotPrepared), false);
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
+        var info = Role(role); var version = original.Opening.Build.Version;
+        var (_, bundled) = await TableDefinitionSources.FeatureTableAsync(info.Table, token);
+        // D101: the definition Tables chooses now for these rows, bundled or fetched, under the Settings switch.
+        var definition = await definitions.ForFeatureRowsAsync(info.Table, version, admission.Artifact, token);
         await CpuAsync(() =>
         {
-            var info = Role(role); provider.Definitions.TryGetValue(info.Table, out var definition);
-            var snapshot = Snapshot(original.Snapshot.Context, admission, role,
-                admission.Artifact.Binding.DefinitionSha256 == definition?.Sha256 ? definition : null);
-            var state = RevisionState(role, admission.Artifact.Binding.DecoderRevision, admission.Source.Projection is not null);
+            var chosen = admission.Artifact.Binding.DefinitionSha256 == definition.Sha256 && admission.Artifact.Binding.ProviderRevision == definition.Revision;
+            var snapshot = Snapshot(original.Snapshot.Context, admission, role, chosen ? definition : null, version, bundled);
+            var state = CurrentState(role, admission.Artifact.Binding.DecoderRevision, admission.Artifact.Header.LayoutHash,
+                admission.Source.Projection is not null, definition, bundled, version, chosen);
             var probe = new SourceProbe(role, admission, snapshot, new(role, state,
                 HistoricalArtifactId: state == ItemEffectsSourceState.NotPrepared ? snapshot.ArtifactId : null), false);
             // Recognized history publishes no current semantic or physical facts. Let shared
-            // Tables upgrade it under today's pinned definition before current eligibility.
+            // Tables upgrade it under today's chosen definition before current eligibility.
             if (state == ItemEffectsSourceState.NotPrepared) { result = probe; return; }
-            if (definition is null || definition.Sha256 != info.Definition || admission.Artifact.Binding.DefinitionSha256 != info.Definition ||
-                admission.Artifact.Binding.ProviderRevision != BundledTableDefinitions.Revision)
-            { result = Failed(probe, ItemEffectsSourceState.Unsupported); return; }
             if (state != ItemEffectsSourceState.Ready) { result = Failed(probe, ItemEffectsSourceState.Unsupported); return; }
-            if (!Qualified(original.Opening.Build.Version, role, admission, definition, token))
+            if (!Qualified(version, role, admission, definition, bundled, token))
             { result = Failed(probe, ItemEffectsSourceState.Unsupported); return; }
             result = probe with { Public = new(role, ItemEffectsSourceState.Ready, snapshot), CurrentProfile = true };
         }, token);
@@ -98,28 +98,34 @@ public sealed partial class ItemEffectsStore
         }
     }
     private static TableDataSnapshot Snapshot(ItemsContext context, StoredTableAdmission admission,
-        ItemEffectsSourceRole role, BundledTableDefinition? definition)
+        ItemEffectsSourceRole role, TableDefinition? definition, string version, BundledTableDefinition bundled)
     {
         var artifact = admission.Artifact; var c = artifact.Completion;
         var columns = artifact.Header.Columns.Select(column => definition is not null ? TableDataStore.ProjectColumn(column, definition.Document) :
             new TableDataColumn(column.Name, column.Kind, column.IsId, null, column.Interpretation is { } p ?
                 new(p.Policy, p.PhysicalBits, p.PhysicalSigned, p.CandidateBits, p.CandidateUnsigned, p.Warning) : null)).ToArray();
-        return new(context.ProductId, context.BuildIdentity, context.SourceRegion, Role(role).Table, context.ResearchLocale,
+        TableDataSnapshot snapshot = new(context.ProductId, context.BuildIdentity, context.SourceRegion, Role(role).Table, context.ResearchLocale,
             artifact.ContentKey, admission.PreparedAt, artifact.Header.LayoutHash.ToUpperInvariant(), artifact.Binding.DefinitionSha256,
             artifact.Binding.ProviderRevision, artifact.Binding.DecoderRevision, admission.Source, admission.Association, Array.AsReadOnly(columns),
             new(c.Scope, N(c.DeclaredRecords), N(c.PhysicalRows), N(c.CopyRows), N(c.ExcludedEncryptedSections),
                 N(checked(c.ExcludedPhysicalRecords + c.ExcludedCopyRecords)), N(artifact.Header.DeclaredCopyRecords),
                 N(c.ExcludedPhysicalRecords), N(c.ExcludedCopyRecords)), N(checked(c.PhysicalRows + c.CopyRows)), N(c.TextIssueCount));
+        // Which definition read the rows, as Tables says it (D101).
+        return definition is null ? snapshot : TableDataStore.WithDefinitionFacts(snapshot, definition, version, bundled);
     }
+    // The reviewed profile per role: the exact layout, file and every field's name, width and flags. Any definition, bundled
+    // or fetched (D101), qualifies when its block for that layout says the same; the Effect raw columns also need the
+    // reviewed raw rules, which a fetched definition gets only for an identical block.
     private static bool Qualified(string version, ItemEffectsSourceRole role, StoredTableAdmission admission,
-        BundledTableDefinition definition, CancellationToken token)
+        TableDefinition definition, BundledTableDefinition bundled, CancellationToken token)
     {
         var info = Role(role); var artifact = admission.Artifact;
         if (artifact.Header.SchemaVersion != 5 || !string.Equals(artifact.Header.TableHash, info.Table, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(artifact.Header.LayoutHash, info.Layout, StringComparison.OrdinalIgnoreCase) || admission.Association.FileDataId != info.Fdid ||
-            artifact.Binding.DecoderRevision != TableDataStore.AdmissionRevision(info.Table, definition.Sha256, BundledTableDefinitions.Revision, admission.Source.Projection is not null) ||
+            artifact.Binding.DefinitionSha256 != definition.Sha256 || artifact.Binding.ProviderRevision != definition.Revision ||
+            artifact.Binding.DecoderRevision != TableDataStore.AdmissionRevision(info.Table, definition, bundled, version, info.Layout, admission.Source.Projection is not null, token) ||
             artifact.Binding.SchemaSelectionSha256 != TableRowArtifacts.SchemaSelectionKey(definition.Document, version, token)) return false;
-        var selected = definition.Document.SelectBuild(version, info.Layout, token);
+        var selected = definition.Document.SelectFile(version, info.Layout, token);
         var names = role == ItemEffectsSourceRole.Bridge ? new[] { "ID", "ItemEffectID", "ItemID" } :
             role == ItemEffectsSourceRole.Effect ? EffectColumns : ["ID", "Name_lang"];
         if (selected.Blocks.Count != 1 || selected.Blocks[0].Fields.Count != names.Length || artifact.Header.Columns.Count != names.Length) return false;
@@ -189,7 +195,7 @@ public sealed partial class ItemEffectsStore
             try
             {
                 _ = await tables.PrepareAsync(new(original.Snapshot.Context.ProductId, original.Snapshot.Context.BuildIdentity,
-                    original.Snapshot.Context.SourceRegion, info.Table, original.Snapshot.Context.ResearchLocale),
+                    original.Snapshot.Context.SourceRegion, info.Table, original.Snapshot.Context.ResearchLocale, FetchedDefinitions: true, Feature: "Item effects"),
                     stage => operation.ReportAsync(new(stage, "stage", TableId: info.Table)), token);
             }
             catch (DiscoveryException error) when (error.Code == "TABLE_DATA_BUSY")
@@ -254,14 +260,15 @@ public sealed partial class ItemEffectsStore
         using var query = EnterQuery(token);
         var sources = bridge is null ? consulted : new[] { bridge.Source }.Concat(consulted).ToArray();
         await ValidateConfigurationsAsync(original, sources, token);
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
         // Interpretation/profile checks precede the one SQL linearization point. Unsupported/historical
         // proof remains an authority proof without being required to satisfy the profile it failed.
         foreach (var source in sources)
         {
             if (!source.CurrentProfile || source.Admission is null) continue;
-            var valid = false; await CpuAsync(() => valid = provider.Definitions.TryGetValue(Role(source.Role).Table, out var definition) &&
-                Qualified(original.Opening.Build.Version, source.Role, source.Admission, definition, token), token);
+            var table = Role(source.Role).Table; var version = original.Opening.Build.Version;
+            var (_, bundled) = await TableDefinitionSources.FeatureTableAsync(table, token);
+            var definition = await definitions.ForFeatureRowsAsync(table, version, source.Admission.Artifact, token);
+            var valid = false; await CpuAsync(() => valid = Qualified(version, source.Role, source.Admission, definition, bundled, token), token);
             if (!valid) throw source.Role == ItemEffectsSourceRole.Bridge ? Stale() : new DiscoveryException("ITEM_EFFECTS_TARGET_STALE", "The selected target source changed.", true);
         }
         var targets = consulted.Where(probe => probe.Admission is not null).Select(probe =>
@@ -290,6 +297,23 @@ public sealed partial class ItemEffectsStore
         }
     }
 
+    /// <summary>
+    /// The state of admitted rows before the field profile is checked. Rows read with another definition than the one
+    /// chosen now (the switch changed, or WoWDBDefs has a newer one) are stale like history: shared Tables reads them
+    /// again. Rows that are already current for the chosen definition but carry an older-looking revision are not
+    /// stale: preparing again would give the same rows, so the profile is unsupported (D101). That is a fetched
+    /// ItemEffect block that differs from the reviewed one, so it gets no raw rules and keeps v3.
+    /// </summary>
+    internal static ItemEffectsSourceState CurrentState(ItemEffectsSourceRole role, string decoderRevision, string layout, bool projected,
+        TableDefinition definition, BundledTableDefinition bundled, string version, bool chosen)
+    {
+        var state = RevisionState(role, decoderRevision, projected);
+        if (!chosen) return state == ItemEffectsSourceState.Ready ? ItemEffectsSourceState.NotPrepared : state;
+        if (state == ItemEffectsSourceState.NotPrepared &&
+            decoderRevision == TableDataStore.AdmissionRevision(Role(role).Table, definition, bundled, version, layout, projected))
+            return ItemEffectsSourceState.Unsupported;
+        return state;
+    }
     // These are exact previously shipped interpretations, never a version-prefix/suffix grant.
     internal static ItemEffectsSourceState RevisionState(ItemEffectsSourceRole role, string revision, bool projected)
     {

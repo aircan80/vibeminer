@@ -2,9 +2,11 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using VibeMiner.Application;
 using VibeMiner.Domain;
 using VibeMiner.Formats.Wow;
+using VibeMiner.Host;
 using VibeMiner.Infrastructure;
 using VibeMiner.Protocols.Tact;
 using Xunit;
@@ -124,6 +126,47 @@ public sealed class FetchedDefinitionTests
         Assert.Equal(Newer, replaced.Revision); Assert.Equal(R.Sha(newer), replaced.Sha256); Assert.Equal(clock.Now, replaced.FetchedAt);
         var folder = Path.Combine(directory.Path, WoWDBDefsDefinitions.FolderName, "wowdbdefs");
         Assert.Equal([$"{ItemTable}-{replaced.Sha256}.dbd"], Directory.GetFiles(folder, "*.dbd").Select(Path.GetFileName));
+    }
+
+    // Review fix (#84): a feature's definition failure carries the table and the switch as fields, on every path, also
+    // when its words never name the table ("Neither the pinned definition nor the WoWDBDefs definition fetched …").
+    // contracts/examples/definition-errors.json holds exactly what the engine sends, and the renderer tests use it.
+    [Fact]
+    public async Task Feature_definition_failures_name_their_table_and_switch_as_fields_as_the_contract_example_shows()
+    {
+        using var directory = new TempDirectory(); var github = new GitHub(); var clock = new Clock();
+        var provider = await TablesCatalog.Provider.Value;
+        var item = provider.Entries.Single(e => e.TableId == ItemTable); var sparse = provider.Entries.Single(e => e.TableId == "919be54e");
+        var fetched = new WoWDBDefsDefinitions(directory.Path, new HttpClient(github), clock);
+        // WoWDBDefs' newest ItemSparse doesn't list the build either: the words name no table.
+        github.Serve("ItemSparse", Revision, File.ReadAllBytes(RepositoryPaths.File(
+            $"src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/ItemSparse.dbd")));
+        var newest = (await fetched.EnsureAsync("919be54e", "ItemSparse", Any, None, default)).Definition!;
+        var neither = TableDefinitionSources.Unusable(sparse, "99.0.0.1", null, new(null, TableDefinition.From(newest), null), true, "Items");
+        Assert.DoesNotContain("ItemSparse", neither.Message);
+        // GitHub unreachable while Item needs a fetched definition.
+        github.Failure = new HttpRequestException(HttpRequestError.NameResolutionError, "offline");
+        var offline = (await fetched.EnsureAsync(ItemTable, "Item", Any, None, default)).Failure!;
+        var unreachable = TableDefinitionSources.Unusable(item, "99.0.0.1", null, new(null, null, offline), true, "Items");
+        // Fetching off, from the same start Items makes before any download.
+        var off = await Assert.ThrowsAsync<DiscoveryException>(() =>
+            new TableDefinitionSources(fetched, new Policy(false)).RequireFeatureBuildAsync(ItemTable, "Items", "99.0.0.1", default));
+        var creatures = await Assert.ThrowsAsync<DiscoveryException>(() =>
+            new TableDefinitionSources(fetched, new Policy(false)).RequireFeatureBuildAsync(CreaturesPolicy.Table, "Creatures", "99.0.0.1", default));
+        var actual = new JsonObject
+        {
+            ["creaturesFetchingOff"] = JsonSerializer.SerializeToNode(ProtocolHost.ErrorBody(creatures), Json),
+            ["itemSparseNotListed"] = JsonSerializer.SerializeToNode(ProtocolHost.ErrorBody(neither), Json),
+            ["itemFetchOffline"] = JsonSerializer.SerializeToNode(ProtocolHost.ErrorBody(unreachable), Json),
+            ["itemsFetchingOff"] = JsonSerializer.SerializeToNode(ProtocolHost.ErrorBody(off), Json),
+        };
+        var example = JsonNode.Parse(File.ReadAllText(RepositoryPaths.File("contracts/examples/definition-errors.json")));
+        Assert.True(JsonNode.DeepEquals(example, actual), actual.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        Assert.Equal(new TableDefinitionProblem("919be54e", "on"), neither.Definition);
+        Assert.Equal(new TableDefinitionProblem(ItemTable, "on"), unreachable.Definition);
+        Assert.Equal(new TableDefinitionProblem(ItemTable, "off"), off.Definition);
+        // Errors that aren't about a definition carry no such field.
+        Assert.Null(JsonSerializer.SerializeToNode(ProtocolHost.ErrorBody(new DiscoveryException("NETWORK_UNAVAILABLE", "Offline.", true)), Json)!["definition"]);
     }
 
     [Fact]
@@ -450,30 +493,193 @@ public sealed class FetchedDefinitionTests
     }
 
     [Fact]
-    public async Task Feature_prerequisites_use_bundled_definitions_only_and_never_contact_GitHub()
+    public async Task A_feature_prerequisite_chooses_its_definition_as_Tables_does_and_shares_its_rows()
     {
+        // D101: a build only a fetched definition lists opens for a feature too, with the same admission Tables reads.
         await using var h = await Tables.Create("77.0.0.100");
-        h.GitHub.Serve("Item", Revision, ItemWith("9A2A4834", "77.0.0.100"));
-        Assert.Equal("SCHEMA_BUILD_NOT_LISTED", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Feature, None, default))).Code);
-        Assert.Equal("SCHEMA_BUILD_NOT_LISTED", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.ReadAsync(h.Feature, default))).Code);
-        Assert.Empty(h.GitHub.Requests);
-        // Rows Tables read with a fetched definition are never handed to a feature.
-        Assert.NotNull((await h.Store.PrepareAsync(h.Request, None, default)).FetchedDefinition);
+        var fake = ItemWith("9A2A4834", "77.0.0.100"); h.GitHub.Serve("Item", Revision, fake);
+        var feature = await h.Store.PrepareAsync(h.Feature, None, default);
+        Assert.Equal(new TableDefinitionFetched(Revision, h.Clock.Now), feature.FetchedDefinition);
+        Assert.Equal(TableFetchedBecause.ExactBuild, feature.FetchedBecause); Assert.Equal(R.Sha(fake), feature.DefinitionSha256);
         var github = h.GitHub.Requests.Count;
-        await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.ReadAsync(h.Feature, default));
+        Assert.Equal(feature.ArtifactId, (await h.Store.ReadAsync(h.Request, default)).Snapshot!.ArtifactId);
+        Assert.Equal(feature.ArtifactId, (await h.Store.PrepareAsync(h.Request, None, default)).ArtifactId);
+        // The feature checks the rows it holds against the same choice, from the cache only.
+        var sources = h.Sources(); var admission = await h.Admission();
+        Assert.Equal(R.Sha(fake), (await sources.CurrentForFeatureAsync(admission, ItemTable, "77.0.0.100", default))!.Sha256);
+        await sources.RequireFeatureBuildAsync(ItemTable, "Items", "77.0.0.100", default);
+        // Turned off, the rows are stale for the feature as for Tables, and it fails before any download, naming the switch.
+        h.Policy.Enabled = false;
+        Assert.Null(await sources.CurrentForFeatureAsync(admission, ItemTable, "77.0.0.100", default));
+        var off = await Assert.ThrowsAsync<DiscoveryException>(() => sources.RequireFeatureBuildAsync(ItemTable, "Items", "77.0.0.100", default));
+        Assert.Equal("SCHEMA_BUILD_NOT_LISTED", off.Code);
+        Assert.Contains("so Items can’t open on this build. Fetching newer table definitions from WoWDBDefs is off in Settings", off.Message);
+        var prepare = await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Feature, None, default));
+        Assert.Equal(off.Message, prepare.Message); Assert.DoesNotContain("Tables the bundled", prepare.Message);
         Assert.Equal(github, h.GitHub.Requests.Count);
     }
 
     [Fact]
-    public async Task A_feature_prerequisite_on_a_listed_build_with_an_unknown_layout_fails_without_fetching()
+    public async Task A_feature_prerequisite_on_an_uncovered_layout_names_itself_then_reads_a_fetched_block()
     {
         await using var h = await Tables.Create("1.60.1.70450", 0x1234abcd);
+        // WoWDBDefs has nothing for it yet: the message says the feature can't open, not what Tables still opens.
+        var missing = await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Feature, None, default));
+        Assert.Contains("so Items can’t open on this build", missing.Message); Assert.DoesNotContain("Tables the bundled", missing.Message);
+        Assert.Contains("Tables the bundled", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Request, None, default))).Message);
+        // Once upstream has a block for the layout, a deliberate retry reads with it, as Tables does.
         h.GitHub.Serve("Item", Revision, ItemWith("1234ABCD", "1.60.1.70450"));
-        Assert.Equal("DB2_SCHEMA_MISSING", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Feature, None, default))).Code);
-        Assert.Empty(h.GitHub.Requests);
-        Assert.NotNull((await h.Store.PrepareAsync(h.Request, None, default)).FetchedDefinition);
-        Assert.Null((await h.Store.ReadAsync(h.Feature, default)).Snapshot);
-        Assert.Equal(2, h.GitHub.Requests.Count);
+        var snapshot = await h.Store.PrepareAsync(h.Feature, None, default);
+        Assert.Equal("1234ABCD", snapshot.LayoutHash); Assert.Equal(TableFetchedBecause.LayoutNotBundled, snapshot.FetchedBecause);
+        Assert.Equal(snapshot.ArtifactId, (await h.Store.ReadAsync(h.Request, default)).Snapshot!.ArtifactId);
+    }
+
+    [Fact]
+    public async Task Requests_that_differ_only_in_the_feature_share_one_preparation()
+    {
+        await using var h = await Tables.Create("1.60.1.70450");
+        await using var tables = new TableDataService(h.Store);
+        var gate = new TaskCompletionSource();
+        var first = tables.PrepareAsync(h.Feature, async _ => await gate.Task);
+        var second = tables.PrepareAsync(h.Request with { Feature = "Creatures" });
+        gate.SetResult();
+        Assert.Equal((await first).ArtifactId, (await second).ArtifactId);
+        Assert.Throws<DiscoveryException>(() => TableDataService.Validate(h.Request with { Feature = "" }));
+        Assert.Throws<DiscoveryException>(() => TableDataService.Validate(h.Request with { Feature = new string('x', 33) }));
+    }
+
+    // D101: the reviewed raw rules (D079) and the ItemEffect v4 revision follow the reviewed block, not the file's hash:
+    // a fetched definition gets them only where its block for the layout is the reviewed one, field for field.
+    [Theory]
+    [InlineData("same", true)]
+    [InlineData("comment", true)]
+    [InlineData("width", false)]
+    [InlineData("flags", false)]
+    [InlineData("otherLayout", false)]
+    public async Task A_fetched_definition_gets_the_reviewed_raw_rules_only_for_an_identical_block(string change, bool reviewed)
+    {
+        var bundled = (await TablesCatalog.Provider.Value).Definitions["4002a5b1"];
+        var text = File.ReadAllText(RepositoryPaths.File(
+            "src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemEffect.dbd")).Replace("\r\n", "\n");
+        var lines = text.Split('\n'); var start = Array.IndexOf(lines, "LAYOUT 4CA77678");
+        var fields = lines.Skip(start).TakeWhile(line => line.Length > 0).Where(line => !line.StartsWith("LAYOUT ", StringComparison.Ordinal) && !line.StartsWith("BUILD ", StringComparison.Ordinal)).ToArray();
+        fields = change switch
+        {
+            "comment" => fields.Select(line => line.StartsWith("Charges", StringComparison.Ordinal) ? line + " // a newer note" : line).ToArray(),
+            "width" => fields.Select(line => line.StartsWith("Charges", StringComparison.Ordinal) ? "Charges<32>" : line).ToArray(),
+            "flags" => fields.Select(line => line == "$noninline,id$ID<32>" ? "$id$ID<32>" : line).ToArray(),
+            _ => fields
+        };
+        var layout = change == "otherLayout" ? "1234ABCD" : "4CA77678";
+        var bytes = Encoding.UTF8.GetBytes(text.TrimEnd('\n') + "\n\nLAYOUT " + layout + "\nBUILD 77.0.0.100\n" + string.Join("\n", fields) + "\n");
+        var document = DbdDefinitionReader.Parse(bytes); var sha = R.Sha(bytes);
+        var fetched = TableDefinition.From(new("4002a5b1", "ItemEffect", sha, bytes.Length, WoWDBDefsDefinitions.DefinitionUrl(Newer, "ItemEffect"),
+            Newer, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, document));
+        var rules = TableDataStore.RawRules(fetched, bundled, "77.0.0.100", layout);
+        Assert.Equal(reviewed, rules is { Count: 3 });
+        if (reviewed) Assert.All(rules!, rule => Assert.Equal(sha, rule.ExpectedDefinitionSha256));
+        Assert.Equal(reviewed ? TableDataStore.ItemEffectDecoderRevision : TableDataStore.DecoderRevision,
+            TableDataStore.AdmissionRevision("4002a5b1", fetched, bundled, "77.0.0.100", layout, projected: false));
+        Assert.Equal(reviewed ? TableDataStore.ItemEffectProjectionDecoderRevision : TableDataStore.ProjectionDecoderRevision,
+            TableDataStore.AdmissionRevision("4002a5b1", fetched, bundled, "77.0.0.100", layout, projected: true));
+        // The bundled definition keeps all of its own rules, and no rules ever go to a table that has none.
+        Assert.Equal(3, TableDataStore.RawRules(TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", null)!.Count);
+        var item = (await TablesCatalog.Provider.Value).Definitions[ItemTable];
+        Assert.Null(TableDataStore.RawRules(TableDefinition.Bundled(item), item, "12.1.5.70448", "9A2A4834"));
+    }
+
+    // Review fix (#84): rows decoded with a fetched definition before D101 were narrowed with no raw rules under v3. The
+    // same definition now reads the reviewed raw columns, so its revision and content key must differ, or the old
+    // narrowed rows would be reused for the new decoding. A fetched block that differs keeps v3, as before.
+    [Theory]
+    [InlineData("95d8638f", "ItemSubClass", "1E67DB87", 1)]
+    [InlineData("bfdaf9f1", "CreatureDisplayInfo", "7275F5F6", 3)]
+    [InlineData("4002a5b1", "ItemEffect", "4CA77678", 3)]
+    public async Task A_fetched_definition_with_reviewed_raw_rules_never_shares_a_key_with_rows_narrowed_before_them(string table, string name, string layout, int count)
+    {
+        var bundled = (await TablesCatalog.Provider.Value).Definitions[table];
+        TableDefinition Fetched(Func<string, string> change)
+        {
+            var text = File.ReadAllText(RepositoryPaths.File(
+                $"src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/{name}.dbd")).Replace("\r\n", "\n");
+            var lines = text.Split('\n'); var start = Array.IndexOf(lines, "LAYOUT " + layout);
+            var fields = lines.Skip(start).TakeWhile(line => line.Length > 0).Where(line => !line.StartsWith("LAYOUT ", StringComparison.Ordinal) &&
+                !line.StartsWith("BUILD ", StringComparison.Ordinal) && !line.StartsWith("COMMENT ", StringComparison.Ordinal)).Select(change);
+            var bytes = Encoding.UTF8.GetBytes(text.TrimEnd('\n') + "\n\nLAYOUT " + layout + "\nBUILD 77.0.0.100\n" + string.Join("\n", fields) + "\n");
+            return TableDefinition.From(new(table, name, R.Sha(bytes), bytes.Length, WoWDBDefsDefinitions.DefinitionUrl(Newer, name),
+                Newer, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, DbdDefinitionReader.Parse(bytes)));
+        }
+        var same = Fetched(line => line);
+        Assert.Equal(count, TableDataStore.RawRules(same, bundled, "77.0.0.100", layout)!.Count);
+        foreach (var projected in new[] { false, true })
+        {
+            var revision = TableDataStore.AdmissionRevision(table, same, bundled, "77.0.0.100", layout, projected);
+            var before = projected ? TableDataStore.ProjectionDecoderRevision : TableDataStore.DecoderRevision;
+            Assert.Equal(projected ? TableDataStore.ItemEffectProjectionDecoderRevision : TableDataStore.ItemEffectDecoderRevision, revision);
+            TableArtifactBinding Binding(string decoder) => new(new('a', 64), new('b', 64), same.Sha256, same.Revision, "enUS", decoder,
+                TableRowArtifacts.SchemaSelectionKey(same.Document, "77.0.0.100"));
+            Assert.NotEqual(TableRowArtifacts.ContentKey(Binding(before)), TableRowArtifacts.ContentKey(Binding(revision)));
+            Assert.True(TableDataStore.MayBeFetchedReviewedAdmission(table, layout, same.Sha256, same.Revision));
+            // A block that differs reads without the rules and keeps v3.
+            var wider = Fetched(line => line.StartsWith("$noninline,id$", StringComparison.Ordinal) ? "$id$" + line["$noninline,id$".Length..]
+                : line.StartsWith("$id$", StringComparison.Ordinal) ? "$noninline,id$" + line["$id$".Length..] : line);
+            Assert.Null(TableDataStore.RawRules(wider, bundled, "77.0.0.100", layout));
+            Assert.Equal(before, TableDataStore.AdmissionRevision(table, wider, bundled, "77.0.0.100", layout, projected));
+        }
+        // The bundled ItemSubClass and CreatureDisplayInfo rules predate v4 and keep their v3 keys.
+        if (table != "4002a5b1")
+            Assert.Equal(TableDataStore.DecoderRevision, TableDataStore.AdmissionRevision(table, TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", layout, false));
+    }
+
+    // Review fix (#84): a fetched ItemEffect block that differs from the reviewed one gets no raw rules and keeps v3. Those
+    // rows are current for that definition, so preparing again would give the same rows: effects says unsupported, not
+    // "not prepared" forever. The same v3 rows under the bundled definition, or under another definition, are stale.
+    [Fact]
+    public async Task Effect_rows_current_for_a_fetched_block_without_the_reviewed_rules_are_unsupported_not_stale()
+    {
+        var bundled = (await TablesCatalog.Provider.Value).Definitions["4002a5b1"];
+        var text = File.ReadAllText(RepositoryPaths.File(
+            $"src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/ItemEffect.dbd")).Replace("\r\n", "\n");
+        var lines = text.Split('\n'); var start = Array.IndexOf(lines, "LAYOUT 4CA77678");
+        var fields = lines.Skip(start).TakeWhile(line => line.Length > 0).Where(line => !line.StartsWith("LAYOUT ", StringComparison.Ordinal) && !line.StartsWith("BUILD ", StringComparison.Ordinal))
+            .Select(line => line.StartsWith("Charges", StringComparison.Ordinal) ? "Charges<32>" : line);
+        var bytes = Encoding.UTF8.GetBytes(text.TrimEnd('\n') + "\n\nLAYOUT 4CA77678\nBUILD 77.0.0.100\n" + string.Join("\n", fields) + "\n");
+        var fetched = TableDefinition.From(new("4002a5b1", "ItemEffect", R.Sha(bytes), bytes.Length, WoWDBDefsDefinitions.DefinitionUrl(Newer, "ItemEffect"),
+            Newer, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, DbdDefinitionReader.Parse(bytes)));
+        const ItemEffectsSourceRole Effect = ItemEffectsSourceRole.Effect;
+        foreach (var projected in new[] { false, true })
+        {
+            var v3 = projected ? TableDataStore.ProjectionDecoderRevision : TableDataStore.DecoderRevision;
+            var v4 = projected ? TableDataStore.ItemEffectProjectionDecoderRevision : TableDataStore.ItemEffectDecoderRevision;
+            Assert.Equal(ItemEffectsSourceState.Unsupported, ItemEffectsStore.CurrentState(Effect, v3, "4CA77678", projected, fetched, bundled, "77.0.0.100", chosen: true));
+            Assert.Equal(ItemEffectsSourceState.NotPrepared, ItemEffectsStore.CurrentState(Effect, v3, "4CA77678", projected, fetched, bundled, "77.0.0.100", chosen: false));
+            Assert.Equal(ItemEffectsSourceState.NotPrepared, ItemEffectsStore.CurrentState(Effect, v3, "4CA77678", projected, TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", chosen: true));
+            Assert.Equal(ItemEffectsSourceState.Ready, ItemEffectsStore.CurrentState(Effect, v4, "4CA77678", projected, TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", chosen: true));
+            Assert.Equal(ItemEffectsSourceState.NotPrepared, ItemEffectsStore.CurrentState(Effect, v4, "4CA77678", projected, TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", chosen: false));
+        }
+    }
+
+    // The catalog can't see a fetched definition, so it lets the v4 revision through only where one could carry it.
+    [Theory]
+    [InlineData("4002a5b1", "4CA77678", "fetched", true)]
+    [InlineData("4002a5b1", "4CA77678", "pinnedSha", false)]
+    [InlineData("4002a5b1", "4CA77678", "bundledProvider", false)]
+    [InlineData("4002a5b1", "4CA77678", "notACommit", false)]
+    [InlineData("4002a5b1", "1234ABCD", "fetched", false)]
+    [InlineData("50238ec2", "4CA77678", "fetched", false)]
+    [InlineData("95d8638f", "1E67DB87", "fetched", true)]
+    [InlineData("bfdaf9f1", "7275F5F6", "fetched", true)]
+    [InlineData("95d8638f", "4CA77678", "fetched", false)]
+    [InlineData("bfdaf9f1", "7275F5F6", "bundledProvider", false)]
+    public void Only_a_fetched_ItemEffect_definition_on_the_reviewed_layout_may_carry_v4(string table, string layout, string kind, bool allowed)
+    {
+        const string pinned = "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c";
+        var (sha, provider) = kind switch
+        {
+            "pinnedSha" => (pinned, Newer), "bundledProvider" => (new string('a', 64), BundledTableDefinitions.Revision),
+            "notACommit" => (new string('a', 64), "wrong-provider"), _ => (new string('a', 64), Newer)
+        };
+        Assert.Equal(allowed, TableDataStore.MayBeFetchedReviewedAdmission(table, layout, sha, provider));
     }
 
     [Fact]
@@ -680,7 +886,9 @@ public sealed class FetchedDefinitionTests
         internal TableDataStore Store { get; private set; } = null!;
         internal TablesCatalog Catalog { get; private set; } = null!;
         internal TableDataRequest Request { get; private set; } = null!;
-        internal TableDataRequest Feature => Request with { FetchedDefinitions = false };
+        internal TableDataRequest Feature => Request with { Feature = "Items" };
+        internal async Task<StoredTableAdmission> Admission() =>
+            (await DiscoveryCatalog.ReadTableAdmissionAsync(await DiscoveryCatalog.ResolveOpeningAsync(new("wow", Request.BuildIdentity, "us"), default), ItemTable, "enUS", default))!;
         internal TableDefinitionRequest DefinitionRequest => new("wow", Request.BuildIdentity, "us", ItemTable);
         internal TableRowsRequest Rows(string artifact) => new("wow", Request.BuildIdentity, "us", ItemTable, "enUS", artifact);
         internal int OpenedRequests { get; private set; }
@@ -712,7 +920,7 @@ public sealed class FetchedDefinitionTests
             h.Store = h.Restart(); h.Catalog = new(h.DiscoveryCatalog, h.Sources());
             return h;
         }
-        private TableDefinitionSources Sources() => new(new WoWDBDefsDefinitions(directory.Path, new HttpClient(GitHub), Clock), Policy);
+        internal TableDefinitionSources Sources() => new(new WoWDBDefsDefinitions(directory.Path, new HttpClient(GitHub), Clock), Policy);
         /// <summary>A new store and definition cache over the same storage, as after an engine restart.</summary>
         internal TableDataStore Restart() { var store = new TableDataStore(DiscoveryCatalog, objects, cdnClient, definitions: Sources()); stores.Add(store); return store; }
         public async ValueTask DisposeAsync()

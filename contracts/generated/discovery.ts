@@ -513,6 +513,14 @@ export interface EngineError {
   code: string;
   message: string;
   retryable: boolean;
+  definition?: TableDefinitionProblem;
+}
+/**
+ * Present on an error when no definition can read a table (D081, D101): the table, and the Settings switch as it read then (the same values as definitionFetch). Views decide their next step from it, never from the message.
+ */
+export interface TableDefinitionProblem {
+  tableId: string;
+  definitionFetch: 'on' | 'off';
 }
 export interface EngineRequest1 {
   protocolVersion: 1;
@@ -2604,44 +2612,51 @@ export interface ItemEffectsIndexSnapshot {
   preparedAt: string;
   revision: 'item-effect-bridge-index-v1';
   orderPolicy: 'signed-item-unsigned-bridge-source-ordinal-v1';
-  bridgeSource: TableDataSnapshot & {
-    tableId?: '00cb674f';
-    layoutHash?: '96F083AD';
-    definitionSha256?: '3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb';
-    providerRevision?: 'b9a63096cdd99b26967f17f9515377ae62cadfd7';
-    association?: {
-      fileDataId?: '3177687';
-    };
-    decoderRevision?: 'wdc5-values-v7+table-admission-v3' | 'wdc5-values-v7+table-admission-projection-v3';
-    /**
-     * @minItems 3
-     * @maxItems 3
-     */
-    columns?: [
-      {
-        name: 'ID';
-        family: 'integer';
-        isId: true;
-        reference: null;
-        interpretation: null;
-      },
-      {
-        name: 'ItemEffectID';
-        family: 'integer';
-        isId: false;
-        reference: {table: 'ItemEffect'; column: 'ID'};
-        interpretation: null;
-      },
-      {
-        name: 'ItemID';
-        family: 'integer';
-        isId: false;
-        reference: {table: 'Item'; column: 'ID'};
-        interpretation: null;
-      }
-    ];
-    rowCount?: string;
-  };
+  bridgeSource: TableDataSnapshot &
+    ((
+      | {
+          definitionSha256?: '3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb';
+          providerRevision?: 'b9a63096cdd99b26967f17f9515377ae62cadfd7';
+        }
+      | {
+          providerRevision?: string;
+        }
+    ) & {
+      tableId?: '00cb674f';
+      layoutHash?: '96F083AD';
+      association?: {
+        fileDataId?: '3177687';
+      };
+      decoderRevision?: 'wdc5-values-v7+table-admission-v3' | 'wdc5-values-v7+table-admission-projection-v3';
+      /**
+       * @minItems 3
+       * @maxItems 3
+       */
+      columns?: [
+        {
+          name: 'ID';
+          family: 'integer';
+          isId: true;
+          reference: null;
+          interpretation: null;
+        },
+        {
+          name: 'ItemEffectID';
+          family: 'integer';
+          isId: false;
+          reference: {table: 'ItemEffect'; column: 'ID'};
+          interpretation: null;
+        },
+        {
+          name: 'ItemID';
+          family: 'integer';
+          isId: false;
+          reference: {table: 'Item'; column: 'ID'};
+          interpretation: null;
+        }
+      ];
+      rowCount?: string;
+    });
   fields: ItemEffectsBridgeFields;
   emittedRows: string;
 }
@@ -2690,44 +2705,51 @@ export interface ItemEffectsPage {
   selection: ItemEffectsSelection;
   bridgeIndexArtifactId: string;
   orderPolicy: 'signed-item-unsigned-bridge-source-ordinal-v1';
-  bridgeSource: TableDataSnapshot & {
-    tableId?: '00cb674f';
-    layoutHash?: '96F083AD';
-    definitionSha256?: '3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb';
-    providerRevision?: 'b9a63096cdd99b26967f17f9515377ae62cadfd7';
-    association?: {
-      fileDataId?: '3177687';
-    };
-    decoderRevision?: 'wdc5-values-v7+table-admission-v3' | 'wdc5-values-v7+table-admission-projection-v3';
-    /**
-     * @minItems 3
-     * @maxItems 3
-     */
-    columns?: [
-      {
-        name: 'ID';
-        family: 'integer';
-        isId: true;
-        reference: null;
-        interpretation: null;
-      },
-      {
-        name: 'ItemEffectID';
-        family: 'integer';
-        isId: false;
-        reference: {table: 'ItemEffect'; column: 'ID'};
-        interpretation: null;
-      },
-      {
-        name: 'ItemID';
-        family: 'integer';
-        isId: false;
-        reference: {table: 'Item'; column: 'ID'};
-        interpretation: null;
-      }
-    ];
-    rowCount?: string;
-  };
+  bridgeSource: TableDataSnapshot &
+    ((
+      | {
+          definitionSha256?: '3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb';
+          providerRevision?: 'b9a63096cdd99b26967f17f9515377ae62cadfd7';
+        }
+      | {
+          providerRevision?: string;
+        }
+    ) & {
+      tableId?: '00cb674f';
+      layoutHash?: '96F083AD';
+      association?: {
+        fileDataId?: '3177687';
+      };
+      decoderRevision?: 'wdc5-values-v7+table-admission-v3' | 'wdc5-values-v7+table-admission-projection-v3';
+      /**
+       * @minItems 3
+       * @maxItems 3
+       */
+      columns?: [
+        {
+          name: 'ID';
+          family: 'integer';
+          isId: true;
+          reference: null;
+          interpretation: null;
+        },
+        {
+          name: 'ItemEffectID';
+          family: 'integer';
+          isId: false;
+          reference: {table: 'ItemEffect'; column: 'ID'};
+          interpretation: null;
+        },
+        {
+          name: 'ItemID';
+          family: 'integer';
+          isId: false;
+          reference: {table: 'Item'; column: 'ID'};
+          interpretation: null;
+        }
+      ];
+      rowCount?: string;
+    });
   observedAssociations: string;
   /**
    * @minItems 0
@@ -3765,7 +3787,7 @@ export interface SettingsSnapshot {
     problem: SettingsProblem | null;
   };
   /**
-   * Fetch newer table definitions from WoWDBDefs for the Tables view, exact build first (D081). On by default; an unreadable value reads as off.
+   * Fetch newer table definitions from WoWDBDefs for Tables and the feature views, exact build first (D081, D101). On by default; an unreadable value reads as off.
    */
   fetchTableDefinitions: {
     value: boolean;

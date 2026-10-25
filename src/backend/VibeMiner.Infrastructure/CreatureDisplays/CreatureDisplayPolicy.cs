@@ -73,7 +73,7 @@ internal static class CreatureDisplayPolicy
     internal static int SelectField(DbdDocument definition, string version, TableRowsArtifact rows, CreatureDisplayTargetRole role)
     {
         if (!string.Equals(rows.Header.TableHash, Table(role), StringComparison.OrdinalIgnoreCase) || !IsLayout(role, rows.Header.LayoutHash)) throw Unsupported();
-        var selected = definition.SelectBuild(version, rows.Header.LayoutHash);
+        var selected = definition.SelectFile(version, rows.Header.LayoutHash);
         if (selected.Blocks.Count != 1) throw Unsupported();
         var offset = 0; var result = -1;
         foreach (var field in selected.Blocks[0].Fields)

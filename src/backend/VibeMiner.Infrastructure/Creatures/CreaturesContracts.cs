@@ -80,7 +80,9 @@ internal static class CreaturesPolicy
             b.Rows is null || b.Rows.Binding is null || b.Rows.Header is null || b.Rows.Header.Columns is null || b.Rows.Header.Columns.Any(c => c is null) || b.Rows.Completion is null ||
             b.Fields is null || b.Fields.Count != 16 || b.Fields.Any(f => f is null)) throw Invalid();
         CreaturesService.Validate(b.Context); var s = b.Source; var r = b.Rows; var c = r.Completion; var coverage = s.Coverage;
-        if (s.LayoutHash != Layout || r.Header.LayoutHash != Layout) throw Unsupported();
+        // Any layout qualifies when its block names the sixteen fields with the widths below (D101); Layout is the
+        // retail layout the profile was first reviewed on.
+        if (s.LayoutHash != r.Header.LayoutHash.ToUpperInvariant()) throw Invalid();
         if (c.PhysicalRows > 1_000_000 || c.CopyRows > 1_000_000 || c.PhysicalRows >= 0 && c.CopyRows >= 0 && c.PhysicalRows > 1_000_000 - c.CopyRows) throw Limit();
         if (s.ProductId != b.Context.ProductId || s.BuildIdentity != b.Context.BuildIdentity || s.SourceRegion != b.Context.SourceRegion || s.ResearchLocale != "enUS" ||
             s.TableId != Table || !string.Equals(r.Header.TableHash, Table, StringComparison.OrdinalIgnoreCase) || 
@@ -118,7 +120,7 @@ internal static class CreaturesPolicy
     }
     internal static IReadOnlyList<CreatureProfileField> SelectFields(DbdDocument definition, string version, string layout, IReadOnlyList<TableDataColumn> columns)
     {
-        var selected = definition.SelectBuild(version, layout); if (selected.Blocks.Count != 1) throw Unsupported();
+        var selected = definition.SelectFile(version, layout); if (selected.Blocks.Count != 1) throw Unsupported();
         var fields = selected.Blocks[0].Fields; var bound = new List<(DbdField Field, int Index)>(); var ordinal = 0;
         foreach (var field in fields) { bound.Add((field, ordinal)); ordinal = checked(ordinal + field.ArrayLength); }
         if (ordinal != columns.Count) throw Unsupported();

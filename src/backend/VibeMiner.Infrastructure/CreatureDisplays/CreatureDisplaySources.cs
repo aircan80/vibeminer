@@ -11,6 +11,8 @@ namespace VibeMiner.Infrastructure;
 internal sealed class CreatureDisplaySources(DiscoveryCatalog catalog, VerifiedObjectStore objects, CreaturesStore creatures,
     TableDataService tables, AcquisitionResources resources) : ICreatureDisplaySources
 {
+    // D101: display and model tables are read with the definition Tables chooses, as Creatures is.
+    private readonly TableDefinitionSources definitions = creatures.Definitions;
     private readonly Func<string, long, CancellationToken, Task<FileStream>> openEncodedSource = (sha, length, token) => objects.OpenVerifiedAsync(sha, length, resources, null, token);
     internal CreatureDisplaySources(DiscoveryCatalog catalog, VerifiedObjectStore objects, CreaturesStore creatures,
         TableDataService tables, AcquisitionResources resources, Func<string, long, CancellationToken, Task<FileStream>> openEncodedSource)
@@ -52,12 +54,12 @@ internal sealed class CreatureDisplaySources(DiscoveryCatalog catalog, VerifiedO
         }
         var admission = await catalog.ReadCreatureDisplayTargetAsync(core.Opening, CreatureDisplayPolicy.Table(role), token);
         if (admission is null) return null;
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
-        if (!provider.Definitions.TryGetValue(CreatureDisplayPolicy.Table(role), out var definition)) throw CreatureDisplayPolicy.Unsupported();
-        var snapshot = Snapshot(core.Snapshot.Context, admission, role, definition);
+        var (_, bundled) = await TableDefinitionSources.FeatureTableAsync(CreatureDisplayPolicy.Table(role), token);
+        var definition = await definitions.ForFeatureRowsAsync(CreatureDisplayPolicy.Table(role), core.Opening.Build.Version, admission.Artifact, token);
+        var snapshot = Snapshot(core.Snapshot.Context, admission, role, definition, core.Opening.Build.Version, bundled);
         var binding = new CreatureDisplayCatalogBinding(CreatureDisplayPolicy.Table(role), admission);
         int column;
-        try { column = ValidateProfile(core, admission, role, definition); }
+        try { column = ValidateProfile(core, admission, role, definition, bundled); }
         catch (DiscoveryException error) when (error.Code == "CREATURE_DISPLAY_STALE")
         {
             // An initially retained historical interpretation is not a delivered dependency.
@@ -91,7 +93,8 @@ internal sealed class CreatureDisplaySources(DiscoveryCatalog catalog, VerifiedO
         Func<CreaturesPreparationProgress, Task> progress, CancellationToken token)
     {
         var table = CreatureDisplayPolicy.Table(role);
-        var request = new TableDataRequest(context.ProductId, context.BuildIdentity, context.SourceRegion, table, context.ResearchLocale);
+        var request = new TableDataRequest(context.ProductId, context.BuildIdentity, context.SourceRegion, table, context.ResearchLocale,
+            FetchedDefinitions: true, Feature: "Creature displays");
         for (var attempt = 0; attempt < 8; attempt++)
         {
             try
@@ -113,16 +116,16 @@ internal sealed class CreatureDisplaySources(DiscoveryCatalog catalog, VerifiedO
         var current = await creatures.AuthorizeDisplayAsync(request.Context, request.ArtifactId, request.CreatureId, token);
         CreatureDisplayPolicy.SameCore(core, current, request.Slot);
         _ = CreatureDisplayPolicy.Select(current, request);
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
         foreach (var target in delivered)
         {
-            if (!provider.Definitions.TryGetValue(target.Binding.TableId, out var definition)) throw CreatureDisplayPolicy.Stale();
+            var (_, bundled) = await TableDefinitionSources.FeatureTableAsync(target.Binding.TableId, token);
+            var definition = await definitions.ForFeatureRowsAsync(target.Binding.TableId, core.Opening.Build.Version, target.Binding.Admission.Artifact, token);
             // Unsupported delivered schemas retain their source authority; only current interpretation
             // identity is required, since no semantic edge was admitted for that source.
-            ValidateCurrent(core, target.Binding.Admission, target.Target.Role, definition);
+            ValidateCurrent(core, target.Binding.Admission, target.Target.Role, definition, bundled);
             await ValidateConfigurationAssociationAsync(core, target.Binding.Admission, token);
             if (target.Failure != CreatureDisplayMetadataState.Unsupported)
-                _ = ValidateProfile(core, target.Binding.Admission, target.Target.Role, definition);
+                _ = ValidateProfile(core, target.Binding.Admission, target.Target.Role, definition, bundled);
         }
         await catalog.ValidateCreatureDisplayCurrentAsync(core.Opening, core.Artifact, delivered.Select(p => p.Binding).ToArray(), token);
     }
@@ -138,33 +141,33 @@ internal sealed class CreatureDisplaySources(DiscoveryCatalog catalog, VerifiedO
         }
     }
     private static void ValidateCurrent(CreaturesDisplayAuthorization core, StoredTableAdmission admission,
-        CreatureDisplayTargetRole role, BundledTableDefinition definition)
+        CreatureDisplayTargetRole role, TableDefinition definition, BundledTableDefinition bundled)
     {
         var rows = admission.Artifact;
-        if (definition.Sha256 != CreatureDisplayPolicy.Definition(role) || rows.Binding.DefinitionSha256 != definition.Sha256 ||
-            rows.Binding.ProviderRevision != BundledTableDefinitions.Revision ||
-            rows.Binding.DecoderRevision != (admission.Source.Projection is null ? TableDataStore.DecoderRevision : TableDataStore.ProjectionDecoderRevision) ||
+        if (rows.Binding.DefinitionSha256 != definition.Sha256 || rows.Binding.ProviderRevision != definition.Revision ||
+            rows.Binding.DecoderRevision != TableDataStore.AdmissionRevision(CreatureDisplayPolicy.Table(role), definition, bundled, core.Opening.Build.Version,
+                rows.Header.LayoutHash, admission.Source.Projection is not null) ||
             rows.Binding.SchemaSelectionSha256 != TableRowArtifacts.SchemaSelectionKey(definition.Document, core.Opening.Build.Version) ||
             admission.Association.FileDataId != CreatureDisplayPolicy.File(role)) throw CreatureDisplayPolicy.Stale();
     }
     private static int ValidateProfile(CreaturesDisplayAuthorization core, StoredTableAdmission admission,
-        CreatureDisplayTargetRole role, BundledTableDefinition definition)
+        CreatureDisplayTargetRole role, TableDefinition definition, BundledTableDefinition bundled)
     {
-        ValidateCurrent(core, admission, role, definition);
+        ValidateCurrent(core, admission, role, definition, bundled);
         return CreatureDisplayPolicy.SelectField(definition.Document, core.Opening.Build.Version, admission.Artifact, role);
     }
     private static TableDataSnapshot Snapshot(CreaturesContext context, StoredTableAdmission admission,
-        CreatureDisplayTargetRole role, BundledTableDefinition definition)
+        CreatureDisplayTargetRole role, TableDefinition definition, string version, BundledTableDefinition bundled)
     {
         var artifact = admission.Artifact; var c = artifact.Completion;
-        return new(context.ProductId, context.BuildIdentity, context.SourceRegion, CreatureDisplayPolicy.Table(role), context.ResearchLocale,
+        return TableDataStore.WithDefinitionFacts(new(context.ProductId, context.BuildIdentity, context.SourceRegion, CreatureDisplayPolicy.Table(role), context.ResearchLocale,
             artifact.ContentKey, admission.PreparedAt, artifact.Header.LayoutHash.ToUpperInvariant(), artifact.Binding.DefinitionSha256,
             artifact.Binding.ProviderRevision, artifact.Binding.DecoderRevision, admission.Source, admission.Association,
             Array.AsReadOnly(artifact.Header.Columns.Select(v => TableDataStore.ProjectColumn(v, definition.Document)).ToArray()),
             new(c.Scope, CreatureDisplayPolicy.N(c.DeclaredRecords), CreatureDisplayPolicy.N(c.PhysicalRows), CreatureDisplayPolicy.N(c.CopyRows),
                 CreatureDisplayPolicy.N(c.ExcludedEncryptedSections), CreatureDisplayPolicy.N(c.ExcludedPhysicalRecords + c.ExcludedCopyRecords),
                 CreatureDisplayPolicy.N(artifact.Header.DeclaredCopyRecords), CreatureDisplayPolicy.N(c.ExcludedPhysicalRecords), CreatureDisplayPolicy.N(c.ExcludedCopyRecords)),
-            CreatureDisplayPolicy.N(c.PhysicalRows + c.CopyRows), CreatureDisplayPolicy.N(c.TextIssueCount));
+            CreatureDisplayPolicy.N(c.PhysicalRows + c.CopyRows), CreatureDisplayPolicy.N(c.TextIssueCount)), definition, version, bundled);
     }
     private async Task<Borrow> AcquireAsync(CreaturesDisplayAuthorization core, StoredTableAdmission admission,
         CreatureDisplayTargetRole role, CancellationToken token)

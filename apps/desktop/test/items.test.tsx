@@ -6,9 +6,13 @@ import type {DiscoveryBridge,BridgeReply} from '../src/shared/bridge';
 import type {ItemsSnapshot,ItemsPage,ItemInspectResult,ItemFactsResult} from '../../../contracts/generated/discovery';
 import {ItemsBrowser} from '../src/renderer/ItemsBrowser';
 import {ShellContext} from '../src/renderer/HomeShell';
+import {SettingsProvider} from '../src/renderer/Settings';
 import {useItemsLoading,ItemsLoadBanner} from '../src/renderer/useItemsLoading';
 import {itemsSnapshot,itemsPage,itemDetail,itemFacts,itemLabelLists} from '../../../tests/desktop/fixtures/items.mjs';
 import workspace from '../../../tests/desktop/fixtures/download-workspace.json';
+import definitionErrorsJson from '../../../contracts/examples/definition-errors.json';
+import type {EngineError} from '../../../contracts/generated/discovery';
+const definitionErrors=definitionErrorsJson as Record<keyof typeof definitionErrorsJson,EngineError>;
 // Items view (docs/design/items-view): list, search, engine-projected facts with source links, roving sections and the one-pane layout.
 const snapshot=itemsSnapshot(),ok=<T,>(value:T):BridgeReply<T>=>({ok:true,value});
 const deferred=<T,>()=>{let resolve!:(value:T)=>void;return{promise:new Promise<T>(r=>resolve=r),resolve:(value:T)=>resolve(value)};};
@@ -17,7 +21,7 @@ const row=(id:string)=>document.getElementById(`iv-opt-${id}`);
 const findRow=async(id:string)=>{await waitFor(()=>expect(row(id)).toBeInTheDocument());return row(id)!;};
 const listbox=()=>screen.getByRole('listbox',{name:'Items on this page'});
 const applied=()=>document.querySelector('.iv-applied')!;
-function setup(ready=true,configure?:(bridge:DiscoveryBridge)=>void,options:{compact?:boolean;onSource?:(...args:unknown[])=>void;source?:ItemsSnapshot}={}){const onSource=options.onSource??vi.fn();
+function setup(ready=true,configure?:(bridge:DiscoveryBridge)=>void,options:{compact?:boolean;onSource?:(...args:unknown[])=>void;source?:ItemsSnapshot;openSettings?:(trigger:HTMLElement)=>void;onOpenTable?:(tableId:string,name:string)=>void}={}){const onSource=options.onSource??vi.fn();
  vi.spyOn(window,'scrollTo').mockImplementation(()=>{});Element.prototype.scrollIntoView=vi.fn();
  const s=options.source??snapshot,pending=deferred<BridgeReply<ItemsSnapshot>>();let admitted=ready;
  const bridge={onProgress:vi.fn(()=>()=>{}),cancel:vi.fn(async()=>ok({requested:true})),
@@ -27,7 +31,7 @@ function setup(ready=true,configure?:(bridge:DiscoveryBridge)=>void,options:{com
   itemInspect:vi.fn(async p=>ok({context:s.context,artifactId:s.artifactId,itemId:p.itemId,detail:itemDetail(s,p.itemId)})),
   itemFacts:vi.fn(async p=>ok(itemFacts(s,p))),itemLabels:vi.fn(async()=>ok(itemLabelLists))}as unknown as DiscoveryBridge;
  configure?.(bridge);
- function Harness(){const flow=useItemsLoading(bridge),[active,setActive]=useState(true),[mounted,setMounted]=useState(true);return <ShellContext.Provider value={{compact:!!options.compact,statusSlot:null}}><button onClick={()=>flow.load({context:s.context,buildVersion:workspace.build.version})}>Attach exact Items demand</button><button onClick={()=>setActive(x=>!x)}>Switch area</button><button onClick={()=>setMounted(x=>!x)}>Choose build</button><ItemsLoadBanner flow={flow} onView={()=>setActive(true)}/>{mounted&&<ItemsBrowser workspace={workspace as never} bridge={bridge} active={active} flow={flow} factsAvailable onSource={onSource}/>}</ShellContext.Provider>;}
+ function Harness(){const flow=useItemsLoading(bridge),[active,setActive]=useState(true),[mounted,setMounted]=useState(true);return <SettingsProvider value={options.openSettings?{open:()=>{},register:()=>()=>{},openHere:options.openSettings}:null}><ShellContext.Provider value={{compact:!!options.compact,statusSlot:null}}><button onClick={()=>flow.load({context:s.context,buildVersion:workspace.build.version})}>Attach exact Items demand</button><button onClick={()=>setActive(x=>!x)}>Switch area</button><button onClick={()=>setMounted(x=>!x)}>Choose build</button><ItemsLoadBanner flow={flow} onView={()=>setActive(true)}/>{mounted&&<ItemsBrowser workspace={workspace as never} bridge={bridge} active={active} flow={flow} factsAvailable onSource={onSource} onOpenTable={options.onOpenTable}/>}</ShellContext.Provider></SettingsProvider>;}
  render(<Harness/>);return{bridge,pending};}
 async function ready(){await findRow('0');await waitFor(()=>expect(screen.getByRole('heading',{name:'Items'})).toHaveFocus());}
 function search(mode:'Name'|'Item ID',value:string){fireEvent.click(screen.getByRole('button',{name:mode}));const box=screen.getByRole('searchbox',{name:mode==='Name'?'Name contains':'Exact Item ID'});fireEvent.change(box,{target:{value}});fireEvent.click(screen.getByRole('button',{name:'Search'}));return box;}
@@ -288,4 +292,79 @@ it('names rows by their visible identity and quality, and announces only concise
  await waitFor(()=>expect(row('9')).toHaveTextContent('Authored sword 9'));expect(row('8')).toHaveTextContent('Name unavailable · Invalid UTF-8');
  expect(row('9')).toHaveAccessibleName(/^Authored sword 9/);
  expect(applied()).toHaveAttribute('role','status');expect(applied()).toHaveTextContent('All admitted Items · ascending Item ID');
+});
+
+// D101 (#84): Items says which of its tables a fetched WoWDBDefs definition read, and a change of Fetch newer table
+// definitions checks Items again as it checks Tables.
+it('says which Items tables a fetched definition read and checks again when fetching is switched',async()=>{
+ const commit='2'.repeat(40),fetched=structuredClone(snapshot);
+ for(const source of[fetched.itemSource,fetched.sparseSource])Object.assign(source,{definitionSha256:'e'.repeat(64),providerRevision:commit,fetchedDefinition:{revision:commit,fetchedAt:'2026-10-25T00:00:00Z'},fetchedBecause:'exactBuild',bundledFallback:true});
+ const{bridge}=setup(true,undefined,{source:fetched});await ready();
+ const notice=screen.getByRole('region',{name:/^Item and ItemSparse · Definition from WoWDBDefs \(fetched .*, 2222222\)$/});
+ expect(notice).toHaveTextContent(`The bundled Item and ItemSparse definitions don’t list build ${workspace.build.version}; the newest WoWDBDefs definitions do.`);
+ expect(notice).toHaveTextContent('Turn off Fetch newer table definitions in Settings to read them with the bundled definitions only.');
+ const data=vi.mocked(bridge.itemsData);
+ data.mockImplementation(async()=>({ok:false,error:definitionErrors.itemsFetchingOff}));
+ act(()=>{window.dispatchEvent(new CustomEvent('vibeminer-settings-changed',{detail:{name:'fetchTableDefinitions'}}));});
+ await screen.findByText(/so Items can’t open on this build/);expect(row('0')).not.toBeInTheDocument();
+ data.mockImplementation(async()=>ok({snapshot:fetched,dependencies:[{tableId:'50238ec2',state:'ready',artifactId:fetched.itemSource.artifactId},{tableId:'919be54e',state:'ready',artifactId:fetched.sparseSource.artifactId}]}));
+ act(()=>{window.dispatchEvent(new CustomEvent('vibeminer-settings-changed',{detail:{name:'fetchTableDefinitions'}}));});
+ await findRow('0');expect(bridge.itemsPrepare).not.toHaveBeenCalled();
+});
+
+it('shows no definition notice when the bundled definitions list the build',async()=>{setup();await ready();expect(document.querySelector('.feature-definition')).toBeNull();});
+
+// Review fix (#84): with fetching off on a build only a fetched definition opens, the next step is the Settings switch,
+// and Tables can't open Item either, so the Tables way out is not offered.
+// The engine's own failures (contracts/examples/definition-errors.json, checked against the engine).
+const fetchOff=definitionErrors.itemsFetchingOff;
+it('offers Open Settings and no dead-end Tables link when Items stop because fetching is off',async()=>{
+ const openSettings=vi.fn(),onOpenTable=vi.fn();
+ setup(false,bridge=>{vi.mocked(bridge.itemsData).mockResolvedValue({ok:false,error:fetchOff});},{openSettings,onOpenTable});
+ await screen.findByText(/so Items can’t open on this build/);
+ expect(screen.queryByText(/can be read in Tables now/)).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Open Item in Tables'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Retry Items preparation'})).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Open Settings'}));expect(openSettings).toHaveBeenCalledTimes(1);
+});
+// Regression (#84 review): with fetching on, ItemSparse can fail with words that never name it; Tables can still open Item.
+it('keeps the Tables way out when only ItemSparse has no definition, and no Settings step for other failures',async()=>{
+ const onOpenTable=vi.fn(),sparse=definitionErrors.itemSparseNotListed;expect(sparse.message).not.toContain('ItemSparse');
+ setup(false,bridge=>{vi.mocked(bridge.itemsData).mockResolvedValue({ok:false,error:sparse});},{openSettings:vi.fn(),onOpenTable});
+ await screen.findByText(/so Items can’t open on this build/);expect(screen.queryByRole('button',{name:'Open Settings'})).not.toBeInTheDocument();
+ expect(screen.getAllByText(/can be read in Tables now/).length).toBeGreaterThan(0);
+ fireEvent.click(screen.getByRole('button',{name:'Open Item in Tables'}));expect(onOpenTable).toHaveBeenCalledWith('50238ec2','Item');
+ cleanup();
+ // GitHub unreachable for Item: retry, no Settings step, and no Tables way out since Tables can't open Item either.
+ setup(false,bridge=>{vi.mocked(bridge.itemsData).mockResolvedValue({ok:false,error:definitionErrors.itemFetchOffline});},{openSettings:vi.fn(),onOpenTable});
+ await screen.findByText(/couldn’t reach WoWDBDefs/);expect(screen.queryByRole('button',{name:'Open Settings'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Open Item in Tables'})).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'Retry Items preparation'})).toBeVisible();
+});
+it('shows the one-line compact notice and names no selected item while Items prepares again',async()=>{
+ const commit='2'.repeat(40),fetched=structuredClone(snapshot);
+ for(const source of[fetched.itemSource,fetched.sparseSource])Object.assign(source,{definitionSha256:'e'.repeat(64),providerRevision:commit,fetchedDefinition:{revision:commit,fetchedAt:'2026-10-25T00:00:00Z'},fetchedBecause:'exactBuild',bundledFallback:true});
+ const{bridge}=setup(true,undefined,{source:fetched,compact:true});await findRow('0');
+ const notice=screen.getByRole('region',{name:/^WoWDBDefs · .* · 2222222$/});
+ expect(notice).toHaveTextContent(`Only WoWDBDefs lists build ${workspace.build.version}.`);
+ expect(notice.querySelector('.feature-definition-short')).toHaveAttribute('title',expect.stringContaining('CC BY-SA 4.0.'));
+ await choose('3');expect(document.querySelector('.iv-switch-name')).toHaveTextContent('Authored sword 3');
+ vi.mocked(bridge.itemsData).mockResolvedValue({ok:false,error:fetchOff});
+ act(()=>{window.dispatchEvent(new CustomEvent('vibeminer-settings-changed',{detail:{name:'fetchTableDefinitions'}}));});
+ await screen.findByText(/so Items can’t open on this build/);expect(document.querySelector('.iv-switch-name')).toBeNull();
+});
+// #84 QA: Item and ItemSparse fetched 24 s apart from one WoWDBDefs commit are one source, so 200% text still gets the
+// one compact line (with the earliest fetch), and the full heading names the commit once. Different commits stay apart.
+it('treats tables fetched at different times from one commit as one source',async()=>{
+ const commit='835e08f'+'0'.repeat(33),fetched=structuredClone(snapshot),at=(source:typeof fetched.itemSource,fetchedAt:string,revision=commit)=>Object.assign(source,{definitionSha256:'e'.repeat(64),providerRevision:revision,fetchedDefinition:{revision,fetchedAt},fetchedBecause:'exactBuild',bundledFallback:true});
+ at(fetched.itemSource,'2026-10-28T00:46:01Z');at(fetched.sparseSource,'2026-10-28T00:45:37Z');
+ setup(true,undefined,{source:fetched,compact:true});await findRow('0');
+ const date=new Date('2026-10-28T00:45:37Z').toLocaleDateString(undefined,{dateStyle:'medium'});
+ expect(screen.getByRole('region',{name:`WoWDBDefs · ${date} · 835e08f`})).toHaveTextContent(`Only WoWDBDefs lists build ${workspace.build.version}.`);
+ cleanup();
+ setup(true,undefined,{source:fetched});await findRow('0');
+ expect(screen.getByRole('region',{name:/^Item and ItemSparse · Definition from WoWDBDefs \(fetched .*, 835e08f\)$/})).toBeInTheDocument();
+ cleanup();
+ at(fetched.itemSource,'2026-10-28T00:46:01Z','3'.repeat(40));
+ setup(true,undefined,{source:fetched});await findRow('0');
+ expect(screen.getByRole('region',{name:/^Item · Definition from WoWDBDefs \(fetched .*, 3333333\); ItemSparse · Definition from WoWDBDefs \(fetched .*, 835e08f\)$/})).toBeInTheDocument();
 });

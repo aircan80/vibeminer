@@ -28,7 +28,7 @@ public sealed partial class TableDataStore : ITableFollowStore
             var configuration = await ReadBuildConfigurationAsync(context, token);
             ValidateSourceAssociation(configuration, admission.Association);
             var definition = await definitions.ForRowsAsync(entry, bundled, context.Build.Version, admission.Artifact, fetchEnabled, token);
-            Validate(admission, entry, definition, context.Build.Version);
+            Validate(admission, entry, definition, bundled, context.Build.Version);
             if (request.ArtifactId != admission.Artifact.ContentKey)
                 throw new DiscoveryException("TABLE_ARTIFACT_STALE", "This row belongs to a different table interpretation. Reopen the table data.");
 
@@ -46,7 +46,7 @@ public sealed partial class TableDataStore : ITableFollowStore
                 ?? throw new DiscoveryException("TABLE_NOT_PREPARED", $"Load {reference.Table} before following {column.Name}.");
             ValidateSourceAssociation(configuration, target.Association);
             var targetDefinition = await definitions.ForRowsAsync(resolvedTarget, targetBundled, context.Build.Version, target.Artifact, fetchEnabled, token);
-            Validate(target, resolvedTarget, targetDefinition, context.Build.Version);
+            Validate(target, resolvedTarget, targetDefinition, targetBundled, context.Build.Version);
             if (request.TargetArtifactId != target.Artifact.ContentKey)
                 throw new DiscoveryException("TABLE_ARTIFACT_STALE", $"The {reference.Table} rows changed. Reopen its table data.");
 

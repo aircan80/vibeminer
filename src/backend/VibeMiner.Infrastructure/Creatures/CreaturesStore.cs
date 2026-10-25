@@ -9,11 +9,15 @@ internal sealed record CreaturesDisplayAuthorization(CapturedOpeningContext Open
 
 /// <summary>Creature-only prerequisites, two fully accounted core sessions and independent bounded queries.</summary>
 public sealed partial class CreaturesStore(DiscoveryCatalog catalog, VerifiedObjectStore objects, TableDataService tables,
-    AcquisitionResources resources) : ICreaturesStore, IAsyncDisposable
+    AcquisitionResources resources, TableDefinitionSources? definitionSources = null) : ICreaturesStore, IAsyncDisposable
 {
+    private readonly TableDefinitionSources definitions = definitionSources ?? new();
+    /// <summary>The definition choice Creatures uses; creature displays choose the same way.</summary>
+    internal TableDefinitionSources Definitions => definitions;
     private readonly Func<string, long, CancellationToken, Task<FileStream>> openEncodedSource = (sha, length, token) => objects.OpenVerifiedAsync(sha, length, resources, null, token);
     internal CreaturesStore(DiscoveryCatalog catalog, VerifiedObjectStore objects, TableDataService tables, AcquisitionResources resources,
-        Func<string, long, CancellationToken, Task<FileStream>> openEncodedSource) : this(catalog, objects, tables, resources)
+        Func<string, long, CancellationToken, Task<FileStream>> openEncodedSource, TableDefinitionSources? definitionSources = null)
+        : this(catalog, objects, tables, resources, definitionSources)
     { this.openEncodedSource = openEncodedSource; }
     public const string FeatureRevision = CreaturesPolicy.FeatureRevision, QueryPolicy = CreaturesPolicy.QueryPolicy, SemanticProfile = CreaturesPolicy.SemanticProfile;
     private readonly CreaturesProjection projection = new(objects, resources);
@@ -73,6 +77,8 @@ public sealed partial class CreaturesStore(DiscoveryCatalog catalog, VerifiedObj
     {
         CreaturesService.Validate(context); using var operation = Enter(false, token); token = operation.Token;
         var opening = await catalog.ResolveOpeningAsync(Workspace(context), token);
+        // The same start as Tables (D101): with fetching off, a bundled definition must open the build.
+        await definitions.RequireFeatureBuildAsync(CreaturesPolicy.Table, "Creatures", opening.Build.Version, token);
         var saved = await SavedAsync(opening, token);
         if (saved is not null)
         {
@@ -110,10 +116,8 @@ public sealed partial class CreaturesStore(DiscoveryCatalog catalog, VerifiedObj
         }
         await catalog.ReadCreatureSourceAsync(opening, token); // Guard before shared prerequisite work.
         var originalConfigurations = await catalog.ReadCreatureConfigurationsAsync(opening, token);
-        // Creatures needs a listed build; Tables alone may open an unlisted one by layout (D080). Fail before any download.
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
-        if (!provider.Definitions.TryGetValue(CreaturesPolicy.Table, out var definition) || !definition.Document.ListsBuild(opening.Build.Version, token))
-            throw new DiscoveryException("SCHEMA_BUILD_NOT_LISTED", "The pinned Creature definition does not list this exact build.");
+        // Creatures chooses its definition as Tables does (D101): fail before any download when nothing can open the build.
+        await definitions.RequireFeatureBuildAsync(CreaturesPolicy.Table, "Creatures", opening.Build.Version, token);
         await PrerequisiteAsync(context, progress, token); // No feature slot, reader or registry lock is held here.
         var currentOpening = await catalog.ResolveOpeningAsync(Workspace(context), token);
         if (currentOpening.Reference != opening.Reference) throw CreaturesPolicy.Stale();
@@ -332,7 +336,8 @@ public sealed partial class CreaturesStore(DiscoveryCatalog catalog, VerifiedObj
         throw new DiscoveryException("CREATURES_PREREQUISITE_BUSY", "Shared Tables preparation remained busy after bounded retries.", true);
     }
     private static WorkspaceRequest Workspace(CreaturesContext context) => new(context.ProductId, context.BuildIdentity, context.SourceRegion);
-    private static TableDataRequest Table(CreaturesContext context) => new(context.ProductId, context.BuildIdentity, context.SourceRegion, CreaturesPolicy.Table, context.ResearchLocale);
+    private static TableDataRequest Table(CreaturesContext context) =>
+        new(context.ProductId, context.BuildIdentity, context.SourceRegion, CreaturesPolicy.Table, context.ResearchLocale, FetchedDefinitions: true, Feature: "Creatures");
     public async ValueTask DisposeAsync()
     {
         Task drain; lock (sync) { closed = true; foreach (var slot in slots) slot.Retiring = true; drain = retired?.Task ?? Task.CompletedTask; }

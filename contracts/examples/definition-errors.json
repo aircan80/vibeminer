@@ -1,0 +1,38 @@
+{
+  "creaturesFetchingOff": {
+    "code": "SCHEMA_BUILD_NOT_LISTED",
+    "message": "The pinned Creature definition doesn’t list build 99.0.0.1 or any layout on its version line, so Creatures can’t open on this build. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest Creature definition.",
+    "retryable": false,
+    "definition": {
+      "tableId": "c9d6b6b3",
+      "definitionFetch": "off"
+    }
+  },
+  "itemSparseNotListed": {
+    "code": "SCHEMA_BUILD_NOT_LISTED",
+    "message": "Neither the pinned definition nor the WoWDBDefs definition fetched 2026-10-23 (1111111) lists build 99.0.0.1 or any layout on its version line, so Items can’t open on this build. A later WoWDBDefs update may cover it.",
+    "retryable": false,
+    "definition": {
+      "tableId": "919be54e",
+      "definitionFetch": "on"
+    }
+  },
+  "itemFetchOffline": {
+    "code": "DEFINITION_FETCH_OFFLINE",
+    "message": "VibeMiner couldn’t reach WoWDBDefs on GitHub to fetch a newer Item definition. The pinned Item definition doesn’t list build 99.0.0.1 or any layout on its version line, so Items can’t open on this build. Check the connection, then retry Items.",
+    "retryable": true,
+    "definition": {
+      "tableId": "50238ec2",
+      "definitionFetch": "on"
+    }
+  },
+  "itemsFetchingOff": {
+    "code": "SCHEMA_BUILD_NOT_LISTED",
+    "message": "The pinned Item definition doesn’t list build 99.0.0.1 or any layout on its version line, so Items can’t open on this build. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest Item definition.",
+    "retryable": false,
+    "definition": {
+      "tableId": "50238ec2",
+      "definitionFetch": "off"
+    }
+  }
+}

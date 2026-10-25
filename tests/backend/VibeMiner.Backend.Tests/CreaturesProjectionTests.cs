@@ -128,12 +128,11 @@ public sealed class CreaturesProjectionTests(ITestOutputHelper output)
         Assert.Equal("2", Assert.Single((await s.ReadPageAsync(next, default)).Entries).Id);
     }
     [Theory]
-    [InlineData("layout")] [InlineData("raw")] [InlineData("missing")] [InlineData("width")] [InlineData("unsigned")]
+    [InlineData("raw")] [InlineData("missing")] [InlineData("width")] [InlineData("unsigned")]
     public async Task HonestUnsupportedProfilesRemainUnsupported(string condition)
     {
         await using var f = new Fixture(); var b = await f.Binding([new(1, "Name")]);
-        if (condition == "layout") b = b with { Source = b.Source with { LayoutHash = "12345678" }, Rows = b.Rows with { Header = b.Rows.Header with { LayoutHash = "12345678" } } };
-        else if (condition is "width" or "unsigned") b = b with { Fields = b.Fields.Select((v, i) => i == 4 ? v with { Bits = condition == "width" ? 16 : 8, Unsigned = condition == "unsigned" } : v).ToArray() };
+        if (condition is "width" or "unsigned") b = b with { Fields = b.Fields.Select((v, i) => i == 4 ? v with { Bits = condition == "width" ? 16 : 8, Unsigned = condition == "unsigned" } : v).ToArray() };
         else
         {
             var ordinal = b.Fields[0].ColumnIndex;
@@ -144,6 +143,19 @@ public sealed class CreaturesProjectionTests(ITestOutputHelper output)
             b = b with { Source = b.Source with { Columns = columns }, Rows = b.Rows with { Header = b.Rows.Header with { Columns = header } } };
         }
         Assert.Equal("CREATURES_SCHEMA_UNSUPPORTED", Assert.Throws<DiscoveryException>(() => CreaturesPolicy.ValidateBinding(b)).Code);
+    }
+    // D101: the layout isn't pinned; the definition's block for the file's layout must name the sixteen fields. A layout
+    // it has no block for is unsupported, and a snapshot that disagrees with its rows about the layout is invalid.
+    [Fact]
+    public async Task ALayoutWithoutADefinitionBlockIsUnsupportedAndAMismatchedLayoutIsInvalid()
+    {
+        await using var f = new Fixture(); var b = await f.Binding([new(1, "Name")]);
+        var definition = (await TablesCatalog.Provider.Value).Definitions[CreaturesPolicy.Table];
+        Assert.Equal("CREATURES_SCHEMA_UNSUPPORTED", Assert.Throws<DiscoveryException>(() =>
+            CreaturesPolicy.SelectFields(definition.Document, b.BuildVersion, "12345678", b.Source.Columns)).Code);
+        Assert.Equal("CREATURES_PROJECTION_INVALID", Assert.Throws<DiscoveryException>(() =>
+            CreaturesPolicy.ValidateBinding(b with { Source = b.Source with { LayoutHash = "12345678" } })).Code);
+        CreaturesPolicy.ValidateBinding(b with { Source = b.Source with { LayoutHash = "12345678" }, Rows = b.Rows with { Header = b.Rows.Header with { LayoutHash = "12345678" } } });
     }
     [Fact]
     public async Task FullNamePoolUsesBoundedManagedLiveScratchAndWarmNoMatchScan()

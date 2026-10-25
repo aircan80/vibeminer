@@ -4,3 +4,5 @@
 .creature-metadata{border-block-start:1px solid #dce2d9;margin-block:1.5rem;padding-block-start:1rem}.creature-metadata>h3{font-size:1.066666667rem;overflow-wrap:anywhere}.creature-metadata-target{border-block-start:1px solid #dce2d9;margin-block-start:1rem;padding-block-start:.5rem}.creature-metadata pre{max-block-size:16rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8rem}.creature-metadata progress{accent-color:#176e66;max-inline-size:100%}
 
 .creature-declarations>section.selected{background:#e6f1e8}
+/* D101: the definition notice shares the edges of the source scope box under it. */
+.creatures-browser .feature-definition,.desktop-home .creatures-browser .dh-notice.feature-definition{margin-inline:0}

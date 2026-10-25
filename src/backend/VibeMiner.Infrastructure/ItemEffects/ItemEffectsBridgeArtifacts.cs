@@ -9,8 +9,9 @@ namespace VibeMiner.Infrastructure;
 /// <summary>Only immutable index bytes. Caller retains staging reservation/cleanup and the shared CAS's
 /// single hash/publication pass; this class never acquires, publishes, registers or authorizes a source.</summary>
 internal sealed partial class ItemEffectsBridgeArtifacts(Func<Action, CancellationToken, Task> runCpuSlice,
-    int maximumPageBytes = (512 << 10) - 1)
+    int maximumPageBytes = (512 << 10) - 1, TableDefinitionSources? definitionSources = null)
 {
+    private readonly TableDefinitionSources definitions = definitionSources ?? new();
     private readonly int maximumPageBytes = maximumPageBytes is >= 1 and <= (512 << 10) - 1 ? maximumPageBytes : throw new ArgumentOutOfRangeException(nameof(maximumPageBytes));
     private async Task CpuAsync(Action owned, CancellationToken token)
     {
@@ -43,7 +44,7 @@ internal sealed partial class ItemEffectsBridgeArtifacts(Func<Action, Cancellati
         token.ThrowIfCancellationRequested();
         if (callerOwnedStaging is null || !callerOwnedStaging.CanRead || !callerOwnedStaging.CanWrite || !callerOwnedStaging.CanSeek ||
             callerOwnedStaging.Length != 0 || callerOwnedStaging.Position != 0 || readPage is null) throw ItemEffectsBridgePolicy.Invalid();
-        await ItemEffectsBridgePolicy.ValidateProfileAsync(owned, token, CpuAsync);
+        await ItemEffectsBridgePolicy.ValidateProfileAsync(owned, token, CpuAsync, definitions);
         var count = checked((int)ItemEffectsBridgePolicy.Total(owned)); var rowCount = ItemEffectsBridgePolicy.N(count);
         byte[]? metadata = null; string? key = null;
         await CpuAsync(() =>

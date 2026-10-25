@@ -38,6 +38,24 @@ public sealed class ItemEffectsResultValidationTests
         Bad(() => ItemEffectsValidation.Validate(result with { Outcomes = [outcome with { Target = outcome.Target! with { RowId = "1" } }] }, Details));
     }
 
+    // D101: an effect source read with a definition fetched from WoWDBDefs names that definition's commit; one that
+    // claims the pinned revision, or a fetched commit that isn't its own, is refused.
+    [Fact]
+    public void AFetchedEffectSourceNamesItsOwnCommitAndNeverThePinnedOne()
+    {
+        const string commit = "2222222222222222222222222222222222222222";
+        var source = Source(ItemEffectsSourceRole.Effect, partial: true);
+        var fetched = source with { DefinitionSha256 = new('e', 64), ProviderRevision = commit,
+            FetchedDefinition = new(commit, DateTimeOffset.UnixEpoch), FetchedBecause = TableFetchedBecause.ExactBuild, BundledFallback = false };
+        var outcome = new ItemEffectOutcome(new("0"), "0", ItemEffectState.ObservedReady, "1", Target(fetched, "0"), Fields(fetched));
+        var result = new ItemEffectDetailsResult(Details.Selection, Details.BridgeIndexArtifactId, ItemEffectsValidation.InputPolicy, new(ItemEffectsSourceRole.Effect, ItemEffectsSourceState.Ready, fetched), [outcome]);
+        ItemEffectsValidation.Validate(result, Details);
+        foreach (var forged in new[] { fetched with { ProviderRevision = source.ProviderRevision, FetchedDefinition = new(source.ProviderRevision, DateTimeOffset.UnixEpoch) },
+            fetched with { FetchedDefinition = new(new string('3', 40), DateTimeOffset.UnixEpoch) }, fetched with { FetchedDefinition = null } })
+            Bad(() => ItemEffectsValidation.Validate(result with { Source = result.Source with { Snapshot = forged },
+                Outcomes = [outcome with { Target = Target(forged, "0") }] }, Details));
+    }
+
     [Fact]
     public void AmbiguityHasCountAndNoFirstRowAndMissingUsesItsOwnCoverage()
     {

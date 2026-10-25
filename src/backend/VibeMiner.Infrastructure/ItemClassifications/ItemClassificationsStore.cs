@@ -12,6 +12,8 @@ namespace VibeMiner.Infrastructure;
 public sealed partial class ItemClassificationsStore(DiscoveryCatalog catalog, VerifiedObjectStore objects, ItemsStore items,
     TableDataService tables, AcquisitionResources resources) : IItemClassificationsStore, IAsyncDisposable
 {
+    // D101: ItemClass and ItemSubClass are read with the definition Tables chooses, under the same Settings switch as Items.
+    private readonly TableDefinitionSources definitions = items.Definitions;
     public bool SupportsSubclassLabels => true;
     private readonly ClassificationIndex indexes = new(objects, resources);
     private readonly CompositeClassificationIndex composites = new(objects, resources);
@@ -133,7 +135,8 @@ public sealed partial class ItemClassificationsStore(DiscoveryCatalog catalog, V
             try { await ValidateCurrentProfile(Binding(context, opening, admission, await catalog.ReadItemClassificationConfigurationsAsync(opening, token), kind), token); return; }
             catch (DiscoveryException error) when (error.Code is "ITEM_CLASSIFICATION_STALE" or "ITEM_CLASSIFICATION_PROFILE_UNSUPPORTED") { }
         }
-        var request = new TableDataRequest(context.ProductId, context.BuildIdentity, context.SourceRegion, table, context.ResearchLocale);
+        var request = new TableDataRequest(context.ProductId, context.BuildIdentity, context.SourceRegion, table, context.ResearchLocale,
+            FetchedDefinitions: true, Feature: "Item class labels");
         for (var attempt = 0; attempt < 8; attempt++)
         {
             await progress(new("Preparing " + kind.ToString().ToLowerInvariant() + " table prerequisite", "stage", TableId: table));
@@ -242,27 +245,28 @@ public sealed partial class ItemClassificationsStore(DiscoveryCatalog catalog, V
             names.Where(name => name != textName).Select(name => new ClassificationField(name, Column(snapshot, name), "integer", 8, false, true)).ToArray(),
             new(textName, Column(snapshot, textName), "string", null, null, true));
     }
-    private static async Task<TableDataSnapshot> PublicSnapshot(ClassificationIndexBinding binding, CancellationToken token)
+    private async Task<TableDataSnapshot> PublicSnapshot(ClassificationIndexBinding binding, CancellationToken token)
     {
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
-        if (!provider.Definitions.TryGetValue(binding.Source.TableId, out var definition) ||
-            definition.Sha256 != binding.Source.DefinitionSha256 || definition.Sha256 != binding.Rows.Binding.DefinitionSha256)
+        var definition = await definitions.ForFeatureRowsAsync(binding.Source.TableId, binding.BuildVersion, binding.Rows, token);
+        if (definition.Sha256 != binding.Source.DefinitionSha256 || definition.Sha256 != binding.Rows.Binding.DefinitionSha256)
             throw ClassificationPolicy.Stale();
-        // Hydrate only public presentation metadata. The stored binding/key/bytes and
-        // all original receipt timestamps remain unchanged, including legacy Class v1.
-        return binding.Source with
+        var (_, bundled) = await TableDefinitionSources.FeatureTableAsync(binding.Source.TableId, token);
+        // Hydrate only public presentation metadata, including which definition read the rows. The stored
+        // binding/key/bytes and all original receipt timestamps remain unchanged, including legacy Class v1.
+        return TableDataStore.WithDefinitionFacts(binding.Source with
         {
             Columns = Array.AsReadOnly(binding.Rows.Header.Columns.Select(column => TableDataStore.ProjectColumn(column, definition.Document)).ToArray())
-        };
+        }, definition, binding.BuildVersion, bundled);
     }
 
-    private static async Task ValidateCurrentProfile(ClassificationIndexBinding binding, CancellationToken token)
+    private async Task ValidateCurrentProfile(ClassificationIndexBinding binding, CancellationToken token)
     {
         ClassificationPolicy.ValidateBinding(binding);
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
-        if (!provider.Definitions.TryGetValue(binding.Source.TableId, out var definition) ||
-            binding.Rows.Binding.DefinitionSha256 != definition.Sha256 || binding.Source.ProviderRevision != BundledTableDefinitions.Revision ||
-            binding.Source.DecoderRevision != (binding.Source.Source.Projection is null ? TableDataStore.DecoderRevision : TableDataStore.ProjectionDecoderRevision) ||
+        var (_, bundled) = await TableDefinitionSources.FeatureTableAsync(binding.Source.TableId, token);
+        var definition = await definitions.ForFeatureRowsAsync(binding.Source.TableId, binding.BuildVersion, binding.Rows, token);
+        if (binding.Rows.Binding.DefinitionSha256 != definition.Sha256 || binding.Source.ProviderRevision != definition.Revision ||
+            binding.Source.DecoderRevision != TableDataStore.AdmissionRevision(binding.Source.TableId, definition, bundled, binding.BuildVersion,
+                binding.Rows.Header.LayoutHash, binding.Source.Source.Projection is not null, token) ||
             binding.Rows.Binding.SchemaSelectionSha256 != TableRowArtifacts.SchemaSelectionKey(definition.Document, binding.BuildVersion, token))
             throw ClassificationPolicy.Stale();
         foreach (var field in binding.KeyFields.Append(binding.TextField))
@@ -274,10 +278,11 @@ public sealed partial class ItemClassificationsStore(DiscoveryCatalog catalog, V
                 throw new DiscoveryException("ITEM_CLASSIFICATION_PROFILE_UNSUPPORTED", "The exact selected definition does not qualify this label key or text profile.");
         }
     }
-    private static async Task<int> ItemColumn(ItemsSnapshot snapshot, string version, string name, int bits, bool unsigned, CancellationToken token)
+    private async Task<int> ItemColumn(ItemsSnapshot snapshot, string version, string name, int bits, bool unsigned, CancellationToken token)
     {
-        var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
-        if (!provider.Definitions.TryGetValue(ItemsProjection.ItemTable, out var definition)) return -1;
+        // The Item definition Items was read with; another one chosen meanwhile means Items itself is stale.
+        var definition = await definitions.ForFeatureLayoutAsync(ItemsProjection.ItemTable, version, snapshot.ItemSource.LayoutHash, token);
+        if (definition.Sha256 != snapshot.ItemSource.DefinitionSha256 || definition.Revision != snapshot.ItemSource.ProviderRevision) return -1;
         var field = SelectedField(definition.Document, version, snapshot.ItemSource.LayoutHash, name);
         var column = Column(snapshot.ItemSource, name);
         return field is { Column.VerifiedName: true, ArrayLength: 1 } && field.Column.Family == "int" && field.IntegerBits == bits &&
@@ -286,7 +291,7 @@ public sealed partial class ItemClassificationsStore(DiscoveryCatalog catalog, V
     }
     private static DbdField? SelectedField(DbdDocument definition, string version, string layout, string name)
     {
-        var selection = definition.SelectBuild(version, layout);
+        var selection = definition.SelectFile(version, layout);
         return selection.Blocks.Count == 1 ? selection.Blocks[0].Fields.SingleOrDefault(f => f.Column.Name == name) : null;
     }
     private static int Column(TableDataSnapshot snapshot, string name)

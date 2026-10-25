@@ -22,7 +22,7 @@ internal sealed partial class ItemEffectsBridgeArtifacts
             token.ThrowIfCancellationRequested();
             if (!input.CanRead || !input.CanSeek || input.Position != 0) throw ItemEffectsBridgePolicy.Invalid();
             await CpuAsync(() => ItemEffectsBridgePolicy.ValidateArtifact(frozen), token);
-            await ItemEffectsBridgePolicy.ValidateProfileAsync(frozen.Binding, token, CpuAsync);
+            await ItemEffectsBridgePolicy.ValidateProfileAsync(frozen.Binding, token, CpuAsync, definitions);
             byte[]? expected = null;
             await CpuAsync(() => expected = ItemEffectsBridgePolicy.MetadataBytes(frozen.Binding, frozen.RowCount), token);
             var header = new byte[64]; await ReadExactlyAsync(input, header, 0, token);

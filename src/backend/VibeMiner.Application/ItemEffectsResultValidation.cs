@@ -205,7 +205,10 @@ public static partial class ItemEffectsValidation
             _ => (NameTable, "1990283", "782EE721", "d48ae2eb0455a30451cadda1c63627b9ad4ad4e9c4e473cd3444def1981fa667", 2)
         };
         Require(value is not null && value.ProductId == context.ProductId && value.BuildIdentity == context.BuildIdentity && value.SourceRegion == context.SourceRegion &&
-            value.ResearchLocale == context.ResearchLocale && value.TableId == table && value.LayoutHash == layout && value.DefinitionSha256 == definition && value.ProviderRevision == Provider &&
+            value.ResearchLocale == context.ResearchLocale && value.TableId == table && value.LayoutHash == layout &&
+            // The pinned definition, or one fetched from WoWDBDefs (D101) that names its own commit.
+            (value.FetchedDefinition is null ? value.DefinitionSha256 == definition && value.ProviderRevision == Provider
+                : Hash(value.DefinitionSha256) && Hex(value.ProviderRevision, 40) && value.ProviderRevision != Provider && value.FetchedDefinition.Revision == value.ProviderRevision) &&
             Hash(value.ArtifactId) && Time(value.PreparedAt) && Count(value.RowCount, 1_000_000) && Count(value.TextIssueCount, 10_000_000));
         Require(value.Source is not null && value.Source.Location is not null && Hash(value.Source.Sha256) && Hex(value.Source.ContentKey, 32) && Hex(value.Source.EncodingKey, 32) &&
             Unsigned(value.Source.EncodedBytes, long.MaxValue) && Unsigned(value.Source.DecodedBytes, long.MaxValue) && Time(value.Source.RetrievedAt) && Time(value.Source.VerifiedAt) &&

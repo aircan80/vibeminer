@@ -14,6 +14,68 @@ namespace VibeMiner.Backend.Tests;
 [Collection("Items projection builder")]
 public sealed class ItemsStoreTests(ITestOutputHelper output)
 {
+    // D101 (#84): a build the bundled Item and ItemSparse definitions don't list opens with the definitions WoWDBDefs lists
+    // it in, as Tables does, and the Items snapshot says which definition read each table. Turned off, the same rows are
+    // stale for Items; a build no bundled definition opens then fails before any table work, naming the switch.
+    [Fact]
+    public async Task ItemsOpenOnABuildOnlyFetchedDefinitionsListAndSayWhichDefinitionReadThem()
+    {
+        const string build = "12.1.5.70575", commit = "2222222222222222222222222222222222222222";
+        var github = new FetchedDefinitionTests.GitHub(); var policy = new FetchedDefinitionTests.Policy(true);
+        await using var h = await Harness.Create(version: build, definitions: async directory =>
+        {
+            var fetched = new WoWDBDefsDefinitions(directory, new HttpClient(github), new FetchedDefinitionTests.Clock());
+            foreach (var (table, name, layout) in new[] { (ItemsProjection.ItemTable, "Item", "996192AA"), (ItemsProjection.SparseTable, "ItemSparse", "1C17D17F") })
+            {
+                github.Serve(name, commit, WithBuild(name, layout, build));
+                Assert.NotNull((await fetched.EnsureAsync(table, name, _ => true, _ => Task.CompletedTask, default)).Definition);
+            }
+            return new TableDefinitionSources(fetched, policy);
+        });
+        var asked = github.Requests.Count;
+        var snapshot = await h.Store.PrepareAsync(h.Request, _ => Task.CompletedTask, default);
+        foreach (var source in new[] { snapshot.ItemSource, snapshot.SparseSource })
+        {
+            Assert.Equal(commit, source.ProviderRevision); Assert.Equal(new TableDefinitionFetched(commit, new FetchedDefinitionTests.Clock().Now), source.FetchedDefinition);
+            Assert.Equal(TableFetchedBecause.ExactBuild, source.FetchedBecause); Assert.Null(source.SchemaMatch);
+        }
+        Assert.Equal("Original", Assert.Single((await h.Store.ReadPageAsync(new(h.Request, snapshot.ArtifactId), default)).Entries).Name.Value);
+        Assert.Equal(snapshot.ArtifactId, (await h.Store.ReadAsync(h.Request, default)).Snapshot!.ArtifactId);
+        // Off, the bundled definitions still open 12.1.5 by layout, so Items read with fetched ones is stale, not ready,
+        // and preparing refuses the fetched rows the shared table service would otherwise hand it.
+        policy.Enabled = false;
+        Assert.Null((await h.Store.ReadAsync(h.Request, default)).Snapshot);
+        h.PretendMissing = true;
+        Assert.Equal("ITEMS_PREREQUISITE_STALE", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Request, _ => Task.CompletedTask, default))).Code);
+        h.PretendMissing = false;
+        policy.Enabled = true;
+        Assert.Equal(snapshot.ArtifactId, (await h.Store.ReadAsync(h.Request, default)).Snapshot!.ArtifactId);
+        // Items checks its rows against the cached choice only; it never asks WoWDBDefs itself.
+        Assert.Equal(asked, github.Requests.Count);
+    }
+
+    [Fact]
+    public async Task WithFetchingOffABuildNoBundledDefinitionOpensFailsBeforeAnyTableWorkAndNamesTheSwitch()
+    {
+        var policy = new FetchedDefinitionTests.Policy(false); var github = new FetchedDefinitionTests.GitHub();
+        await using var h = await Harness.Create(version: "99.0.0.1", definitions: directory =>
+            Task.FromResult(new TableDefinitionSources(new WoWDBDefsDefinitions(directory, new HttpClient(github)), policy)));
+        var failure = await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.ReadAsync(h.Request, default));
+        Assert.Equal("SCHEMA_BUILD_NOT_LISTED", failure.Code); Assert.Equal(new TableDefinitionProblem(ItemsProjection.ItemTable, "off"), failure.Definition);
+        Assert.Contains("so Items can’t open on this build. Fetching newer table definitions from WoWDBDefs is off in Settings", failure.Message);
+        Assert.Equal(failure.Message, (await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Request, _ => Task.CompletedTask, default))).Message);
+        Assert.Empty(h.PreparedTables); Assert.Empty(github.Requests);
+    }
+
+    /// <summary>A bundled definition plus one block that lists the build, with the fields of the bundled block for the layout.</summary>
+    private static byte[] WithBuild(string name, string layout, string build)
+    {
+        var text = File.ReadAllText(RepositoryPaths.File($"src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/{name}.dbd")).Replace("\r\n", "\n");
+        var lines = text.Split('\n'); var start = Array.IndexOf(lines, "LAYOUT " + layout);
+        var fields = lines.Skip(start).TakeWhile(line => line.Length > 0).Where(line => !line.StartsWith("LAYOUT ", StringComparison.Ordinal) && !line.StartsWith("BUILD ", StringComparison.Ordinal));
+        return Encoding.UTF8.GetBytes(text.TrimEnd('\n') + "\n\nLAYOUT " + layout + "\nBUILD " + build + "\n" + string.Join("\n", fields) + "\n");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -193,10 +255,14 @@ public sealed class ItemsStoreTests(ITestOutputHelper output)
         internal readonly List<string> PreparedTables = [];
         internal Func<TableDataRequest, CancellationToken, Task>? BeforePrepare;
         internal string AdmittedRootRevision = MetadataAcquirer.SourceRevision;
-        internal static async Task<Harness> Create(string admittedRootRevision = MetadataAcquirer.SourceRevision)
+        /// <summary>The definition choice the store and its fixture rows use; bundled only unless a test gives one.</summary>
+        internal TableDefinitionSources Definitions = new();
+        internal static async Task<Harness> Create(string admittedRootRevision = MetadataAcquirer.SourceRevision, string version = "12.1.5.70448",
+            Func<string, Task<TableDefinitionSources>>? definitions = null)
         {
             var h = new Harness { AdmittedRootRevision = admittedRootRevision }; h.Catalog = await DiscoveryCatalog.OpenAsync(h.directory); h.Objects = new(h.directory);
-            var versions = Fixtures.Versions($"us|{h.Fixture.BuildKey}|{h.Fixture.CdnKey}||70448|12.1.5.70448||items");
+            if (definitions is not null) h.Definitions = await definitions(h.directory);
+            var versions = Fixtures.Versions($"us|{h.Fixture.BuildKey}|{h.Fixture.CdnKey}||{version.Split('.')[3]}|{version}||items");
             var cdns = Encoding.UTF8.GetString(h.Fixture.Discovery.Documents.Single(d => d.Role == "cdns").Bytes);
             var discovery = await Fixtures.Attempt(versions, cdns); var generation = await h.Catalog.BeginRefreshAsync("wow", default);
             var page = await h.Catalog.CommitAsync("wow", generation, discovery, Time, default);
@@ -214,7 +280,7 @@ public sealed class ItemsStoreTests(ITestOutputHelper output)
             h.Item = await h.Source(ItemsProjection.ItemTable, h.Fixture.PayloadA);
             h.Sparse = await h.Source(ItemsProjection.SparseTable, h.Fixture.PayloadB);
             await h.Publish(h.Item); await h.Publish(h.Sparse);
-            h.Tables = new(new ReadyTables(h)); h.Store = new(h.Catalog, h.Objects, h.Tables, h.Resources); return h;
+            h.Tables = new(new ReadyTables(h)); h.Store = new(h.Catalog, h.Objects, h.Tables, h.Resources, h.Definitions); return h;
         }
         private MetadataReceipt Metadata(string role)
         {
@@ -224,27 +290,29 @@ public sealed class ItemsStoreTests(ITestOutputHelper output)
         }
         internal async Task<SourceFixture> Source(string table, InventoryFixture.FixtureObject bytes, string? decoder = null)
         {
-            var provider = await TablesCatalog.Provider.Value; var definition = provider.Definitions[table];
+            var provider = await TablesCatalog.Provider.Value; var bundled = provider.Definitions[table];
+            var sparse = table == ItemsProjection.SparseTable; var layout = sparse ? "1C17D17F" : "996192AA";
+            // The rows are read with the definition chosen for this build and layout, bundled or fetched (D101).
+            var definition = await Definitions.ForFeatureLayoutAsync(table, Opening.Build.Version, layout, default);
             var source = new ContentReceipt(bytes.ContentKey, bytes.EncodingKey, Convert.ToHexStringLower(SHA256.HashData(bytes.Encoded)),
                 N(bytes.Encoded.Length), N(bytes.Decoded.Length), InventoryFixture.Url("data", bytes.EncodingKey), Time, Time, "content-blte-v1", new("loose", "0", N(bytes.Encoded.Length), null));
             await Catalog.RecordContentAsync(source, default);
             var entry = provider.Entries.Single(e => e.TableId == table);
             var association = new SelectedFileAssociation(entry.Db2FileDataId!, "enUS", "enus-consistent-root-variants-v1", Metadata("encoding"),
                 Metadata("root") with { ParserRevision = AdmittedRootRevision }, [new("0", "0", source.ContentKey, "2", "0", "0", "0", "0", null)]);
-            var binding = new TableArtifactBinding(source.Sha256, new('d', 64), definition.Sha256, BundledTableDefinitions.Revision, "enUS",
+            var binding = new TableArtifactBinding(source.Sha256, new('d', 64), definition.Sha256, definition.Revision, "enUS",
                 decoder ?? TableDataStore.DecoderRevision, TableRowArtifacts.SchemaSelectionKey(definition.Document, Opening.Build.Version));
-            var sparse = table == ItemsProjection.SparseTable;
             Db2Column[] columns = sparse ? [new("ID", "integer", true), new("Display_lang", "string", false), new("OverallQualityID", "integer", false)]
                 : [new("ID", "integer", true), new("ClassID", "integer", false), new("IconFileDataID", "integer", false)];
             await using var rows = new TableRowArtifacts(Objects); await using var writer = await rows.CreateWriterAsync(binding, default);
-            var header = new Wdc5TableHeader(1, table.ToUpperInvariant(), sparse ? "1C17D17F" : "996192AA", 1, 0, 4, columns);
+            var header = new Wdc5TableHeader(1, table.ToUpperInvariant(), layout, 1, 0, 4, columns);
             await writer.HeaderAsync(header, default); await writer.RowAsync(new(1, false, null, sparse ? ["1", "Original", "4"] : ["1", "2", "132759"]), default);
             var completion = new Wdc5Completion(1, 1, 0, 0, 0, 0, "complete", bytes.Decoded.Length);
             var artifact = await writer.CompleteAsync(completion, default);
-            var snapshot = new TableDataSnapshot(Request.ProductId, Request.BuildIdentity, Request.SourceRegion, table, "enUS", artifact.ContentKey,
+            var snapshot = TableDataStore.WithDefinitionFacts(new TableDataSnapshot(Request.ProductId, Request.BuildIdentity, Request.SourceRegion, table, "enUS", artifact.ContentKey,
                 Time, header.LayoutHash, definition.Sha256, binding.ProviderRevision, binding.DecoderRevision, source, association,
                 columns.Select(c => new TableDataColumn(c.Name, c.Kind, c.IsId, null)).ToArray(),
-                new("complete", "1", "1", "0", "0", "0", "0", "0", "0"), "1");
+                new("complete", "1", "1", "0", "0", "0", "0", "0", "0"), "1"), definition, Opening.Build.Version, bundled);
             return new(artifact, source, association, snapshot);
         }
         private async Task Publish(SourceFixture source)

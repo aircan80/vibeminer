@@ -139,7 +139,7 @@ function registerBridge(): void {
       return { ok: true, value };
     } catch (error) {
       const failure = error instanceof EngineFailure ? error : new EngineFailure('ENGINE_UNAVAILABLE', 'The local engine is unavailable. Restart VibeMiner to reconnect.', true);
-      return { ok: false, error: { code: failure.code, message: failure.message, retryable: failure.retryable } };
+      return { ok: false, error: { code: failure.code, message: failure.message, retryable: failure.retryable, ...(failure.definition ? { definition: { tableId: failure.definition.tableId, definitionFetch: failure.definition.definitionFetch } } : {}) } };
     }
   });
 }

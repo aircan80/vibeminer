@@ -3,10 +3,11 @@ using VibeMiner.Domain;
 
 namespace VibeMiner.Application;
 
-/// <summary>FetchedDefinitions is true only for the Tables view (D081): it may fetch and read with definitions from
-/// WoWDBDefs. Feature prerequisites leave it false and use bundled definitions only, with no network.</summary>
+/// <summary>FetchedDefinitions true means the definition is chosen by D081 and the Settings switch: the Tables view and
+/// every feature prerequisite set it (D101), so they read a table the same way. Feature names the feature asking, only so
+/// messages can say who needs the table; requests that differ only in Feature share one preparation.</summary>
 public sealed record TableDataRequest(string ProductId, string BuildIdentity, string SourceRegion,
-    string TableId, string ResearchLocale, bool FetchedDefinitions = false);
+    string TableId, string ResearchLocale, bool FetchedDefinitions = false, string? Feature = null);
 public sealed record TableRowsRequest(string ProductId, string BuildIdentity, string SourceRegion,
     string TableId, string ResearchLocale, string ArtifactId, int Limit = 50, string? After = null,
     string? RecordId = null);
@@ -71,7 +72,7 @@ public sealed class TableDataService(ITableDataStore store) : IAsyncDisposable
         lock (gate)
         {
             ThrowIfClosed();
-            if (active is not null && (active.Request != request || active.Stopping || active.Consumers >= MaximumConsumers))
+            if (active is not null && (active.Request with { Feature = null } != request with { Feature = null } || active.Stopping || active.Consumers >= MaximumConsumers))
                 throw new DiscoveryException("TABLE_DATA_BUSY", "Another table operation is active or stopping. Wait for it to finish before loading another table.", true);
             start = active is null;
             preparation = active ??= new(request);
@@ -186,7 +187,7 @@ public sealed class TableDataService(ITableDataStore store) : IAsyncDisposable
             request.SourceRegion.Length is < 2 or > 8 || request.SourceRegion.Any(ch => ch is < 'a' or > 'z'))
             throw Invalid();
         WorkspaceService.Validate(new(request.ProductId, request.BuildIdentity, request.SourceRegion));
-        if (!Hex(request.TableId, 8) || request.ResearchLocale != "enUS") throw Invalid();
+        if (!Hex(request.TableId, 8) || request.ResearchLocale != "enUS" || request.Feature is { Length: < 1 or > 32 }) throw Invalid();
     }
     public static void Validate(TableRowsRequest request)
     {
