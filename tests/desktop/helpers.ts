@@ -4,7 +4,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 export const root = fileURLToPath(new URL('../../', import.meta.url));
-export async function launch(fixtures = false, offlineEmpty = false, retention = false, items = false, icons = false, classifications: false|'class'|'subclass'=false, creatures=false,creatureDisplay=false,effects:false|true|'split'=false,referenceText=false,follow=false,fileCatalog=false,geometry=false) {
+export async function launch(fixtures = false, offlineEmpty = false, retention = false, items = false, icons = false, classifications: false|'class'|'subclass'=false, creatures=false,creatureDisplay=false,effects:false|true|'split'=false,referenceText=false,follow=false,fileCatalog=false,geometry=false,longProducts=false) {
   const data = await mkdtemp(path.join(tmpdir(), 'vibeminer-electron-'));
   const app = await electron.launch({
     args: [process.env.VIBEMINER_DESKTOP_TEST_APP_PATH??path.join(root, 'apps/desktop'), '--ozone-platform=headless', `--user-data-dir=${path.join(data, 'electron-profile')}`],
@@ -15,6 +15,7 @@ export async function launch(fixtures = false, offlineEmpty = false, retention =
       ...(items||icons||classifications||effects ? { VIBEMINER_FIXTURE_ITEMS: '1' } : {}),
       ...(creatures?{VIBEMINER_FIXTURE_CREATURES:'1'}:{}),
       ...(fileCatalog?{VIBEMINER_FIXTURE_FILE_CATALOG:'1'}:{}),
+      ...(longProducts?{VIBEMINER_FIXTURE_LONG_PRODUCTS:'1'}:{}),
       ...(creatureDisplay?{VIBEMINER_FIXTURE_CREATURE_DISPLAY:'1'}:{}),
       ...(geometry?{VIBEMINER_FIXTURE_CREATURE_GEOMETRY:'1'}:{}),
       ...(effects?{VIBEMINER_FIXTURE_EFFECTS:effects==='split'?'split':'1'}:{}),

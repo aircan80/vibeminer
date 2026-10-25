@@ -30,6 +30,12 @@ const tableManifest = JSON.parse(readFileSync(path.join(root, `src/backend/VibeM
 const tableEntries = tableManifest.map(entry => ({ tableId: entry.tableHash.toLowerCase(), name: entry.tableName ?? null, db2FileDataId: entry.db2FileDataID === undefined ? null : String(entry.db2FileDataID), definitionState: tableDefinitions[entry.tableHash.toLowerCase()] ? 'bundled' : 'notBundled', sourceState: 'notChecked', rowsState: 'notPrepared' })).sort((a, b) => Number(b.definitionState === 'bundled') - Number(a.definitionState === 'bundled') || (a.name ?? '').localeCompare(b.name ?? '', 'en', { sensitivity: 'base' }) || a.tableId.localeCompare(b.tableId));
 const offlineEmpty = process.env.VIBEMINER_FIXTURE_OFFLINE_EMPTY === '1';
 const saved = new Map(offlineEmpty ? [] : [['wow', { ...seed, connection: 'notChecked' }]]);
+// VIBEMINER_FIXTURE_LONG_PRODUCTS=1 (#52): two more products with long real-style ids, one saved build each, so list cells meet ids as long as wow_classic_era_ptr.
+const longProducts = process.env.VIBEMINER_FIXTURE_LONG_PRODUCTS === '1' ? [{ id: 'wow_classic_era_ptr', label: 'Classic Era PTR', description: 'Authored long product id' }, { id: 'wow_classic_beta', label: 'Classic Beta', description: 'Authored long product id' }] : [];
+for (const [index, product] of longProducts.entries()) {
+  const build = { ...structuredClone(seed.builds[0]), productId: product.id, id: String(index + 1).repeat(64) };
+  saved.set(product.id, { ...structuredClone(seed), productId: product.id, connection: 'notChecked', builds: [build] });
+}
 // VIBEMINER_FIXTURE_PERSIST=1 keeps saved observations in the control directory, so a relaunch sees them like a real catalog.
 const persisted = process.env.VIBEMINER_FIXTURE_PERSIST === '1' ? path.join(directory, 'persisted-catalog.json') : null;
 if (persisted && existsSync(persisted)) { saved.clear(); for (const [id, page] of JSON.parse(readFileSync(persisted, 'utf8'))) saved.set(id, page); }
@@ -75,7 +81,7 @@ function pageFor(productId, filter = 'all', limit = 50) {
   page.builds = page.builds.filter(b => filter === 'all' || filter === 'local' && b.isLocal || filter === 'advertised' && b.isAdvertised).slice(0, limit);
   return page;
 }
-const fixtureProducts = [{ id: 'wow', label: 'Retail', description: 'Authored discovery fixture' }, { id: 'wowt', label: 'Public Test Realm', description: 'Authored second product' }];
+const fixtureProducts = [{ id: 'wow', label: 'Retail', description: 'Authored discovery fixture' }, { id: 'wowt', label: 'Public Test Realm', description: 'Authored second product' }, ...longProducts];
 /** The authored outcome of checking one product: offline without history, wowt with a regional problem. */
 function checkedPage(productId) {
   // Per-product failure controls, shaped like the real engine: HTTP 500 on both documents saves partial with no

@@ -416,3 +416,152 @@ test('with nothing selected the inspector keeps its disabled actions pinned abov
     expect(layout.empty.bottom).toBeLessThanOrEqual(layout.foot.top + 1);
   } finally { await session.close(); }
 });
+
+test('in the shared scrolling area the first selection leaves the clicked row where it was (#52)', async () => {
+  for (const scale of [1.5, 2]) {
+    const session = await launch(true);
+    try {
+      const { page, app } = session;
+      const label = `600x480 at ${scale * 100}% text`;
+      await expect(page.locator('.build-row')).toHaveCount(2);
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(600, 480));
+      await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, 15 * scale);
+      await expect(page.locator('.dv-shared'), label).toHaveCount(1);
+      await expect(page.getByRole('listbox', { name: 'Builds' }).getByRole('option', { selected: true }), label).toHaveCount(0);
+      // The jump's slot is reserved but is no control yet: not visible, not focusable, not announced.
+      await expect(page.getByRole('button', { name: 'View selected build' }), label).toHaveCount(0);
+      const row = page.locator('.build-row').first();
+      await row.scrollIntoViewIfNeeded();
+      const before = await row.boundingBox();
+      // With nothing selected the page itself still never scrolls.
+      expect(await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.scrollHeight]), label).toEqual([600, 480]);
+      await row.click();
+      await expect(row, label).toHaveAttribute('aria-selected', 'true');
+      await expect(page.getByRole('button', { name: 'View selected build' }), label).toBeVisible();
+      const after = await row.boundingBox();
+      expect(Math.abs(after!.y - before!.y), label).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(after!.height - before!.height), label).toBeLessThanOrEqual(0.5);
+    } finally { await session.close(); }
+  }
+});
+
+test('nothing overlaps or is cut off from the smallest window to the reference sizes, at 100%, 150% and 200% text (#52)', async () => {
+  test.setTimeout(90_000);
+  // Two more products with long real-style ids (wow_classic_era_ptr, wow_classic_beta), so the Product column meets the longest ids.
+  const session = await launch(true, false, false, false, false, false, false, false, false, false, false, false, false, true);
+  try {
+    const { page, app, data } = session;
+    await expect(page.locator('.build-row')).toHaveCount(4);
+    // A measured build, so the Downloaded column shows a meter rather than a short word.
+    await page.locator('.build-row').first().click(); await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
+    await page.getByRole('button', { name: /Choose build/ }).click();
+    await writeFile(path.join(data, 'stored-summary.json'), JSON.stringify({ storedObjects: '30', storedBytes: '3000' }));
+    await expect(page.locator('.build-row').first()).toContainText('50%');
+    await page.locator('.build-row').first().click();
+    const base = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+    // What part of an element (and of its focus ring, with ring) every clipping ancestor, the toolbar and the status bar leave visible.
+    const visible = (selector: string, ring = false) => page.evaluate(([selector, ring]) => {
+      const element = document.querySelector<HTMLElement>(selector)!, r = element.getBoundingClientRect(), style = getComputedStyle(element);
+      const out = ring ? parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset) : 0;
+      let top = document.querySelector('.dv-toolbar')!.getBoundingClientRect().bottom, bottom = document.querySelector('.dv-statusbar')!.getBoundingClientRect().top;
+      for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        const clip = getComputedStyle(parent);
+        if (!/auto|scroll|hidden|clip/.test(`${clip.overflowY} ${clip.overflowX}`)) continue;
+        const inner = parent.getBoundingClientRect().top + parent.clientTop;
+        top = Math.max(top, inner); bottom = Math.min(bottom, inner + parent.clientHeight);
+      }
+      return { top: r.top - out, bottom: r.bottom + out, viewTop: top, viewBottom: bottom, thead: document.querySelector('.dv-thead')!.getBoundingClientRect().bottom };
+    }, [selector, ring] as const);
+    const whole = (fit: Awaited<ReturnType<typeof visible>>, what: string) => {
+      expect(fit.top, what).toBeGreaterThanOrEqual(fit.viewTop - 1);
+      expect(fit.bottom, what).toBeLessThanOrEqual(fit.viewBottom + 1);
+    };
+    for (const [width, height] of [[600, 480], [1280, 800], [1440, 1100]]) for (const scale of [1, 1.5, 2]) {
+      const label = `${width}x${height} at ${scale * 100}% text`, rem = base * scale;
+      // Stacked below 65.333333rem of width, two-line rows below 28rem, one shared scrolling area below 25rem of height.
+      const compact = width < 65.333333 * rem, expected = { compact, narrow: compact && width < 28 * rem, shared: compact && height < 25 * rem };
+      expect(expected.shared, label).toBe(width === 600 && scale > 1);
+      await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height), { width, height });
+      await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, rem);
+      // Wait for the window size, the new text size and the layout state that follows from both, not just the width.
+      await expect.poll(() => page.evaluate(() => ({ width: innerWidth, height: innerHeight, status: Math.round(document.querySelector('.dv-statusbar')!.getBoundingClientRect().height),
+        compact: !!document.querySelector('.dv-compact'), narrow: !!document.querySelector('.dv-narrow'), shared: !!document.querySelector('.dv-shared') })), label)
+        .toEqual({ width, height, status: Math.round(1.633333 * rem), ...expected });
+      await page.evaluate(() => { for (const element of document.querySelectorAll('.dv-body, .dv-pane, .dv-list, .dv-insp-body')) element.scrollTop = 0; });
+      await page.mouse.move(1, 1);
+      const layout = await page.evaluate(() => {
+        const box = (element: Element) => { const r = element.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; };
+        const one = (selector: string) => document.querySelector<HTMLElement>(selector)!;
+        const clipped = (element: HTMLElement) => element.scrollHeight > element.clientHeight + 1 || element.scrollWidth > element.clientWidth + 1;
+        const list = one('.dv-list'), listBox = list.getBoundingClientRect(), listRight = listBox.left + list.clientLeft + list.clientWidth;
+        // Every visible header and row cell, and everything inside it, stays within the list and is not cut short.
+        const cells = [...document.querySelectorAll<HTMLElement>('.dv-thead > span, .build-row > span')].filter(cell => getComputedStyle(cell).display !== 'none');
+        const cut = cells.flatMap(cell => [cell, ...cell.querySelectorAll<HTMLElement>('*')]).filter(element => element.getBoundingClientRect().width > 1)
+          .filter(element => { const r = element.getBoundingClientRect(); return r.right > listRight + 1 || r.left < listBox.left - 1 || element.matches('.dv-cols > span') && element.scrollWidth > element.clientWidth + 1; })
+          .map(element => element.textContent);
+        // Every element that actually scrolls, so the shared area can be checked to be the only one.
+        const scrollers = [...document.querySelectorAll<HTMLElement>('.dv-window *')].filter(element => {
+          const style = getComputedStyle(element);
+          return /auto|scroll/.test(style.overflowY) && element.scrollHeight > element.clientHeight + 1 || /auto|scroll/.test(style.overflowX) && element.scrollWidth > element.clientWidth + 1;
+        }).map(element => element.className);
+        const head = one('.dv-insp-head');
+        return {
+          scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight, cut, scrollers, products: cells.filter(cell => cell.matches('.dv-product')).map(cell => cell.textContent),
+          pane: box(one('.dv-pane')), inspector: box(one('.dv-inspector')), head: box(head), title: box(one('#inspector-heading')), product: box(one('.inspector-product')),
+          headClipped: clipped(head), footClipped: clipped(one('.dv-insp-foot')),
+        };
+      });
+      expect(layout.scrollWidth, label).toBeLessThanOrEqual(width);
+      expect(layout.scrollHeight, label).toBeLessThanOrEqual(height);
+      expect(layout.products, label).toEqual(['wow', 'wow', 'wow_classic_era_ptr', 'wow_classic_beta']);
+      expect(layout.cut, label).toEqual([]);
+      // The inspector sits beside or below the list pane, never over it, and its title and product line stay inside its header.
+      if (expected.compact) expect(layout.inspector.top, label).toBeGreaterThanOrEqual(layout.pane.bottom - 1);
+      else expect(layout.inspector.left, label).toBeGreaterThanOrEqual(layout.pane.right - 1);
+      for (const part of [layout.title, layout.product]) {
+        expect(part.top, label).toBeGreaterThanOrEqual(layout.head.top - 1);
+        expect(part.bottom, label).toBeLessThanOrEqual(layout.head.bottom + 1);
+      }
+      expect(layout.headClipped, label).toBe(false);
+      expect(layout.footClipped, label).toBe(false);
+      // In the shared area it is the only scroller; otherwise the area between toolbar and status bar never scrolls.
+      if (expected.shared) expect(layout.scrollers, label).toEqual(['dv-body']);
+      else expect(layout.scrollers, label).not.toContain('dv-body');
+      // Keyboard to the selected row: the whole row shows, below the list header.
+      await page.locator('#builds').focus();
+      await page.keyboard.press('Home');
+      await expect(page.locator('.build-row').first(), label).toHaveAttribute('aria-selected', 'true');
+      const row = await visible('.build-row[aria-selected="true"]');
+      whole(row, `selected row, ${label}`);
+      expect(row.top, `selected row below the list header, ${label}`).toBeGreaterThanOrEqual(row.thead - 1);
+      // Keyboard to Open build: its whole focus ring shows, clear of the status bar.
+      await page.locator('#opening-source').focus();
+      await page.keyboard.press('Tab');
+      await expect(page.locator('.dv-open'), label).toBeFocused();
+      expect(await page.locator('.dv-open').evaluate(element => element.matches(':focus-visible')), label).toBe(true);
+      whole(await visible('.dv-open', true), `Open build focus ring, ${label}`);
+      await page.screenshot({ path: path.join(root, `artifacts/electron-tests/discovery-fit-${width}x${height}-${scale * 100}.png`) });
+      // The shared area has a jump to the inspector and a return to the selected row; the other layouts show both at once and need neither.
+      const jump = page.getByRole('button', { name: 'View selected build', exact: true }), back = page.getByRole('button', { name: 'Return to build list', exact: true });
+      if (!expected.shared) { await expect(jump, label).toHaveCount(0); await expect(back, label).toHaveCount(0); continue; }
+      await page.evaluate(() => { document.querySelector('.dv-body')!.scrollTop = 0; });
+      await jump.focus(); await page.keyboard.press('Enter');
+      await expect(page.locator('#inspector-heading'), label).toBeFocused();
+      const jumped = await visible('#inspector-heading');
+      whole(jumped, `inspector heading after the jump, ${label}`);
+      expect(jumped.top, `inspector heading clear of the list header, ${label}`).toBeGreaterThanOrEqual(jumped.thead - 1);
+      await back.focus(); await page.keyboard.press('Enter');
+      await expect(page.getByRole('listbox', { name: 'Builds' }), label).toBeFocused();
+      const returned = await visible('.build-row[aria-selected="true"]');
+      whole(returned, `selected row after the return, ${label}`);
+      expect(returned.top, `returned row below the list header, ${label}`).toBeGreaterThanOrEqual(returned.thead - 1);
+      // Leaving the shared area while a jump control has focus hands focus to what it pointed at, never to the page.
+      await jump.focus();
+      await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, base);
+      await expect(jump, label).toHaveCount(0);
+      await expect(page.locator('#inspector-heading'), label).toBeFocused();
+    }
+  } finally { await session.close(); }
+});

@@ -444,6 +444,17 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
   const allFailed = attempted.length > 0 && completed.length === 0;
   const anySaved = statuses.some(s => s.hasSavedHistory);
   const nothingSaved = !!page && !reading && !page.builds.length && filter === 'all' && productFilter === 'all' && !anySaved;
+  // Shared area (#52): the inspector's top edge goes to the top of the area, past the list and its sticky header, and its heading takes focus.
+  function viewSelected() {
+    const area = document.querySelector<HTMLElement>('.dv-body'), inspector = document.getElementById('inspector'), heading = document.getElementById('inspector-heading');
+    if (area && inspector) area.scrollTop += inspector.getBoundingClientRect().top - area.getBoundingClientRect().top - area.clientTop;
+    heading?.focus({ preventScroll: true });
+  }
+  // Shared area (#52): back from the inspector to the selected row, or to the list when that row is filtered out.
+  function returnToList() {
+    const row = selectedId ? document.getElementById(`build-option-${selectedId}`) : null, list = document.getElementById('builds');
+    if (list) { (row ?? list).scrollIntoView({ block: 'nearest' }); list.focus({ preventScroll: true }); } else { const heading = document.getElementById('builds-heading'); heading?.scrollIntoView({ block: 'start' }); heading?.focus({ preventScroll: true }); }
+  }
   function listKey(event: KeyboardEvent<HTMLDivElement>) {
     if ((event.key === 'Enter' || event.key === ' ') && filtered.length) { event.preventDefault(); select(filtered[activeIndex]); return; }
     const from = filtered.some(b => b.id === selectedId) ? activeIndex : -1;
@@ -479,9 +490,17 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
   const summary = activity_ && activity_.entry && !activity_.expanded ? activity_.summary : null;
   const windowRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLElement>(null), statusRef = useRef<HTMLElement>(null);
   // Text-relative breakpoint, evaluated here because Chromium does not always re-run rem container queries when only the root text size changes.
-  const [compact, setCompact] = useState(false);
+  // Narrow (#52): below 28rem the four compact columns no longer fit, so each row takes two lines.
+  // Shared (#52): a stacked window under 25rem tall can't hold the list and the inspector at once, so both take their natural height in one scrolling area.
+  const [compact, setCompact] = useState(false), [narrow, setNarrow] = useState(false), [shared, setShared] = useState(false);
   useLayoutEffect(() => {
-    const measure = () => { const host = windowRef.current; if (host) setCompact(host.clientWidth < 65.333333 * parseFloat(getComputedStyle(document.documentElement).fontSize)); };
+    const measure = () => {
+      const host = windowRef.current; if (!host) return;
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize), stacked = host.clientWidth < 65.333333 * rem, together = stacked && host.clientHeight < 25 * rem;
+      // The jump and return controls exist only in the shared area. If one of them has focus as it goes, focus moves to what it pointed at.
+      if (!together) { const focused = document.activeElement; if (focused?.matches('.dv-jump')) document.getElementById('inspector-heading')?.focus({ preventScroll: true }); else if (focused?.matches('.dv-return')) (document.getElementById('builds') ?? document.getElementById('builds-heading'))?.focus({ preventScroll: true }); }
+      setCompact(stacked); setNarrow(host.clientWidth < 28 * rem); setShared(together);
+    };
     measure();
     const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     if (windowRef.current) resize?.observe(windowRef.current);
@@ -533,7 +552,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
     if (completed.length) return ['No builds advertised', `No builds were advertised by the checked products at ${stamp(latestCheck)}.${failedNames}`];
     return ['No saved builds yet', "Refresh builds checks Blizzard's official version service for every World of Warcraft product."];
   })();
-  return <div className={`dv-window${compact ? ' dv-compact' : ''}`} ref={windowRef}>
+  return <div className={`dv-window${compact ? ' dv-compact' : ''}${compact && narrow ? ' dv-narrow' : ''}${shared ? ' dv-shared' : ''}`} ref={windowRef}>
     <header className="dv-toolbar" ref={toolbarRef}>
       <div className="dv-brand"><img src={brand} alt="VibeMiner"/><span className="dv-word" aria-hidden="true">Vibe<span>Miner</span></span></div>
       {fixtureLabel && <span className="dv-fixture"><strong>{fixtureLabel}</strong><span> · Synthetic identities and receipts.</span></span>}
@@ -549,13 +568,15 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
           <select id="product-filter" className="dv-control dv-product-filter" aria-label="Product" value={productFilter} disabled={nothingSaved || refused} onChange={e => changeProduct(e.target.value)}><option value="all">All products</option>{products.map(p => <option value={p.id} key={p.id}>{p.id} · {p.label}</option>)}</select>
           <div className="dv-segmented" role="group" aria-label="Build visibility">{(['all', 'local', 'advertised'] as const).map(f => <button key={f} id={`visibility-${f}`} aria-pressed={filter === f} disabled={nothingSaved || refused} onClick={() => changeFilter(f)}>{f === 'all' ? 'All' : f === 'local' ? 'Prepared' : 'Current'}</button>)}</div>
           {!refused && <button ref={refreshButton} className="dv-btn dv-refresh" aria-keyshortcuts="F5" onClick={() => { if (busy) void cancel(); else void refresh(); }} aria-disabled={stopping}>{!stopping && <span aria-hidden="true">{busy ? '✕' : '↻'}</span>}{refreshLabel}</button>}
+          {/* Its slot stays reserved in the shared area, so the first selection doesn't move the rows under the pointer. */}
+          {shared && <button className={`dv-btn dv-jump${selected ? '' : ' dv-reserved'}`} onClick={viewSelected} disabled={!selected} aria-hidden={!selected || undefined}>View selected build</button>}
         </div>
         {notices}
         <div className={`dv-list${notices.props.children.some(Boolean) ? '' : ' flush'}`} aria-busy={reading}>
           {filtered.length > 0 && <>
             <div className="dv-cols dv-thead" aria-hidden="true"><span>Product</span><span>Version</span><span>Build</span>{summaryProblem ? <span className="dv-stale-head">Downloaded<span className="dv-stale-tag">not current</span></span> : <span>Downloaded</span>}<span>In VibeMiner</span></div>
             <div role="listbox" id="builds" aria-label="Builds" tabIndex={0} aria-activedescendant={`build-option-${filtered[activeIndex].id}`} onKeyDown={listKey}>{filtered.map(build => <div role="option" key={build.id} id={`build-option-${build.id}`} data-build-id={build.id} data-product-id={build.productId} className={`dv-cols build-row${filtered[activeIndex].id === build.id ? ' active' : ''}${build.isAdvertised ? ' current' : ''}`} aria-selected={selectedId === build.id} onClick={() => select(build)}>
-              <span className="dv-product">{build.productId}</span>
+              <span className="dv-product">{build.productId.split('_').map((part, index) => index ? <Fragment key={index}>_<wbr/>{part}</Fragment> : part)}</span>
               <span className="dv-version">{build.version || 'Version not supplied'}{build.isAdvertised && <span className="dv-pill current">Current</span>}<span className="visually-hidden">, Config {short(build.buildConfig)}, Identity {short(build.id)}</span></span>
               <span className="dv-dim"><span className="visually-hidden">Build </span>{build.buildId || 'not supplied'}</span>
               <DownloadedCell summary={summaryOf(build)} stale={!!summaryProblem}/>
@@ -568,7 +589,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
         </div>
       </section>
       {!refused && !(nothingSaved && !selected) && <aside className="dv-inspector" id="inspector" aria-labelledby="inspector-heading" inert={!!activity_?.expanded}>{selected ? <>
-        <div className="dv-insp-head"><div className="dv-label">Selected build</div><h2 id="inspector-heading" className="dv-selectable">{selected.version}</h2><p className="inspector-product">World of Warcraft · {label(selected.productId) || selected.productId} · <code>{selected.productId}</code></p></div>
+        <div className="dv-insp-head"><div className="dv-label">Selected build</div><h2 id="inspector-heading" className="dv-selectable" tabIndex={-1}>{selected.version}</h2><p className="inspector-product">World of Warcraft · {label(selected.productId) || selected.productId} · <code>{selected.productId}</code></p>{shared && <button className="dv-btn dv-return" onClick={returnToList}>Return to build list</button>}</div>
         <div className="dv-insp-body">
           {openingHere ? openingBox(openingHere) : <div className="dv-state"><strong>{selected.isLocal ? 'Prepared locally' : 'Not prepared'}</strong>{selected.isLocal ? summaryOf(selected)?.download?.downloadAll ? 'Local evidence recorded. Download all is on for this build.' : 'Local evidence recorded. Game content downloads on demand.' : 'Opening verifies configs and measures download size.'}</div>}
           <div className="dv-label">Identity</div>
