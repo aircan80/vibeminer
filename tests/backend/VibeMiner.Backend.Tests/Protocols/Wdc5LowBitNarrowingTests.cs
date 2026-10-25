@@ -31,7 +31,7 @@ public sealed class Wdc5LowBitNarrowingTests
 
     [Theory]
     [InlineData("<u16>",0x20005ul,0x21234ul,"5","4660")]
-    [InlineData("<16>",0xd1fffful,0xd0005ul,"-1","5")]
+    [InlineData("<16>",0xdfffful,0xd0005ul,"-1","5")]
     public async Task Common_default_and_override_values_keep_their_low_bits(string schema,ulong fallback,ulong value,string first,string second)
     {
         // Record 1 reads the common default, record 2 its override.
@@ -52,6 +52,39 @@ public sealed class Wdc5LowBitNarrowingTests
         var sink=new Sink();await Read(Fixture(4,32,[0x40001,0x40002,0x40003,4],"<u8>",array:2),sink);
         Assert.Equal(["1","1","2"],sink.Rows[0].Values);Assert.Equal(["2","3","4"],sink.Rows[1].Values);
         Assert.Equal(sink.Header!.Columns[1].Narrowing,sink.Header.Columns[2].Narrowing);Assert.NotNull(sink.Header.Columns[2].Narrowing);
+    }
+
+    // #56: narrowing is only for one constant upper-bit pattern per column; varying upper bits stay a mismatch, before Header.
+    [Fact]
+    public async Task One_constant_upper_pattern_narrows_even_among_values_that_fit()
+    {
+        // The fixture's one-bit pallet index reads entries 0 and 1; selection still checks every pallet entry.
+        var sink=new Sink();await Read(Fixture(3,32,[0x780107,5,0x7801ff,0],"<u8>"),sink);
+        Assert.Equal(["7","5","7","5"],sink.Rows.Select(r=>r.Values[1]));
+        Assert.Equal(new Db2ValueNarrowing(32,8),sink.Header!.Columns[1].Narrowing);
+    }
+
+    [Theory]
+    [InlineData(3,"<u8>",new ulong[]{0x780107,0x790105},"pallet","unsigned8","2 different patterns above bit 8 (0x780100, 0x790100)")]
+    [InlineData(3,"<8>",new ulong[]{0x2ff,0x1ff,0xffffffff},"pallet","signed8","2 different patterns above bit 8 (0x100, 0x200)")]
+    [InlineData(2,"<u16>",new ulong[]{0x20005,0x30005},"common","unsigned16","2 different patterns above bit 16 (0x20000, 0x30000)")]
+    [InlineData(4,"<u8>",new ulong[]{0x40001,0x40002,0x50003,4},"pallet array","unsigned8","2 different patterns above bit 8 (0x40000, 0x50000)")]
+    [InlineData(3,"<u16>",new ulong[]{0x10000,0x20000,0x30000,0x40000,0x50000,0x60000},"pallet","unsigned16","at least 4 different patterns above bit 16 (0x10000, 0x20000, 0x30000, 0x40000)")]
+    public async Task Varying_upper_bits_are_refused_before_any_row_naming_the_field_and_patterns(uint kind,string schema,ulong[] values,string storage,string width,string patterns)
+    {
+        var sink=new Sink();
+        var error=await Assert.ThrowsAsync<DiscoveryException>(()=>Read(Fixture(kind,32,values,schema,array:kind==4?2:1),sink));
+        Assert.Equal("DB2_SCHEMA_MISMATCH",error.Code);Assert.Null(sink.Header);Assert.Empty(sink.Rows);
+        Assert.Equal($"Field 'Value' stores 32-bit {storage} values that don't fit its {width}-bit definition width with {patterns}; only one constant pattern is narrowed, so the definition may be too narrow.",error.Message);
+    }
+
+    [Fact]
+    public async Task Varying_upper_bits_on_unverified_names_and_exact_rules_keep_their_raw_evidence()
+    {
+        var unverified=new Sink();await Read(Fixture(3,32,[0x780107,0x790105],"<u8>",unverified:true),unverified);
+        Assert.Equal(["7864583","7930117"],unverified.Rows.Select(r=>r.Values[1]));Assert.Null(unverified.Header!.Columns[1].Narrowing);
+        var f=Fixture(3,32,[0x780107,0x790105],"<u8>");var rule=new Sink();await Read(f,rule,Evidence(f));
+        Assert.Equal(["7864583","7930117"],rule.Rows.Select(r=>r.Values[1]));Assert.NotNull(rule.Header!.Columns[1].Interpretation);
     }
 
     [Theory]

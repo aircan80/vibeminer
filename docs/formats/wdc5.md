@@ -81,7 +81,8 @@ Pallet blocks are laid out kind 3 first, then kind 4, in field order; common dat
 - Pallet and Common values are 32-bit. The record holds an index; the index width is not the value width.
 - Inline storage (None, Bitpacked, Bitpacked signed) narrows to the DBD width only when the dropped high bits are a canonical sign extension. Otherwise `DB2_SCHEMA_MISMATCH`: the record gives the field exactly those bits, so a value that doesn't fit is corruption.
 - Pallet and Common narrow by keeping the low bits ([D079](../DECISIONS.md)). When a verified non-ID, non-relationship integer field is narrower than 32 bits and any of its pallet or common values (the common default included) doesn't fit, the whole column keeps the low bits at the DBD width, signed or unsigned per the DBD, and its `Db2Column` carries `Narrowing` (32 stored bits, N used bits). It is chosen once the auxiliary blocks are loaded, before Header and before any row. A column whose values all fit gets no marker and reads exactly as before. Raw evidence (below) wins over narrowing; IDs and relationship keys stay strict.
-- Examples: None8 `0xff` read as DBD signed32 is 255; as DBD signed8 it is −1. None32 `0x100` into unsigned8 fails. Kind 5 2-bit −1 into DBD unsigned8 is 255. Pallet `0x780107` into verified unsigned8 is 7; pallet `0x2ff` into verified signed8 is −1; pallet `0xffffffff` into signed8 is −1 with no marker, since it fits as a sign extension.
+- Narrowing needs one constant upper-bit pattern ([D087](../DECISIONS.md)). Every misfit value in the column (fitting values are ignored) must have the same bits above the DBD width, `value >> width`. If two differ, the definition may simply be too narrow, so the table fails with `DB2_SCHEMA_MISMATCH` before Header. The message names the field, its storage (pallet, pallet array or common), the DBD width and sign, and the patterns seen as `value & ~mask`, sorted, at most 4 (`at least 4` when the scan stopped there). Every Classic case seen has exactly one pattern per column.
+- Examples: None8 `0xff` read as DBD signed32 is 255; as DBD signed8 it is −1. None32 `0x100` into unsigned8 fails. Kind 5 2-bit −1 into DBD unsigned8 is 255. Pallet `0x780107` into verified unsigned8 is 7; pallet `0x2ff` into verified signed8 is −1; pallet `0xffffffff` into signed8 is −1 with no marker, since it fits as a sign extension. Pallet `0x780107` and `0x790105` together into unsigned8 fail (patterns `0x780100`, `0x790100`).
 - Floats need exactly 32 physical bits and must be finite.
 - Fixed-record strings are 32-bit relative offsets into the concatenated string tables. 0 is the empty string. A string in a keyed section is `DB2_ENCRYPTED`. Strings are strict UTF-8, bounded at 65,536 bytes.
 
@@ -106,13 +107,14 @@ For Charges, half the pallet values are canonical signed16 extensions and half a
 
 These retail rules predate D079 and are kept so retail values and the Item effect evidence don't change. The same retail fields show the pattern D079 narrows (NPCSoundID `0x20000+n`, ObjectEffectPackageID `0x560000+n`, SpellCategoryID `0x30000+n`); retiring a rule would let it narrow instead, and changes that table's values.
 
-Known pallet/common fields that narrow (D079), all verified names with a pinned matching block:
+Known pallet/common fields that narrow (D079), all verified names with a pinned matching block and one upper-bit pattern each:
 
 | Build / table, layout | Fields | Stored | DBD |
 | --- | --- | --- | --- |
 | 5.5.4.67849 Item `39911A3F` | Sound_override_subclassID (`0x200+n`), ItemGroupSoundsID (`0x780100+n`), DamageType[5] (`0x40000+n`) | Pallet / pallet array 32 | signed8, unsigned8, unsigned8 |
 | 5.5.4.67849 CreatureDisplayInfo `F75F884C` | CreatureModelAlpha, BloodID (`0x1100+n`), NPCSoundID (`0x20000+n`), ObjectEffectPackageID, AnimReplacementSetID (`0xd0000+n`) | Common / pallet 32 | unsigned8 ×2, unsigned16 ×3 |
 | 5.5.4.67849 ItemEffect `1BF9CF3A` | SpellCategoryID (`0x70000+n`) | Pallet 32 | unsigned16 |
+| 5.5.4.70579 Item, CreatureDisplayInfo, ItemEffect | Same fields as 5.5.4.67849 | as above | as above |
 | 2.5.6.70006 Item `39911A3F` | AmmunitionType (`0x100+n`) | Pallet 32 | unsigned8 |
 | 2.5.6.70006 CreatureDisplayInfo `F75F884C`, ItemEffect `1BF9CF3A` | Same fields as 5.5.4.67849 | Common / pallet 32 | as above |
 

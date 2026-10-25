@@ -200,7 +200,7 @@ public sealed class ItemEffectAdmissionTests
 
     [Theory]
     [InlineData("layout", "DB2_SCHEMA_MISSING")]
-    [InlineData("table", "TABLE_IDENTITY_MISMATCH")] // Without the rule the values narrow (D079); the header still isn't this table.
+    [InlineData("table", "DB2_SCHEMA_MISMATCH")] // Without the rule Charges' upper bits vary (65536, 0x80000000), so it can't narrow (D087).
     [InlineData("kind", "DB2_SCHEMA_MISMATCH")]
     [InlineData("palette", "DB2_INVALID")]
     public async Task Actual_production_profile_does_not_relax_unmatched_or_malformed_metadata(string defect, string code)
@@ -211,17 +211,17 @@ public sealed class ItemEffectAdmissionTests
     }
 
     [Fact]
-    public async Task Original_pure_reader_narrows_without_the_adapter_rule_and_keeps_canonical_signed_cases()
+    public async Task Original_pure_reader_refuses_varying_upper_bits_without_the_adapter_rule_and_keeps_canonical_signed_cases()
     {
         await using var h = await Harness.Create(false);
         var sink = new Sink(); var strictBytes = h.Payload.Decoded.ToArray();
         var start = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(strictBytes.AsSpan(212)));
         Put(strictBytes, start + 8, 2); // First row chooses the authored noncanonical Charges palette entry 65536.
         using var input = new MemoryStream(strictBytes);
-        // Without the exact retail rule D079 keeps the low 16 bits, and says so on the column.
-        await Wdc5TableReader.ReadAsync(input, h.Definition.Document, Version, new(), sink);
-        Assert.Equal("0", sink.Rows[0].Values[3]);
-        Assert.Equal(new Db2ValueNarrowing(32, 16), sink.Header!.Columns[3].Narrowing); Assert.Null(sink.Header.Columns[3].Interpretation);
+        // Without the exact retail rule, Charges' misfit pallet values carry two upper-bit patterns, so D087 refuses it before Header.
+        var failure = await Assert.ThrowsAsync<DiscoveryException>(() => Wdc5TableReader.ReadAsync(input, h.Definition.Document, Version, new(), sink));
+        Assert.Equal("DB2_SCHEMA_MISMATCH", failure.Code); Assert.Contains("'Charges'", failure.Message); Assert.Contains("(0x10000, 0x80000000)", failure.Message);
+        Assert.Null(sink.Header); Assert.Empty(sink.Rows);
         // The adapter opt-in preserves even canonical-negative bits as raw uint32, tested above.
         // A separate strict all-fit source proves the unchanged candidate signed16 decoding path.
         var payload = Table(h.Definition, Effect, "4CA77678", false, true, null);

@@ -28,7 +28,11 @@ public static partial class Wdc5TableReader
         var mask=(1u<<width)-1;if(value<=mask)return true;
         return !unsigned&&value==unchecked((uint)Signed(value&mask,width));
     }
+    // At most this many distinct upper-bit patterns are collected per column; more than one already refuses it.
+    private const int ReportedUpperPatterns=4;
     // Selected once the pallet and common values are loaded and before Header, never from the rows that happen to be read.
+    // D087 (#56): only a column whose misfit values all carry the same bits above the definition width narrows. That is
+    // the constant junk Classic files store; varying upper bits mean the definition may be too narrow, so it stays a mismatch.
     private static bool SelectLowBitNarrowing(IReadOnlyList<BoundField> fields,Storage[] storage,CancellationToken token)
     {
         var any=false;
@@ -37,12 +41,30 @@ public static partial class Wdc5TableReader
             if(bound.Source!=FieldSource.Physical||bound.StorageIndex<0)continue;
             var column=storage[bound.StorageIndex];var field=bound.Field;
             if(!NarrowsToLowBits(column,field))continue;
-            var width=field.IntegerBits??32;var unsigned=field.Unsigned==true;var seen=0;
-            bool Misfit(uint value){if((++seen&4095)==0)token.ThrowIfCancellationRequested();return !FitsDefinition(value,width,unsigned);}
-            column.KeepsLowBits=column.Kind==2?Misfit(column.P1)||column.Common!.Values.Any(Misfit):column.Palette.Any(Misfit);
+            var width=field.IntegerBits??32;var unsigned=field.Unsigned==true;var seen=0;var patterns=new List<uint>(ReportedUpperPatterns);
+            // Returns false once enough patterns are collected to refuse the column.
+            bool Observe(uint value)
+            {
+                if((++seen&4095)==0)token.ThrowIfCancellationRequested();
+                if(FitsDefinition(value,width,unsigned))return true;
+                var upper=value>>width;if(!patterns.Contains(upper))patterns.Add(upper);
+                return patterns.Count<ReportedUpperPatterns;
+            }
+            if(column.Kind==2){if(Observe(column.P1))foreach(var value in column.Common!.Values)if(!Observe(value))break;}
+            else foreach(var value in column.Palette)if(!Observe(value))break;
+            if(patterns.Count>1)throw VaryingUpperBits(field,column.Kind,width,unsigned,patterns);
+            column.KeepsLowBits=patterns.Count==1;
             any|=column.KeepsLowBits;
         }
         return any;
+    }
+    private static VibeMiner.Domain.DiscoveryException VaryingUpperBits(DbdField field,uint kind,int width,bool unsigned,List<uint> patterns)
+    {
+        var shown=string.Join(", ",patterns.Order().Select(upper=>"0x"+(upper<<width).ToString("x",System.Globalization.CultureInfo.InvariantCulture)));
+        var count=(patterns.Count<ReportedUpperPatterns?"":"at least ")+patterns.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var storage=kind==2?"common":kind==4?"pallet array":"pallet";
+        return Fail("SCHEMA_MISMATCH",$"Field '{field.Column.Name}' stores 32-bit {storage} values that don't fit its {(unsigned?"unsigned":"signed")}{width}-bit definition width"
+            +$" with {count} different patterns above bit {width} ({shown}); only one constant pattern is narrowed, so the definition may be too narrow.");
     }
     private static Db2ValueNarrowing? LowBitNarrowing(Storage storage,DbdField field)=>
         storage.KeepsLowBits?new(32,field.IntegerBits??32):null;
