@@ -4,37 +4,41 @@
     "artifactId": "7777777777777777777777777777777777777777777777777777777777777777",
     "bindingSha256": "8888888888888888888888888888888888888888888888888888888888888888",
     "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
-    "byteLength": 332,
-    "formatVersion": 1,
+    "byteLength": 444,
+    "formatVersion": 2,
     "headerBytes": 160,
     "coordinatePolicy": "native-m2-position-normal-uv-winding-v1",
     "vertexCount": 4,
     "indexCount": 3,
     "drawCount": 1,
-    "textureCount": 1,
+    "textureCount": 2,
     "positions": {
       "offset": 160,
       "byteLength": 48
     },
-    "uvs": {
+    "normals": {
       "offset": 208,
+      "byteLength": 48
+    },
+    "uvs": {
+      "offset": 256,
       "byteLength": 32
     },
     "indices": {
-      "offset": 240,
+      "offset": 288,
       "byteLength": 12
     },
     "draws": {
-      "offset": 252,
-      "byteLength": 32
+      "offset": 300,
+      "byteLength": 48
     },
     "textures": {
-      "offset": 284,
-      "byteLength": 32
+      "offset": 348,
+      "byteLength": 64
     },
     "texels": {
-      "offset": 316,
-      "byteLength": 16
+      "offset": 412,
+      "byteLength": 32
     },
     "bounds": {
       "min": [
@@ -51,10 +55,10 @@
     "alphaReference": 128,
     "displayId": 23,
     "geometryBindingSha256": "5555555555555555555555555555555555555555555555555555555555555555",
-    "materialPolicy": "m2-single-texture-opaque-alphakey-v1",
+    "materialPolicy": "m2-one-or-two-stage-combiners-v1",
     "texturePolicy": "blp2-largest-mip-within-1024-rgba8-v1",
     "readerRevision": "m2-appearance-batches-v1",
     "decoderRevision": "blp2-rgba8-v2",
-    "artifactRevision": "model-appearance-vma1-v1"
+    "artifactRevision": "model-appearance-vma1-v2"
   }
 }

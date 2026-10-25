@@ -1,6 +1,6 @@
 # Selected Creature geometry v1
 
-Capability `creature-source-geometry-v1` turns one explicitly selected Creature display slot into a verified [VMG1 geometry artifact](geometry-vmg1-v1.md): the model's native vertex positions and the triangle edges of its main SKIN, as a line set. It is a diagnostic source-geometry view. Pose and visibility are always `notEvaluated`. When the display's texture chain is ready the same result also carries a [VMA1 textured appearance](geometry-vma1-v1.md), drawn instead of the lines ([appearance](#appearance), D088–D091).
+Capability `creature-source-geometry-v1` turns one explicitly selected Creature display slot into a verified [VMG1 geometry artifact](geometry-vmg1-v1.md): the model's native vertex positions and the triangle edges of its main SKIN, as a line set. It is a diagnostic source-geometry view. Pose and visibility are always `notEvaluated`. When the display's texture chain is ready the same result also carries a [VMA1 textured appearance](geometry-vma1-v2.md), drawn instead of the lines ([appearance](#appearance), D088–D091).
 
 The Host composes the geometry service in `Program.cs` and the Creatures area offers it as a Geometry step on resolved slot metadata ([D083](../docs/DECISIONS.md)).
 
@@ -66,10 +66,10 @@ Prepare progress keeps the normal envelope (honest label, unit `stage`/`bytes`/`
 
 Policy `creature-textured-appearance-v1`. It runs inside the same Prepare, on the same verified model and SKIN bytes and the same asset handle, after the geometry pair is sealed. No appearance outcome changes the geometry state; a non-ready appearance leaves the VMG1 lines drawn.
 
-Texture chain, per drawn batch ([m2-skin.md](../docs/formats/m2-skin.md#single-texture-appearance-profile)):
+Texture chain, per texture stage of each drawn batch ([m2-skin.md](../docs/formats/m2-skin.md#textured-appearance-profile)). A batch draws one or two stages with a supported combiner ([combiner notes](../docs/formats/m2-skin.md#combiner-notes)); batches with blend mode 2–7 are blended layers, counted and not drawn (D094):
 
 1. `CreatureDisplayInfo.ExtendedDisplayInfoID` ≠ 0 → `characterModel` (baked CreatureDisplayInfoExtra textures are not resolved).
-2. The batch's `TextureCombos[TextureComboIndex]` names one texture ordinal. Type 0 → `TXID[ordinal]`; types 11, 12, 13 → `TextureVariationFileDataID[0]`, `[1]`, `[2]` of the same admitted display row (all four positions are read with the ModelID edge). A zero FileDataID is `textureUnresolved`, naming the ordinal; nothing is substituted.
+2. Stage *i* reads `TextureCombos[TextureComboIndex + i]`, which names one texture ordinal. Type 0 → `TXID[ordinal]`; types 11, 12, 13 → `TextureVariationFileDataID[0]`, `[1]`, `[2]` of the same admitted display row (all four positions are read with the ModelID edge). A zero FileDataID is `textureUnresolved`, naming the ordinal; nothing is substituted.
 3. Each distinct FileDataID is resolved through the open handle under `all-root-variants-consistent-asset-v1`, acquired at interactive priority (≤ 16 MiB encoded and decoded) and fully BLTE-verified. Its mip descriptors fix one level per image first: the largest ≤ 1,024 px each side, stepped down largest first while the slots exceed 8 MiB ([blp.md](../docs/formats/blp.md#model-textures)); each image is then decoded once at that level.
 4. The VMA1 artifact is built into ≤ 10 MiB staging, verified, published to CAS and fenced in one transaction with the geometry locator, the CDI/CMD admissions and the known invalidity of the VMA1 file and every texture source.
 
@@ -77,8 +77,8 @@ Texture chain, per drawn batch ([m2-skin.md](../docs/formats/m2-skin.md#single-t
 | --- | --- |
 | `policy`, `state` | Fixed policy; state below |
 | `display` | The display ID, ExtendedDisplayInfoID and four TextureVariationFileDataID values read; null if the row cannot supply them |
-| `textures` | One entry per drawn texture ordinal: `ordinal`, `type`, `binding` (`txid`/`variation`), `variation`, `fileDataId` (null when zero), `state`, and for `decoded` the chosen `image` (size, mip, base size, encoding) and verified `source` receipt |
-| `effects` | Counts of particles, ribbons, lights, shadow batches and sections without a batch; `evaluation: notDrawn` |
+| `textures` | One entry per drawn texture ordinal, over all stages: `ordinal`, `type`, `binding` (`txid`/`variation`), `variation`, `fileDataId` (null when zero), `state`, and for `decoded` the chosen `image` (size, mip, base size, encoding) and verified `source` receipt |
+| `effects` | Counts of particles, ribbons, lights, shadow batches, sections without a batch, `blendedBatches` (blend 2–7 layers) and `envTransforms` (env-map stages drawn without their UV animation); `evaluation: notDrawn` |
 | `manifest` | VMA1 manifest, only for `ready` |
 | `problem` | `code`, `message`, `retryable`, optional `batchOrdinal` and `textureOrdinal` |
 
@@ -87,7 +87,7 @@ Texture chain, per drawn batch ([m2-skin.md](../docs/formats/m2-skin.md#single-t
 | `notPrepared` | No retained appearance (Read only); the desktop then Prepares once | — |
 | `ready` | Every drawn texture decoded; VMA1 verified | yes |
 | `characterModel` | ExtendedDisplayInfoID ≠ 0 | yes |
-| `multiTexture`, `blendUnsupported`, `textureWeight`, `textureTransform`, `materialUnsupported` | The first refused batch, in SKIN order (`batchOrdinal`) | yes |
+| `multiTexture`, `combinerUnsupported`, `blendUnsupported`, `textureWeight`, `textureTransform`, `materialUnsupported` | The first refused batch, in SKIN order (`batchOrdinal`): more than two stages; a combiner that is not drawn (the message names the pixel and vertex shader and shader ID); an unknown blend mode, or only blended layers left; an animated opacity; a UV stage's animated transform; anything else outside the profile | yes |
 | `textureUnresolved` | A zero TXID entry or display variation (`textureOrdinal`), or an unreadable display row | yes |
 | `textureMissing`, `textureAmbiguous` | No ROOT membership or encoding; memberships disagree | no |
 | `textureProtected`, `textureUnsupported`, `textureCorrupt`, `textureUnavailable` | Encrypted; BLP variant outside the decoder; integrity failure; CDN or storage unavailable | no |
@@ -96,7 +96,7 @@ Texture chain, per drawn batch ([m2-skin.md](../docs/formats/m2-skin.md#single-t
 
 Retained outcomes depend only on the verified model, SKIN and display row and the revisions, so they are stored in `geometry_appearances` (catalog version 19), keyed by the geometry locator, the CDI rows artifact, row and texture fields and every revision. A ready geometry is reused only with its retained appearance; otherwise Prepare produces both again from local CAS. Read re-verifies a retained VMA1 fully; missing bytes read as `notPrepared`, same-size corruption as `corrupt`.
 
-Particles and ribbons do not block texturing (D090): they are counted and not drawn. Lights, shadow batches, geosets and colour/alpha animation are not drawn or evaluated either.
+Particles, ribbons (D090) and blended layers (D094) do not block texturing: they are counted and not drawn. Lights, shadow batches, geosets, colour/alpha animation and env-map UV animation are not drawn or evaluated either.
 
 ### Float32 bounds
 
@@ -157,7 +157,7 @@ Flow:
 
 Body request rules: GET only; `Range` → 416; credential headers → 403; no query, fragment or aliases. Response: `application/octet-stream`, exact `Content-Length`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Access-Control-Allow-Origin: null`, `Vary: Origin`. Scheme privileges: standard, secure, `supportFetchAPI`, `corsEnabled`; no CSP bypass or service workers.
 
-Desktop presentation budget: 16 MiB of reachable app buffers and graphics reservations for VMG1 (8 MiB canvas surfaces + 2 MiB each for snapshot, response, received buffer and margin while fetching). A VMA1 body raises it to 48 MiB: 8 MiB canvas, 10 MiB snapshot, 10 MiB received buffer, up to 11 MiB of mipmapped texture and 2 MiB of buffer uploads, plus margin. It is accounting, not a Chromium or driver memory cap. The canvas backing store is its displayed size × devicePixelRatio at the camera's fixed 4:3, between 64×48 and 836×627 pixels, so 16 bytes per pixel (two colour buffers, depth, one compositor copy) stays within the 8 MiB canvas share. Resizing changes only the backing store; the camera fit is unchanged.
+Desktop presentation budget: 16 MiB of reachable app buffers and graphics reservations for VMG1 (8 MiB canvas surfaces + 2 MiB each for snapshot, response, received buffer and margin while fetching). A VMA1 body raises it to 48 MiB: 8 MiB canvas, 10 MiB snapshot, 10 MiB received buffer, up to 11 MiB of mipmapped texture and 2.5 MiB of buffer uploads with normals (positions, normals, UVs and indices), plus margin. It is accounting, not a Chromium or driver memory cap. The canvas backing store is its displayed size × devicePixelRatio at the camera's fixed 4:3, between 64×48 and 836×627 pixels, so 16 bytes per pixel (two colour buffers, depth, one compositor copy) stays within the 8 MiB canvas share. Resizing changes only the backing store; the camera fit is unchanged.
 
 ### Electron 44 provenance gotchas
 

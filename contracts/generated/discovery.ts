@@ -198,7 +198,8 @@ export type CreatureGeometryAppearanceState =
   | 'textureCorrupt'
   | 'textureUnavailable'
   | 'resourceLimit'
-  | 'corrupt';
+  | 'corrupt'
+  | 'combinerUnsupported';
 export type CreatureGeometryTextureState =
   | 'decoded'
   | 'unresolved'
@@ -3145,6 +3146,8 @@ export interface CreatureGeometryEffects {
   lights: number;
   shadowBatches: number;
   unbatchedSections: number;
+  blendedBatches: number;
+  envTransforms: number;
   evaluation: 'notDrawn';
 }
 export interface CreatureGeometryAppearanceProblem {
@@ -3155,14 +3158,14 @@ export interface CreatureGeometryAppearanceProblem {
   textureOrdinal: number | null;
 }
 /**
- * VMA1 textured appearance manifest; see contracts/geometry-vma1-v1.md.
+ * VMA1 v2 textured appearance manifest; see contracts/geometry-vma1-v2.md.
  */
 export interface CreatureAppearanceManifest {
   artifactId: string;
   bindingSha256: string;
   sha256: string;
   byteLength: number;
-  formatVersion: 1;
+  formatVersion: 2;
   headerBytes: 160;
   coordinatePolicy: 'native-m2-position-normal-uv-winding-v1';
   vertexCount: number;
@@ -3170,6 +3173,7 @@ export interface CreatureAppearanceManifest {
   drawCount: number;
   textureCount: number;
   positions: CreatureGeometryAppearanceRegion;
+  normals: CreatureGeometryAppearanceOptionalRegion;
   uvs: CreatureGeometryAppearanceRegion;
   indices: CreatureGeometryAppearanceRegion;
   draws: CreatureGeometryAppearanceRegion;
@@ -3179,11 +3183,18 @@ export interface CreatureAppearanceManifest {
   alphaReference: 128;
   displayId: number;
   geometryBindingSha256: string;
-  materialPolicy: 'm2-single-texture-opaque-alphakey-v1';
+  materialPolicy: 'm2-one-or-two-stage-combiners-v1';
   texturePolicy: 'blp2-largest-mip-within-1024-rgba8-v1';
   readerRevision: 'm2-appearance-batches-v1';
   decoderRevision: 'blp2-rgba8-v2';
-  artifactRevision: 'model-appearance-vma1-v1';
+  artifactRevision: 'model-appearance-vma1-v2';
+}
+/**
+ * A VMA1 region that is empty (byteLength 0) when no drawn stage needs it.
+ */
+export interface CreatureGeometryAppearanceOptionalRegion {
+  offset: number;
+  byteLength: number;
 }
 export interface CreatureGeometryBounds {
   /**

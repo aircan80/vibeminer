@@ -3,7 +3,7 @@ import { BufferAttribute, BufferGeometry, Camera, LineBasicMaterial, LineSegment
 import { createGeometryScene, createGeometrySceneForTests, geometryBackingSize, geometryCanvasBudgetBytes, geometryCanvasBytesPerPixel, type GeometryGraphics, type GeometrySceneIdentity } from '../src/renderer/geometry-scene';
 import { validateGeometry } from '../src/renderer/geometry-vmg';
 import { validateAppearance } from '../src/renderer/geometry-vma';
-import { DataTexture, DoubleSide, Mesh, MeshBasicMaterial, RepeatWrapping, ClampToEdgeWrapping } from 'three';
+import { DataTexture, DoubleSide, FrontSide, Mesh, NoColorSpace, RepeatWrapping, ClampToEdgeWrapping, ShaderMaterial } from 'three';
 import { appearanceFixture, geometryCSharpGolden, geometryFixture } from './geometry-fixtures';
 
 function harness() {
@@ -317,7 +317,7 @@ describe('backing store follows the displayed size (#59)', () => {
     expect(h.status).toHaveBeenLastCalledWith({ code: 'renderFailed' }); expect(h.renderer.dispose).toHaveBeenCalled();
   });
 
-  it('mounts a validated VMA1 appearance as one unlit textured mesh and retires every texture and material', async () => {
+  it('mounts a validated VMA1 appearance as one unlit combiner mesh and retires every texture and material', async () => {
     const h = harness(); const fixture = appearanceFixture();
     const validated = await validateAppearance(fixture.buffer, fixture.manifest, { signal: new AbortController().signal, isCurrent: () => true });
     if (validated.state !== 'valid') throw Error('refused');
@@ -325,11 +325,26 @@ describe('backing store follows the displayed size (#59)', () => {
     expect(h.owner.mount(validated.value, identity, { ...identity, retired: true })).toEqual({ state: 'mounted' }); h.frame();
     const mesh = h.getSeen()!.scene.children[0] as Mesh;
     expect(mesh).toBeInstanceOf(Mesh); expect(mesh.geometry.getAttribute('uv').array).toBe(validated.value.uvs); expect(mesh.geometry.groups).toEqual([{ start: 0, count: 3, materialIndex: 0 }]);
-    const material = (mesh.material as MeshBasicMaterial[])[0]; const texture = material.map as DataTexture;
-    expect(material.side).toBe(DoubleSide); expect(material.alphaTest).toBeCloseTo(128 / 255); expect(texture.image.data).toBe(validated.value.textures[0].texels);
-    expect([texture.wrapS, texture.wrapT, texture.flipY, texture.colorSpace]).toEqual([RepeatWrapping, ClampToEdgeWrapping, false, SRGBColorSpace]);
+    const material = (mesh.material as ShaderMaterial[])[0]; const texture = material.uniforms.vmaMap0.value as DataTexture;
+    expect(material).toBeInstanceOf(ShaderMaterial); expect(material.side).toBe(DoubleSide); expect(mesh.geometry.getAttribute('normal')).toBeUndefined();
+    expect([material.uniforms.vmaCombiner.value, material.uniforms.vmaAlphaKey.value, material.uniforms.vmaAlphaReference.value]).toEqual([2, true, 128 / 255]);
+    expect(material.uniforms.vmaMap1.value).toBe(texture); expect(texture.image.data).toBe(validated.value.textures[0].texels);
+    expect([texture.wrapS, texture.wrapT, texture.flipY, texture.colorSpace]).toEqual([RepeatWrapping, ClampToEdgeWrapping, false, NoColorSpace]);
     const disposeTexture = vi.spyOn(texture, 'dispose'), disposeMaterial = vi.spyOn(material, 'dispose');
     expect(h.owner.disposeScene(identity).state).toBe('disposed');
     expect(disposeTexture).toHaveBeenCalled(); expect(disposeMaterial).toHaveBeenCalled(); expect(texture.image.data).toBeNull(); expect(mesh.geometry.getAttribute('uv')).toBeUndefined();
+  });
+
+  it('binds both stages, their coordinates and the normals for an env-map combiner', async () => {
+    const h = harness(); const fixture = appearanceFixture({ env: true });
+    const validated = await validateAppearance(fixture.buffer, fixture.manifest, { signal: new AbortController().signal, isCurrent: () => true });
+    if (validated.state !== 'valid') throw Error('refused');
+    const identity = { ...h.identity, geometryArtifactId: fixture.manifest.artifactId };
+    expect(h.owner.mount(validated.value, identity, { ...identity, retired: true })).toEqual({ state: 'mounted' }); h.frame();
+    const mesh = h.getSeen()!.scene.children[0] as Mesh, material = (mesh.material as ShaderMaterial[])[0];
+    expect(mesh.geometry.getAttribute('normal').array).toBe(validated.value.normals);
+    expect([material.uniforms.vmaCombiner.value, material.uniforms.vmaCoord0.value, material.uniforms.vmaCoord1.value, material.uniforms.vmaAlphaKey.value]).toEqual([4, 0, 2, false]);
+    expect((material.uniforms.vmaMap1.value as DataTexture).image.data).toBe(validated.value.textures[1].texels); expect(material.side).toBe(FrontSide);
+    expect(h.owner.disposeScene(identity).state).toBe('disposed');
   });
 });

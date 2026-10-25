@@ -100,14 +100,14 @@ internal static class CreatureGeometryWire
             image = t.Image is { } image ? new { image.Width, image.Height, image.MipLevel, image.BaseWidth, image.BaseHeight, image.Encoding } : null,
             source = t.Source is { } source ? new { source.ContentKey, source.EncodingKey, source.EncodedSha256, source.EncodedBytes, source.DecodedBytes, source.FullVerifierRevision } : null
         }),
-        effects = value.Effects is { } e ? new { e.Particles, e.Ribbons, e.Lights, e.ShadowBatches, e.UnbatchedSections, evaluation = "notDrawn" } : null,
+        effects = value.Effects is { } e ? new { e.Particles, e.Ribbons, e.Lights, e.ShadowBatches, e.UnbatchedSections, e.BlendedBatches, e.EnvTransforms, evaluation = "notDrawn" } : null,
         manifest = value.Manifest is { } manifest ? AppearanceManifest(manifest) : null,
         problem = value.Problem is { } problem ? new { problem.Code, problem.Message, problem.Retryable, problem.BatchOrdinal, problem.TextureOrdinal } : null
     };
     internal static object AppearanceManifest(CreatureGeometryAppearanceManifest value) => new
     {
         value.ArtifactId, value.BindingSha256, value.Sha256, value.ByteLength, value.FormatVersion, value.HeaderBytes, value.CoordinatePolicy,
-        value.VertexCount, value.IndexCount, value.DrawCount, value.TextureCount, value.Positions, value.Uvs, value.Indices, value.Draws,
+        value.VertexCount, value.IndexCount, value.DrawCount, value.TextureCount, value.Positions, value.Normals, value.Uvs, value.Indices, value.Draws,
         value.Textures, value.Texels,
         bounds = new
         {

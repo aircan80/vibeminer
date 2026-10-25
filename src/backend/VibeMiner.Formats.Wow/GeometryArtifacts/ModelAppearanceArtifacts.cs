@@ -13,22 +13,27 @@ public sealed record AppearanceTextureInput(uint FileDataId, GeometryOriginalSou
 /// <summary>Display-keyed appearance identity. DisplayFields are ExtendedDisplayInfoID then TextureVariationFileDataID[0..3].</summary>
 public sealed record AppearanceBinding(string GeometryBindingSha256, uint DisplayId, IReadOnlyList<int> DisplayFields,
     IReadOnlyList<AppearanceTextureInput> Textures);
+/// <summary>One drawn batch: its combiner and one or two stages (slot, M2 texture ordinal, coordinate source).</summary>
 public sealed record AppearanceDrawInput(int BatchOrdinal, int SectionIndex, int TextureOrdinal, int Slot, bool AlphaKey,
-    bool TwoSided, bool DepthTest, bool DepthWrite);
+    bool TwoSided, bool DepthTest, bool DepthWrite, M2Combiner Combiner = M2Combiner.Opaque, M2StageCoordinate Coordinate = M2StageCoordinate.Uv0,
+    int? SecondTextureOrdinal = null, int? SecondSlot = null, M2StageCoordinate? SecondCoordinate = null);
 public sealed record AppearanceManifest(string ArtifactId, string BindingSha256, string Sha256, long ByteLength, int FormatVersion,
     int HeaderBytes, string CoordinatePolicy, int VertexCount, int IndexCount, int DrawCount, int TextureCount,
-    GeometryBufferRegion Positions, GeometryBufferRegion Uvs, GeometryBufferRegion Indices, GeometryBufferRegion Draws,
+    GeometryBufferRegion Positions, GeometryBufferRegion Normals, GeometryBufferRegion Uvs, GeometryBufferRegion Indices, GeometryBufferRegion Draws,
     GeometryBufferRegion Textures, GeometryBufferRegion Texels, GeometryBounds Bounds, int AlphaReference, uint DisplayId,
     string GeometryBindingSha256, string MaterialPolicy, string TexturePolicy, string ReaderRevision, string DecoderRevision,
     string ArtifactRevision);
 public sealed record AppearanceArtifact(AppearanceBinding Binding, string BindingSha256, string ArtifactId, string Sha256,
     long ByteLength, AppearanceManifest Manifest);
 
-/// <summary>Original VMA1 derivative: native positions, UV0, the drawn batches' triangles and RGBA8 texels.
-/// It does not acquire, authorize or decode any source; see contracts/geometry-vma1-v1.md.</summary>
+/// <summary>Original VMA1 v2 derivative: native positions, normals (only when a stage samples an env map), UV0, the drawn
+/// batches' triangles with their combiners, and RGBA8 texels.
+/// It does not acquire, authorize or decode any source; see contracts/geometry-vma1-v2.md.</summary>
 public static class ModelAppearanceArtifacts
 {
-    public const string Revision = "model-appearance-vma1-v1";
+    public const string Revision = "model-appearance-vma1-v2";
+    public const int FormatVersion = 2, DrawRecordBytes = 48;
+    private const uint NoStage = uint.MaxValue;
     public const string TexturePolicy = "blp2-largest-mip-within-1024-rgba8-v1";
     public const int MaximumTextureSide = 1024, MaximumTextures = 32, MaximumDraws = 512;
     public const long MaximumTexelBytes = 8L << 20, MaximumBytes = 10L << 20, MaximumTextureSourceBytes = 16L << 20;
@@ -72,7 +77,7 @@ public static class ModelAppearanceArtifacts
         ArgumentNullException.ThrowIfNull(texels); ArgumentNullException.ThrowIfNull(output); ArgumentNullException.ThrowIfNull(budget);
         if (!output.CanWrite || !output.CanSeek || output.Position != 0 || output.Length != 0)
             throw Bad("The caller-owned output must be writable, seekable and empty at position zero.");
-        var model = skin.Model; byte[] bindingHash; Layout layout; uint[] indices; var drawRecords = new byte[draws.Count * 32];
+        var model = skin.Model; byte[] bindingHash; Layout layout; uint[] indices; var drawRecords = new byte[draws.Count * DrawRecordBytes];
         using (await GeometryArtifactWork.EnterAsync(budget, token))
         {
             bindingHash = BindingHash(binding);
@@ -85,13 +90,14 @@ public static class ModelAppearanceArtifacts
             {
                 token.ThrowIfCancellationRequested();
                 if (draw is null || draw.BatchOrdinal <= previous || draw.SectionIndex < 0 || draw.SectionIndex >= skin.Sections.Count || draw.Slot < 0 ||
-                    draw.Slot >= binding.Textures.Count || draw.TextureOrdinal is < 0 or >= MaximumTextures || skin.Sections[draw.SectionIndex].TriangleCount == 0)
-                    throw Bad("A draw names no drawable section or decoded texture slot.");
+                    draw.Slot >= binding.Textures.Count || draw.TextureOrdinal is < 0 or >= MaximumTextures || skin.Sections[draw.SectionIndex].TriangleCount == 0 ||
+                    !Consistent(draw, binding.Textures.Count))
+                    throw Bad("A draw names no drawable section, decoded texture slot or supported combiner stage.");
                 previous = draw.BatchOrdinal; total += skin.Sections[draw.SectionIndex].TriangleCount;
             }
             if (total > MaximumIndices) throw Limit("The drawn triangles exceed the artifact profile.");
             if (model.Vertices.Count is < 1 or > MaximumVertices) throw Limit("The model vertices exceed the artifact profile.");
-            layout = new(model.Vertices.Count, (int)total, draws.Count, binding.Textures.Select(t => (long)t.Width * t.Height * 4).ToArray());
+            layout = new(model.Vertices.Count, (int)total, draws.Count, binding.Textures.Select(t => (long)t.Width * t.Height * 4).ToArray(), draws.Any(SamplesEnv));
             if (layout.Length > MaximumBytes) throw Limit("The appearance artifact exceeds ten MiB.");
             indices = new uint[total];
         }
@@ -109,9 +115,7 @@ public static class ModelAppearanceArtifacts
                     var vertex = (uint)skin.VertexLookup[skin.TriangleLookup[(int)n]]; indices[at++] = vertex;
                     var p = model.Vertices[(int)vertex].Position; min = Vector3.Min(min, p); max = Vector3.Max(max, p);
                 }
-                var r = d * 32; U(drawRecords, r, (uint)d); U(drawRecords, r + 4, (uint)draw.BatchOrdinal); U(drawRecords, r + 8, (uint)draw.SectionIndex);
-                U(drawRecords, r + 12, start); U(drawRecords, r + 16, at - start); U(drawRecords, r + 20, (uint)draw.Slot); U(drawRecords, r + 24, (uint)draw.TextureOrdinal);
-                U(drawRecords, r + 28, Flags(draw));
+                DrawRecord(drawRecords.AsSpan(d * DrawRecordBytes, DrawRecordBytes), d, draw, start, at - start);
             }
         }
         await Task.Yield();
@@ -119,16 +123,21 @@ public static class ModelAppearanceArtifacts
         var header = HeaderFor(layout, bindingHash, bounds, binding.DisplayId);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256); var buffer = new byte[BufferBytes];
         await WriteAsync(header);
-        foreach (var uv in new[] { false, true })
+        // Positions, then normals only when a stage samples an env map, then UV0; exact source bits.
+        foreach (var region in layout.Normals ? new[] { 0, 1, 2 } : [0, 2])
             for (var first = 0; first < layout.Vertices;)
             {
-                var stride = uv ? 8 : 12; var count = Math.Min(BufferBytes / stride, layout.Vertices - first);
+                var stride = region == 2 ? 8 : 12; var count = Math.Min(BufferBytes / stride, layout.Vertices - first);
                 using (await GeometryArtifactWork.EnterAsync(budget, token))
                     for (var i = 0; i < count; i++)
                     {
                         if ((i & 4095) == 0) token.ThrowIfCancellationRequested(); var v = model.Vertices[first + i];
-                        if (uv) { if (!float.IsFinite(v.Uv0.X) || !float.IsFinite(v.Uv0.Y)) throw Bad("A source UV is not finite."); F(buffer, i * 8, v.Uv0.X); F(buffer, i * 8 + 4, v.Uv0.Y); }
-                        else { if (!Finite(v.Position)) throw Bad("A source position is not finite."); F(buffer, i * 12, v.Position.X); F(buffer, i * 12 + 4, v.Position.Y); F(buffer, i * 12 + 8, v.Position.Z); }
+                        if (region == 2) { if (!float.IsFinite(v.Uv0.X) || !float.IsFinite(v.Uv0.Y)) throw Bad("A source UV is not finite."); F(buffer, i * 8, v.Uv0.X); F(buffer, i * 8 + 4, v.Uv0.Y); }
+                        else
+                        {
+                            var p = region == 0 ? v.Position : v.Normal;
+                            if (!Finite(p)) throw Bad("A source position or normal is not finite."); F(buffer, i * 12, p.X); F(buffer, i * 12 + 4, p.Y); F(buffer, i * 12 + 8, p.Z);
+                        }
                     }
                 await WriteAsync(buffer.AsMemory(0, count * stride)); first += count;
             }
@@ -177,10 +186,10 @@ public static class ModelAppearanceArtifacts
                 for (var i = at; i < Math.Min(positions.Length, at + BufferBytes); i += 4) if (!float.IsFinite(F(positions, i))) throw Bad("An appearance position is not finite.");
             await Task.Yield();
         }
-        for (var remaining = layout.Vertices * 8; remaining > 0;)
+        for (var remaining = (layout.Normals ? layout.Vertices * 12 : 0) + layout.Vertices * 8; remaining > 0;)
         {
             var count = Math.Min(BufferBytes, remaining); await ReadAsync(buffer.AsMemory(0, count)); remaining -= count;
-            using (await GeometryArtifactWork.EnterAsync(budget, token)) for (var i = 0; i < count; i += 4) if (!float.IsFinite(F(buffer, i))) throw Bad("An appearance UV is not finite.");
+            using (await GeometryArtifactWork.EnterAsync(budget, token)) for (var i = 0; i < count; i += 4) if (!float.IsFinite(F(buffer, i))) throw Bad("An appearance normal or UV is not finite.");
         }
         var min = new Vector3(float.PositiveInfinity); var max = new Vector3(float.NegativeInfinity);
         for (var remaining = layout.Indices * 4; remaining > 0;)
@@ -194,18 +203,19 @@ public static class ModelAppearanceArtifacts
                     var p = V(positions, (int)index * 12); min = Vector3.Min(min, p); max = Vector3.Max(max, p);
                 }
         }
-        var directory = new byte[layout.Draws * 32]; await ReadAsync(directory);
+        var directory = new byte[layout.Draws * DrawRecordBytes]; await ReadAsync(directory);
         using (await GeometryArtifactWork.EnterAsync(budget, token))
         {
-            long cumulative = 0; long previous = -1;
+            long cumulative = 0; long previous = -1; var env = false;
             for (var d = 0; d < layout.Draws; d++)
             {
-                var r = d * 32; var batch = U(directory, r + 4); var count = U(directory, r + 16);
+                var r = d * DrawRecordBytes; var batch = U(directory, r + 4); var count = U(directory, r + 16);
                 if (U(directory, r) != d || batch <= previous || batch >= MaximumDraws || U(directory, r + 8) > 255 || U(directory, r + 12) != cumulative ||
-                    count == 0 || count % 3 != 0 || U(directory, r + 20) >= layout.Slots.Length || U(directory, r + 24) >= MaximumTextures || (U(directory, r + 28) & ~15u) != 0)
-                    throw Bad("A draw record violates the exact draw partition.");
-                previous = batch; cumulative += count;
+                    count == 0 || count % 3 != 0 || ReadDraw(directory.AsSpan(r, DrawRecordBytes), layout.Slots.Length) is not { } draw)
+                    throw Bad("A draw record violates the exact draw partition or combiner stages.");
+                previous = batch; cumulative += count; env |= SamplesEnv(draw);
             }
+            if (env != layout.Normals) throw Bad("The normals region does not match the env-map stages.");
             if (cumulative != layout.Indices || !Same(new GeometryBounds(Canonical(min), Canonical(max)), expected.Manifest.Bounds))
                 throw Bad("The draw partition or tight drawn bounds differ from the declaration.");
         }
@@ -235,13 +245,41 @@ public static class ModelAppearanceArtifacts
         var m = descriptor.Manifest; BoundsValid(m.Bounds);
         if (m.VertexCount is < 1 or > MaximumVertices || m.IndexCount is < 3 or > MaximumIndices || m.IndexCount % 3 != 0 || m.DrawCount is < 1 or > MaximumDraws)
             throw Bad("The appearance counts are outside the artifact profile.");
-        var layout = new Layout(m.VertexCount, m.IndexCount, m.DrawCount, descriptor.Binding.Textures.Select(t => (long)t.Width * t.Height * 4).ToArray());
+        if (m.Normals is null || m.Normals.ByteLength != 0 && m.Normals.ByteLength != (long)m.VertexCount * 12) throw Bad("The normals region is neither empty nor one per vertex.");
+        var layout = new Layout(m.VertexCount, m.IndexCount, m.DrawCount, descriptor.Binding.Textures.Select(t => (long)t.Width * t.Height * 4).ToArray(), m.Normals.ByteLength != 0);
         if (descriptor.BindingSha256 != bound || descriptor.ByteLength != layout.Length || descriptor.ArtifactId != ArtifactId(bindingHash, fileHash, layout.Length) ||
             m != Manifest(descriptor.Binding, bound, descriptor.ArtifactId, descriptor.Sha256, layout, m.Bounds))
             throw Bad("The canonical appearance descriptor, revisions or manifest fields do not match.");
         return (layout, bindingHash, fileHash);
     }
     private static uint Flags(AppearanceDrawInput draw) => (draw.AlphaKey ? 1u : 0) | (draw.TwoSided ? 2u : 0) | (draw.DepthTest ? 0 : 4u) | (draw.DepthWrite ? 0 : 8u);
+    private static bool SamplesEnv(AppearanceDrawInput draw) => draw.Coordinate == M2StageCoordinate.Env || draw.SecondCoordinate == M2StageCoordinate.Env;
+    /// <summary>The combiner fixes the stage count, each stage's coordinate and whether alpha key may apply.</summary>
+    private static bool Consistent(AppearanceDrawInput draw, int slots)
+    {
+        if (M2Combiners.Profile(draw.Combiner) is not { } profile || draw.AlphaKey && !profile.TextureAlpha || draw.Coordinate != profile.Stages[0]) return false;
+        return profile.Stages.Count == 1
+            ? draw.SecondTextureOrdinal is null && draw.SecondSlot is null && draw.SecondCoordinate is null
+            : draw.SecondTextureOrdinal is >= 0 and < MaximumTextures && draw.SecondSlot is { } second && second >= 0 && second < slots && draw.SecondCoordinate == profile.Stages[1];
+    }
+    private static void DrawRecord(Span<byte> r, int ordinal, AppearanceDrawInput draw, uint start, uint count)
+    {
+        U(r, 0, (uint)ordinal); U(r, 4, (uint)draw.BatchOrdinal); U(r, 8, (uint)draw.SectionIndex); U(r, 12, start); U(r, 16, count);
+        U(r, 20, (uint)draw.Combiner); U(r, 24, (uint)draw.Slot); U(r, 28, (uint)draw.TextureOrdinal);
+        U(r, 32, draw.SecondSlot is { } slot ? (uint)slot : NoStage); U(r, 36, draw.SecondTextureOrdinal is { } texture ? (uint)texture : NoStage);
+        r[40] = (byte)draw.Coordinate; r[41] = draw.SecondCoordinate is { } coordinate ? (byte)coordinate : byte.MaxValue; r[42] = 0; r[43] = 0; U(r, 44, Flags(draw));
+    }
+    /// <summary>Parses one draw record's combiner, stages and flags, or null when any field is outside the profile.</summary>
+    private static AppearanceDrawInput? ReadDraw(ReadOnlySpan<byte> r, int slots)
+    {
+        var flags = U(r, 44); var combiner = U(r, 20);
+        if ((flags & ~15u) != 0 || r[42] != 0 || r[43] != 0 || combiner > 255 || r[40] > 2 || r[41] is > 2 and not byte.MaxValue || U(r, 24) >= slots || U(r, 28) >= MaximumTextures) return null;
+        var two = U(r, 32) != NoStage || U(r, 36) != NoStage || r[41] != byte.MaxValue;
+        if (two && (U(r, 32) >= slots || U(r, 36) >= MaximumTextures || r[41] == byte.MaxValue)) return null;
+        var draw = new AppearanceDrawInput((int)U(r, 4), (int)U(r, 8), (int)U(r, 28), (int)U(r, 24), (flags & 1) != 0, (flags & 2) != 0, (flags & 4) == 0, (flags & 8) == 0,
+            (M2Combiner)combiner, (M2StageCoordinate)r[40], two ? (int)U(r, 36) : null, two ? (int)U(r, 32) : null, two ? (M2StageCoordinate)r[41] : null);
+        return Consistent(draw, slots) ? draw : null;
+    }
     internal static byte EncodingCode(Blp2Encoding encoding) => encoding switch
     { Blp2Encoding.Paletted => 1, Blp2Encoding.Bc1 => 2, Blp2Encoding.Bc2 => 3, Blp2Encoding.Bc3 => 4, Blp2Encoding.Bgra8 => 5, _ => throw Bad("Unknown texture encoding.") };
     private static byte[] TextureDirectory(AppearanceBinding binding, Layout layout)
@@ -259,19 +297,26 @@ public static class ModelAppearanceArtifacts
     }
     private static byte[] HeaderFor(Layout l, byte[] binding, GeometryBounds bounds, uint display)
     {
-        var b = new byte[Header]; "VMA1"u8.CopyTo(b); W(b, 4, 1); W(b, 6, Header); U(b, 8, (uint)l.Length); U(b, 12, 1); binding.CopyTo(b, 16);
+        var b = new byte[Header]; "VMA1"u8.CopyTo(b); W(b, 4, FormatVersion); W(b, 6, Header); U(b, 8, (uint)l.Length); U(b, 12, 1); binding.CopyTo(b, 16);
         U(b, 48, (uint)l.Vertices); U(b, 52, (uint)l.Indices); U(b, 56, (uint)l.Draws); U(b, 60, (uint)l.Slots.Length);
-        U(b, 64, Header); U(b, 68, (uint)l.Vertices * 12); U(b, 72, (uint)l.UvOffset); U(b, 76, (uint)l.Vertices * 8);
-        U(b, 80, (uint)l.IndexOffset); U(b, 84, (uint)l.Indices * 4); U(b, 88, (uint)l.DrawOffset); U(b, 92, (uint)l.Draws * 32);
-        U(b, 96, (uint)l.TextureOffset); U(b, 100, (uint)l.Slots.Length * 32); U(b, 104, (uint)l.TexelOffset); U(b, 108, (uint)l.TexelBytes);
-        for (var i = 0; i < 3; i++) { F(b, 112 + i * 4, bounds.Min[i]); F(b, 124 + i * 4, bounds.Max[i]); }
-        U(b, 136, M2Appearance.AlphaReference); U(b, 140, display); return b;
+        var at = 64;
+        foreach (var region in Regions(l)) { U(b, at, (uint)region.Offset); U(b, at + 4, (uint)region.ByteLength); at += 8; }
+        for (var i = 0; i < 3; i++) { F(b, 120 + i * 4, bounds.Min[i]); F(b, 132 + i * 4, bounds.Max[i]); }
+        U(b, 144, M2Appearance.AlphaReference); U(b, 148, display); return b;
     }
-    private static AppearanceManifest Manifest(AppearanceBinding binding, string bound, string id, string sha, Layout l, GeometryBounds bounds) =>
-        new(id, bound, sha, l.Length, 1, Header, M2StaticGeometry.CoordinatePolicy, l.Vertices, l.Indices, l.Draws, l.Slots.Length,
-            new(Header, l.Vertices * 12), new(l.UvOffset, l.Vertices * 8), new(l.IndexOffset, l.Indices * 4), new(l.DrawOffset, l.Draws * 32),
-            new(l.TextureOffset, l.Slots.Length * 32), new(l.TexelOffset, (int)l.TexelBytes), bounds, M2Appearance.AlphaReference, binding.DisplayId,
+    /// <summary>Positions, normals (empty unless an env stage exists), UV0, indices, draws, texture directory, texels.</summary>
+    private static GeometryBufferRegion[] Regions(Layout l) =>
+    [
+        new(Header, l.Vertices * 12), new(l.NormalOffset, l.Normals ? l.Vertices * 12 : 0), new(l.UvOffset, l.Vertices * 8), new(l.IndexOffset, l.Indices * 4),
+        new(l.DrawOffset, l.Draws * DrawRecordBytes), new(l.TextureOffset, l.Slots.Length * 32), new(l.TexelOffset, (int)l.TexelBytes)
+    ];
+    private static AppearanceManifest Manifest(AppearanceBinding binding, string bound, string id, string sha, Layout l, GeometryBounds bounds)
+    {
+        var r = Regions(l);
+        return new(id, bound, sha, l.Length, FormatVersion, Header, M2StaticGeometry.CoordinatePolicy, l.Vertices, l.Indices, l.Draws, l.Slots.Length,
+            r[0], r[1], r[2], r[3], r[4], r[5], r[6], bounds, M2Appearance.AlphaReference, binding.DisplayId,
             binding.GeometryBindingSha256, M2Appearance.MaterialPolicy, TexturePolicy, M2Appearance.ReaderRevision, Blp2Decoder.Revision, Revision);
+    }
     private static string ArtifactId(byte[] binding, byte[] fileHash, long length)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256); hash.AppendData("vibeminer-model-appearance-artifact-v1\0"u8);
@@ -303,19 +348,20 @@ public static class ModelAppearanceArtifacts
         }
         if (texels > MaximumTexelBytes) throw Limit("The decoded texture slots exceed eight MiB.");
         foreach (var revision in new[] { M2Appearance.ReaderRevision, M2Appearance.MaterialPolicy, TexturePolicy, Blp2Decoder.Revision, M2StaticGeometry.CoordinatePolicy, Revision }) Text(revision);
-        Span<byte> version = stackalloc byte[2]; W(version, 0, 1); hash.AppendData(version);
+        Span<byte> version = stackalloc byte[2]; W(version, 0, FormatVersion); hash.AppendData(version);
         return hash.GetHashAndReset();
         void Text(string value)
         {
             Span<byte> length = stackalloc byte[2]; W(length, 0, (ushort)value.Length); hash.AppendData(length); hash.AppendData(Encoding.ASCII.GetBytes(value));
         }
     }
-    private sealed record Layout(int Vertices, int Indices, int Draws, long[] Slots)
+    private sealed record Layout(int Vertices, int Indices, int Draws, long[] Slots, bool Normals)
     {
-        internal int UvOffset => Header + Vertices * 12;
+        internal int NormalOffset => Header + Vertices * 12;
+        internal int UvOffset => NormalOffset + (Normals ? Vertices * 12 : 0);
         internal int IndexOffset => UvOffset + Vertices * 8;
         internal int DrawOffset => IndexOffset + Indices * 4;
-        internal int TextureOffset => DrawOffset + Draws * 32;
+        internal int TextureOffset => DrawOffset + Draws * DrawRecordBytes;
         internal int TexelOffset => TextureOffset + Slots.Length * 32;
         internal long TexelBytes => Slots.Sum();
         internal long Length => TexelOffset + TexelBytes;

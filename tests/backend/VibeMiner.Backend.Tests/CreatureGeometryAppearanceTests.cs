@@ -93,6 +93,41 @@ public sealed class CreatureGeometryAppearanceTests
     }
 
     [Fact]
+    public async Task A_two_stage_env_combiner_binds_both_stages_writes_normals_and_counts_blended_layers()
+    {
+        // Stage 0: display variation 779 (no wrap). Stage 1: TXID 779 wrapped in U, so a second slot. Section 1 is an additive layer.
+        var spec = new Model([new(11, 0), new(0, 1, CreatureGeometrySourcesFixture.TextureId)], [(0, 0), (0x15, 4)], [0, 1], [0], [ushort.MaxValue, ushort.MaxValue],
+            [[[32767]]], [0x20]);
+        await using var f = await CreatureGeometrySourcesFixture.CreateAsync(textured: new(spec,
+            [new(Section: 0, Shader: 0x8002, Flags: 0x80, TextureCount: 2), new(Section: 1, Material: 1, Shader: 0x4014, Flags: 0x80, TextureCount: 2)], Sections: 2));
+        await using var store = Store(f);
+        var result = await store.PrepareAsync(new(f.Request), Progress, default).WaitAsync(Guard); var appearance = result.Appearance!;
+        Assert.True(appearance.State == CreatureGeometryAppearanceState.Ready, appearance.Problem?.Code + " " + appearance.Problem?.Message);
+        Assert.Equal([(0, CreatureGeometryTextureBinding.Variation, "779"), (1, CreatureGeometryTextureBinding.Txid, "779")],
+            appearance.Textures.Select(t => (t.Ordinal, t.Binding, t.FileDataId)));
+        var manifest = appearance.Manifest!;
+        Assert.Equal((1, 2, 3 * 12, 48), (manifest.DrawCount, manifest.TextureCount, manifest.Normals.ByteLength, manifest.Draws.ByteLength));
+        Assert.Equal((1, 0), (appearance.Effects!.BlendedBatches, appearance.Effects.EnvTransforms));
+        var lease = await store.OpenAsync(new(f.Request, manifest.ArtifactId), default); var bytes = new byte[manifest.ByteLength]; await lease.Content.ReadExactlyAsync(bytes);
+        await lease.DisposeAsync(); await lease.Retirement;
+        var r = manifest.Draws.Offset; uint U(int at) => System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(at));
+        Assert.Equal((4u, 0u, 0u, 1u, 1u), (U(r + 20), U(r + 24), U(r + 28), U(r + 32), U(r + 36))); Assert.Equal((0, 2), (bytes[r + 40], bytes[r + 41]));
+        var read = await store.ReadAsync(new(f.Request), default);
+        Assert.Equal(JsonSerializer.Serialize(appearance, CreaturesPolicy.Json), JsonSerializer.Serialize(read.Appearance, CreaturesPolicy.Json));
+    }
+
+    [Fact]
+    public async Task An_unsupported_combiner_is_retained_by_name_without_texture_demand()
+    {
+        var spec = new Model([new(11, 0), new(0, 0, CreatureGeometrySourcesFixture.TextureId)], [(0, 0)], [0, 1], [0], [ushort.MaxValue, ushort.MaxValue], [[[32767]]], [0x20]);
+        await using var f = await CreatureGeometrySourcesFixture.CreateAsync(textured: new(spec, [new(Shader: 0x4011, Flags: 0x80, TextureCount: 2)])); await using var store = Store(f);
+        var result = await store.PrepareAsync(new(f.Request), Progress, default).WaitAsync(Guard); var appearance = result.Appearance!;
+        Assert.Equal(CreatureGeometryAppearanceState.CombinerUnsupported, appearance.State); Assert.Equal("CREATURE_APPEARANCE_COMBINER_UNSUPPORTED", appearance.Problem!.Code);
+        Assert.Contains("Combiners_Mod_Mod with Diffuse_T1_T2 (shader 0x4011", appearance.Problem.Message); Assert.False(Requested(f));
+        Assert.Equal(JsonSerializer.Serialize(appearance, CreaturesPolicy.Json), JsonSerializer.Serialize((await store.ReadAsync(new(f.Request), default)).Appearance, CreaturesPolicy.Json));
+    }
+
+    [Fact]
     public async Task An_encrypted_texture_names_its_ordinal_and_is_never_retained()
     {
         await using var f = await CreatureGeometrySourcesFixture.CreateAsync(textured: Variation(encrypted: true)); await using var store = Store(f);
@@ -142,6 +177,38 @@ public sealed class CreatureGeometryAppearanceTests
         Assert.Equal(CreatureGeometryAppearanceState.ResourceLimit, result.Appearance!.State); Assert.Equal("CREATURE_APPEARANCE_TEXEL_LIMIT", result.Appearance.Problem!.Code);
         Assert.All(result.Appearance.Textures, t => Assert.Equal(CreatureGeometryTextureState.NotReached, t.State));
         Assert.Equal(0, store.Pressure.Payload);
+    }
+
+    [Fact]
+    public async Task A_retained_v1_appearance_row_reads_not_prepared_and_prepares_again()
+    {
+        // Every revision is part of the appearance key, so a row written by VMA1 v1 (#63) sits under another key with v1 revisions.
+        // Stand one in: the current row, re-keyed and rewritten to the v1 revisions. It is never adopted, read or deleted.
+        await using var f = await CreatureGeometrySourcesFixture.CreateAsync(textured: Variation()); await using var store = Store(f);
+        var first = await store.PrepareAsync(new(f.Request), Progress, default).WaitAsync(Guard);
+        Assert.Equal(CreatureGeometryAppearanceState.Ready, first.Appearance!.State);
+        var database = Path.Combine(f.Projection.DirectoryPath, "discovery-v1.sqlite3"); var oldKey = new string('e', 64);
+        using (var db = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={database};Pooling=False"))
+        {
+            db.Open(); using var command = db.CreateCommand();
+            command.CommandText = "UPDATE geometry_appearances SET appearance_key=$k, descriptor=replace(replace(descriptor,'model-appearance-vma1-v2','model-appearance-vma1-v1'),"
+                + "'m2-one-or-two-stage-combiners-v1','m2-single-texture-opaque-alphakey-v1')";
+            command.Parameters.AddWithValue("$k", oldKey); Assert.Equal(1, command.ExecuteNonQuery());
+        }
+        var read = await store.ReadAsync(new(f.Request), default);
+        Assert.Equal(CreatureGeometryState.Ready, read.State); Assert.NotNull(read.Manifest);
+        Assert.Equal(CreatureGeometryAppearanceState.NotPrepared, read.Appearance!.State); Assert.Empty(read.Appearance.Textures);
+        var again = await store.PrepareAsync(new(f.Request), Progress, default).WaitAsync(Guard);
+        Assert.Equal(CreatureGeometryAppearanceState.Ready, again.Appearance!.State);
+        Assert.Equal((2, "model-appearance-vma1-v2"), (again.Appearance.Manifest!.FormatVersion, again.Appearance.Manifest.ArtifactRevision));
+        Assert.Equal(first.Appearance.Manifest!.ArtifactId, again.Appearance.Manifest.ArtifactId);
+        using (var db = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={database};Pooling=False"))
+        {
+            db.Open(); using var command = db.CreateCommand(); command.CommandText = "SELECT appearance_key FROM geometry_appearances ORDER BY appearance_key";
+            using var reader = command.ExecuteReader(); var keys = new List<string>(); while (reader.Read()) keys.Add(reader.GetString(0));
+            Assert.Equal(2, keys.Count); Assert.Contains(oldKey, keys);
+        }
+        Assert.Equal(CreatureGeometryAppearanceState.Ready, (await store.ReadAsync(new(f.Request), default)).Appearance!.State);
     }
 
     [Fact]

@@ -61,11 +61,22 @@ it('shows the texture chain for a textured draw and names a refusal while the ed
  const {rerender}=render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view}}} onReturn={()=>{}}/>);
  expect(screen.getByText('Unposed textured surfaces · bind pose, unlit')).toBeVisible();
  expect(screen.getByRole('region',{name:'Texture chain'})).toHaveTextContent('Texture 0 · type 11 → TextureVariationFileDataID[0] → FileDataID 779 · BC1, mip 0 2×2 of 2×2');
- expect(screen.getByText(/Not drawn: 4 particle emitters, 0 ribbons/)).toBeVisible();
+ expect(screen.getByRole('region',{name:'Texture chain'})).toHaveTextContent('Texture 1 · type 0 → TXID[1] → FileDataID 900 · BC1, mip 0 2×2 of 2×2');
+ expect(screen.getByText(/Not drawn: 4 particle emitters, 0 ribbons, 0 lights, 2 shadow batches, 1 blended layer\. 1 env-map stage drawn without its UV animation\./)).toBeVisible();
+ // #69 nit from #63: each label keeps its number on the same line.
+ const rows=[...screen.getByRole('region',{name:'Texture chain'}).querySelectorAll('li')].map(li=>li.textContent);
+ for(const pair of ['Texture\u00a00','type\u00a011','FileDataID\u00a0779','mip\u00a00','Texture\u00a01','type\u00a00','FileDataID\u00a0900'])expect(rows.join('\n')).toContain(pair);
+ expect(rows.join('\n')).not.toMatch(/(Texture|type|FileDataID|mip) \d/);
+ // ...and no arrow can start a line.
+ for(const row of rows)expect(row!.match(/\u00a0→ /g)).toHaveLength(2);expect(rows.join('\n')).not.toMatch(/ →/);
  const refused={...textured,appearance:{...textured.appearance!,state:'multiTexture' as const,textures:[],manifest:null,problem:{code:'CREATURE_APPEARANCE_MULTI_TEXTURE',message:'The batch combines more than one texture stage.',retryable:false,batchOrdinal:3,textureOrdinal:null}}};
  rerender(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...view,result:refused}}}} onReturn={()=>{}}/>);
- expect(screen.getByText('Unposed source edges · a batch combines several textures')).toBeVisible();
+ expect(screen.getByText('Unposed source edges · a batch combines more than two textures')).toBeVisible();
  expect(screen.getByRole('region',{name:'Texture chain'})).toHaveTextContent('CREATURE_APPEARANCE_MULTI_TEXTURE: The batch combines more than one texture stage. Batch 3.');
+ const combiner={...refused,appearance:{...refused.appearance,state:'combinerUnsupported' as const,problem:{code:'CREATURE_APPEARANCE_COMBINER_UNSUPPORTED',message:'The batch combines its textures with Combiners_Mod_Mod with Diffuse_T1_T2 (shader 0x4011, 2 textures), which is not drawn.',retryable:false,batchOrdinal:0,textureOrdinal:null}}};
+ rerender(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...view,result:combiner}}}} onReturn={()=>{}}/>);
+ expect(screen.getByText('Unposed source edges · a batch combines its textures in a way that is not drawn')).toBeVisible();
+ expect(screen.getByRole('region',{name:'Texture chain'})).toHaveTextContent('Combiners_Mod_Mod with Diffuse_T1_T2 (shader 0x4011, 2 textures), which is not drawn. Batch 0.');
 });
 
 it('names texture chain states in plain words, counts in the singular and offers Retry textures for a retryable texture outcome',()=>{
@@ -77,7 +88,11 @@ it('names texture chain states in plain words, counts in the singular and offers
  render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:{...textured,appearance}}}}} onReturn={()=>{}}/>);
  const chain=screen.getByRole('region',{name:'Texture chain'});
  expect(chain).toHaveTextContent('FileDataID 779 · unavailable');expect(chain).toHaveTextContent('· not reached');expect(chain).not.toHaveTextContent('notReached');
- expect(chain).toHaveTextContent('Not drawn: 4 particle emitters, 1 ribbon, 0 lights, 1 shadow batch.');
+ expect(chain).toHaveTextContent('Not drawn: 4 particle emitters, 1 ribbon, 0 lights, 1 shadow batch, 1 blended layer. 1 env-map stage drawn without its UV animation.');
+ const plain={...textured,appearance:{...appearance,effects:{...appearance.effects,blendedBatches:0,envTransforms:0}}};
+ cleanup();render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:plain}}}} onReturn={()=>{}}/>);
+ expect(screen.getByRole('region',{name:'Texture chain'})).toHaveTextContent('Not drawn: 4 particle emitters, 1 ribbon, 0 lights, 1 shadow batch. Geosets and colour animation are not evaluated.');
+ cleanup();render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:{...textured,appearance}}}}} onReturn={()=>{}}/>);
  fireEvent.click(screen.getByRole('button',{name:'Retry textures'}));expect(retryAppearance).toHaveBeenCalledTimes(1);
  expect(screen.queryByRole('button',{name:'Retry geometry'})).not.toBeInTheDocument();
 });

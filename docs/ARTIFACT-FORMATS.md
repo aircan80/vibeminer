@@ -140,4 +140,4 @@ See [contracts/geometry-vmg1-v1.md](../contracts/geometry-vmg1-v1.md).
 
 ## Creature appearance (VMA1)
 
-See [contracts/geometry-vma1-v1.md](../contracts/geometry-vma1-v1.md). Retained in `geometry_appearances`, keyed by display.
+See [contracts/geometry-vma1-v2.md](../contracts/geometry-vma1-v2.md) (format version 2, D094). Retained in `geometry_appearances`, keyed by display.

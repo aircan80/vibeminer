@@ -56,8 +56,17 @@ test('a ready display appearance carries its VMA1 manifest and every other state
   assert.equal(check('CreatureGeometryAppearance')({ ...appearance, state: 'notPrepared', manifest: null, problem: null }), false);
   assert.ok(check('CreatureGeometryAppearance')({ ...appearance, state: 'notPrepared', manifest: null, problem: null, textures: [] }));
   assert.equal(check('CreatureGeometryResult')({ ...textured, state: 'noDeclaredTriangles', manifest: null }), false);
-  for (const patch of [{ byteLength: 10485761 }, { headerBytes: 128 }, { alphaReference: 127 }, { textureCount: 33 }, { artifactRevision: 'model-geometry-vmg1-v1' }, { extra: 1 }])
+  for (const patch of [{ byteLength: 10485761 }, { headerBytes: 128 }, { alphaReference: 127 }, { textureCount: 33 }, { artifactRevision: 'model-geometry-vmg1-v1' }, { extra: 1 },
+    { formatVersion: 1 }, { artifactRevision: 'model-appearance-vma1-v1' }, { materialPolicy: 'm2-single-texture-opaque-alphakey-v1' }, { normals: undefined }])
     assert.equal(check('CreatureAppearanceManifest')({ ...appearance.manifest, ...patch }), false, JSON.stringify(patch));
+  // VMA1 v2: the normals region is empty when no stage samples an env map; every other region is not.
+  assert.ok(check('CreatureAppearanceManifest')({ ...appearance.manifest, normals: { offset: 208, byteLength: 0 } }));
+  assert.equal(check('CreatureAppearanceManifest')({ ...appearance.manifest, uvs: { offset: 256, byteLength: 0 } }), false);
+  const { blendedBatches, ...withoutBlended } = appearance.effects;
+  assert.equal(blendedBatches, 1); assert.equal(check('CreatureGeometryEffects')(withoutBlended), false);
+  const refused = { ...appearance, state: 'combinerUnsupported', textures: [], manifest: null,
+    problem: { code: 'CREATURE_APPEARANCE_COMBINER_UNSUPPORTED', message: 'The batch combines its textures with Combiners_Mod_Mod with Diffuse_T1_T2 (shader 0x4011, 2 textures), which is not drawn.', retryable: false, batchOrdinal: 0, textureOrdinal: null } };
+  assert.ok(check('CreatureGeometryAppearance')(refused), JSON.stringify(check('CreatureGeometryAppearance').errors));
   assert.equal(check('CreatureGeometryTexture')({ ...appearance.textures[0], type: 14 }), false);
   assert.equal(check('CreatureGeometryTextureImage')({ ...appearance.textures[0].image, width: 1025 }), false);
 });

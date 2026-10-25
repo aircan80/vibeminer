@@ -98,7 +98,7 @@ public sealed class CreatureGeometryHostTests
         await session.Send("textured", "creatures.geometry." + operation, parameters);
         var result = (await session.Receive()).GetProperty("result");
         var wire = operation == "open" ? result.GetProperty("manifest") : result.GetProperty("appearance").GetProperty("manifest");
-        Assert.Equal(textured.ArtifactId, wire.GetProperty("artifactId").GetString()); Assert.Equal("model-appearance-vma1-v1", wire.GetProperty("artifactRevision").GetString());
+        Assert.Equal(textured.ArtifactId, wire.GetProperty("artifactId").GetString()); Assert.Equal("model-appearance-vma1-v2", wire.GetProperty("artifactRevision").GetString());
         if (operation != "open")
         {
             var appearance = result.GetProperty("appearance"); Assert.Equal("ready", appearance.GetProperty("state").GetString());

@@ -223,14 +223,14 @@ public sealed partial class CreatureGeometryStore
         new(m.Positions.Offset,m.Positions.ByteLength),new(m.LineIndices.Offset,m.LineIndices.ByteLength),new(m.Sections.Offset,m.Sections.ByteLength),new(m.Bounds.Min,m.Bounds.Max),
         m.ModelFileDataId,m.SkinFileDataId,m.MainSkinOrdinal,m.ModelReaderRevision,m.SkinReaderRevision,m.InterpretationPolicy,m.ArtifactRevision,m.EdgePolicy);
     private static CreatureGeometryAppearanceManifest ToDomain(AppearanceManifest m)=>new(m.ArtifactId,m.BindingSha256,m.Sha256,m.ByteLength,m.FormatVersion,m.HeaderBytes,
-        m.CoordinatePolicy,m.VertexCount,m.IndexCount,m.DrawCount,m.TextureCount,new(m.Positions.Offset,m.Positions.ByteLength),new(m.Uvs.Offset,m.Uvs.ByteLength),
+        m.CoordinatePolicy,m.VertexCount,m.IndexCount,m.DrawCount,m.TextureCount,new(m.Positions.Offset,m.Positions.ByteLength),new(m.Normals.Offset,m.Normals.ByteLength),new(m.Uvs.Offset,m.Uvs.ByteLength),
         new(m.Indices.Offset,m.Indices.ByteLength),new(m.Draws.Offset,m.Draws.ByteLength),new(m.Textures.Offset,m.Textures.ByteLength),new(m.Texels.Offset,m.Texels.ByteLength),
         new(m.Bounds.Min,m.Bounds.Max),m.AlphaReference,m.DisplayId,m.GeometryBindingSha256,m.MaterialPolicy,m.TexturePolicy,m.ReaderRevision,m.DecoderRevision,m.ArtifactRevision);
     private static AppearanceArtifact ToPure(GeometryAppearanceDescriptor descriptor)
     {
         var m=descriptor.Appearance.Manifest??throw new DiscoveryException("CREATURE_GEOMETRY_NOT_PREPARED","This display has no retained textured appearance.",true);
         var manifest=new AppearanceManifest(m.ArtifactId,m.BindingSha256,m.Sha256,m.ByteLength,m.FormatVersion,m.HeaderBytes,m.CoordinatePolicy,m.VertexCount,m.IndexCount,
-            m.DrawCount,m.TextureCount,new(m.Positions.Offset,m.Positions.ByteLength),new(m.Uvs.Offset,m.Uvs.ByteLength),new(m.Indices.Offset,m.Indices.ByteLength),
+            m.DrawCount,m.TextureCount,new(m.Positions.Offset,m.Positions.ByteLength),new(m.Normals.Offset,m.Normals.ByteLength),new(m.Uvs.Offset,m.Uvs.ByteLength),new(m.Indices.Offset,m.Indices.ByteLength),
             new(m.Draws.Offset,m.Draws.ByteLength),new(m.Textures.Offset,m.Textures.ByteLength),new(m.Texels.Offset,m.Texels.ByteLength),
             new(new Vector3(m.Bounds.Min[0],m.Bounds.Min[1],m.Bounds.Min[2]),new Vector3(m.Bounds.Max[0],m.Bounds.Max[1],m.Bounds.Max[2])),m.AlphaReference,m.DisplayId,
             m.GeometryBindingSha256,m.MaterialPolicy,m.TexturePolicy,m.ReaderRevision,m.DecoderRevision,m.ArtifactRevision);

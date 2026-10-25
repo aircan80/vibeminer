@@ -1,7 +1,8 @@
-import { BufferAttribute, BufferGeometry, ClampToEdgeWrapping, DataTexture, DoubleSide, FrontSide, LinearFilter, LinearMipmapLinearFilter,
-  LineBasicMaterial, LineSegments, Matrix4, Mesh, MeshBasicMaterial, NoToneMapping, PerspectiveCamera, RepeatWrapping, RGBAFormat, Scene,
+import { BufferAttribute, BufferGeometry, ClampToEdgeWrapping, DataTexture, LinearFilter, LinearMipmapLinearFilter,
+  LineBasicMaterial, LineSegments, Matrix4, Mesh, NoColorSpace, NoToneMapping, PerspectiveCamera, RepeatWrapping, RGBAFormat, Scene,
   SRGBColorSpace, UnsignedByteType, WebGLRenderer, type Camera, type Material, type Object3D, type WebGLRendererParameters } from 'three';
 import type { ValidatedAppearance } from './geometry-vma';
+import { appearanceMaterial } from './geometry-combiners';
 import type { GeometryBodyRetired, GeometrySceneDisposal, GeometrySceneIdentity } from '../shared/geometry-lifecycle';
 import { fitGeometryCamera, moveGeometryCamera, type GeometryCamera, type GeometryCameraAction } from './geometry-camera';
 import type { GeometryValidationResult } from './geometry-vmg';
@@ -291,6 +292,7 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
       if (input.manifest.artifactId !== identity.geometryArtifactId || !(input.positions instanceof Float32Array) || input.positions.buffer.byteLength !== input.manifest.byteLength)
         return refused('invalidGeometry');
       if (isAppearance(input) ? !(input.uvs instanceof Float32Array) || !(input.indices instanceof Uint32Array) || input.uvs.buffer !== input.positions.buffer
+          || input.normals !== null && (!(input.normals instanceof Float32Array) || input.normals.buffer !== input.positions.buffer)
           || input.indices.buffer !== input.positions.buffer || input.manifest.byteLength > 10485760 || input.textures.some(t => t.texels.buffer !== input.positions.buffer)
         : !(input.lineIndices instanceof Uint32Array) || input.positions.buffer !== input.lineIndices.buffer
           || input.positions.byteLength + input.lineIndices.byteLength > 2097152) return refused('invalidGeometry');
@@ -306,16 +308,16 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
       const geometry = new BufferGeometry(), scene = new Scene();
       let line: Object3D, materials: Material[], textures: DataTexture[] = [];
       if (isAppearance(input)) {
-        // Unlit: each drawn batch samples its one RGBA8 texture as decoded in C#. No colour, weight or lighting animation is evaluated.
+        // Unlit: each drawn batch combines its one or two RGBA8 slots, as decoded in C#, with its documented combiner
+        // (geometry-combiners.ts). No colour, weight or lighting animation is evaluated. Texels are stored values, not decoded.
         textures = input.textures.map(t => {
           const texture = new DataTexture(t.texels, t.width, t.height, RGBAFormat, UnsignedByteType);
-          texture.colorSpace = SRGBColorSpace; texture.flipY = false; texture.generateMipmaps = true;
+          texture.colorSpace = NoColorSpace; texture.flipY = false; texture.generateMipmaps = true;
           texture.magFilter = LinearFilter; texture.minFilter = LinearMipmapLinearFilter;
           texture.wrapS = t.wrapU ? RepeatWrapping : ClampToEdgeWrapping; texture.wrapT = t.wrapV ? RepeatWrapping : ClampToEdgeWrapping;
           texture.needsUpdate = true; return texture;
         });
-        materials = input.draws.map(d => new MeshBasicMaterial({ map: textures[d.slot], side: d.twoSided ? DoubleSide : FrontSide, transparent: false,
-          alphaTest: d.alphaKey ? input.manifest.alphaReference / 255 : 0, depthTest: d.depthTest, depthWrite: d.depthWrite, toneMapped: false }));
+        materials = input.draws.map(d => appearanceMaterial(d, textures, input.manifest.alphaReference));
         line = new Mesh(geometry, materials);
       } else {
         materials = [new LineBasicMaterial({ color: '#176e66', linewidth: 1, opacity: 1, transparent: false, toneMapped: false })];
@@ -326,6 +328,7 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
         geometry.setAttribute('position', new BufferAttribute(input.positions, 3));
         if (isAppearance(input)) {
           geometry.setAttribute('uv', new BufferAttribute(input.uvs, 2)); geometry.setIndex(new BufferAttribute(input.indices, 1));
+          if (input.normals) geometry.setAttribute('normal', new BufferAttribute(input.normals, 3));
           input.draws.forEach((d, index) => geometry.addGroup(d.indexStart, d.indexCount, index)); geometry.setDrawRange(0, input.indices.length);
         } else { geometry.setIndex(new BufferAttribute(input.lineIndices, 1)); geometry.setDrawRange(0, input.lineIndices.length); }
         line.frustumCulled = false; line.matrixAutoUpdate = false; line.matrixWorldAutoUpdate = false;

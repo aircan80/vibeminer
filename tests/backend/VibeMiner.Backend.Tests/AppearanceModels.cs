@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 
 namespace VibeMiner.Backend.Tests;
 
-// Authored chunked MD21/MD20 274 models and SKINs for the single-texture appearance profile. No game bytes.
+// Authored chunked MD21/MD20 274 models and SKINs for the textured appearance profile. No game bytes.
 internal static class AppearanceModels
 {
     internal sealed record Texture(uint Type, uint Flags = 0, uint Txid = 0);
@@ -10,7 +10,7 @@ internal static class AppearanceModels
         ushort Combo = 0, ushort Weight = 0, ushort Transform = 0, short Color = -1, ushort Coordinate = 0, ushort Layer = 0);
     internal sealed record Model(Texture[] Textures, (ushort Flags, ushort Blend)[] Materials, ushort[] Combos, ushort[] WeightLookup,
         ushort[] TransformLookup, short[][][] WeightKeys, uint[] SequenceFlags, int Particles = 0, int Ribbons = 0, ushort[]? Coordinates = null,
-        uint SkinId = 778, (int Tracks, int Slices, bool Shared)? WeightStress = null);
+        uint SkinId = 778, (int Tracks, int Slices, bool Shared)? WeightStress = null, int TransformTracks = 0);
 
     /// <summary>One texture of the given type, opaque material, one static full-opacity weight and no transform.</summary>
     internal static Model Simple(uint type = 11, uint txid = 0, ushort blend = 0, int particles = 0) => new(
@@ -71,6 +71,7 @@ internal static class AppearanceModels
         }
         Array(88, m.WeightKeys.Length, Append(tracks));
         }
+        if (m.TransformTracks > 0) Array(96, m.TransformTracks, Append(new byte[m.TransformTracks * 60]));
         var effects = Append(new byte[16]);
         if (m.Particles > 0) Array(296, m.Particles, effects);
         if (m.Ribbons > 0) Array(288, m.Ribbons, effects);

@@ -79,35 +79,44 @@ export function geometryCSharpGolden() {
   return fixture;
 }
 
-// Authored VMA1 app-format fixture: three vertices, one drawn triangle, one 2×2 RGBA8 slot. No game data.
-export function appearanceFixture(options: { positions?: readonly number[]; uvs?: readonly number[]; indices?: readonly number[] } = {}) {
+// Authored VMA1 v2 app-format fixture: three vertices, one drawn triangle, 2×2 RGBA8 slots. No game data.
+// Default: one Mod stage (alpha key, two-sided). `env`: one Opaque_AddAlpha_Alpha draw (UV0 + env map) with normals and two slots.
+export function appearanceFixture(options: { positions?: readonly number[]; uvs?: readonly number[]; indices?: readonly number[]; env?: boolean } = {}) {
   const positions = options.positions ?? [0, 0, 0, 1, 0, 0, 0, 0, 1], uvs = options.uvs ?? [0, 1, 1, 1, 0, 0], indices = options.indices ?? [0, 1, 2];
-  const v = positions.length / 3, n = indices.length, texels = 16;
-  const uvOffset = 160 + v * 12, indexOffset = uvOffset + v * 8, drawOffset = indexOffset + n * 4, textureOffset = drawOffset + 32, texelOffset = textureOffset + 32;
+  const env = options.env ?? false, slots = env ? 2 : 1;
+  const v = positions.length / 3, n = indices.length, texels = 16 * slots, normalBytes = env ? v * 12 : 0;
+  const normalOffset = 160 + v * 12, uvOffset = normalOffset + normalBytes, indexOffset = uvOffset + v * 8, drawOffset = indexOffset + n * 4;
+  const textureOffset = drawOffset + 48, texelOffset = textureOffset + 32 * slots;
   const buffer = new ArrayBuffer(texelOffset + texels), data = new DataView(buffer), u32 = (at: number, value: number) => data.setUint32(at, value, true);
-  [0x56, 0x4d, 0x41, 0x31].forEach((value, index) => data.setUint8(index, value)); data.setUint16(4, 1, true); data.setUint16(6, 160, true);
+  [0x56, 0x4d, 0x41, 0x31].forEach((value, index) => data.setUint8(index, value)); data.setUint16(4, 2, true); data.setUint16(6, 160, true);
   u32(8, buffer.byteLength); u32(12, 1); for (let i = 0; i < 32; i++) data.setUint8(16 + i, 0x88);
-  u32(48, v); u32(52, n); u32(56, 1); u32(60, 1);
-  const regions = [[160, v * 12], [uvOffset, v * 8], [indexOffset, n * 4], [drawOffset, 32], [textureOffset, 32], [texelOffset, texels]];
+  u32(48, v); u32(52, n); u32(56, 1); u32(60, slots);
+  const regions = [[160, v * 12], [normalOffset, normalBytes], [uvOffset, v * 8], [indexOffset, n * 4], [drawOffset, 48], [textureOffset, 32 * slots], [texelOffset, texels]];
   regions.forEach(([offset, length], i) => { u32(64 + i * 8, offset); u32(68 + i * 8, length); });
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
   for (const index of indices) for (let a = 0; a < 3; a++) { min[a] = Math.min(min[a], positions[index * 3 + a]); max[a] = Math.max(max[a], positions[index * 3 + a]); }
-  for (let a = 0; a < 3; a++) { min[a] = Math.fround(min[a]) || 0; max[a] = Math.fround(max[a]) || 0; data.setFloat32(112 + a * 4, min[a], true); data.setFloat32(124 + a * 4, max[a], true); }
-  u32(136, 128); u32(140, 23);
+  for (let a = 0; a < 3; a++) { min[a] = Math.fround(min[a]) || 0; max[a] = Math.fround(max[a]) || 0; data.setFloat32(120 + a * 4, min[a], true); data.setFloat32(132 + a * 4, max[a], true); }
+  u32(144, 128); u32(148, 23);
   positions.forEach((value, i) => data.setFloat32(160 + i * 4, value, true)); uvs.forEach((value, i) => data.setFloat32(uvOffset + i * 4, value, true));
+  if (env) for (let i = 0; i < v; i++) data.setFloat32(normalOffset + i * 12 + 8, 1, true);
   indices.forEach((value, i) => u32(indexOffset + i * 4, value));
-  u32(drawOffset + 16, n); u32(drawOffset + 28, 1 | 2);
-  u32(textureOffset + 4, 779); u32(textureOffset + 8, 2); u32(textureOffset + 12, 2); u32(textureOffset + 16, texelOffset); u32(textureOffset + 20, texels);
-  data.setUint8(textureOffset + 25, 2); data.setUint8(textureOffset + 26, 1); data.setUint16(textureOffset + 28, 2, true); data.setUint16(textureOffset + 30, 2, true);
+  u32(drawOffset + 16, n);
+  if (env) { u32(drawOffset + 20, 4); u32(drawOffset + 32, 1); u32(drawOffset + 36, 1); data.setUint8(drawOffset + 41, 2); u32(drawOffset + 44, 0); }
+  else { u32(drawOffset + 20, 2); u32(drawOffset + 32, 0xffffffff); u32(drawOffset + 36, 0xffffffff); data.setUint8(drawOffset + 41, 255); u32(drawOffset + 44, 1 | 2); }
+  for (let slot = 0; slot < slots; slot++) {
+    const at = textureOffset + slot * 32;
+    u32(at, slot); u32(at + 4, 779 + slot); u32(at + 8, 2); u32(at + 12, 2); u32(at + 16, texelOffset + slot * 16); u32(at + 20, 16);
+    data.setUint8(at + 25, 2); data.setUint8(at + 26, 1); data.setUint16(at + 28, 2, true); data.setUint16(at + 30, 2, true);
+  }
   for (let i = 0; i < texels; i++) data.setUint8(texelOffset + i, i);
   const region = ([offset, byteLength]: number[]) => ({ offset, byteLength });
   const manifest = {
-    artifactId: '77'.repeat(32), bindingSha256: '88'.repeat(32), sha256: '99'.repeat(32), byteLength: buffer.byteLength, formatVersion: 1 as const, headerBytes: 160 as const,
-    coordinatePolicy: 'native-m2-position-normal-uv-winding-v1' as const, vertexCount: v, indexCount: n, drawCount: 1, textureCount: 1,
-    positions: region(regions[0]), uvs: region(regions[1]), indices: region(regions[2]), draws: region(regions[3]), textures: region(regions[4]), texels: region(regions[5]),
+    artifactId: '77'.repeat(32), bindingSha256: '88'.repeat(32), sha256: '99'.repeat(32), byteLength: buffer.byteLength, formatVersion: 2 as const, headerBytes: 160 as const,
+    coordinatePolicy: 'native-m2-position-normal-uv-winding-v1' as const, vertexCount: v, indexCount: n, drawCount: 1, textureCount: slots,
+    positions: region(regions[0]), normals: region(regions[1]), uvs: region(regions[2]), indices: region(regions[3]), draws: region(regions[4]), textures: region(regions[5]), texels: region(regions[6]),
     bounds: { min, max }, alphaReference: 128 as const, displayId: 23, geometryBindingSha256: '11'.repeat(32),
-    materialPolicy: 'm2-single-texture-opaque-alphakey-v1' as const, texturePolicy: 'blp2-largest-mip-within-1024-rgba8-v1' as const,
-    readerRevision: 'm2-appearance-batches-v1' as const, decoderRevision: 'blp2-rgba8-v2' as const, artifactRevision: 'model-appearance-vma1-v1' as const,
+    materialPolicy: 'm2-one-or-two-stage-combiners-v1' as const, texturePolicy: 'blp2-largest-mip-within-1024-rgba8-v1' as const,
+    readerRevision: 'm2-appearance-batches-v1' as const, decoderRevision: 'blp2-rgba8-v2' as const, artifactRevision: 'model-appearance-vma1-v2' as const,
   };
-  return { buffer, data, manifest, offsets: { uvOffset, indexOffset, drawOffset, textureOffset, texelOffset } };
+  return { buffer, data, manifest, offsets: { normalOffset, uvOffset, indexOffset, drawOffset, textureOffset, texelOffset } };
 }

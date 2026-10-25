@@ -63,11 +63,12 @@ internal static class GeometryAppearanceSources
                 M2AppearanceRefusal.BlendUnsupported => CreatureGeometryAppearanceState.BlendUnsupported,
                 M2AppearanceRefusal.TextureWeight => CreatureGeometryAppearanceState.TextureWeight,
                 M2AppearanceRefusal.TextureTransform => CreatureGeometryAppearanceState.TextureTransform,
+                M2AppearanceRefusal.CombinerUnsupported => CreatureGeometryAppearanceState.CombinerUnsupported,
                 _ => CreatureGeometryAppearanceState.MaterialUnsupported
             }, Problem("CREATURE_APPEARANCE_" + decline.Reason.ToString().ToUpperInvariant() switch
             {
                 "MULTITEXTURE" => "MULTI_TEXTURE", "BLENDUNSUPPORTED" => "BLEND_UNSUPPORTED", "TEXTUREWEIGHT" => "TEXTURE_WEIGHT",
-                "TEXTURETRANSFORM" => "TEXTURE_TRANSFORM", _ => "MATERIAL_UNSUPPORTED"
+                "TEXTURETRANSFORM" => "TEXTURE_TRANSFORM", "COMBINERUNSUPPORTED" => "COMBINER_UNSUPPORTED", _ => "MATERIAL_UNSUPPORTED"
             }, decline.Message, batch: decline.BatchOrdinal, texture: decline.TextureOrdinal));
         // Chain: type 0 uses TXID[ordinal]; 11/12/13 use TextureVariationFileDataID[0/1/2]. Zero is unresolved, never substituted.
         var chain = new CreatureGeometryTexture[plan.Textures.Count]; var ids = new uint[plan.Textures.Count]; int? unresolved = null;
@@ -188,12 +189,14 @@ internal static class GeometryAppearanceSources
                     long.Parse(receipt.DecodedBytes, CultureInfo.InvariantCulture), receipt.VerifierRevision), image.Width, image.Height, image.MipLevel,
                     image.BaseWidth, image.BaseHeight, image.Encoding, s.WrapU, s.WrapV);
             }).ToArray();
-            foreach (var draw in plan.Draws)
+            int Slot(int ordinal)
             {
-                var t = plan.Textures.Single(x => x.Ordinal == draw.TextureOrdinal); var at = Array.FindIndex(chain, c => c.Ordinal == t.Ordinal);
-                draws.Add(new(draw.BatchOrdinal, draw.SectionIndex, draw.TextureOrdinal, slots.IndexOf((ids[at], t.WrapU, t.WrapV)),
-                    draw.AlphaKey, draw.TwoSided, draw.DepthTest, draw.DepthWrite));
+                var t = plan.Textures.Single(x => x.Ordinal == ordinal); var at = Array.FindIndex(chain, c => c.Ordinal == t.Ordinal);
+                return slots.IndexOf((ids[at], t.WrapU, t.WrapV));
             }
+            foreach (var draw in plan.Draws)
+                draws.Add(new(draw.BatchOrdinal, draw.SectionIndex, draw.TextureOrdinal, Slot(draw.TextureOrdinal), draw.AlphaKey, draw.TwoSided, draw.DepthTest,
+                    draw.DepthWrite, draw.Combiner, draw.Coordinate, draw.SecondTextureOrdinal, draw.SecondTextureOrdinal is { } second ? Slot(second) : null, draw.SecondCoordinate));
             var fields = new[] { 0 }.Concat(display.TextureVariations.Select(v => int.Parse(v, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture))).ToArray();
             var binding = new AppearanceBinding(geometryBindingSha256, uint.Parse(display.DisplayId, CultureInfo.InvariantCulture), Array.AsReadOnly(fields), Array.AsReadOnly(inputs));
             var ready = new GeometryAppearancePreparation(Outcome(CreatureGeometryAppearanceState.Ready, display, chain, effects, null), false,
@@ -202,7 +205,8 @@ internal static class GeometryAppearanceSources
         }
         finally { if (!transferred) reservation.Dispose(); }
     }
-    internal static CreatureGeometryEffects Effects(M2AppearanceEffects e) => new(e.Particles, e.Ribbons, e.Lights, e.ShadowBatches, e.UnbatchedSections);
+    internal static CreatureGeometryEffects Effects(M2AppearanceEffects e) => new(e.Particles, e.Ribbons, e.Lights, e.ShadowBatches, e.UnbatchedSections,
+        e.BlendedBatches, e.EnvTransforms);
     private static string Words(CreatureGeometryTextureState state) => state switch
     {
         CreatureGeometryTextureState.Protected => "encrypted", CreatureGeometryTextureState.ResourceLimit => "over a size limit",

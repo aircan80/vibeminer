@@ -12,7 +12,7 @@ public sealed record CreatureGeometryManifest(string ArtifactId, string BindingS
     string ArtifactRevision, string EdgePolicy);
 public sealed record CreatureGeometryAppearanceManifest(string ArtifactId, string BindingSha256, string Sha256, long ByteLength,
     int FormatVersion, int HeaderBytes, string CoordinatePolicy, int VertexCount, int IndexCount, int DrawCount, int TextureCount,
-    CreatureGeometryBufferRegion Positions, CreatureGeometryBufferRegion Uvs, CreatureGeometryBufferRegion Indices,
+    CreatureGeometryBufferRegion Positions, CreatureGeometryBufferRegion Normals, CreatureGeometryBufferRegion Uvs, CreatureGeometryBufferRegion Indices,
     CreatureGeometryBufferRegion Draws, CreatureGeometryBufferRegion Textures, CreatureGeometryBufferRegion Texels,
     CreatureGeometryBounds Bounds, int AlphaReference, uint DisplayId, string GeometryBindingSha256, string MaterialPolicy,
     string TexturePolicy, string ReaderRevision, string DecoderRevision, string ArtifactRevision);

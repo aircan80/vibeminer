@@ -2,16 +2,22 @@ using static VibeMiner.Formats.Wow.M2Input;
 
 namespace VibeMiner.Formats.Wow;
 
-public enum M2AppearanceRefusal { MultiTexture, BlendUnsupported, TextureWeight, TextureTransform, MaterialUnsupported }
-/// <summary>The first batch, in SKIN order, that the single-texture profile refuses. A null batch means the model as a whole.</summary>
+public enum M2AppearanceRefusal { MultiTexture, BlendUnsupported, TextureWeight, TextureTransform, MaterialUnsupported, CombinerUnsupported }
+/// <summary>The first batch, in SKIN order, that the appearance profile refuses. A null batch means the model as a whole.</summary>
 public sealed record M2AppearanceDecline(M2AppearanceRefusal Reason, int? BatchOrdinal, int? TextureOrdinal, string Message);
 public enum M2TextureBinding { FileDataId, CreatureVariation }
 /// <summary>A texture ordinal some admitted batch draws. FileDataId is the exact TXID entry for type 0 (zero when
 /// the TXID entry is zero); Variation is the CreatureDisplayInfo position for types 11-13. Nothing is resolved here.</summary>
 public sealed record M2AppearanceTexture(int Ordinal, uint Type, M2TextureBinding Binding, int? Variation, uint FileDataId, bool WrapU, bool WrapV);
-public sealed record M2AppearanceDraw(int BatchOrdinal, int SectionIndex, int TextureOrdinal, bool AlphaKey, bool TwoSided, bool DepthTest, bool DepthWrite);
-/// <summary>Declared parts the textured draw leaves out. They are counted, never drawn or evaluated.</summary>
-public sealed record M2AppearanceEffects(int Particles, int Ribbons, int Lights, int ShadowBatches, int UnbatchedSections);
+/// <summary>One drawn batch. Stage 0 is always present; SecondTextureOrdinal and SecondCoordinate are set exactly for
+/// two-stage combiners.</summary>
+public sealed record M2AppearanceDraw(int BatchOrdinal, int SectionIndex, int TextureOrdinal, bool AlphaKey, bool TwoSided, bool DepthTest, bool DepthWrite,
+    M2Combiner Combiner = M2Combiner.Opaque, M2StageCoordinate Coordinate = M2StageCoordinate.Uv0, int? SecondTextureOrdinal = null,
+    M2StageCoordinate? SecondCoordinate = null);
+/// <summary>Declared parts the textured draw leaves out. They are counted, never drawn or evaluated. BlendedBatches are
+/// batches with blend mode 2-7; EnvTransforms are env-map stages drawn without their UV animation (D094).</summary>
+public sealed record M2AppearanceEffects(int Particles, int Ribbons, int Lights, int ShadowBatches, int UnbatchedSections,
+    int BlendedBatches = 0, int EnvTransforms = 0);
 /// <summary>Model-phase facts the SKIN phase needs; holds no source bytes.</summary>
 public sealed class M2AppearanceModelFacts
 {
@@ -32,13 +38,13 @@ public sealed class M2AppearancePlan
     public M2AppearanceEffects Effects { get; }
 }
 
-/// <summary>Original reader and admission for the single-texture static appearance profile. It reads SKIN batch
+/// <summary>Original reader and admission for the static textured appearance profile (one or two texture stages). It reads SKIN batch
 /// records and texture-weight keys from the same verified sources the geometry readers consumed. It never
 /// fetches textures, picks a display or evaluates animation. Layout facts: pywowlib 55276dc, wow.export 1b625d0.</summary>
 public static class M2Appearance
 {
     public const string ReaderRevision = "m2-appearance-batches-v1";
-    public const string MaterialPolicy = "m2-single-texture-opaque-alphakey-v1";
+    public const string MaterialPolicy = "m2-one-or-two-stage-combiners-v1";
     /// <summary>Alpha-key reference out of 255 for blend mode 1, as the pinned wow.export renderer uses.</summary>
     public const int AlphaReference = 128;
     private const int MaxWeightKeys = 65_536, MaxWeightSlices = 65_536;
@@ -102,7 +108,8 @@ public static class M2Appearance
         return new(parsedModel, proofs);
     }
 
-    /// <summary>SKIN phase: reads the batch records and admits every batch or names the first refused one.</summary>
+    /// <summary>SKIN phase: reads the batch records and admits every batch or names the first refused one. Batches with
+    /// blend mode 2-7 are counted as not drawn (D094); the rest must fit a supported combiner (m2-skin.md).</summary>
     public static async Task<M2AppearancePlan> AdmitAsync(Stream skin, M2GeometrySkin parsedSkin, M2AppearanceModelFacts facts, CancellationToken token = default)
     {
         ArgumentNullException.ThrowIfNull(parsedSkin); ArgumentNullException.ThrowIfNull(facts); token.ThrowIfCancellationRequested();
@@ -117,11 +124,10 @@ public static class M2Appearance
             new(row[0], unchecked((sbyte)row[1]), U16(row, 2), U16(row, 4), U16(row, 6), I16(row, 8), U16(row, 10), U16(row, 12),
                 U16(row, 14), U16(row, 16), U16(row, 18), U16(row, 20), U16(row, 22)));
         await skinInput.FinishAsync();
-        var weightTracks = Declaration(parsedModel, "weights");
-        bool StaticFull(int track) => facts.StaticWeights[track];
-        var sections = parsedSkin.Sections; var seen = new bool[sections.Count];
+        var weightTracks = Declaration(parsedModel, "weights"); var transformTracks = Declaration(parsedModel, "transforms").Count;
+        var sections = parsedSkin.Sections; var batched = new bool[sections.Count]; var drawn = new bool[sections.Count];
         var draws = new List<M2AppearanceDraw>(batches.Length); var textures = new SortedDictionary<int, M2AppearanceTexture>();
-        var colors = Declaration(parsedModel, "colors").Count;
+        var colors = Declaration(parsedModel, "colors").Count; int blended = 0, envTransforms = 0; int? firstBlended = null;
         M2AppearanceDecline? decline = null;
         M2AppearanceDecline Refuse(M2AppearanceRefusal reason, int batch, int? texture, string message) => new(reason, batch, texture, message);
         for (var i = 0; i < batches.Length && decline is null; i++)
@@ -129,40 +135,75 @@ public static class M2Appearance
             token.ThrowIfCancellationRequested(); var b = batches[i];
             if (b.SectionIndex >= sections.Count || b.MaterialIndex >= parsedModel.Materials.Count || b.ColorIndex < -1 || b.ColorIndex >= colors)
             { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, null, "The batch names a section, material or color the model does not declare."); break; }
-            if (b.TextureCount != 1) { decline = Refuse(M2AppearanceRefusal.MultiTexture, i, null, "The batch combines more than one texture stage."); break; }
             var material = parsedModel.Materials[b.MaterialIndex];
-            if (material.BlendMode > 1) { decline = Refuse(M2AppearanceRefusal.BlendUnsupported, i, null, "The batch blends with mode " + material.BlendMode + "; only opaque and alpha key are drawn."); break; }
-            if ((material.Flags & ~KnownRenderFlags) != 0 || b.Flags is not (0 or 0x10) || b.ShaderId is not (0 or 0x10) || b.Flags2 != 0 || b.MaterialLayer != 0)
-            { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, null, "The batch needs a shader, flag or layer outside the single-texture profile."); break; }
-            if (b.TextureComboIndex >= parsedModel.TextureCombos.Count || parsedModel.TextureCombos[b.TextureComboIndex] >= parsedModel.Textures.Count)
+            if (material.BlendMode > 7) { decline = Refuse(M2AppearanceRefusal.BlendUnsupported, i, null, "The batch blends with mode " + material.BlendMode + ", which has no M2 meaning."); break; }
+            batched[b.SectionIndex] = true;
+            // D094: blended layers (2 alpha, 3 add without alpha, 4 add, 5 mod, 6 mod2x, 7 blend add) are counted, not drawn.
+            if (material.BlendMode >= 2) { blended++; if (sections[b.SectionIndex].TriangleCount != 0) firstBlended ??= i; continue; }
+            if (b.TextureCount is 0 or > 2) { decline = Refuse(M2AppearanceRefusal.MultiTexture, i, null, "The batch combines " + b.TextureCount + " texture stages; one or two are drawn."); break; }
+            var stages = b.TextureCount;
+            if ((material.Flags & ~KnownRenderFlags) != 0 || b.Flags is not (0 or 0x10) && !(stages == 2 && b.Flags is 0x80 or 0x90) || b.Flags2 != 0 || b.MaterialLayer != 0)
+            { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, null, "The batch needs a render flag, batch flag or layer outside the appearance profile."); break; }
+            if (M2Combiners.Admit(stages, b.ShaderId, out var combinerName) is not { } profile)
+            { decline = Refuse(M2AppearanceRefusal.CombinerUnsupported, i, null, "The batch combines its textures with " + combinerName + ", which is not drawn."); break; }
+            if (b.TextureComboIndex + stages > parsedModel.TextureCombos.Count || Enumerable.Range(b.TextureComboIndex, stages).Any(c => parsedModel.TextureCombos[c] >= parsedModel.Textures.Count))
             { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, null, "The batch texture lookup names no declared texture."); break; }
-            var ordinal = parsedModel.TextureCombos[b.TextureComboIndex];
-            // Shaders 0 and 0x10 sample UV0. A present coordinate lookup must agree; an empty one defers to the shader.
-            var coordinates = parsedModel.TextureCoordinates;
-            if (coordinates.Count != 0 && (b.TextureCoordinateComboIndex >= coordinates.Count || coordinates[b.TextureCoordinateComboIndex] != 0))
-            { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, ordinal, "The batch samples a texture coordinate other than UV0."); break; }
-            if (b.TextureWeightComboIndex >= parsedModel.TextureWeights.Count || b.TextureTransformComboIndex >= parsedModel.TextureTransforms.Count)
-            { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, ordinal, "The batch opacity or UV-transform lookup lies outside the model."); break; }
-            var weight = parsedModel.TextureWeights[b.TextureWeightComboIndex];
-            if (weight != NoChannel && (weight >= weightTracks.Count || !StaticFull(weight)))
-            { decline = Refuse(M2AppearanceRefusal.TextureWeight, i, ordinal, "The batch texture weight is not a proven constant full opacity."); break; }
-            if (parsedModel.TextureTransforms[b.TextureTransformComboIndex] != NoChannel)
-            { decline = Refuse(M2AppearanceRefusal.TextureTransform, i, ordinal, "The batch animates its texture coordinates."); break; }
-            var texture = parsedModel.Textures[ordinal];
-            if ((texture.Flags & ~3u) != 0) { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, ordinal, "The texture has flags outside the U/V wrap bits."); break; }
-            M2AppearanceTexture reference;
-            if (texture.Type == 0) reference = new(ordinal, 0, M2TextureBinding.FileDataId, null, texture.FileDataId ?? 0, (texture.Flags & 1) != 0, (texture.Flags & 2) != 0);
-            else if (texture.Type is >= 11 and <= 13) reference = new(ordinal, texture.Type, M2TextureBinding.CreatureVariation, (int)texture.Type - 11, 0, (texture.Flags & 1) != 0, (texture.Flags & 2) != 0);
-            else { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, ordinal, "Texture type " + texture.Type + " has no creature binding in this profile."); break; }
-            if (seen[b.SectionIndex]) { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, ordinal, "Several batches layer the same section."); break; }
-            seen[b.SectionIndex] = true; textures[ordinal] = reference;
+            var ordinals = Enumerable.Range(b.TextureComboIndex, stages).Select(c => (int)parsedModel.TextureCombos[c]).ToArray();
+            // A present coordinate lookup must agree with the combiner's stages: 0 for UV0, 1 for UV1, -1 for an env map.
+            // Retail models usually ship an empty lookup, which defers to the shader.
+            var coordinates = parsedModel.TextureCoordinates; int? wrongCoordinate = null;
+            if (coordinates.Count != 0)
+                for (var s = 0; s < stages && wrongCoordinate is null; s++)
+                    if (b.TextureCoordinateComboIndex + s >= coordinates.Count || coordinates[b.TextureCoordinateComboIndex + s] != profile.Stages[s] switch
+                        { M2StageCoordinate.Uv0 => 0, M2StageCoordinate.Uv1 => 1, _ => -1 }) wrongCoordinate = ordinals[s];
+            if (wrongCoordinate is { } badStage) { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, badStage, "The batch coordinate lookup disagrees with its combiner's texture coordinates."); break; }
+            if (b.TextureWeightComboIndex >= parsedModel.TextureWeights.Count || b.TextureTransformComboIndex + stages > parsedModel.TextureTransforms.Count)
+            { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, ordinals[0], "The batch opacity or UV-transform lookup lies outside the model."); break; }
+            // Stage s reads weight lookup entry index + s; the client may scale a stage (such as an added env term) by it. Each entry
+            // present must be 0xFFFF or a proven constant full opacity. An entry past the lookup's end names no weight channel
+            // (live retail two-stage bodies ship a one-entry lookup), as an entry past the declared transform tracks names no transform.
+            int? animatedWeight = null;
+            for (var s = 0; s < stages && animatedWeight is null; s++)
+            {
+                if (b.TextureWeightComboIndex + s >= parsedModel.TextureWeights.Count) break;
+                var weight = parsedModel.TextureWeights[b.TextureWeightComboIndex + s];
+                if (weight != NoChannel && (weight >= weightTracks.Count || !facts.StaticWeights[weight])) animatedWeight = ordinals[s];
+            }
+            if (animatedWeight is { } weighted) { decline = Refuse(M2AppearanceRefusal.TextureWeight, i, weighted, "The batch texture weight is not a proven constant full opacity."); break; }
+            // Stage s reads transform lookup entry index + s. 0xFFFF, or an entry past the declared tracks, is no transform.
+            var animated = 0; int? uvTransform = null;
+            for (var s = 0; s < stages; s++)
+            {
+                var transform = parsedModel.TextureTransforms[b.TextureTransformComboIndex + s];
+                if (transform == NoChannel || transform >= transformTracks) continue;
+                if (profile.Stages[s] == M2StageCoordinate.Env) animated++; else { uvTransform = ordinals[s]; break; }
+            }
+            if (uvTransform is { } scrolled) { decline = Refuse(M2AppearanceRefusal.TextureTransform, i, scrolled, "The batch animates its texture coordinates."); break; }
+            var references = new M2AppearanceTexture[stages]; int? badTexture = null; string? badMessage = null;
+            for (var s = 0; s < stages && badTexture is null; s++)
+            {
+                var texture = parsedModel.Textures[ordinals[s]];
+                if ((texture.Flags & ~3u) != 0) { badTexture = ordinals[s]; badMessage = "The texture has flags outside the U/V wrap bits."; }
+                else if (texture.Type == 0) references[s] = new(ordinals[s], 0, M2TextureBinding.FileDataId, null, texture.FileDataId ?? 0, (texture.Flags & 1) != 0, (texture.Flags & 2) != 0);
+                else if (texture.Type is >= 11 and <= 13) references[s] = new(ordinals[s], texture.Type, M2TextureBinding.CreatureVariation, (int)texture.Type - 11, 0, (texture.Flags & 1) != 0, (texture.Flags & 2) != 0);
+                else { badTexture = ordinals[s]; badMessage = "Texture type " + texture.Type + " has no creature binding in this profile."; }
+            }
+            if (badTexture is { } bad) { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, bad, badMessage!); break; }
+            if (drawn[b.SectionIndex]) { decline = Refuse(M2AppearanceRefusal.MaterialUnsupported, i, ordinals[0], "Several opaque or alpha-key batches layer the same section."); break; }
+            drawn[b.SectionIndex] = true; envTransforms += animated;
+            foreach (var reference in references) textures[reference.Ordinal] = reference;
             if (sections[b.SectionIndex].TriangleCount != 0)
-                draws.Add(new(i, b.SectionIndex, ordinal, material.BlendMode == 1 && b.ShaderId == 0x10, (material.Flags & 4) != 0, (material.Flags & 8) == 0, (material.Flags & 0x10) == 0));
+                draws.Add(new(i, b.SectionIndex, ordinals[0], material.BlendMode == 1 && profile.TextureAlpha, (material.Flags & 4) != 0, (material.Flags & 8) == 0,
+                    (material.Flags & 0x10) == 0, profile.Combiner, profile.Stages[0], stages == 2 ? ordinals[1] : null, stages == 2 ? profile.Stages[1] : null));
         }
-        if (decline is null && draws.Count == 0) decline = new(M2AppearanceRefusal.MaterialUnsupported, null, null, "No batch draws any declared surface triangle.");
-        var unbatched = 0; for (var i = 0; i < sections.Count; i++) if (!seen[i] && sections[i].TriangleCount != 0) unbatched++;
+        if (decline is null && draws.Count == 0)
+            decline = firstBlended is { } layer
+                ? new(M2AppearanceRefusal.BlendUnsupported, layer, null, "Every batch with surface triangles is a blended layer; no opaque or alpha-key surface is left to draw.")
+                : new(M2AppearanceRefusal.MaterialUnsupported, null, null, "No batch draws any declared surface triangle.");
+        var unbatched = 0; for (var i = 0; i < sections.Count; i++) if (!batched[i] && sections[i].TriangleCount != 0) unbatched++;
         var effects = new M2AppearanceEffects((int)Declaration(parsedModel, "particles").Count, (int)Declaration(parsedModel, "ribbons").Count,
-            (int)Declaration(parsedModel, "lights").Count, (int)parsedSkin.ShadowBatchDeclaration.Count, decline is null ? unbatched : 0);
+            (int)Declaration(parsedModel, "lights").Count, (int)parsedSkin.ShadowBatchDeclaration.Count, decline is null ? unbatched : 0,
+            decline is null ? blended : 0, decline is null ? envTransforms : 0);
         return decline is null ? new(draws.ToArray(), textures.Values.ToArray(), null, effects) : new([], [], decline, effects);
     }
     private static M2ArrayDeclaration Declaration(M2Model model, string name) =>

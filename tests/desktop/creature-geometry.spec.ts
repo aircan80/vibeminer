@@ -97,7 +97,8 @@ test('A ready display appearance draws the textured surfaces from its verified V
  await expect(page.getByText('Unposed textured surfaces · bind pose, unlit',{exact:true})).toBeVisible();
  const chain=page.getByRole('region',{name:'Texture chain'});await expect(chain).toContainText('Textured');
  await expect(chain).toContainText('Texture 0 · type 11 → TextureVariationFileDataID[0] → FileDataID 779 · BC1, mip 0 4×4 of 4×4');
- await expect(chain).toContainText('Not drawn: 2 particle emitters, 0 ribbons, 0 lights, 1 shadow batch.');
+ await expect(chain).toContainText('Texture 1 · type 0 → TXID[1] → FileDataID 780 · BC1, mip 0 4×4 of 4×4');
+ await expect(chain).toContainText('Not drawn: 2 particle emitters, 0 ribbons, 0 lights, 1 shadow batch, 1 blended layer.');
  const canvas=page.locator('.creature-geometry canvas'),before=await canvas.screenshot();
  await page.getByRole('button',{name:'Rotate left',exact:true}).click();await expect.poll(async()=>Buffer.compare(before,await canvas.screenshot())).not.toBe(0);
  await capture(page,s.app,'textured',canvas);
@@ -105,8 +106,15 @@ test('A ready display appearance draws the textured surfaces from its verified V
  await size(s.app,600,480);await text(page,2);await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(600);
  const names=page.locator('.geometry-inspector .geometry-name');await names.last().scrollIntoViewIfNeeded();
  const fragments=await names.evaluateAll(els=>els.map(e=>({text:e.textContent,lines:e.getClientRects().length})));
- expect(fragments.map(f=>f.text)).toEqual(['TextureVariationFileDataID','[0–3]','TextureVariationFileDataID[0]']);
+ expect(fragments.map(f=>f.text)).toEqual(['TextureVariationFileDataID','[0–3]','TextureVariationFileDataID[0]','TXID[1]']);
  for(const fragment of fragments)expect(fragment.lines,fragment.text!).toBe(1);
+ // #69: in chain rows a label never wraps apart from its number.
+ const pairs=await chain.locator('li').evaluateAll(items=>items.flatMap(li=>{const out:{text:string;lines:number}[]=[];const walker=document.createTreeWalker(li,NodeFilter.SHOW_TEXT);
+  for(let node=walker.nextNode();node;node=walker.nextNode())for(const m of node.textContent!.matchAll(/(Texture|type|FileDataID|mip)\u00a0\d+/g)){const range=document.createRange();range.setStart(node,m.index!);range.setEnd(node,m.index!+m[0].length);
+   out.push({text:m[0],lines:new Set([...range.getClientRects()].map(r=>Math.round(r.top))).size});}return out;}));
+ expect(pairs.length).toBe(8);for(const pair of pairs)expect(pair.lines,pair.text).toBe(1);
+ // Each arrow is glued to the text before it, so it never starts a line.
+ for(const row of await chain.locator('li').allTextContents())expect(row.match(/\u00a0→ /g)?.length,row).toBe(2);
  expect(await page.locator('.geometry-inspector').evaluate(e=>e.scrollWidth-e.clientWidth)).toBeLessThanOrEqual(0);
  await text(page,1);
  const opens=(await methods(s.data)).filter(r=>r.method==='creatures.geometry.open');expect(opens).toHaveLength(1);expect(opens[0].params.geometryArtifactId).not.toBe(opens[0].params.artifactId);

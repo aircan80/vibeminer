@@ -16053,7 +16053,8 @@
         "textureCorrupt",
         "textureUnavailable",
         "resourceLimit",
-        "corrupt"
+        "corrupt",
+        "combinerUnsupported"
       ]
     },
     "CreatureGeometryTextureState": {
@@ -16092,6 +16093,28 @@
         "byteLength"
       ],
       "additionalProperties": false
+    },
+    "CreatureGeometryAppearanceOptionalRegion": {
+      "title": "CreatureGeometryAppearanceOptionalRegion",
+      "type": "object",
+      "properties": {
+        "offset": {
+          "type": "integer",
+          "minimum": 160,
+          "maximum": 10485760
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10485760
+        }
+      },
+      "required": [
+        "offset",
+        "byteLength"
+      ],
+      "additionalProperties": false,
+      "description": "A VMA1 region that is empty (byteLength 0) when no drawn stage needs it."
     },
     "CreatureGeometryAppearanceDisplay": {
       "title": "CreatureGeometryAppearanceDisplay",
@@ -16322,6 +16345,16 @@
           "minimum": 0,
           "maximum": 65536
         },
+        "blendedBatches": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "envTransforms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
         "evaluation": {
           "const": "notDrawn"
         }
@@ -16332,6 +16365,8 @@
         "lights",
         "shadowBatches",
         "unbatchedSections",
+        "blendedBatches",
+        "envTransforms",
         "evaluation"
       ],
       "additionalProperties": false
@@ -16388,7 +16423,7 @@
     },
     "CreatureAppearanceManifest": {
       "title": "CreatureAppearanceManifest",
-      "description": "VMA1 textured appearance manifest; see contracts/geometry-vma1-v1.md.",
+      "description": "VMA1 v2 textured appearance manifest; see contracts/geometry-vma1-v2.md.",
       "type": "object",
       "properties": {
         "artifactId": {
@@ -16409,7 +16444,7 @@
           "maximum": 10485760
         },
         "formatVersion": {
-          "const": 1
+          "const": 2
         },
         "headerBytes": {
           "const": 160
@@ -16439,6 +16474,9 @@
         },
         "positions": {
           "$ref": "#/definitions/CreatureGeometryAppearanceRegion"
+        },
+        "normals": {
+          "$ref": "#/definitions/CreatureGeometryAppearanceOptionalRegion"
         },
         "uvs": {
           "$ref": "#/definitions/CreatureGeometryAppearanceRegion"
@@ -16471,7 +16509,7 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "materialPolicy": {
-          "const": "m2-single-texture-opaque-alphakey-v1"
+          "const": "m2-one-or-two-stage-combiners-v1"
         },
         "texturePolicy": {
           "const": "blp2-largest-mip-within-1024-rgba8-v1"
@@ -16483,7 +16521,7 @@
           "const": "blp2-rgba8-v2"
         },
         "artifactRevision": {
-          "const": "model-appearance-vma1-v1"
+          "const": "model-appearance-vma1-v2"
         }
       },
       "required": [
@@ -16499,6 +16537,7 @@
         "drawCount",
         "textureCount",
         "positions",
+        "normals",
         "uvs",
         "indices",
         "draws",

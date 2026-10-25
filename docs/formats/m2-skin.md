@@ -9,7 +9,7 @@ Our original static model readers in [`src/backend/VibeMiner.Formats.Wow/Models/
 | `M2GeometrySkinReader` | `m2-skin-geometry-v1` | `M2GeometrySkin`: geometry only; batches kept as uninterpreted array declarations |
 | `M2StaticGeometry.Create` | `native-m2-position-normal-uv-winding-v1` | Resolved triangle indices and section-referenced bounds |
 | `M2StaticMaterials.AdmitOpaque` | `m2-opaque-shader0-flags0-uv0-absent-channels-v1` | Draw list for the narrow opaque profile, or `MODEL_MATERIAL_UNSUPPORTED` |
-| `M2Appearance.ReadModelAsync` / `AdmitAsync` | `m2-appearance-batches-v1`, `m2-single-texture-opaque-alphakey-v1` | Texture-weight proofs, SKIN batch records and the textured draw plan, or the first refused batch |
+| `M2Appearance.ReadModelAsync` / `AdmitAsync` | `m2-appearance-batches-v1`, `m2-one-or-two-stage-combiners-v1` | Texture-weight proofs, SKIN batch records and the textured draw plan (one or two stages per batch), or the first refused batch |
 
 Input streams must be readable, seekable, start at 0 and be complete. A BLTE projection with holes is unsupported. Every read is asynchronous and bounded; nothing is published until EOF and length checks pass.
 
@@ -124,26 +124,66 @@ Render flags: the pinned wow.export renderer uses `0x01` unlit, `0x04` two-sided
 
 Keep all four `TextureVariationFileDataID` slots from CreatureDisplayInfo, zeros included. Never compact them or pick the first nonzero.
 
-## Single-texture appearance profile
+## Combiner notes
 
-`M2Appearance` (#63) reads what the geometry-only reader leaves uninterpreted, from the same verified bytes, and never fails geometry. Model phase: sequence flags and, per texture-weight track, a proof that every key stored in this model is `32767`. A sequence without flag `0x20` keeps its keys in an `.anim` file, so keys there leave the track unproven; a track with no keys at all has the default full opacity, as the pinned wow.export renderer evaluates it. SKIN phase: the 24-byte batch records, then every batch in order until the first refusal:
+How a batch's texture stages combine (#69). Read from the pinned wow.export `ShaderMapper.js`, `m2.vertex.shader` and `m2.fragment.shader` (1b625d0) and checked against live wowxptr 12.1.5.70340 files.
+
+**Selection.** The batch's texture count and shader ID name a pixel shader (the combiner) and a vertex shader (where each stage's coordinates come from):
+
+- Shader ID with bit `0x8000`: index `ID & 0x7FFF` into a fixed table of (pixel, vertex) pairs. `0x8000` is `Combiners_Opaque_Mod2xNA_Alpha` with `Diffuse_T1_Env`, `0x8002` is `Combiners_Opaque_AddAlpha_Alpha` with `Diffuse_T1_Env`, `0x8017` is `Combiners_Opaque_Alpha` with `Diffuse_T1_T1`.
+- Otherwise, one texture: `Combiners_Mod` if any of `0x70` is set, else `Combiners_Opaque`; vertex `Diffuse_Env` (`0x80`), `Diffuse_T2` (`0x4000`) or `Diffuse_T1`.
+- Otherwise, two textures: `0x70` set picks the `Combiners_Mod_*` family, clear the `Combiners_Opaque_*` family, and `ID & 7` picks the member (`0x4011` is `Combiners_Mod_Mod`, `0x4014` `Combiners_Mod_Mod2x`). Vertex: `0x80` gives `Diffuse_Env_*`, `0x8` `Diffuse_T1_Env`, `0x4000` `Diffuse_T1_T2`, else `Diffuse_T1_T1`.
+
+In a vertex shader name, `T1` is UV0, `T2` is UV1 and `Env` is a sphere map from the view-space normal: `r = reflect(normalize(viewPosition), normal)`, `m = 2·√(r.x² + r.y² + (r.z + 1)²)`, `uv = r.xy / m + 0.5`. Stage *i* reads `TextureCombos[index + i]`, `TextureCoordCombos[index + i]` and `TextureTransformCombos[index + i]`. Stage *i* has weight lookup entry `index + i`; wow.export reads only the first, but the client may scale a stage's term by its own weight, so every present entry must be a constant full opacity. Live two-stage bodies ship a one-entry weight lookup, so their second stage has no entry.
+
+**Formulas** (T0, T1 are the stage samples; the colour is then lit, and an added term is added after lighting):
+
+| Combiner | Colour | Texture alpha (for blend 1) |
+| --- | --- | --- |
+| `Combiners_Opaque` | T0 | none |
+| `Combiners_Mod` | T0 | T0.a |
+| `Combiners_Opaque_Mod2xNA_Alpha` | mix(T0 × T1 × 2, T0, T0.a): the env map shows, doubled, where the base alpha is low | none |
+| `Combiners_Opaque_AddAlpha_Alpha` | T0, plus T1 × T1.a × (1 − T0.a) added | none |
+| `Combiners_Opaque_Alpha` | mix(T0, T1, T1.a): a decal over the base, same UVs | none |
+| `Combiners_Mod_Mod`, `Combiners_Mod_Mod2x` | T0 × T1 (× 2) | T0.a × T1.a (× 2) |
+
+**Live creature bodies** (wowxptr 12.1.5.70340; 17 models, 52 batches: Infernal, Voidwalker, Felhunter, Felguard, Imp, Succubus, Chicken, Lord Piglet, Jadefire Felsworn, Tree Frog, Archaedas, Siamese Cat, White Stallion and four others):
+
+| Batches | Blend | Combiner | Use |
+| --- | --- | --- | --- |
+| 19 | 0 | `Combiners_Opaque` (`0x0`) | body |
+| 7 | 1 | `Combiners_Mod` (`0x10`) | alpha-keyed hair, fins, wings |
+| 9 | 0 | `0x8000` `Combiners_Opaque_Mod2xNA_Alpha` + `Diffuse_T1_Env` | body with an env-map sheen in the low-alpha areas (Voidwalker, Succubus, Chicken, Lord Piglet, Felsworn) |
+| 3 | 0 | `0x8002` `Combiners_Opaque_AddAlpha_Alpha` + `Diffuse_T1_Env` | body with an added env-map glint (Voidwalker, Felhunter, Felguard) |
+| 3 | 0 | `0x8017` `Combiners_Opaque_Alpha` + `Diffuse_T1_T1` | body with a decal (Tree Frog) |
+| 4 | 7 | `0x4011` `Combiners_Mod_Mod` + `Diffuse_T1_T2` | Infernal fire layers, UV-scrolled |
+| 3 | 2, 4 | `0x4014` `Combiners_Mod_Mod2x` + `Diffuse_T1_T2` | Voidwalker glow layers |
+| 4 | 2, 4 | `Combiners_Mod` | glow and shadow layers |
+
+Every two-texture batch has batch flags `0x80`, or `0x90` when both stages' transform lookup entries are `0xFFFF`. No meaning is assigned to `0x80`; wow.export ignores the batch flags byte. All these models ship an empty coordinate lookup, one texture-weight lookup entry and a constant 32767 weight. The env stage often names a transform lookup entry: Voidwalker's scrolls (track 0 translation, global sequence), while Felhunter's and Felguard's entry is 0 with no transform tracks declared, which wow.export treats as no transform. Every two-texture body batch is opaque; the `T1_T2` (UV1) combiners appear only on blended layers.
+
+## Textured appearance profile
+
+`M2Appearance` (#63, #69) reads what the geometry-only reader leaves uninterpreted, from the same verified bytes, and never fails geometry. Model phase: sequence flags and, per texture-weight track, a proof that every key stored in this model is `32767`. A sequence without flag `0x20` keeps its keys in an `.anim` file, so keys there leave the track unproven; a track with no keys at all has the default full opacity, as the pinned wow.export renderer evaluates it. SKIN phase: the 24-byte batch records, then every batch in order until the first refusal:
 
 | Check | Refusal |
 | --- | --- |
 | Section, material and color indices exist | `MaterialUnsupported` |
-| Texture count is exactly 1 | `MultiTexture` |
-| Material blend is 0 (opaque) or 1 (alpha key) | `BlendUnsupported` |
-| Render flags only `0x01`, `0x04`, `0x08`, `0x10`; batch flags 0 or `0x10`; shader `0x0` or `0x10`; second raw field and material layer 0 | `MaterialUnsupported` |
-| Texture combo names a declared texture; texture flags only U/V wrap | `MaterialUnsupported` |
-| Coordinate: shaders 0 and `0x10` sample UV0. A non-empty coordinate lookup must also say 0. Retail models usually ship an empty lookup | `MaterialUnsupported` |
-| Weight lookup is `0xFFFF` or a proven constant full opacity | `TextureWeight` |
-| Transform lookup is `0xFFFF` | `TextureTransform` |
-| Texture type 0 (TXID) or 11/12/13 (display variation 0/1/2) | `MaterialUnsupported` |
-| One batch per section | `MaterialUnsupported` |
+| Material blend is 0-7. Blend 2-7 is a blended layer: counted, not drawn, no further checks (D094) | `BlendUnsupported` (blend > 7) |
+| Texture count is 1 or 2 | `MultiTexture` |
+| Render flags only `0x01`, `0x04`, `0x08`, `0x10`; batch flags 0 or `0x10`, or also `0x80`/`0x90` with two textures; second raw field and material layer 0 | `MaterialUnsupported` |
+| Combiner, from texture count and shader ID: `Combiners_Opaque` or `Combiners_Mod` with `Diffuse_T1`; `0x8000`, `0x8002` or `0x8017` with two textures. Shader bits outside the selection rules refuse | `CombinerUnsupported`, naming the pixel and vertex shader and the ID |
+| Each stage's texture combo names a declared texture; texture flags only U/V wrap | `MaterialUnsupported` |
+| A non-empty coordinate lookup says 0 for a `T1` stage and −1 for an `Env` stage. Retail models usually ship an empty lookup | `MaterialUnsupported` |
+| Each stage's weight lookup entry is `0xFFFF` or a proven constant full opacity. The first entry must exist; a later stage's entry past the lookup's end names no weight channel | `TextureWeight` / `MaterialUnsupported` |
+| Each stage's transform lookup entry exists. `0xFFFF`, or an entry past the declared transform tracks, is no transform. A real track on a `T1` stage refuses; on an `Env` stage it is drawn at rest and counted (D094) | `TextureTransform` / `MaterialUnsupported` |
+| Each stage's texture is type 0 (TXID) or 11/12/13 (display variation 0/1/2) | `MaterialUnsupported` |
+| One opaque or alpha-key batch per section; blended layers do not count | `MaterialUnsupported` |
+| At least one opaque or alpha-key batch draws a triangle | `BlendUnsupported` when only blended layers are left, else `MaterialUnsupported` |
 
-Particles, ribbons, lights and shadow batches are counted, not drawn, and do not refuse (D090). Priority planes are ignored: nothing blends. Color tracks (vertex color/alpha animation, often used to hide alternate geosets) are not evaluated, like pose. Alpha key applies only to shader `0x10` (`Combiners_Mod`, texture alpha), at 128/255; shader `0` (`Combiners_Opaque`) has no texture alpha. Render flag `0x01` (unlit) has no effect because the preview is unlit; `0x04` draws both sides; `0x08`/`0x10` turn off depth test/write.
+Particles, ribbons, lights, shadow batches and blended layers are counted, not drawn, and do not refuse (D090, D094). Priority planes are ignored: nothing blends. Color tracks (vertex color/alpha animation, often used to hide alternate geosets) are not evaluated, like pose. Alpha key applies only to `Combiners_Mod` (any `0x70` bit, texture alpha), at 128/255; the other drawn combiners have no texture alpha. Render flag `0x01` (unlit) has no effect because the preview is unlit; `0x04` draws both sides; `0x08`/`0x10` turn off depth test/write. The renderer applies the formulas above to the stored texel values, unlit, with the added term added directly ([VMA1 renderer](../../contracts/geometry-vma1-v2.md#renderer)).
 
-Live observation on wowxptr 12.1.5.70340 (#63): most modern creature bodies use two-texture combiner batches (`0x4011`, `0x4014`, `0x8000`, `0x8002`) and are refused as `MultiTexture`; Ragnaros' lava batches animate their weights and UVs. Imp (display 64799) passes.
+Live on wowxptr 12.1.5.70340 (#69): Infernal, Voidwalker, Felhunter, Felguard, Imp, Succubus, Chicken, Lord Piglet, Jadefire Felsworn, Tree Frog, Archaedas and Siamese Cat draw textured. Voidwalker's alternate bracers show because colour tracks are not evaluated. Ragnaros' lava batches animate their weights and UVs.
 
 ## Coordinates
 
@@ -176,5 +216,5 @@ Reads are at most 64 KiB; loops check cancellation at least every 4,096 entries.
 Read for layout facts only; nothing was copied, installed or executed. The Java project had no M2 reader.
 
 - pywowlib `55276dc5c2195da7fe136638a2a59716622f8c65` (MIT): `m2_format.py`, `skin_format.py`, `wow_common_types.py`, `m2_chunks.py`, `enums/m2_enums.py`, `m2_file.py` (its maximum-bones writer buckets are marked uncertain).
-- wow.export `1b625d0f9943be4d8f8e124dbb7a04f1fc7da8f3` (MIT): `M2Loader.js`, `Skin.js`, `ShaderMapper.js`, `M2RendererGL.js`. Its filename, first-choice and default-material conveniences are not our policy.
+- wow.export `1b625d0f9943be4d8f8e124dbb7a04f1fc7da8f3` (MIT): `M2Loader.js`, `Skin.js`, `ShaderMapper.js`, `M2RendererGL.js`, `m2.vertex.shader`, `m2.fragment.shader`. Its filename, first-choice and default-material conveniences are not our policy.
 - WoWFormatLib `1abf1bfad68705a2064b90fba1cb8bcd22588ff0`: `M2Reader.cs`, `SKINReader.cs`, cross-check only. Its fallback textures are not acceptable for a real appearance.

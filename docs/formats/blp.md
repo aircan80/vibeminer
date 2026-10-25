@@ -66,7 +66,7 @@ Reads are sliced at 64 KiB and loops check cancellation per row or block.
 
 ## Model textures
 
-Creature textures (#63, D091) first read only the mip descriptors (`ReadMipsAsync`) and start at the first declared mip, in level order, whose width and height are both ≤ 1,024. While one display's slots together exceed 8 MiB of RGBA8, the image with the largest current level steps down one declared level; then each image is decoded once at its planned level with `DecodeAsync`. Nothing is resized. A container whose declared levels never get within 1,024 px is `BLP_MIP_UNAVAILABLE`, and slots that exceed 8 MiB even at their smallest declared levels are `CREATURE_APPEARANCE_TEXEL_LIMIT`; both report `resourceLimit`. The images go into a [VMA1 artifact](../../contracts/geometry-vma1-v1.md) as raw RGBA8, not PNG; the renderer uploads them without decoding.
+Creature textures (#63, D091) first read only the mip descriptors (`ReadMipsAsync`) and start at the first declared mip, in level order, whose width and height are both ≤ 1,024. While one display's slots together exceed 8 MiB of RGBA8, the image with the largest current level steps down one declared level; then each image is decoded once at its planned level with `DecodeAsync`. Nothing is resized. A container whose declared levels never get within 1,024 px is `BLP_MIP_UNAVAILABLE`, and slots that exceed 8 MiB even at their smallest declared levels are `CREATURE_APPEARANCE_TEXEL_LIMIT`; both report `resourceLimit`. The images go into a [VMA1 artifact](../../contracts/geometry-vma1-v2.md) as raw RGBA8, not PNG; the renderer uploads them without decoding.
 
 ## Icon pipeline
 

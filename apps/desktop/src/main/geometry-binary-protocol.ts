@@ -88,11 +88,12 @@ export class GeometryBinaryProtocol{
 }
 function failure(error:unknown):Response{return new Response('Geometry body unavailable.',{status:error instanceof Refusal?error.status:error instanceof EngineFailure&&error.code.endsWith('CLEANUP_FAILED')?502:500,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':'null','Vary':'Origin'}});}
 function headerMatches(b:Buffer,m:ReadonlyBodyManifest):boolean{return isAppearanceManifest(m)?appearanceHeaderMatches(b,m):geometryHeaderMatches(b,m as ReadonlyGeometryManifest);}
-// VMA1 header (contracts/geometry-vma1-v1.md); the renderer then scans every region before any upload.
+// VMA1 v2 header (contracts/geometry-vma1-v2.md); the renderer then scans every region before any upload.
 function appearanceHeaderMatches(b:Buffer,m:ReadonlyAppearanceManifest):boolean{
- if(b.length<160||b.toString('ascii',0,4)!=='VMA1'||b.readUInt16LE(4)!==1||b.readUInt16LE(6)!==160||b.readUInt32LE(8)!==m.byteLength||b.readUInt32LE(12)!==1||b.subarray(16,48).toString('hex')!==m.bindingSha256)return false;
- const expected=[[48,m.vertexCount],[52,m.indexCount],[56,m.drawCount],[60,m.textureCount],[64,m.positions.offset],[68,m.positions.byteLength],[72,m.uvs.offset],[76,m.uvs.byteLength],[80,m.indices.offset],[84,m.indices.byteLength],[88,m.draws.offset],[92,m.draws.byteLength],[96,m.textures.offset],[100,m.textures.byteLength],[104,m.texels.offset],[108,m.texels.byteLength],[136,m.alphaReference],[140,m.displayId],[144,0],[148,0],[152,0],[156,0]];
- if(expected.some(([offset,value])=>b.readUInt32LE(offset)!==value))return false;for(let i=0;i<3;i++){const min=b.readFloatLE(112+i*4),max=b.readFloatLE(124+i*4);if(!Number.isFinite(min)||!Number.isFinite(max)||Object.is(min,-0)||Object.is(max,-0)||min!==m.bounds.min[i]||max!==m.bounds.max[i])return false;}return true;
+ if(b.length<160||b.toString('ascii',0,4)!=='VMA1'||b.readUInt16LE(4)!==2||b.readUInt16LE(6)!==160||b.readUInt32LE(8)!==m.byteLength||b.readUInt32LE(12)!==1||b.subarray(16,48).toString('hex')!==m.bindingSha256)return false;
+ const regions=[m.positions,m.normals,m.uvs,m.indices,m.draws,m.textures,m.texels].flatMap((r,i)=>[[64+i*8,r.offset],[68+i*8,r.byteLength]]);
+ const expected=[[48,m.vertexCount],[52,m.indexCount],[56,m.drawCount],[60,m.textureCount],...regions,[144,m.alphaReference],[148,m.displayId],[152,0],[156,0]];
+ if(expected.some(([offset,value])=>b.readUInt32LE(offset)!==value))return false;for(let i=0;i<3;i++){const min=b.readFloatLE(120+i*4),max=b.readFloatLE(132+i*4);if(!Number.isFinite(min)||!Number.isFinite(max)||Object.is(min,-0)||Object.is(max,-0)||min!==m.bounds.min[i]||max!==m.bounds.max[i])return false;}return true;
 }
 function geometryHeaderMatches(b:Buffer,m:ReadonlyGeometryManifest):boolean{
  if(b.length<128||b.toString('ascii',0,4)!=='VMG1'||b.readUInt16LE(4)!==1||b.readUInt16LE(6)!==128||b.readUInt32LE(8)!==m.byteLength||b.readUInt32LE(12)!==1||b.subarray(16,48).toString('hex')!==m.bindingSha256)return false;

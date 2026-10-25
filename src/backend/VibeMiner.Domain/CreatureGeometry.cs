@@ -32,7 +32,7 @@ public enum CreatureGeometryAppearanceState
 {
     NotPrepared, Ready, CharacterModel, MultiTexture, BlendUnsupported, TextureWeight, TextureTransform, MaterialUnsupported,
     TextureUnresolved, TextureMissing, TextureAmbiguous, TextureProtected, TextureUnsupported, TextureCorrupt, TextureUnavailable,
-    ResourceLimit, Corrupt
+    ResourceLimit, Corrupt, CombinerUnsupported
 }
 public enum CreatureGeometryTextureBinding { Txid, Variation }
 public enum CreatureGeometryTextureState { Decoded, Unresolved, NotReached, Missing, Ambiguous, Protected, Unsupported, Corrupt, Unavailable, ResourceLimit }
@@ -43,8 +43,10 @@ public sealed record CreatureGeometryTextureSource(string ContentKey, string Enc
     long DecodedBytes, string FullVerifierRevision);
 public sealed record CreatureGeometryTexture(int Ordinal, int Type, CreatureGeometryTextureBinding Binding, int? Variation,
     string? FileDataId, CreatureGeometryTextureState State, CreatureGeometryTextureImage? Image = null, CreatureGeometryTextureSource? Source = null);
-/// <summary>Declared parts the textured draw leaves out; all are notEvaluated and never drawn.</summary>
-public sealed record CreatureGeometryEffects(int Particles, int Ribbons, int Lights, int ShadowBatches, int UnbatchedSections);
+/// <summary>Declared parts the textured draw leaves out; all are notEvaluated and never drawn. BlendedBatches are
+/// batches with blend mode 2-7 (D094); EnvTransforms are env-map stages drawn without their UV animation.</summary>
+public sealed record CreatureGeometryEffects(int Particles, int Ribbons, int Lights, int ShadowBatches, int UnbatchedSections,
+    int BlendedBatches = 0, int EnvTransforms = 0);
 public sealed record CreatureGeometryAppearanceProblem(string Code, string Message, bool Retryable, int? BatchOrdinal = null, int? TextureOrdinal = null);
 public sealed record CreatureGeometryAppearance(string Policy, CreatureGeometryAppearanceState State,
     CreatureGeometryAppearanceDisplay? Display, IReadOnlyList<CreatureGeometryTexture> Textures, CreatureGeometryEffects? Effects,

@@ -37,7 +37,7 @@ public static partial class CreatureGeometryValidation
                     source.DecodedBytes is >= 1 and <= 16 << 20 && source.FullVerifierRevision == "content-blte-v1");
             textures[i] = t with { Image = t.Image is null ? null : t.Image with { }, Source = t.Source is null ? null : t.Source with { } };
         }
-        if (value.Effects is { } e) Require(new[] { e.Particles, e.Ribbons, e.Lights, e.ShadowBatches, e.UnbatchedSections }.All(n => n is >= 0 and <= 65536));
+        if (value.Effects is { } e) Require(new[] { e.Particles, e.Ribbons, e.Lights, e.ShadowBatches, e.UnbatchedSections, e.BlendedBatches, e.EnvTransforms }.All(n => n is >= 0 and <= 65536));
         if (value.Problem is { } p)
             Require(Text(p.Code, 64) && p.Code.All(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_') && Text(p.Message, 512) &&
                 p.BatchOrdinal is null or (>= 0 and < 512) && p.TextureOrdinal is null or (>= 0 and < 32));
@@ -70,26 +70,29 @@ public static partial class CreatureGeometryValidation
     public static CreatureGeometryAppearanceManifest Snapshot(CreatureGeometryAppearanceManifest value)
     {
         Require(value is not null && Hash(value.ArtifactId) && Hash(value.BindingSha256) && Hash(value.Sha256) && Hash(value.GeometryBindingSha256));
-        Require(value.FormatVersion == 1 && value.HeaderBytes == 160 && value.CoordinatePolicy == "native-m2-position-normal-uv-winding-v1" &&
+        Require(value.FormatVersion == 2 && value.HeaderBytes == 160 && value.CoordinatePolicy == "native-m2-position-normal-uv-winding-v1" &&
             value.VertexCount is >= 1 and <= 65536 && value.IndexCount is >= 3 and <= 131070 && value.IndexCount % 3 == 0 &&
             value.DrawCount is >= 1 and <= 512 && value.TextureCount is >= 1 and <= 32 && value.AlphaReference == 128 && value.DisplayId is > 0 and <= int.MaxValue &&
-            value.MaterialPolicy == "m2-single-texture-opaque-alphakey-v1" && value.TexturePolicy == "blp2-largest-mip-within-1024-rgba8-v1" &&
-            value.ReaderRevision == "m2-appearance-batches-v1" && value.DecoderRevision == "blp2-rgba8-v2" && value.ArtifactRevision == "model-appearance-vma1-v1");
+            value.MaterialPolicy == "m2-one-or-two-stage-combiners-v1" && value.TexturePolicy == "blp2-largest-mip-within-1024-rgba8-v1" &&
+            value.ReaderRevision == "m2-appearance-batches-v1" && value.DecoderRevision == "blp2-rgba8-v2" && value.ArtifactRevision == "model-appearance-vma1-v2");
         Require(value.Texels is not null && value.Texels.ByteLength is >= 4 and <= 8 << 20 && value.Texels.ByteLength % 4 == 0);
+        // Normals are present (one per vertex) only when a drawn stage samples an env map; otherwise the region is empty.
+        Require(value.Normals is not null && (value.Normals.ByteLength == 0 || value.Normals.ByteLength == value.VertexCount * 12));
         var positions = new CreatureGeometryBufferRegion(160, value.VertexCount * 12);
-        var uvs = new CreatureGeometryBufferRegion(positions.Offset + positions.ByteLength, value.VertexCount * 8);
+        var normals = new CreatureGeometryBufferRegion(positions.Offset + positions.ByteLength, value.Normals!.ByteLength);
+        var uvs = new CreatureGeometryBufferRegion(normals.Offset + normals.ByteLength, value.VertexCount * 8);
         var indices = new CreatureGeometryBufferRegion(uvs.Offset + uvs.ByteLength, value.IndexCount * 4);
-        var draws = new CreatureGeometryBufferRegion(indices.Offset + indices.ByteLength, value.DrawCount * 32);
+        var draws = new CreatureGeometryBufferRegion(indices.Offset + indices.ByteLength, value.DrawCount * 48);
         var textures = new CreatureGeometryBufferRegion(draws.Offset + draws.ByteLength, value.TextureCount * 32);
         var texels = new CreatureGeometryBufferRegion(textures.Offset + textures.ByteLength, value.Texels.ByteLength);
-        Require(value.Positions == positions && value.Uvs == uvs && value.Indices == indices && value.Draws == draws && value.Textures == textures &&
+        Require(value.Positions == positions && value.Normals == normals && value.Uvs == uvs && value.Indices == indices && value.Draws == draws && value.Textures == textures &&
             value.Texels == texels && value.ByteLength == (long)texels.Offset + texels.ByteLength && value.ByteLength <= 10 << 20);
         Require(value.Bounds is not null);
         var min = Entries(value.Bounds.Min, 3); var max = Entries(value.Bounds.Max, 3);
         Require(min.Length == 3 && max.Length == 3);
         for (var i = 0; i < 3; i++) Require(float.IsFinite(min[i]) && float.IsFinite(max[i]) && min[i] <= max[i] &&
             (min[i] != 0 || BitConverter.SingleToInt32Bits(min[i]) == 0) && (max[i] != 0 || BitConverter.SingleToInt32Bits(max[i]) == 0));
-        return value with { Positions = positions, Uvs = uvs, Indices = indices, Draws = draws, Textures = textures, Texels = texels,
+        return value with { Positions = positions, Normals = normals, Uvs = uvs, Indices = indices, Draws = draws, Textures = textures, Texels = texels,
             Bounds = new(Array.AsReadOnly(min), Array.AsReadOnly(max)) };
     }
     private static bool Signed(string? value) => value is { Length: >= 1 and <= 11 } && int.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var n) &&

@@ -1,19 +1,32 @@
-// VMA1 is our app framing for a display's textured appearance (contracts/geometry-vma1-v1.md).
+// VMA1 v2 is our app framing for a display's textured appearance (contracts/geometry-vma1-v2.md).
 // Source authority and full SHA verification belong to engine/main; this scans every region before any upload.
 import type { GeometryValidationWork } from './geometry-vmg';
 import { validAppearanceManifest, type ReadonlyAppearanceManifest } from '../shared/creature-geometry';
 
+/** VMA1 combiner codes: 1 Opaque, 2 Mod (one stage); 3 Opaque_Mod2xNA_Alpha, 4 Opaque_AddAlpha_Alpha, 5 Opaque_Alpha (two stages). */
+export type AppearanceCombiner = 1 | 2 | 3 | 4 | 5;
+/** Stage coordinate codes: 0 UV0, 1 UV1, 2 sphere env map from the view-space normal. */
+export type AppearanceCoordinate = 0 | 1 | 2;
+// Each combiner fixes its stage coordinates and whether texture alpha may alpha key it.
+export const appearanceCombiners: Readonly<Record<AppearanceCombiner, { readonly stages: readonly AppearanceCoordinate[]; readonly textureAlpha: boolean }>> = Object.freeze({
+  1: { stages: [0], textureAlpha: false }, 2: { stages: [0], textureAlpha: true },
+  3: { stages: [0, 2], textureAlpha: false }, 4: { stages: [0, 2], textureAlpha: false }, 5: { stages: [0, 0], textureAlpha: false },
+});
 export interface AppearanceDraw {
   readonly ordinal: number; readonly batch: number; readonly section: number; readonly indexStart: number; readonly indexCount: number;
-  readonly slot: number; readonly textureOrdinal: number; readonly alphaKey: boolean; readonly twoSided: boolean;
-  readonly depthTest: boolean; readonly depthWrite: boolean;
+  readonly combiner: AppearanceCombiner; readonly slot: number; readonly textureOrdinal: number; readonly coordinate: AppearanceCoordinate;
+  /** Second stage, or null for one-stage combiners. */
+  readonly second: Readonly<{ slot: number; textureOrdinal: number; coordinate: AppearanceCoordinate }> | null;
+  readonly alphaKey: boolean; readonly twoSided: boolean; readonly depthTest: boolean; readonly depthWrite: boolean;
 }
 export interface AppearanceTexture {
   readonly slot: number; readonly fileDataId: number; readonly width: number; readonly height: number; readonly mipLevel: number;
   readonly wrapU: boolean; readonly wrapV: boolean; readonly texels: Uint8Array;
 }
 export interface ValidatedAppearance {
-  readonly kind: 'appearance'; readonly manifest: ReadonlyAppearanceManifest; readonly positions: Float32Array; readonly uvs: Float32Array;
+  readonly kind: 'appearance'; readonly manifest: ReadonlyAppearanceManifest; readonly positions: Float32Array;
+  /** Present exactly when some draw samples an env map. */
+  readonly normals: Float32Array | null; readonly uvs: Float32Array;
   readonly indices: Uint32Array; readonly draws: readonly AppearanceDraw[]; readonly textures: readonly AppearanceTexture[];
 }
 export type AppearanceValidationResult =
@@ -44,14 +57,14 @@ export async function validateAppearance(buffer: ArrayBuffer, manifest: unknown,
     if (!littleEndian()) return { state: 'refused', code: 'unsupportedEndian' };
     const m = own(manifest); requireValid(length === m.byteLength);
     const data = new DataView(buffer); const u32 = (offset: number) => data.getUint32(offset, true);
-    requireValid(u32(0) === 0x31414d56 && data.getUint16(4, true) === 1 && data.getUint16(6, true) === 160 && u32(8) === length && u32(12) === 1);
+    requireValid(u32(0) === 0x31414d56 && data.getUint16(4, true) === 2 && data.getUint16(6, true) === 160 && u32(8) === length && u32(12) === 1);
     for (let index = 0; index < 32; index++) requireValid(data.getUint8(16 + index) === parseInt(m.bindingSha256.substring(index * 2, index * 2 + 2), 16));
     const v = m.vertexCount, n = m.indexCount, d = m.drawCount, t = m.textureCount;
-    requireValid(u32(48) === v && u32(52) === n && u32(56) === d && u32(60) === t && u32(136) === 128 && u32(140) === m.displayId);
-    for (const at of [144, 148, 152, 156]) requireValid(u32(at) === 0);
-    for (const [header, region] of [[64, m.positions], [72, m.uvs], [80, m.indices], [88, m.draws], [96, m.textures], [104, m.texels]] as const)
-      requireValid(u32(header) === region.offset && u32(header + 4) === region.byteLength && region.offset % 4 === 0);
-    for (let axis = 0; axis < 3; axis++) for (const [offset, bounds] of [[112, m.bounds.min], [124, m.bounds.max]] as const) {
+    requireValid(u32(48) === v && u32(52) === n && u32(56) === d && u32(60) === t && u32(144) === 128 && u32(148) === m.displayId);
+    for (const at of [152, 156]) requireValid(u32(at) === 0);
+    for (const [index, region] of [m.positions, m.normals, m.uvs, m.indices, m.draws, m.textures, m.texels].entries())
+      requireValid(u32(64 + index * 8) === region.offset && u32(68 + index * 8) === region.byteLength && region.offset % 4 === 0);
+    for (let axis = 0; axis < 3; axis++) for (const [offset, bounds] of [[120, m.bounds.min], [132, m.bounds.max]] as const) {
       const value = data.getFloat32(offset + 4 * axis, true); requireValid(!Object.is(value, -0) && value === bounds[axis]);
     }
     let debit = 160, items = 0;
@@ -75,16 +88,24 @@ export async function validateAppearance(buffer: ArrayBuffer, manifest: unknown,
       }
     }
     for (let axis = 0; axis < 3; axis++) requireValid((min[axis] || 0) === m.bounds.min[axis] && (max[axis] || 0) === m.bounds.max[axis]);
-    const draws: AppearanceDraw[] = []; let cumulative = 0, previous = -1;
+    const draws: AppearanceDraw[] = []; let cumulative = 0, previous = -1, env = false;
     for (let index = 0; index < d; index++) {
-      await charge(32); const at = m.draws.offset + index * 32, flags = u32(at + 28);
-      const draw = Object.freeze({ ordinal: u32(at), batch: u32(at + 4), section: u32(at + 8), indexStart: u32(at + 12), indexCount: u32(at + 16),
-        slot: u32(at + 20), textureOrdinal: u32(at + 24), alphaKey: (flags & 1) !== 0, twoSided: (flags & 2) !== 0, depthTest: (flags & 4) === 0, depthWrite: (flags & 8) === 0 });
+      await charge(48); const at = m.draws.offset + index * 48, flags = u32(at + 44), code = u32(at + 20);
+      const profile = Object.hasOwn(appearanceCombiners, code) ? appearanceCombiners[code as AppearanceCombiner] : null; requireValid(profile);
+      const coordinate = data.getUint8(at + 40), secondCoordinate = data.getUint8(at + 41), two = profile!.stages.length === 2;
+      requireValid(coordinate === profile!.stages[0] && data.getUint8(at + 42) === 0 && data.getUint8(at + 43) === 0 && (flags & ~15) === 0 && (!(flags & 1) || profile!.textureAlpha));
+      requireValid(two ? secondCoordinate === profile!.stages[1] && u32(at + 32) < t && u32(at + 36) < 32
+        : secondCoordinate === 255 && u32(at + 32) === 0xffffffff && u32(at + 36) === 0xffffffff);
+      const draw: AppearanceDraw = Object.freeze({ ordinal: u32(at), batch: u32(at + 4), section: u32(at + 8), indexStart: u32(at + 12), indexCount: u32(at + 16),
+        combiner: code as AppearanceCombiner, slot: u32(at + 24), textureOrdinal: u32(at + 28), coordinate: coordinate as AppearanceCoordinate,
+        second: two ? Object.freeze({ slot: u32(at + 32), textureOrdinal: u32(at + 36), coordinate: secondCoordinate as AppearanceCoordinate }) : null,
+        alphaKey: (flags & 1) !== 0, twoSided: (flags & 2) !== 0, depthTest: (flags & 4) === 0, depthWrite: (flags & 8) === 0 });
       requireValid(draw.ordinal === index && draw.batch > previous && draw.batch < 512 && draw.section < 256 && draw.indexStart === cumulative &&
-        draw.indexCount > 0 && draw.indexCount % 3 === 0 && draw.slot < t && draw.textureOrdinal < 32 && (flags & ~15) === 0);
+        draw.indexCount > 0 && draw.indexCount % 3 === 0 && draw.slot < t && draw.textureOrdinal < 32);
+      env ||= draw.coordinate === 2 || draw.second?.coordinate === 2;
       previous = draw.batch; cumulative += draw.indexCount; requireValid(cumulative <= n); draws.push(draw);
     }
-    requireValid(cumulative === n);
+    requireValid(cumulative === n && env === (m.normals.byteLength > 0));
     const textures: AppearanceTexture[] = []; let texel = m.texels.offset;
     for (let index = 0; index < t; index++) {
       await charge(32); const at = m.textures.offset + index * 32, width = u32(at + 8), height = u32(at + 12), bytes = u32(at + 20), wrap = data.getUint8(at + 26);
@@ -97,7 +118,8 @@ export async function validateAppearance(buffer: ArrayBuffer, manifest: unknown,
     }
     requireValid(texel === m.texels.offset + m.texels.byteLength && texel === length); current(); requireValid(bodyLength(buffer) === length);
     return { state: 'valid', value: Object.freeze({ kind: 'appearance' as const, manifest: m,
-      positions: new Float32Array(buffer, m.positions.offset, v * 3), uvs: new Float32Array(buffer, m.uvs.offset, v * 2),
+      positions: new Float32Array(buffer, m.positions.offset, v * 3), normals: m.normals.byteLength > 0 ? new Float32Array(buffer, m.normals.offset, v * 3) : null,
+      uvs: new Float32Array(buffer, m.uvs.offset, v * 2),
       indices: new Uint32Array(buffer, m.indices.offset, n), draws: Object.freeze(draws), textures: Object.freeze(textures) }) };
   } catch (error) {
     if (error instanceof Cancelled) return { state: 'refused', code: 'cancelled' };
