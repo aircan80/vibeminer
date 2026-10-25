@@ -8,6 +8,7 @@ namespace VibeMiner.Infrastructure;
 internal enum ObjectPresenceKind { Present, Absent, WrongLength, Unknown }
 internal sealed record ObjectPresenceObservation(ObjectPresenceKind Kind, long? ObservedBytes);
 internal sealed record ObjectFileIdentity(long Length, DateTime CreatedUtc, DateTime WrittenUtc);
+internal enum ObjectDeletion { Deleted, Absent, Kept }
 
 /// <summary>One lazy app-owned immutable CAS. No decoded or per-build copies.</summary>
 public sealed class VerifiedObjectStore(string dataDirectory,
@@ -364,6 +365,36 @@ public sealed class VerifiedObjectStore(string dataDirectory,
         }
         catch (FileNotFoundException) { return false; }
         catch (DirectoryNotFoundException) { return false; }
+    }
+
+    /// <summary>Deletes one derived object the caller has proven unreferenced and unused (D103), under its SHA stripe so no
+    /// publication or verification of the same bytes interleaves. A wrong length, a link or directory, or a file that can't be
+    /// deleted is kept and reported; nothing else is touched.</summary>
+    internal async Task<ObjectDeletion> DeleteDerivedAsync(string sha256, long length, CancellationToken token)
+    {
+        if (sha256 is null || length is < 1 or > MaxObjectBytes)
+            throw new DiscoveryException("CATALOG_INTEGRITY", "A deletion needs a bounded exact object identity and length.");
+        var path = ObjectPath(sha256);
+        await EnsureInitializedAsync(token);
+        var stripe = IntegrityStripe(sha256);
+        beforeIntegrityStripeWait?.Invoke(sha256);
+        await stripe.WaitAsync(token);
+        try
+        {
+            var shard = Path.GetDirectoryName(path)!;
+            if (!Directory.Exists(shard)) return ObjectDeletion.Absent;
+            if ((File.GetAttributes(shard) & FileAttributes.ReparsePoint) != 0) return ObjectDeletion.Kept;
+            if (!File.Exists(path)) return Directory.Exists(path) ? ObjectDeletion.Kept : ObjectDeletion.Absent;
+            if ((File.GetAttributes(path) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 || new FileInfo(path).Length != length) return ObjectDeletion.Kept;
+            token.ThrowIfCancellationRequested();
+            File.Delete(path);
+            return ObjectDeletion.Deleted;
+        }
+        catch (FileNotFoundException) { return ObjectDeletion.Absent; }
+        catch (DirectoryNotFoundException) { return ObjectDeletion.Absent; }
+        catch (IOException) { return ObjectDeletion.Kept; }
+        catch (UnauthorizedAccessException) { return ObjectDeletion.Kept; }
+        finally { stripe.Release(); }
     }
 
     private SemaphoreSlim IntegrityStripe(string sha256) => integrityStripes[Convert.ToByte(sha256[..2], 16) % integrityStripes.Length];

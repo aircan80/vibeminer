@@ -189,7 +189,7 @@ public sealed class CatalogTests
     [InlineData("DROP TABLE catalog_lineage; PRAGMA user_version=14;", "CATALOG_RESET_REQUIRED", 14L)]
     // The complete build-identity-v2 catalog of the previous engine, before per-ledger stored coverage (D065).
     [InlineData("UPDATE catalog_lineage SET revision='build-identity-v2'; PRAGMA user_version=15;", "CATALOG_RESET_REQUIRED", 15L)]
-    [InlineData("PRAGMA user_version=21;", "CATALOG_VERSION", 21L)]
+    [InlineData("PRAGMA user_version=22;", "CATALOG_VERSION", 22L)]
     public async Task RefusedCatalogWithAPendingWalIsLeftByteForByteUnchanged(string sql, string code, long version)
     {
         using var directory = new TempDirectory();
@@ -219,14 +219,14 @@ public sealed class CatalogTests
     }
     // A retained-appearance catalog (19), a file catalog catalog (18), a Files catalog (17), a complete stored-coverage
     // catalog (16), and fresh catalogs interrupted before (14) or after (15) its step, all continue through the remaining
-    // steps to the saved Checks schema (20) with every feature's tables, #63's appearances and #38's Checks alike.
+    // steps to the appearance cleanup schema (21) with every feature's tables, #63's appearances and #38's Checks alike.
     [Theory]
-    [InlineData(19)] [InlineData(18)] [InlineData(17)] [InlineData(16)] [InlineData(15)] [InlineData(14)]
+    [InlineData(20)] [InlineData(19)] [InlineData(18)] [InlineData(17)] [InlineData(16)] [InlineData(15)] [InlineData(14)]
     public async Task EarlierVersionsOfTheCurrentLineageUpgradeThroughStoredCoverageAndFiles(int version)
     {
         using var directory = new TempDirectory();
         await using (var catalog = await DiscoveryCatalog.OpenAsync(directory.Path)) { }
-        var remove = version switch { 19 => CatalogMigrationFixture.RemoveV20, 18 => CatalogMigrationFixture.RemoveV19, 17 => CatalogMigrationFixture.RemoveV18, 16 => CatalogMigrationFixture.RemoveV17, 15 => CatalogMigrationFixture.RemoveV16, _ => CatalogMigrationFixture.RemoveV15 };
+        var remove = version switch { 20 => CatalogMigrationFixture.RemoveV21, 19 => CatalogMigrationFixture.RemoveV20, 18 => CatalogMigrationFixture.RemoveV19, 17 => CatalogMigrationFixture.RemoveV18, 16 => CatalogMigrationFixture.RemoveV17, 15 => CatalogMigrationFixture.RemoveV16, _ => CatalogMigrationFixture.RemoveV15 };
         using (var db = OpenDb(directory.Path)) { using var command = db.CreateCommand(); command.CommandText = remove + $"PRAGMA user_version={version};"; command.ExecuteNonQuery(); }
         using (var db = OpenDb(directory.Path))
         {
@@ -234,12 +234,15 @@ public sealed class CatalogTests
             Assert.Equal(version == 14 ? 0L : 1L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='stored_coverage'"));
             Assert.Equal(version >= 17 ? 1L : 0L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='inventory_file_stats'"));
             Assert.Equal(version >= 18 ? 1L : 0L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='file_catalogs'"));
-            Assert.Equal(version == 19 ? 1L : 0L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='geometry_appearances'"));
-            Assert.Equal(0L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='download_checks'"));
+            Assert.Equal(version >= 19 ? 1L : 0L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='geometry_appearances'"));
+            Assert.Equal(version == 20 ? 1L : 0L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='download_checks'"));
+            Assert.Equal(0L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='geometry_appearances_file'"));
         }
         await using (var catalog = await DiscoveryCatalog.OpenAsync(directory.Path)) { }
         using var upgraded = OpenDb(directory.Path);
-        Assert.Equal(20L, Scalar(upgraded, "PRAGMA user_version"));
+        Assert.Equal(21L, Scalar(upgraded, "PRAGMA user_version"));
+        Assert.Equal(3L, Scalar(upgraded, "SELECT count(*) FROM pragma_table_info('geometry_appearances') WHERE name IN ('key_revision','artifact_sha256','artifact_bytes')"));
+        Assert.Equal(1L, Scalar(upgraded, "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='geometry_appearances_file'"));
         foreach (var table in new[] { "stored_coverage", "root_scopes", "inventory_file_stats", "inventory_root_variants", "file_catalogs", "geometry_appearances", "download_checks", "download_check_objects" })
             Assert.Equal(1L, Scalar(upgraded, $"SELECT count(*) FROM sqlite_master WHERE type='table' AND name='{table}'"));
         Assert.Equal(1L, Scalar(upgraded, "SELECT count(*) FROM pragma_table_info('inventory_origins') WHERE name='fdid_n'"));
@@ -252,7 +255,7 @@ public sealed class CatalogTests
         await using (var catalog = await DiscoveryCatalog.OpenAsync(directory.Path)) { }
         await using (var reopened = await DiscoveryCatalog.OpenAsync(directory.Path)) { }
         using var db = OpenDb(directory.Path);
-        Assert.Equal(20L, Scalar(db, "PRAGMA user_version"));
+        Assert.Equal(21L, Scalar(db, "PRAGMA user_version"));
         using var command = db.CreateCommand(); command.CommandText = "SELECT revision FROM catalog_lineage WHERE id=1";
         Assert.Equal("stored-coverage-v1", command.ExecuteScalar());
     }

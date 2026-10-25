@@ -48,7 +48,10 @@ try
     await using var itemIcons = new ItemIconsService(iconStore);
     await using var iconLeases = new ItemIconLeases(itemIcons);
     // Diagnostic source geometry (D052/D055): same shared asset sessions and acquisition pipeline as icons.
-    await using var geometryStore = new CreatureGeometryStore(catalog, objects, creatureDisplayStore, assetSessions, acquisition, resources);
+    var appearanceUses = new GeometryAppearanceFileUses();
+    await using var geometryStore = new CreatureGeometryStore(catalog, objects, creatureDisplayStore, assetSessions, acquisition, resources, uses: appearanceUses);
+    // Superseded retained appearances and the VMA1 files no remaining row names are removed once after start (D103).
+    await using var appearanceCleanup = new GeometryAppearanceCleanup(catalog, objects, appearanceUses);
     await using var creatureGeometry = new CreatureGeometryService(geometryStore);
     await using var geometryLeases = new CreatureGeometryLeases(creatureGeometry);
     var retentionDriver = new BuildRetentionDriver(catalog, objects, acquisition, sourcePlans, client, resources);
@@ -63,7 +66,7 @@ try
     try
     {
         await retention.RestoreAsync();
-        storedCoverage.Start(); rootScopes.Start(); fileCatalogs.Start();
+        storedCoverage.Start(); rootScopes.Start(); fileCatalogs.Start(); appearanceCleanup.Start();
         var host = new ProtocolHost(new DiscoveryService(source, catalog), workspace, new InventoryService(catalog),
             new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog, definitionSources)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects,
             creatureGeometry: creatureGeometry, geometryLeases: geometryLeases, settings: settings,

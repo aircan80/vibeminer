@@ -36,6 +36,7 @@ These are the engine's current bounds. Code is the source of truth: [Acquisition
 | Engine requests (host) | 32 active; the 33rd gets `BUSY` |
 | Storage measurement | One data-folder walk at a time, 512 entries per batch between yields and cancellation checks, 32 levels, 4096 queued folders, 5-minute budget (`STORAGE_MEASURE_TIMEOUT`). No acquisition permits |
 | Prepared data per build | `settings.storage.builds`: at most 256 opened builds, one catalog operation per build, cancellation checked between builds; the newest 16 file catalog generations and 4 files each per build. `settings.storage.free`: one at a time (a second waits, cancellably), one catalog operation, the newest 16 generations ([D085](DECISIONS.md)) |
+| Appearance cleanup | Once after start; one catalog operation per 16 rows; one file delete at a time under its SHA stripe; no acquisition permits; a pass that kept files repeats after 30 s, 8 passes at most ([D103](DECISIONS.md)) |
 | Desktop `EngineClient` | 32 pending total. Ordinary requests are capped at 26, so 6 slots always remain for `request.cancel`, `shutdown`, `items.icon.close` and `creatures.geometry.close`. |
 
 A grant is never revoked. If an interactive request is demoted to background, its HTTP and CPU permits run to the end of their current bounded unit; the next request boundary applies the new priority.
@@ -232,6 +233,14 @@ Each context owns at most one EN lookup lease and uses the global staging budget
 - **Outcome.** `ready`; `unsupported` when the file list cannot be read (format, size, or a bound such as 4,096 memberships per file), with the reason and that retrying won't help; `failed` at once for `STORAGE_FULL`; otherwise, for a fault of any kind, a retry 30 s later (sooner when another build is opened or resumed) and `failed` after three attempts. The worker wakes through a one-slot signal; a retry wait cancels and awaits whichever of its delay and its wake-up lost, so no leftover wait takes the wake-up of a later Open or Retry. The typed code, message and underlying SQLite or I/O cause are kept on the problem and written to the engine log (standard error). The next Open queues a failed, unsupported or stopped one again.
 - **Cancellation, shutdown and restart.** Shutdown leaves the preparation pending with its written rows. The next run derives the rows again from the same verified sources, checks the saved ones against them and continues after them; a difference, or a saved file or registry row that fails its check, abandons the generation and starts again, and cleanup deletes the abandoned file. A stage left by a process that ended is reset when the next run starts.
 - **Stale results.** Every write commits only while the row is still pending with the same generation and attempt count; a reset or stopped preparation's late batch or seal writes nothing.
+
+## Appearance cleanup
+
+[GeometryAppearanceCleanup](../src/backend/VibeMiner.Infrastructure/CreatureGeometry/GeometryAppearanceCleanup.cs) removes superseded Creature appearances and the VMA1 files no remaining row names, once after start ([D103](DECISIONS.md), [storage](STORAGE.md#superseded-creature-appearances)). It takes no download, CPU or staging permits: every step is one short operation on the shared catalog worker (at most 16 rows) or one file delete under the store's SHA stripe, so interactive work interleaves.
+
+- **Uses.** [GeometryAppearanceFileUses](../src/backend/VibeMiner.Infrastructure/CreatureGeometry/GeometryAppearanceFileUses.cs) counts the open appearance streams and the publications of each VMA1 file. Cleanup starts a delete only when the file has none; a use that starts during the delete waits for it (cancellably), then opens or publishes as usual. A Read that finds the file gone reports `notPrepared`; a publication writes it again.
+- **Retries.** A pass that kept a file (in use or not deletable) runs again after 30 s, at most 8 passes in all; a catalog or store fault is logged and retried the same way. The loop never escapes a fault. The next start tries again.
+- **Shutdown.** Disposal cancels the loop and awaits it; a delete already started finishes its file and its row on the next run.
 
 ## Preparation and navigation
 

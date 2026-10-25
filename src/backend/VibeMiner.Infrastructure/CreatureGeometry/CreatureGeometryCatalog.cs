@@ -237,6 +237,7 @@ public sealed partial class DiscoveryCatalog
         {
             token.ThrowIfCancellationRequested(); var binding = selection.Core.Binding;
             MetadataReceipt Metadata(MetadataReceipt original) => original with { VerifiedAt = "", Location = MetadataSourceLocation(original) };
+            // Any fixed input added here must be added to GeometryAppearanceKeyRevision too (D103).
             bytes = GeometryBytes(new { revision = "geometry-source-locator-v1", binding.Context, binding.SourceReference,
                 configurations = binding.Configurations.OrderBy(c => c.Role, StringComparer.Ordinal).Select(c => c with { VerifiedAt = "" }).ToArray(),
                 encoding = Metadata(binding.Source.Association.EncodingSource), root = Metadata(binding.Source.Association.RootSource),

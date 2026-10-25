@@ -94,7 +94,7 @@ Texture chain, per texture stage of each drawn batch ([m2-skin.md](../docs/forma
 | `resourceLimit` | A texture source, mip or the texel/artifact bound | no |
 | `corrupt` | The VMA1 artifact failed verification | no |
 
-Retained outcomes depend only on the verified model, SKIN and display row and the revisions, so they are stored in `geometry_appearances` (catalog version 19), keyed by the geometry locator, the CDI rows artifact, row and texture fields, every revision and the texture variant policy (D095). A ready geometry is reused only with its retained appearance; otherwise Prepare produces both again from local CAS. Read re-verifies a retained VMA1 fully; missing bytes read as `notPrepared`, same-size corruption as `corrupt`.
+Retained outcomes depend only on the verified model, SKIN and display row and the revisions, so they are stored in `geometry_appearances` (catalog version 19), keyed by the geometry locator, the CDI rows artifact, row and texture fields, every revision and the texture variant policy (D095). A ready geometry is reused only with its retained appearance; otherwise Prepare produces both again from local CAS. Read re-verifies a retained VMA1 fully; missing bytes read as `notPrepared`, same-size corruption as `corrupt`. Rows no current key reaches are removed after start, with their VMA1 file once no other row names it and no open view or Prepare holds it ([D103](../docs/DECISIONS.md)).
 
 Particles, ribbons (D090) and blended layers (D094) do not block texturing: they are counted and not drawn. Lights, shadow batches, geosets, colour/alpha animation and env-map UV animation are not drawn or evaluated either.
 

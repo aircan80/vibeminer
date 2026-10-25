@@ -211,7 +211,7 @@ public sealed class HostTests
     [Theory]
     [InlineData("DROP TABLE catalog_lineage; PRAGMA user_version=14;", 3, "CATALOG_RESET_REQUIRED", "fresh catalog")]
     [InlineData("UPDATE catalog_lineage SET revision='build-identity-v2'; PRAGMA user_version=15;", 3, "CATALOG_RESET_REQUIRED", "fresh catalog")]
-    [InlineData("PRAGMA user_version=21;", 4, "CATALOG_VERSION", "newer engine")]
+    [InlineData("PRAGMA user_version=22;", 4, "CATALOG_VERSION", "newer engine")]
     public async Task RealProcessRefusesAnOlderOrNewerCatalogWithItsTypedCode(string sql, int exitCode, string code, string text)
     {
         using var directory = new TempDirectory();

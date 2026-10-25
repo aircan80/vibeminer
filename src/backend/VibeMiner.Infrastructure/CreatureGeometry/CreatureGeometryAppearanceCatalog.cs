@@ -26,6 +26,21 @@ public sealed partial class DiscoveryCatalog
         transaction.Commit();
     }
 
+    // D103: each row names the key revision it was written under and the VMA1 file it uses, so cleanup can tell rows no current
+    // key reaches and files no remaining row names. Rows from before this step have neither and are treated as superseded.
+    private void UpgradeGeometryAppearanceCleanup()
+    {
+        using var transaction = Db.BeginTransaction();
+        Execute("""
+            ALTER TABLE geometry_appearances ADD COLUMN key_revision TEXT;
+            ALTER TABLE geometry_appearances ADD COLUMN artifact_sha256 TEXT;
+            ALTER TABLE geometry_appearances ADD COLUMN artifact_bytes INTEGER;
+            CREATE INDEX geometry_appearances_file ON geometry_appearances(artifact_sha256);
+            PRAGMA user_version=21;
+            """, transaction);
+        transaction.Commit();
+    }
+
     internal async Task<GeometryAppearanceRecord?> FindCreatureGeometryAppearanceAsync(GeometryDisplayAuthorization selection,
         GeometryLocator geometry, IGeometryArtifactWorkBudget budget, CancellationToken token)
     {
@@ -80,12 +95,21 @@ public sealed partial class DiscoveryCatalog
                 if (row.Geometry != geometryArtifact || row.Artifact != artifact?.ArtifactId || !insert && row.Descriptor != text) throw GeometryStale();
                 result = new(key, row.Geometry, row.Descriptor == text ? descriptor : GeometryAppearanceValidate(
                     GeometryDecode<GeometryAppearanceDescriptor>(Encoding.UTF8.GetBytes(row.Descriptor)), geometry, selection), row.Descriptor);
+                // A publication that lands on a row written before D103 under this same key makes it current. The producer holds
+                // its file in use meanwhile, so cleanup can't take the file or the row in between.
+                var file = result.Descriptor.Appearance.Manifest;
+                if (insert)
+                    Execute("UPDATE geometry_appearances SET key_revision=$r,artifact_sha256=$s,artifact_bytes=$n WHERE appearance_key=$k AND key_revision IS NULL", transaction,
+                        ("$k", key), ("$r", GeometryAppearanceKeyRevision), ("$s", (object?)file?.Sha256 ?? DBNull.Value), ("$n", (object?)file?.ByteLength ?? DBNull.Value));
             }
             else
             {
                 if (!insert) throw GeometryStale();
-                Execute("INSERT INTO geometry_appearances VALUES($k,$g,$a,$d)", transaction,
-                    ("$k", key), ("$g", geometryArtifact), ("$a", (object?)artifact?.ArtifactId ?? DBNull.Value), ("$d", text));
+                Execute("""
+                    INSERT INTO geometry_appearances(appearance_key,geometry_artifact_id,artifact_id,descriptor,key_revision,artifact_sha256,artifact_bytes)
+                    VALUES($k,$g,$a,$d,$r,$s,$n)
+                    """, transaction, ("$k", key), ("$g", geometryArtifact), ("$a", (object?)artifact?.ArtifactId ?? DBNull.Value), ("$d", text),
+                    ("$r", GeometryAppearanceKeyRevision), ("$s", (object?)artifact?.Sha256 ?? DBNull.Value), ("$n", (object?)artifact?.ByteLength ?? DBNull.Value));
                 result = new(key, geometryArtifact, descriptor, text);
             }
             token.ThrowIfCancellationRequested(); transaction.Commit(); return result;
@@ -107,6 +131,16 @@ public sealed partial class DiscoveryCatalog
         return (reader.GetString(0), artifact, reader.GetString(2));
     }
 
+    /// <summary>Every fixed input of the appearance key and of the geometry locator key inside it (D103). A row written under
+    /// another value can never be reached again.</summary>
+    internal static readonly string GeometryAppearanceKeyRevision = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n',
+        "geometry-appearance-key-v1", GeometryAppearanceSources.Policy, M2Appearance.MaterialPolicy, M2Appearance.ReaderRevision,
+        ModelAppearanceArtifacts.TexturePolicy, Blp2Decoder.Revision, ModelAppearanceArtifacts.Revision, RootTextureVariants.Policy,
+        "geometry-source-locator-v1", MetadataAcquirer.SourceRevision, ConfigurationWorkspacePreparer.VerifierRevision,
+        AssetResolutionSession.VariantPolicy, ResolverArtifacts.EncodingRevision, AssetResolutionSessions.RootArtifactRevision,
+        AssetResolutionSession.EncodingSelectionPolicy, M2ModelReader.Revision, M2GeometrySkinReader.Revision, M2GeometrySkin.InterpretationPolicy,
+        M2StaticGeometry.CoordinatePolicy, ModelGeometryArtifacts.Revision, ModelGeometryArtifacts.LinePolicy))));
+
     // Keyed by display: the geometry locator, the exact CreatureDisplayInfo rows artifact, row and texture fields, every revision
     // and the D095 texture variant policy, so a later variant rule never reuses an appearance chosen under this one.
     private static async Task<string> GeometryAppearanceKeyAsync(GeometryDisplayAuthorization selection, GeometryLocator geometry,
@@ -116,6 +150,7 @@ public sealed partial class DiscoveryCatalog
         {
             token.ThrowIfCancellationRequested();
             if (selection?.Display?.Binding?.Admission?.Artifact is null || selection.Selected is null) throw GeometryInvalid();
+            // Any fixed input added here must be added to GeometryAppearanceKeyRevision too.
             var bytes = GeometryBytes(new
             {
                 revision = "geometry-appearance-key-v1", geometry = geometry.Key, geometryArtifact = geometry.Descriptor.Manifest.ArtifactId,

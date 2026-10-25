@@ -7,14 +7,15 @@ namespace VibeMiner.Infrastructure;
 
 public sealed partial class CreatureGeometryStore
 {
+    /// <param name="uses">The VMA1 files in use, shared with <see cref="GeometryAppearanceCleanup"/> (D103).</param>
     public CreatureGeometryStore(DiscoveryCatalog catalog,VerifiedObjectStore objects,CreatureDisplayMetadataStore displays,
-        AssetResolutionSessions sessions,ISharedAcquisition shared,AcquisitionResources resources,TimeProvider? clock=null)
+        AssetResolutionSessions sessions,ISharedAcquisition shared,AcquisitionResources resources,TimeProvider? clock=null,GeometryAppearanceFileUses? uses=null)
     {
         payload=new();cpu=new GeometryWorkBudget(resources);this.clock=clock??TimeProvider.System;
-        work=new Operations(catalog,objects,displays,new(catalog,objects,sessions,shared,resources),cpu);
+        work=new Operations(catalog,objects,displays,new(catalog,objects,sessions,shared,resources),cpu,uses??new());
     }
     private sealed class Operations(DiscoveryCatalog catalog,VerifiedObjectStore objects,CreatureDisplayMetadataStore displays,
-        GeometrySourceServices services,IGeometryArtifactWorkBudget budget):ICreatureGeometryStoreWork
+        GeometrySourceServices services,IGeometryArtifactWorkBudget budget,GeometryAppearanceFileUses uses):ICreatureGeometryStoreWork
     {
         private DerivedArtifactStaging? stagingDebt;
         public Task<GeometryDisplayAuthorizationResult> AuthorizeAsync(CreatureDisplayMetadataRequest selection,CancellationToken token)=>displays.AuthorizeGeometryAsync(selection,token);
@@ -23,7 +24,7 @@ public sealed partial class CreatureGeometryStore
         public async Task<IGeometryStoreRetained?> FindAsync(GeometryDisplayAuthorization selection,string? expectedArtifact,CancellationToken token)
         {
             var locator=await catalog.FindCreatureGeometryLocatorAsync(selection,expectedArtifact,budget,token);
-            return locator is null?null:new Retained(catalog,objects,services.Resources,budget,locator);
+            return locator is null?null:new Retained(catalog,objects,services.Resources,budget,locator,uses);
         }
         public async Task<IGeometryStorePublication> ProduceAsync(IGeometrySelectionFence selection,IGeometryPayloadBudget payload,
             Func<CreatureGeometryProgress,Task> progress,CancellationToken token)
@@ -39,8 +40,8 @@ public sealed partial class CreatureGeometryStore
                     await progress(new("artifactBuild","Building geometry artifact","stage",Dependency:CreatureGeometryDependency.Artifact));
                     descriptor=await BuildAsync(prepared,progress,token);
                 }
-                var (appearance,binding,retain)=descriptor is null?(null,null,false):await BuildAppearanceAsync(prepared,progress,token);
-                var result=new Publication(catalog,budget,prepared,descriptor,appearance,binding,retain);prepared=null;return result;
+                var (appearance,binding,retain,use)=descriptor is null?(null,null,false,null):await BuildAppearanceAsync(prepared,progress,token);
+                var result=new Publication(catalog,budget,prepared,descriptor,appearance,binding,retain,use);prepared=null;return result;
             }
             catch(GeometrySourceFailureException error)
             {return new FailurePublication(error.State,error.Sources,new(error.Problem.Code,error.Problem.Message,error.Problem.Retryable,error.Dependency));}
@@ -51,13 +52,15 @@ public sealed partial class CreatureGeometryStore
         }
         // A ready texture chain becomes one verified VMA1 object. An artifact failure is an appearance outcome, never a geometry one.
         // Decoded texture slots retire as soon as the build ends, before the final transaction.
-        private async Task<(CreatureGeometryAppearance?,AppearanceBinding?,bool)> BuildAppearanceAsync(GeometryPreparedSources prepared,
+        // A published VMA1 file stays in use until its publication is disposed, so cleanup never deletes it before its row commits (D103).
+        private async Task<(CreatureGeometryAppearance?,AppearanceBinding?,bool,IDisposable?)> BuildAppearanceAsync(GeometryPreparedSources prepared,
             Func<CreatureGeometryProgress,Task> progress,CancellationToken token)
         {
-            var source=prepared.Appearance;if(source is null)return(null,null,false);
+            var source=prepared.Appearance;if(source is null)return(null,null,false,null);
+            IDisposable? use=null;
             try
             {
-                if(source.Evidence.State!=CreatureGeometryAppearanceState.Ready||!source.HasImages)return(source.Evidence,null,source.Cacheable);
+                if(source.Evidence.State!=CreatureGeometryAppearanceState.Ready||!source.HasImages)return(source.Evidence,null,source.Cacheable,null);
                 await progress(new("appearanceBuild","Building textured appearance artifact","stage",Dependency:CreatureGeometryDependency.Texture));
                 var reservation=await services.Resources.ReserveStagingAsync(ModelAppearanceArtifacts.MaximumBytes,null,token);
                 var staging=new DerivedArtifactStaging(reservation,File.Delete,"CREATURE_GEOMETRY_CLEANUP_FAILED");
@@ -71,18 +74,21 @@ public sealed partial class CreatureGeometryStore
                     await ModelAppearanceArtifacts.VerifyAsync(stage,artifact,budget,token);
                     await staging.CloseAsync();
                     await progress(new("appearancePublication","Publishing verified appearance artifact","bytes",artifact.ByteLength,artifact.ByteLength,CreatureGeometryDependency.Texture));
+                    use=await uses.UseAsync(artifact.Sha256,token);
                     var sha=await objects.PublishFileAsync(path,artifact.ByteLength,services.Resources,null,token);
                     if(sha!=artifact.Sha256)throw new DiscoveryException("LOCAL_OBJECT_CORRUPT","The published appearance identity differs from the verified artifact.");
-                    return(source.Evidence with{Manifest=ToDomain(artifact.Manifest)},artifact.Binding,true);
+                    if(uses.AfterPublished is{}published)await published(sha);
+                    var held=use;use=null;
+                    return(source.Evidence with{Manifest=ToDomain(artifact.Manifest)},artifact.Binding,true,held);
                 }
                 finally{if(!await staging.RetireAsync()){stagingDebt=staging;throw staging.Failure();}}
             }
             catch(DiscoveryException error)when(error.Code.StartsWith("GEOMETRY_ARTIFACT_",StringComparison.Ordinal)||error.Code=="LOCAL_OBJECT_CORRUPT")
             {
                 return(GeometryAppearanceSources.Outcome(error.Code=="GEOMETRY_ARTIFACT_LIMIT"?CreatureGeometryAppearanceState.ResourceLimit:CreatureGeometryAppearanceState.Corrupt,
-                    source.Evidence.Display,source.Evidence.Textures,source.Evidence.Effects,new(error.Code,"The textured appearance artifact could not be built and verified.",error.Retryable)),null,false);
+                    source.Evidence.Display,source.Evidence.Textures,source.Evidence.Effects,new(error.Code,"The textured appearance artifact could not be built and verified.",error.Retryable)),null,false,null);
             }
-            finally{source.Dispose();}
+            finally{use?.Dispose();source.Dispose();}
         }
         private async Task<GeometryArtifactDescriptor> BuildAsync(GeometryPreparedSources prepared,Func<CreatureGeometryProgress,Task> progress,CancellationToken token)
         {
@@ -108,7 +114,7 @@ public sealed partial class CreatureGeometryStore
         }
     }
     private sealed class Retained(DiscoveryCatalog catalog,VerifiedObjectStore objects,AcquisitionResources resources,
-        IGeometryArtifactWorkBudget budget,GeometryLocator locator):IGeometryStoreRetained
+        IGeometryArtifactWorkBudget budget,GeometryLocator locator,GeometryAppearanceFileUses uses):IGeometryStoreRetained
     {
         private Stream? closeDebt;
         public CreatureGeometryManifest Manifest=>locator.Descriptor.Manifest;
@@ -134,11 +140,11 @@ public sealed partial class CreatureGeometryStore
         public async Task<IGeometryStoreAppearance?> FindAppearanceAsync(GeometryDisplayAuthorization selection,CancellationToken token)
         {
             var record=await catalog.FindCreatureGeometryAppearanceAsync(selection,locator,budget,token);
-            return record is null?null:new RetainedAppearance(catalog,objects,resources,budget,locator,record);
+            return record is null?null:new RetainedAppearance(catalog,objects,resources,budget,locator,record,uses);
         }
     }
     private sealed class RetainedAppearance(DiscoveryCatalog catalog,VerifiedObjectStore objects,AcquisitionResources resources,
-        IGeometryArtifactWorkBudget budget,GeometryLocator locator,GeometryAppearanceRecord record):IGeometryStoreAppearance
+        IGeometryArtifactWorkBudget budget,GeometryLocator locator,GeometryAppearanceRecord record,GeometryAppearanceFileUses uses):IGeometryStoreAppearance
     {
         private Stream? closeDebt;
         public CreatureGeometryAppearance Appearance=>record.Descriptor.Appearance;
@@ -147,9 +153,11 @@ public sealed partial class CreatureGeometryStore
             if(closeDebt is not null)throw Cleanup();
             var manifest=Appearance.Manifest??throw new DiscoveryException("CREATURE_GEOMETRY_NOT_PREPARED","This display has no retained textured appearance.",true);
             Stream? stream=null;
+            // The use is taken before the file is opened and released when the returned stream is disposed (D103).
+            IDisposable? use=await uses.UseAsync(manifest.Sha256,token);
             try
             {
-                stream=await objects.OpenVerifiedAsync(manifest.Sha256,manifest.ByteLength,resources,null,token);
+                stream=new GeometryAppearanceUseStream(await objects.OpenVerifiedAsync(manifest.Sha256,manifest.ByteLength,resources,null,token),use);use=null;
                 try{await ModelAppearanceArtifacts.VerifyAsync(stream,ToPure(record.Descriptor),budget,token);}
                 catch(DiscoveryException error)when(error.Code.StartsWith("GEOMETRY_ARTIFACT_",StringComparison.Ordinal))
                 {
@@ -158,7 +166,7 @@ public sealed partial class CreatureGeometryStore
                 }
                 stream.Position=0;var result=stream;stream=null;return result;
             }
-            finally{if(stream is not null)try{await stream.DisposeAsync();}catch(Exception){closeDebt=stream;throw Cleanup();}}
+            finally{use?.Dispose();if(stream is not null)try{await stream.DisposeAsync();}catch(Exception){closeDebt=stream;throw Cleanup();}}
         }
         public Task FinalizeAsync(GeometryDisplayAuthorization selection,CancellationToken token)=>
             catalog.FinalizeCreatureGeometryAppearanceAsync(selection,locator,record.Descriptor,false,budget,token);
@@ -175,7 +183,7 @@ public sealed partial class CreatureGeometryStore
         public ValueTask DisposeAsync()=>ValueTask.CompletedTask;
     }
     private sealed class Publication(DiscoveryCatalog catalog,IGeometryArtifactWorkBudget budget,GeometryPreparedSources prepared,
-        GeometryArtifactDescriptor? descriptor,CreatureGeometryAppearance? appearance=null,AppearanceBinding? binding=null,bool retain=false):IGeometryStorePublication
+        GeometryArtifactDescriptor? descriptor,CreatureGeometryAppearance? appearance=null,AppearanceBinding? binding=null,bool retain=false,IDisposable? use=null):IGeometryStorePublication
     {
         public CreatureGeometryAppearance? Appearance=>appearance;
         private readonly object sync=new();
@@ -213,7 +221,7 @@ public sealed partial class CreatureGeometryStore
             _=RetireAsync();return new(completion.Task);
             async Task RetireAsync()
             {
-                try{await wait;if(owned is not null)await owned.DisposeAsync();owned=null;completion.TrySetResult();}
+                try{await wait;use?.Dispose();if(owned is not null)await owned.DisposeAsync();owned=null;completion.TrySetResult();}
                 catch(Exception error){completion.TrySetException(error);}
             }
         }

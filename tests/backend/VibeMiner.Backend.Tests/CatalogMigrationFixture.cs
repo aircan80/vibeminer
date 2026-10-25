@@ -4,8 +4,13 @@ internal static class CatalogMigrationFixture
 {
     // Synthetic old-schema cohorts must remove every newer table before setting their
     // historical user_version. Production migration never drops these tables.
+    // The step to version 21 added each retained appearance's key revision and VMA1 file (D103).
+    internal const string RemoveV21 = """
+        DROP INDEX geometry_appearances_file; ALTER TABLE geometry_appearances DROP COLUMN artifact_bytes;
+        ALTER TABLE geometry_appearances DROP COLUMN artifact_sha256; ALTER TABLE geometry_appearances DROP COLUMN key_revision;
+        """;
     // The step to version 20 added the saved Checks of files Open did not assess (D093).
-    internal const string RemoveV20 = "DROP TABLE download_check_objects; DROP TABLE download_checks;";
+    internal const string RemoveV20 = RemoveV21 + "DROP TABLE download_check_objects; DROP TABLE download_checks;";
     // The step to version 19 added retained Creature appearances (D088).
     internal const string RemoveV19 = RemoveV20 + "DROP TABLE geometry_appearances;";
     // The step to version 18 added the file catalogs prepared after Open (D071).

@@ -43,7 +43,7 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
     /// the first with retained Creature appearances (D088), version 20 the first with saved Checks of files Open did not
     /// assess (D093). Version-16 to version-19 catalogs upgrade in place.
     /// </summary>
-    internal const int CatalogVersion = 20;
+    internal const int CatalogVersion = 21;
     /// <summary>
     /// Written once when a fresh catalog is created. Older catalogs (build-identity-v2 at version 15, or none at all)
     /// never have it and are refused, never migrated.
@@ -73,7 +73,7 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         Action[] steps = [UpgradeWorkspace, UpgradeInventory, UpgradeInventoryCheckpoints, UpgradeDownloads, UpgradeTablesData,
             UpgradeEncodedReceipts, UpgradeRetention, UpgradeItemIcons, UpgradeItemClassifications, UpgradeCreatures,
             UpgradeItemEffects, UpgradeCreatureGeometry, UpgradeStoredCoverage, CompleteStoredCoverage, UpgradeInventoryFiles, UpgradeFileCatalogs, UpgradeCreatureGeometryAppearance,
-            UpgradeDownloadChecks];
+            UpgradeDownloadChecks, UpgradeGeometryAppearanceCleanup];
         for (var current = Math.Max(version, 2); current < CatalogVersion; current++) steps[current - 2]();
     }
     /// <summary>Read-only recognition: returns the version, or refuses a catalog this engine must not read or change.</summary>
