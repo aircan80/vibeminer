@@ -105,8 +105,9 @@ export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileT
     ? `${page.entries.length} ${shownNarrowed ? 'matching ' : ''}files on this page${page.totalCount !== null ? ` · ${exactCount(page.totalCount)} files in this ${shownFamily === 'all' ? 'catalog' : shownFamily === 'root' ? 'ROOT' : 'install manifest'}` : ''}${page.scanLimited && page.nextCursor ? ` · searched through ${position(page.nextCursor)}, more may match` : ''}`
     : page.scanLimited && page.nextCursor ? `No match yet · searched through ${position(page.nextCursor)}` : '0 files';
   const head = <>
-    <h1 ref={heading} id="files-heading" tabIndex={-1}>Files</h1>{viewSwitch && <>{viewSwitch}<span className="dh-head-break" aria-hidden="true"/></>}
-    <input ref={searchInput} className="dh-control dh-fsearch" type="search" value={draft} placeholder="FileDataID or CKey" aria-label="Search by FileDataID or content key" aria-keyshortcuts="Control+F" aria-invalid={invalid || undefined} aria-describedby={invalid ? 'files-search-help' : undefined}
+    <h1 ref={heading} id="files-heading" tabIndex={-1}>Files</h1>{viewSwitch}
+    {/* The search and filters: inline in the head as in the reference, or their own row under the title and the view switch (#79). */}
+    <div className="dh-head-row"><input ref={searchInput} className="dh-control dh-fsearch" type="search" value={draft} placeholder="FileDataID or CKey" aria-label="Search by FileDataID or content key" aria-keyshortcuts="Control+F" aria-invalid={invalid || undefined} aria-describedby={invalid ? 'files-search-help' : undefined}
       onChange={event => { setDraft(event.target.value); if (invalid) setInvalid(false); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); applySearch(); } }} onBlur={applySearch}/>
     <button ref={filtersButton} className="dh-btn dh-fbtn" aria-expanded={filtersOpen} aria-controls="file-filters" onClick={() => setFiltersOpen(open => !open)}>Filters{activeCount > 0 && <><span className="dh-visually-hidden">, {activeCount} active</span><span className="dh-fcount" aria-hidden="true">{activeCount}</span></>}<span className="dh-chev" aria-hidden="true">{filtersOpen ? '▴' : '▾'}</span></button>
     <div className={`dh-fextra${filtersOpen ? ' dh-open' : ''}`} id="file-filters" role="group" aria-label="File filters" onKeyDown={filtersKey}>
@@ -114,7 +115,7 @@ export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileT
       <select className="dh-control" aria-label="Content flags" value={flags} onChange={event => setFlags(event.target.value)}><option value="any">Any content flags</option><option value="none">No content flags</option><option value={ENCRYPTED}>Includes {hex(ENCRYPTED)}</option></select>
       <div className="dh-segmented" role="group" aria-label="Source family">{([['all', 'All'], ['root', 'ROOT'], ['install', 'Install']] as const).map(([value, label]) => <button key={value} aria-pressed={family === value} onClick={() => setFamily(value)}>{label}</button>)}</div>
       <label className="dh-check"><input type="checkbox" checked={stored} onChange={event => setStored(event.target.checked)}/> Stored locally</label>
-    </div>
+    </div></div>
   </>;
   const searchHelp = invalid && <div className="dh-notice dh-calm" id="files-search-help" role="status"><div className="dh-text"><strong>Search not understood</strong>Type a FileDataID (up to 10 digits) or at least 4 hex digits of a content key.</div></div>;
   const previous = stale && !busy && <div className="dh-notice dh-calm" role="status"><div className="dh-text"><strong>These rows are from the previous filters</strong>The list for the current filters wasn't read. Fix the search or Retry, or Clear filters to go back.<div className="dh-row"><button className="dh-btn dh-small" onClick={clearFilters}>Clear filters</button></div></div></div>;

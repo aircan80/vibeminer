@@ -291,6 +291,62 @@ test('the Object column shows seven-digit ordinals whole at every size and text 
     }
   } finally { await session.close(); }
 });
+// #79: with the Files view switch beside the title, All files puts its search and filters on a second row of the pane
+// head. The column header still ends where the inspector head ends, as in the desktop-home reference; the rows are
+// .56rem apart; and the title and the switch stay put when the view changes.
+test('the Files pane head keeps the list and inspector headers aligned and the title still across views (#79)', async () => {
+  test.setTimeout(90_000);
+  const session = await launch(true, false, false, false, false, false, false, false, false, false, false, true);
+  try {
+    const { page, app } = session;
+    await mkdir(path.join(root, 'artifacts/size-first'), { recursive: true });
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 800));
+    await page.locator('.build-row').first().click(); await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(session.data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
+    await writeFile(path.join(session.data, 'file-catalog-ready'), 'ready');
+    await expect(page.locator('section[aria-labelledby="home-catalog"]')).toContainText('Ready to browse', { timeout: 40_000 });
+    await page.getByRole('navigation', { name: 'Build areas' }).getByRole('button', { name: 'Files', exact: true }).click();
+    const files = page.locator('.dh-files:not([hidden])');
+    const view = (name: string) => files.getByRole('group', { name: 'Files view' }).getByRole('button', { name, exact: true });
+    await expect(page.getByRole('listbox', { name: 'Files, one row per FileDataID' })).toBeVisible();
+    const measure = () => page.evaluate(() => {
+      const files = document.querySelector('.dh-files:not([hidden])')!, box = (selector: string) => files.querySelector(selector)?.getBoundingClientRect() ?? null;
+      const head = box('.dh-list > .dh-pane-head')!, thead = box('.dh-fthead'), inspector = box('.dh-inspector > .dh-insp-head')!;
+      const title = box('#files-heading')!, switcher = box('.dh-files-view')!, search = box('.dh-fsearch'), family = box('.dh-fextra .dh-segmented');
+      return { title: title.top, switcher: switcher.top, thead: thead?.bottom ?? null, inspector: inspector.bottom, head: head.bottom,
+        gap: search ? Math.min(search.top, family && family.height ? family.top : Infinity) - switcher.bottom : null, sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+    });
+    const settle = () => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+    for (const [width, height] of [[1280, 800], [1440, 1100]] as const) for (const scale of [1, 2]) {
+      await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height), { width, height });
+      await page.evaluate(font => { document.documentElement.style.fontSize = `${font}px`; }, 15 * scale);
+      const label = `${width}×${height} at ${scale * 100}%`, rem = 15 * scale;
+      if (await view('All files').getAttribute('aria-pressed') !== 'true') await view('All files').click();
+      await expect(page.getByRole('listbox', { name: 'Files, one row per FileDataID' })).toBeVisible();
+      await settle();
+      const all = await measure();
+      await page.screenshot({ path: path.join(root, 'artifacts/size-first', `files-head-all-${width}x${height}-${scale * 100}.png`) });
+      await view('Download objects').click();
+      await expect(page.getByRole('listbox', { name: /^Download objects/ })).toBeVisible();
+      await settle();
+      const objects = await measure();
+      await page.screenshot({ path: path.join(root, 'artifacts/size-first', `files-head-objects-${width}x${height}-${scale * 100}.png`) });
+      expect(all.sideways, label).toBeLessThanOrEqual(0); expect(objects.sideways, label).toBeLessThanOrEqual(0);
+      // The search and filters row sits .56rem under the title row: the zero-height break doubled it (16px).
+      expect(Math.abs(all.gap! - .56 * rem), `${label}: row gap ${all.gap}px`).toBeLessThanOrEqual(1);
+      // The title and the switch don't move when the view changes (they moved 2px).
+      expect(Math.abs(all.title - objects.title), `${label}: title at ${all.title} and ${objects.title}`).toBeLessThanOrEqual(.5);
+      expect(Math.abs(all.switcher - objects.switcher), `${label}: switch at ${all.switcher} and ${objects.switcher}`).toBeLessThanOrEqual(.5);
+      if (scale === 1) {
+        // Side by side, the column header ends where the inspector head ends, in both views.
+        expect(Math.abs(all.thead! - all.inspector), `${label} All files: column header ends at ${all.thead}, inspector head at ${all.inspector}`).toBeLessThanOrEqual(1);
+        expect(Math.abs(objects.thead! - objects.inspector), `${label} Download objects: column header ends at ${objects.thead}, inspector head at ${objects.inspector}`).toBeLessThanOrEqual(1);
+      }
+      await view('All files').click();
+    }
+  } finally { await session.close(); }
+});
 test('focus on View task in a Check note moves to Check when the Check ends, in its own and in another build\'s note (#38, D093)', async () => {
   test.setTimeout(90_000);
   const session = await launch(true);

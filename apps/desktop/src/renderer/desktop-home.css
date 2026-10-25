@@ -97,10 +97,19 @@
 .desktop-home .dh-check-line .dh-linkbtn{font-size:inherit}
 /* Files: All files or Download objects (D093). Beside the title; in the file list the search and filters go to the row
    below, so the search keeps its 11.666667rem and the filters their whole labels. A disabled option fades its label only,
-   so its focus ring keeps full strength. */
+   so its focus ring keeps full strength.
+   #79: that row is .56rem under the title row, and the two rows are centred in a head one row and a gap taller than the
+   reference's, so the title and the switch sit where they do in Download objects' one-row head. Beside the list the
+   inspector head grows by the same row and gap, so it still ends where the column header ends. */
 .desktop-home .dh-files-view{flex:none}
-.desktop-home .dh-files-filters:has(>.dh-head-break){flex-wrap:wrap}
-.desktop-home .dh-files-filters>.dh-head-break{flex-basis:100%;height:0}
+.desktop-home .dh-head-row{display:contents}
+/* The two-row head: the reference's head, a row gap and one row as tall as its tallest control (a segmented group or a
+   control). Both heads below use it, so they stay level. */
+.desktop-home .dh-files{--dh-files-head-rows:calc(var(--pane-head) + .56rem + max(1.913333rem + 2px,2.006667rem))}
+.desktop-home .dh-files-filters:has(>.dh-files-view+.dh-head-row){flex-wrap:wrap;align-content:center;min-height:var(--dh-files-head-rows)}
+.desktop-home .dh-files-filters:has(>.dh-files-view+.dh-head-row)>.dh-head-row{display:flex;flex:1 1 100%;align-items:center;gap:.56rem;min-width:0}
+.desktop-home.dh-compact .dh-files-filters:has(>.dh-files-view+.dh-head-row)>.dh-head-row{flex-wrap:wrap}
+.desktop-home:not(.dh-compact) .dh-files:has(.dh-files-filters>.dh-files-view+.dh-head-row) .dh-insp-head{min-height:calc(var(--dh-files-head-rows) + var(--thead))}
 .desktop-home .dh-files-view button[aria-disabled="true"],.desktop-home .dh-files-view button[aria-disabled="true"]:hover{opacity:1;color:var(--muted);background:none;cursor:default}
 /* At 200% the Files pane head says how many files were not checked at Open and points to the Check in Selected object;
    the head's own gap spaces it from the title, so when it wraps under the title it starts flush with it. */
