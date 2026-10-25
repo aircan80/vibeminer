@@ -59,8 +59,10 @@ internal static class GeometrySourceVerification
         CreatureGeometryDependency dependency, CancellationToken token)
     {
         var expected = result.Expectation ?? throw GeometrySourceCapsuleCodec.Invalid();
-        if (expected.Role != "asset" || expected.EncodedBytes is < 9 or > (4 << 20) || expected.DecodedBytes is < 1 or > (8 << 20)) throw GeometrySourceCapsuleCodec.Limit();
-        var stage = dependency == CreatureGeometryDependency.Model ? "model" : "skin";
+        var texture = dependency == CreatureGeometryDependency.Texture;
+        if (expected.Role != "asset" || expected.EncodedBytes < 9 || expected.EncodedBytes > (texture ? 16 << 20 : 4 << 20) ||
+            expected.DecodedBytes < 1 || expected.DecodedBytes > (texture ? 16 << 20 : 8 << 20)) throw GeometrySourceCapsuleCodec.Limit();
+        var stage = dependency switch { CreatureGeometryDependency.Model => "model", CreatureGeometryDependency.Skin => "skin", CreatureGeometryDependency.Texture => "texture", _ => throw GeometrySourceCapsuleCodec.Invalid() };
         var physical = await services.Shared.AcquireAsync(new(expected.EncodingKey, expected.EncodedBytes), context,
             AcquisitionPriority.Interactive, p => progress(new(stage + "Acquisition", "Acquiring original " + stage + " source", p.Unit, p.Completed, p.Total, dependency)), token);
         await selection.RevalidateAsync(token);
@@ -92,7 +94,7 @@ internal static class GeometrySourceVerification
                 SelectedFileAcquirer.VerifierRevision, physical.Location);
             // This seam bounds the EXISTING row before GetString and records only when absent,
             // in one transaction. Generic RecordContentAsync before it would defeat that bound.
-            var canonical = await services.Catalog.ReadGeometryOriginalSourcesAsync(result.Association, expected, candidate, token);
+            var canonical = await services.Catalog.ReadGeometryOriginalSourcesAsync(result.Association, expected, candidate, token, texture);
             await selection.RevalidateAsync(token); owner.Decoded.Position = 0;
             transferred = true; return new(owner, canonical);
         }

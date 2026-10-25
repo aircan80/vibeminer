@@ -137,3 +137,7 @@ Limit: 10 M entries. Tags, priorities and ordinals stay in the retained DL manif
 ## Model geometry (VMG1)
 
 See [contracts/geometry-vmg1-v1.md](../contracts/geometry-vmg1-v1.md).
+
+## Creature appearance (VMA1)
+
+See [contracts/geometry-vma1-v1.md](../contracts/geometry-vma1-v1.md). Retained in `geometry_appearances`, keyed by display.

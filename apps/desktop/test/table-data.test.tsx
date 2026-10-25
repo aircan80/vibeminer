@@ -56,7 +56,7 @@ it('moves selection, focus and scroll with Up, Down, Home and End, and pages pas
  fireEvent.keyDown(row('49'),{key:'Home'});expect(row('0')).toHaveFocus();expect(row('0')).toHaveAttribute('aria-pressed','true');expect(scroll.mock.contexts.at(-1)).toBe(row('0').closest('tr'));
  for(let i=1;i<=20;i++){fireEvent.keyDown(document.activeElement!,{key:'ArrowDown'});expect(row(String(i))).toHaveFocus();expect(scroll.mock.contexts.at(-1)).toBe(row(String(i)).closest('tr'));}
  fireEvent.keyDown(row('20'),{key:'ArrowUp'});expect(row('19')).toHaveFocus();expect(row('19')).toHaveAttribute('aria-pressed','true');
- fireEvent.keyDown(row('19'),{key:'End'});fireEvent.keyDown(row('49'),{key:'ArrowDown'});await screen.findByRole('button',{name:'Inspect record 50'});await waitFor(()=>expect(row('50')).toHaveFocus());expect(row('50')).toHaveAttribute('aria-pressed','true');expect(screen.getByRole('heading',{name:'Record #50'})).toBeInTheDocument();
+ fireEvent.keyDown(row('19'),{key:'End'});fireEvent.keyDown(row('49'),{key:'ArrowDown'});await screen.findByRole('button',{name:'Inspect record 50'});await waitFor(()=>expect(row('50')).toHaveFocus());expect(row('50')).toHaveAttribute('aria-pressed','true');expect(await screen.findByRole('heading',{name:'Record #50'})).toBeInTheDocument();
  fireEvent.keyDown(row('50'),{key:'ArrowUp'});await screen.findByRole('button',{name:'Inspect record 49'});await waitFor(()=>expect(row('49')).toHaveFocus());expect(row('49')).toHaveAttribute('aria-pressed','true');});
 
 describe('keyboard page moves never apply to another read',()=>{

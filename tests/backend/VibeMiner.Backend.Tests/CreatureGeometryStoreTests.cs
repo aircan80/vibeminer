@@ -21,7 +21,7 @@ public sealed partial class CreatureGeometryStoreTests
         var second=f.Store.PrepareAsync(new(f.Request),Progress,default);
         Assert.Equal("CREATURE_GEOMETRY_BUSY",(await Assert.ThrowsAsync<DiscoveryException>(()=>f.Store.PrepareAsync(new(f.Request),Progress,default))).Code);
         Assert.Equal("CREATURE_GEOMETRY_BUSY",(await Assert.ThrowsAsync<DiscoveryException>(()=>f.Store.PrepareAsync(new(f.Request with{Slot=1}),Progress,default))).Code);
-        Assert.Equal(1,f.Work.Produces);Assert.Equal(48L<<20,f.Store.Pressure.Payload);
+        Assert.Equal(1,f.Work.Produces);Assert.Equal(64L<<20,f.Store.Pressure.Payload);
         release.SetResult();var results=await Task.WhenAll(first,second).WaitAsync(Guard);
         Assert.All(results,r=>Assert.Equal(CreatureGeometryState.NoDeclaredTriangles,r.State));
         Assert.Equal((0,0,0L,false),f.Store.Pressure);
@@ -34,7 +34,7 @@ public sealed partial class CreatureGeometryStoreTests
         using var stop=new CancellationTokenSource();var first=f.Store.PrepareAsync(new(f.Request),Progress,stop.Token);await entered.Task.WaitAsync(Guard);
         var second=f.Store.PrepareAsync(new(f.Request),Progress,default);stop.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>first.WaitAsync(Guard));Assert.False(second.IsCompleted);
-        Assert.Equal(48L<<20,f.Store.Pressure.Payload);release.SetResult();await second.WaitAsync(Guard);Assert.Equal(0,f.Store.Pressure.Payload);
+        Assert.Equal(64L<<20,f.Store.Pressure.Payload);release.SetResult();await second.WaitAsync(Guard);Assert.Equal(0,f.Store.Pressure.Payload);
     }
     [Fact]
     public async Task LastCancellationWaitsProducerAndPublicationCleanupBeforeCapacity()
@@ -42,7 +42,7 @@ public sealed partial class CreatureGeometryStoreTests
         await using var f=await Fixture.Create();var entered=f.Gate();var canceled=f.Gate();var exit=f.Gate();var closing=f.Gate();var closed=f.Gate();
         f.Work.Produce=async(_,_,_,token)=>{using var r=token.Register(()=>canceled.TrySetResult());entered.SetResult();await exit.Task;return new Publication{Dispose=async()=>{closing.SetResult();await closed.Task;}};};
         using var stop=new CancellationTokenSource();var prepare=f.Store.PrepareAsync(new(f.Request),Progress,stop.Token);await entered.Task.WaitAsync(Guard);
-        stop.Cancel();await canceled.Task.WaitAsync(Guard);Assert.False(prepare.IsCompleted);Assert.Equal(48L<<20,f.Store.Pressure.Payload);
+        stop.Cancel();await canceled.Task.WaitAsync(Guard);Assert.False(prepare.IsCompleted);Assert.Equal(64L<<20,f.Store.Pressure.Payload);
         exit.SetResult();await closing.Task.WaitAsync(Guard);Assert.False(prepare.IsCompleted);closed.SetResult();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>prepare.WaitAsync(Guard));Assert.Equal(0,f.Store.Pressure.Payload);
     }
@@ -76,7 +76,7 @@ public sealed partial class CreatureGeometryStoreTests
     {
         await using var f=await Fixture.Create();f.Work.Produce=(_,_,_,_)=>Task.FromResult<IGeometryStorePublication>(new Publication{Dispose=()=>throw new IOException("authored close debt")});
         Assert.Equal("CREATURE_GEOMETRY_CLEANUP_FAILED",(await Assert.ThrowsAsync<DiscoveryException>(()=>f.Store.PrepareAsync(new(f.Request),Progress,default).WaitAsync(Guard))).Code);
-        Assert.Equal(48L<<20,f.Store.Pressure.Payload);Assert.True(f.Store.Pressure.Closed);
+        Assert.Equal(64L<<20,f.Store.Pressure.Payload);Assert.True(f.Store.Pressure.Closed);
         Assert.Equal("CREATURE_GEOMETRY_CLEANUP_FAILED",(await Assert.ThrowsAsync<DiscoveryException>(()=>f.Store.ReadAsync(new(f.Request),default))).Code);
         f.ExpectDebt=true;
     }
@@ -131,14 +131,14 @@ public sealed partial class CreatureGeometryStoreTests
         await Assert.ThrowsAsync<DiscoveryException>(()=>lease.Retirement);Assert.Equal((0,1,8L<<20,true),f.Store.Pressure);f.ExpectDebt=true;
     }
     [Fact]
-    public async Task OneProducerAndTwoReadLeasesFitExactlyShared64MiB()
+    public async Task OneProducerAndTwoReadLeasesFitExactlyShared80MiB()
     {
         await using var f=await Fixture.Create();var entered=f.Gate();var exit=f.Gate();
         f.Work.Produce=async(_,_,_,_)=>{entered.SetResult();await exit.Task;return new Publication();};
         var prepare=f.Store.PrepareAsync(new(f.Request),Progress,default);await entered.Task.WaitAsync(Guard);f.Work.Retained=new Retained();
         var a=await f.Store.OpenAsync(new(f.Request,f.Work.Retained.Manifest.ArtifactId),default);
         var b=await f.Store.OpenAsync(new(f.Request,f.Work.Retained.Manifest.ArtifactId),default);
-        Assert.Equal(64L<<20,f.Store.Pressure.Payload);exit.SetResult();await prepare.WaitAsync(Guard);Assert.Equal(16L<<20,f.Store.Pressure.Payload);
+        Assert.Equal(80L<<20,f.Store.Pressure.Payload);exit.SetResult();await prepare.WaitAsync(Guard);Assert.Equal(16L<<20,f.Store.Pressure.Payload);
         await a.DisposeAsync();await b.DisposeAsync();Assert.Equal(0,f.Store.Pressure.Payload);
     }
     private sealed class Fixture:IAsyncDisposable

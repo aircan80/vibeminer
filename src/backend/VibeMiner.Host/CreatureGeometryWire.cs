@@ -67,6 +67,7 @@ internal static class CreatureGeometryWire
             source.VariantPolicy, source.EncodingLookupRevision, source.RootLookupRevision, source.EncodingSelectionPolicy
         }),
         manifest = value.Manifest is { } manifest ? Manifest(manifest) : null,
+        appearance = value.Appearance is { } appearance ? Appearance(appearance) : null,
         problem = value.Problem is { } problem ? new
         { problem.Code, problem.Message, problem.Retryable, dependency = problem.Dependency is { } dependency ? Name(dependency) : null,
             target = problem.Target is { } target ? Name(target) : null } : null
@@ -87,7 +88,35 @@ internal static class CreatureGeometryWire
         value.ModelFileDataId, value.SkinFileDataId,
         value.MainSkinOrdinal, value.ModelReaderRevision, value.SkinReaderRevision, value.InterpretationPolicy, value.ArtifactRevision, value.EdgePolicy
     };
-    internal static object Descriptor(CreatureGeometryLeaseDescriptor value) => new { value.LeaseId, manifest = Manifest(value.Manifest) };
+    internal static object Descriptor(CreatureGeometryLeaseDescriptor value) =>
+        new { value.LeaseId, manifest = value.Appearance is { } appearance ? AppearanceManifest(appearance) : Manifest(value.Manifest) };
+    internal static object Appearance(CreatureGeometryAppearance value) => new
+    {
+        value.Policy, state = Name(value.State),
+        display = value.Display is { } display ? new { display.DisplayId, display.ExtendedDisplayInfoId, display.TextureVariations } : null,
+        textures = value.Textures.Select(t => new
+        {
+            t.Ordinal, t.Type, binding = Name(t.Binding), t.Variation, t.FileDataId, state = Name(t.State),
+            image = t.Image is { } image ? new { image.Width, image.Height, image.MipLevel, image.BaseWidth, image.BaseHeight, image.Encoding } : null,
+            source = t.Source is { } source ? new { source.ContentKey, source.EncodingKey, source.EncodedSha256, source.EncodedBytes, source.DecodedBytes, source.FullVerifierRevision } : null
+        }),
+        effects = value.Effects is { } e ? new { e.Particles, e.Ribbons, e.Lights, e.ShadowBatches, e.UnbatchedSections, evaluation = "notDrawn" } : null,
+        manifest = value.Manifest is { } manifest ? AppearanceManifest(manifest) : null,
+        problem = value.Problem is { } problem ? new { problem.Code, problem.Message, problem.Retryable, problem.BatchOrdinal, problem.TextureOrdinal } : null
+    };
+    internal static object AppearanceManifest(CreatureGeometryAppearanceManifest value) => new
+    {
+        value.ArtifactId, value.BindingSha256, value.Sha256, value.ByteLength, value.FormatVersion, value.HeaderBytes, value.CoordinatePolicy,
+        value.VertexCount, value.IndexCount, value.DrawCount, value.TextureCount, value.Positions, value.Uvs, value.Indices, value.Draws,
+        value.Textures, value.Texels,
+        bounds = new
+        {
+            min = new[] { (double)value.Bounds.Min[0], (double)value.Bounds.Min[1], (double)value.Bounds.Min[2] },
+            max = new[] { (double)value.Bounds.Max[0], (double)value.Bounds.Max[1], (double)value.Bounds.Max[2] }
+        },
+        value.AlphaReference, value.DisplayId, value.GeometryBindingSha256, value.MaterialPolicy, value.TexturePolicy,
+        value.ReaderRevision, value.DecoderRevision, value.ArtifactRevision
+    };
     internal static string Name<T>(T value) where T : struct, Enum => Enum.IsDefined(value)
         ? JsonNamingPolicy.CamelCase.ConvertName(value.ToString())
         : throw new DiscoveryException("CREATURE_GEOMETRY_RESULT_INVALID", "The geometry result uses an undefined state.");

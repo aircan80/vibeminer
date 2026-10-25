@@ -12,6 +12,8 @@ public interface ICreatureGeometryReadLease : IAsyncDisposable
 {
     Stream Content { get; }
     CreatureGeometryManifest Manifest { get; }
+    /// <summary>Set when the lease holds the appearance (VMA1) bytes instead of the geometry (VMG1) bytes.</summary>
+    CreatureGeometryAppearanceManifest? Appearance => null;
     /// <summary>Actual stream/lease retirement only. Faults on charged cleanup debt, never merely on expiry/cancel.</summary>
     Task Retirement { get; }
 }

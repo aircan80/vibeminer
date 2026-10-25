@@ -224,7 +224,7 @@ public sealed partial class DiscoveryCatalog
             rows.Header.Columns[column].Name != CreatureDisplayPolicy.Field(role) || rows.Header.Columns[column].Kind != "integer" ||
             rows.Header.Columns[column].IsId || rows.Header.Columns[column].Interpretation is not null || row.IsCopy != (row.CopySourceId is not null) ||
             row.CopySourceId is { } copy && (!uint.TryParse(copy, out var copyId) || copyId.ToString(System.Globalization.CultureInfo.InvariantCulture) != copy) ||
-            rows.Header.LayoutHash != CreatureDisplayPolicy.Layout(role) || rows.Binding.DefinitionSha256 != CreatureDisplayPolicy.Definition(role) ||
+            !CreatureDisplayPolicy.IsLayout(role, rows.Header.LayoutHash) || rows.Binding.DefinitionSha256 != CreatureDisplayPolicy.Definition(role) ||
             rows.Binding.ProviderRevision != BundledTableDefinitions.Revision || rows.Binding.DecoderRevision != (admission!.Source.Projection is null ? TableDataStore.DecoderRevision : TableDataStore.ProjectionDecoderRevision) ||
             !uint.TryParse(probe.Edge, out var value) || value == 0 || value.ToString(System.Globalization.CultureInfo.InvariantCulture) != probe.Edge ||
             role == CreatureDisplayTargetRole.Display && value > ushort.MaxValue) throw GeometryInvalid();

@@ -13,7 +13,7 @@ public sealed class EncodedReceiptCatalogTests
     public async Task Fresh_catalog_stores_one_durable_alias_and_keeps_its_original_source_evidence()
     {
         await using var h = await Harness.Create(); var original = Encoded();
-        Assert.Equal(18L, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(19L, await h.Scalar("PRAGMA user_version"));
         Assert.Null(await h.Catalog.FindEncodedReceiptAsync(original.EncodingKey, original.EncodedBytes, default));
         await h.Catalog.RecordEncodedReceiptAsync(original, default);
         await h.Catalog.RecordEncodedReceiptAsync(original with { VerifiedAt = "2026-10-20T00:00:00Z", RetrievedAt = "2026-10-20T00:00:00Z", SourceUrl = Url(original.EncodingKey, "eu") }, default);
@@ -163,7 +163,7 @@ public sealed class EncodedReceiptCatalogTests
         await h.Catalog.CommitAsync("wow", generation, fixture.Discovery, Now, default); await h.Catalog.RecordContentAsync(Content(true), default);
         await h.Catalog.DisposeAsync();
         await h.Execute(CatalogMigrationFixture.RemoveV9 + "DROP TABLE encoded_objects; PRAGMA user_version=7"); h.Catalog = await DiscoveryCatalog.OpenAsync(h.Directory);
-        Assert.Equal(18L, await h.Scalar("PRAGMA user_version")); Assert.Equal(1L, await h.Scalar("SELECT count(*) FROM builds"));
+        Assert.Equal(19L, await h.Scalar("PRAGMA user_version")); Assert.Equal(1L, await h.Scalar("SELECT count(*) FROM builds"));
         Assert.Equal(0L, await h.Scalar("SELECT count(*) FROM encoded_objects"));
         Assert.NotNull(await h.Catalog.FindContentAsync(Key, default)); Assert.NotNull(await h.Catalog.FindEncodedReceiptAsync(Key, 20, default));
     }

@@ -8,7 +8,8 @@ internal interface IGeometryPayloadBudget { IDisposable Reserve(long bytes); }
 /// It is a reservation ceiling, not an assertion about process RSS or a second work scheduler.</summary>
 internal sealed class GeometryPayloadBudget : IGeometryPayloadBudget
 {
-    internal const long MaximumBytes = 64L << 20, ProducerBytes = 48L << 20, ReaderBytes = 8L << 20;
+    // Producer: 16 MiB capture + 32 MiB sources + 16 MiB decoded textures (#63); two 8 MiB read slots.
+    internal const long MaximumBytes = 80L << 20, ProducerBytes = 64L << 20, ReaderBytes = 8L << 20;
     private readonly object gate = new();
     private long used;
     internal long ReservedBytes { get { lock (gate) return used; } }

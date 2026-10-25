@@ -29,13 +29,14 @@ public sealed partial class CreatureGeometryService
             slot.Inner = await store.OpenAsync(owned, operation.Token);
             if (slot.Inner is null) throw new DiscoveryException("CREATURE_GEOMETRY_RESULT_INVALID", "The geometry source returned no read ownership.");
             var manifest = CreatureGeometryValidation.Snapshot(slot.Inner.Manifest);
-            if (manifest.ArtifactId != owned.GeometryArtifactId)
+            var appearance = slot.Inner.Appearance is null ? null : CreatureGeometryValidation.Snapshot(slot.Inner.Appearance);
+            if ((appearance?.ArtifactId ?? manifest.ArtifactId) != owned.GeometryArtifactId || appearance is not null && appearance.VertexCount != manifest.VertexCount)
                 throw new DiscoveryException("CREATURE_GEOMETRY_STALE", "The exact geometry read changed. Retry the selected slot.", true);
             var content = slot.Inner.Content;
-            if (content is null || !content.CanRead || !content.CanSeek || content.CanWrite || content.Position != 0 || content.Length != manifest.ByteLength)
+            if (content is null || !content.CanRead || !content.CanSeek || content.CanWrite || content.Position != 0 || content.Length != (appearance?.ByteLength ?? manifest.ByteLength))
                 throw new DiscoveryException("CREATURE_GEOMETRY_RESULT_INVALID", "The approved geometry stream differs from its bounded manifest.");
             operation.Token.ThrowIfCancellationRequested();
-            lock (gate) { RequireOpen(); if (slot.Closing) throw new OperationCanceledException(operation.Token); result = new(this, slot, content, manifest); }
+            lock (gate) { RequireOpen(); if (slot.Closing) throw new OperationCanceledException(operation.Token); result = new(this, slot, content, manifest, appearance); }
         }
         catch (Exception error)
         {
@@ -111,8 +112,10 @@ public sealed partial class CreatureGeometryService
     }
     private async Task RetireAsync(LeaseSlot slot)
     { StartRetirement(slot); await slot.Retired.Task; await slot.PublishedRetirement.Task; }
-    private sealed class ReadLease(CreatureGeometryService owner, LeaseSlot slot, Stream content, CreatureGeometryManifest manifest) : ICreatureGeometryReadLease
+    private sealed class ReadLease(CreatureGeometryService owner, LeaseSlot slot, Stream content, CreatureGeometryManifest manifest,
+        CreatureGeometryAppearanceManifest? appearance) : ICreatureGeometryReadLease
     {
+        public CreatureGeometryAppearanceManifest? Appearance => appearance;
         public Stream Content { get { lock (owner.gate) { ObjectDisposedException.ThrowIf(slot.Closing, this); return content; } } }
         public CreatureGeometryManifest Manifest => manifest;
         public Task Retirement => slot.PublishedRetirement.Task;

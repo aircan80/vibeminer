@@ -38,17 +38,20 @@ internal sealed partial class GeometrySourceClosure
     internal string DataBindingSha256 { get; }
 }
 
-internal sealed class GeometryPreparedSources(GeometrySourceClosure closure, M2GeometrySkin skin, IReadOnlyList<CreatureGeometrySource> sources, IDisposable payload) : IAsyncDisposable
+internal sealed class GeometryPreparedSources(GeometrySourceClosure closure, M2GeometrySkin skin, IReadOnlyList<CreatureGeometrySource> sources, IDisposable payload,
+    GeometryAppearancePreparation? appearance = null) : IAsyncDisposable
 {
     private M2GeometrySkin? ownedSkin = skin;
     private IDisposable? reservation = payload;
+    /// <summary>Null when the SKIN declares no triangles. Owns decoded texture slots until disposed.</summary>
+    internal GeometryAppearancePreparation? Appearance { get; } = appearance;
     internal GeometrySourceClosure Closure { get; } = closure;
     internal IReadOnlyList<CreatureGeometrySource> Sources { get; } = sources;
     internal M2GeometrySkin Skin => ownedSkin ?? throw new ObjectDisposedException(nameof(GeometryPreparedSources));
     internal GeometrySourceBinding DataBinding => Closure.DataBinding;
     internal string DataBindingSha256 => Closure.DataBindingSha256;
     public ValueTask DisposeAsync()
-    { ownedSkin = null; Interlocked.Exchange(ref reservation, null)?.Dispose(); return ValueTask.CompletedTask; }
+    { ownedSkin = null; Appearance?.Dispose(); Interlocked.Exchange(ref reservation, null)?.Dispose(); return ValueTask.CompletedTask; }
 }
 
 

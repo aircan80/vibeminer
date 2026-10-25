@@ -1,15 +1,15 @@
 import {test,expect,type Page,type ElectronApplication,type Locator} from '@playwright/test';
 import {writeFile,readFile,mkdir,unlink} from 'node:fs/promises';
 import path from 'node:path';
-import {launch,root} from './helpers';
+import {launch,root,size,text} from './helpers';
 // #59: Creatures → slot metadata → Geometry → verified VMG1 body drawn by the real main protocol and WebGL scene.
 const methods=async(data:string)=>(await readFile(path.join(data,'requests.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line) as {method:string;params:Record<string,unknown>});
-async function opened(state='ready'){
+async function opened(state='ready',textured=false){
  const s=await launch(true,false,false,true,false,false,true,true,false,false,false,false,true);
  try{
   const{page}=s;await page.locator('.build-row').first().click();await page.getByRole('button',{name:'Open build',exact:true}).click();await writeFile(path.join(s.data,'release-open'),'release');
   await expect(page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();
-  await writeFile(path.join(s.data,'cached-creatures'),'cached');await writeFile(path.join(s.data,'cached-display'),'cached');await writeFile(path.join(s.data,'geometry-state.json'),JSON.stringify({state}));
+  await writeFile(path.join(s.data,'cached-creatures'),'cached');await writeFile(path.join(s.data,'cached-display'),'cached');await writeFile(path.join(s.data,'geometry-state.json'),JSON.stringify({state,textured}));
   await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Creatures',exact:true}).click();await expect(page.locator('.creatures-browser tbody tr')).toHaveCount(50);
   await page.getByRole('button',{name:/^Inspect Creature 0:/}).click();await page.getByRole('button',{name:'Inspect metadata for display 100 from slot 0',exact:true}).click();
   await expect(page.getByText('Display metadata resolved',{exact:true})).toBeVisible();return s;
@@ -18,7 +18,7 @@ async function opened(state='ready'){
 async function capture(page:Page,app:ElectronApplication,name:string,anchor:Locator){const out=path.join(root,'artifacts/creature-geometry');await mkdir(out,{recursive:true});for(const[width,height]of[[1280,800],[1440,1100]]){await app.evaluate(({BrowserWindow},size)=>BrowserWindow.getAllWindows()[0].setContentSize(size.width,size.height),{width,height});await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(width);for(const scale of[1,2]){await page.evaluate(f=>document.documentElement.style.fontSize=`${f}px`,15*scale);await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));await anchor.scrollIntoViewIfNeeded();await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));expect(await page.evaluate(()=>document.documentElement.scrollWidth>document.documentElement.clientWidth+1)).toBe(false);await page.screenshot({path:path.join(out,`${name}-${width}x${height}-${scale*100}.png`)});}}await page.evaluate(()=>document.documentElement.style.fontSize='15px');}
 test('Geometry step prepares, receives and draws the verified mesh, then Return restores the invoker and releases the lease',async()=>{test.setTimeout(120000);const s=await opened();try{
  const{page}=s;await writeFile(path.join(s.data,'hold-geometry-prepare'),'hold');
- const enter=page.getByRole('button',{name:'View geometry for display 100',exact:true});await expect(page.getByText(/Diagnostic geometry: the model's untextured source edges/)).toBeVisible();
+ const enter=page.getByRole('button',{name:'View geometry for display 100',exact:true});await expect(page.getByText(/Diagnostic geometry: the model's source edges, or its textured surfaces/)).toBeVisible();
  await enter.focus();await page.keyboard.press('Enter');
  await expect(page.getByRole('heading',{name:'Diagnostic source geometry',exact:true})).toBeFocused();await expect(page.locator('.creatures-browser')).toBeHidden();
  await expect(page.getByRole('status').filter({hasText:'Acquiring model source'})).toBeVisible();await expect(page.getByRole('button',{name:'Stop preparing geometry',exact:true})).toBeVisible();
@@ -90,4 +90,26 @@ test('Entering from a scrolled-down browser opens the view at its top with the f
  await writeFile(path.join(s.data,'release-geometry-prepare'),'release');await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toBeVisible({timeout:20000});
  // Async completion never moves the scroll or focus the user now owns.
  const before=await pane.evaluate(e=>e.scrollTop);await expect(heading).toBeFocused();expect(await pane.evaluate(e=>e.scrollTop)).toBe(before);
+}finally{await s.close();}});
+test('A ready display appearance draws the textured surfaces from its verified VMA1 body and shows the texture chain (#63)',async()=>{test.setTimeout(120000);const s=await opened('ready',true);try{
+ const{page}=s;await page.getByRole('button',{name:'View geometry for display 100',exact:true}).click();
+ await expect(page.getByRole('status').filter({hasText:'Unposed textured surfaces drawn'})).toBeVisible({timeout:20000});
+ await expect(page.getByText('Unposed textured surfaces · bind pose, unlit',{exact:true})).toBeVisible();
+ const chain=page.getByRole('region',{name:'Texture chain'});await expect(chain).toContainText('Textured');
+ await expect(chain).toContainText('Texture 0 · type 11 → TextureVariationFileDataID[0] → FileDataID 779 · BC1, mip 0 4×4 of 4×4');
+ await expect(chain).toContainText('Not drawn: 2 particle emitters, 0 ribbons, 0 lights, 1 shadow batch.');
+ const canvas=page.locator('.creature-geometry canvas'),before=await canvas.screenshot();
+ await page.getByRole('button',{name:'Rotate left',exact:true}).click();await expect.poll(async()=>Buffer.compare(before,await canvas.screenshot())).not.toBe(0);
+ await capture(page,s.app,'textured',canvas);
+ // 600×480 at 200%: field names and their indexes never break inside, and nothing overflows the inspector.
+ await size(s.app,600,480);await text(page,2);await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(600);
+ const names=page.locator('.geometry-inspector .geometry-name');await names.last().scrollIntoViewIfNeeded();
+ const fragments=await names.evaluateAll(els=>els.map(e=>({text:e.textContent,lines:e.getClientRects().length})));
+ expect(fragments.map(f=>f.text)).toEqual(['TextureVariationFileDataID','[0–3]','TextureVariationFileDataID[0]']);
+ for(const fragment of fragments)expect(fragment.lines,fragment.text!).toBe(1);
+ expect(await page.locator('.geometry-inspector').evaluate(e=>e.scrollWidth-e.clientWidth)).toBeLessThanOrEqual(0);
+ await text(page,1);
+ const opens=(await methods(s.data)).filter(r=>r.method==='creatures.geometry.open');expect(opens).toHaveLength(1);expect(opens[0].params.geometryArtifactId).not.toBe(opens[0].params.artifactId);
+ await page.getByRole('button',{name:'Return to selected display metadata',exact:true}).click();
+ await expect.poll(async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length).toBe(1);
 }finally{await s.close();}});

@@ -84,10 +84,10 @@ public sealed partial class CreatureGeometryStore
             if(current.Authorization is null)throw Stale();
             // Complete bounded output before the final transaction; canonical-first substitutions below
             // have the same finite shape and are returned directly, without a second catalog lookup.
-            _=Result(selection,current,publication.State,publication.Sources,publication.Manifest,publication.Problem);
+            _=Result(selection,current,publication.State,publication.Sources,publication.Manifest,publication.Problem,publication.Appearance);
             var final=await publication.FinalizeAsync(current.Authorization,consumer.Cancellation.Token);
             consumer.Cancellation.Token.ThrowIfCancellationRequested();
-            return Result(selection,current,publication.State,final.Sources,final.Manifest,publication.Problem);
+            return Result(selection,current,publication.State,final.Sources,final.Manifest,publication.Problem,final.Appearance);
         }
         finally{consumer.BodyRetired.TrySetResult();await RetireConsumerAsync(consumer);}
     }

@@ -183,6 +183,21 @@ public sealed class Blp2DecoderTests
         using var input=new AsyncInput(padded);var image=await Blp2Decoder.DecodeAsync(input);Assert.Equal(new byte[]{255,0,0,255},Pixel(image,0,0));
     }
 
+    [Fact]
+    public async Task Largest_mip_within_a_side_bound_is_the_first_declared_level_that_fits_and_nothing_is_resized()
+    {
+        // 4x2 BGRA with declared 4x2, 2x1 and 1x1 levels; each level has its own fill byte.
+        var bytes=Build(3,8,0,4,2,[Enumerable.Repeat((byte)5,32).ToArray(),Enumerable.Repeat((byte)7,8).ToArray(),[9,9,9,9]]);
+        using(var input=new AsyncInput(bytes)){var image=await Blp2Decoder.DecodeLargestWithinAsync(input,2);
+            Assert.Equal((1,2,1,4,2),(image.MipLevel,image.Width,image.Height,image.BaseWidth,image.BaseHeight));Assert.Equal(new byte[]{7,7,7,7},Pixel(image,1,0));}
+        using(var input=new AsyncInput(bytes))Assert.Equal(0,(await Blp2Decoder.DecodeLargestWithinAsync(input,1024)).MipLevel);
+        using(var input=new AsyncInput(bytes))Assert.Equal(2,(await Blp2Decoder.DecodeLargestWithinAsync(input,1)).MipLevel);
+        // Only the base level is declared: no smaller level is invented.
+        using(var input=new AsyncInput(Build(3,8,0,4,2,[new byte[32]])))
+            Assert.Equal("BLP_MIP_UNAVAILABLE",(await Assert.ThrowsAsync<DiscoveryException>(()=>Blp2Decoder.DecodeLargestWithinAsync(input,2))).Code);
+        using(var input=new AsyncInput(bytes))await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>Blp2Decoder.DecodeLargestWithinAsync(input,0));
+    }
+
     private static byte[] Pixel(Blp2Image image,int x,int y)=>image.Rgba.AsSpan(y*image.RowStride+x*4,4).ToArray();
     private static byte[] Color(int index,byte alpha)=>index switch{1=>[200,10,20,alpha],2=>[30,220,40,alpha],3=>[50,60,240,alpha],_=>[250,230,210,alpha]};
     private static ulong Selectors(IEnumerable<int> selectors,int bits){ulong value=0;var index=0;foreach(var selector in selectors)value|=(ulong)selector<<(index++*bits);return value;}

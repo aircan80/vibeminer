@@ -16,7 +16,7 @@ namespace VibeMiner.Backend.Tests;
 // Fresh catalog tests obtain Closure ONLY by running this real shared B/physical/BLTE/M2 pipeline.
 internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
 {
-    internal const uint ModelId = 777, SkinId = 778;
+    internal const uint ModelId = 777, SkinId = 778, TextureId = 779;
     internal const string Time = "2026-10-19T12:00:00.0000000+00:00";
     internal readonly CreaturesProjectionTests.Fixture Projection = new();
     internal readonly AcquisitionResources Resources = new(maximumCpu: 1, maximumBackgroundCpu: 1, maximumStagingBytes: 16 << 20, maximumBackgroundStagingBytes: 8 << 20);
@@ -37,25 +37,34 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
     internal GeometryPreparedSources? Prepared;
     internal GeometryProducerPayload? Producer;
     private IDisposable? capture;
-    internal byte[] ModelEncoded = [], SkinEncoded = [];
-    internal static async Task<CreatureGeometrySourcesFixture> CreateAsync(bool empty = false, bool encryptedSkin = false, bool oversizedModel = false, bool ambiguousModel = false, bool missingModel = false, bool externalSkeleton = false)
+    internal byte[] ModelEncoded = [], SkinEncoded = [], TextureEncoded = [];
+    // Textured appearance (#63): an authored model/SKIN pair, one BLP and the display row's texture fields.
+    internal sealed record Textured(AppearanceModels.Model Model, AppearanceModels.Batch[] Batches, int Variation = (int)TextureId, int Extended = 0,
+        bool Encrypted = false, byte[]? Blp = null, int Sections = 1);
+    internal static async Task<CreatureGeometrySourcesFixture> CreateAsync(bool empty = false, bool encryptedSkin = false, bool oversizedModel = false, bool ambiguousModel = false, bool missingModel = false, bool externalSkeleton = false,
+        Textured? textured = null)
     {
         var f = new CreatureGeometrySourcesFixture();
-        try { await f.InitializeAsync(empty, encryptedSkin, oversizedModel, ambiguousModel, missingModel, externalSkeleton); return f; }
+        try { await f.InitializeAsync(empty, encryptedSkin, oversizedModel, ambiguousModel, missingModel, externalSkeleton, textured); return f; }
         catch { await f.DisposeAsync(); throw; }
     }
-    private async Task InitializeAsync(bool empty, bool encryptedSkin, bool oversizedModel, bool ambiguousModel, bool missingModel, bool externalSkeleton)
+    private async Task InitializeAsync(bool empty, bool encryptedSkin, bool oversizedModel, bool ambiguousModel, bool missingModel, bool externalSkeleton, Textured? textured)
     {
-        var model = Object("model", ModelBytes(externalSkeleton)); var skin = Object("skin", SkinBytes(empty));
+        var model = Object("model", textured is null ? ModelBytes(externalSkeleton) : AppearanceModels.ModelBytes(textured.Model));
+        var skin = Object("skin", textured is null ? SkinBytes(empty) : AppearanceModels.SkinBytes(textured.Batches, textured.Sections));
+        var texture = Object("texture", textured?.Blp ?? AppearanceModels.Blp(8, 8, 4));
+        if (textured?.Encrypted == true) { texture = texture with { Encoded = Encrypted(texture.Decoded.Length) }; texture = texture with { EncodingKey = Hash(texture.Encoded.AsSpan(0, 36)) }; }
+        TextureEncoded = texture.Encoded;
         if (encryptedSkin) skin = skin with { Encoded = Encrypted(skin.Decoded.Length) };
         if (encryptedSkin) skin = skin with { EncodingKey = Hash(skin.Encoded.AsSpan(0, 36)) };
         var table = Object("table", "authored table source\n"u8.ToArray());
-        var root = Object("root", Root(model, skin, table, ambiguousModel, missingModel)); var encoding = Object("encoding", EncodingManifest([model, skin, table, root], oversizedModel));
+        var root = Object("root", Root(model, skin, table, ambiguousModel, missingModel, textured is null ? null : texture));
+        var encoding = Object("encoding", EncodingManifest(textured is null ? [model, skin, table, root] : [model, skin, table, texture, root], oversizedModel));
         ModelEncoded = model.Encoded; SkinEncoded = skin.Encoded;
         var build = Encoding.UTF8.GetBytes($"root = {root.ContentKey}\nencoding = {encoding.ContentKey} {encoding.EncodingKey}\nencoding-size = {encoding.Decoded.Length} {encoding.Encoded.Length}\n");
         var cdn = "archives =\n"u8.ToArray(); var buildKey = Hash(build); var cdnKey = Hash(cdn);
         Http.Responses[InventoryFixture.Url("config", buildKey)] = build; Http.Responses[InventoryFixture.Url("config", cdnKey)] = cdn;
-        foreach (var item in new[] { model, skin, table, root, encoding }) Http.Responses[InventoryFixture.Url("data", item.EncodingKey)] = item.Encoded;
+        foreach (var item in new[] { model, skin, table, root, encoding, texture }) Http.Responses[InventoryFixture.Url("data", item.EncodingKey)] = item.Encoded;
         Catalog = await DiscoveryCatalog.OpenAsync(Projection.DirectoryPath);
         var versions = Fixtures.Versions($"us|{buildKey}|{cdnKey}||70448|12.1.5.70448||geometry-authored");
         var attempt = await Fixtures.Attempt(versions, "Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0\nus|tpr/wow|us.cdn.blizzard.com|https://us.cdn.blizzard.com/\n");
@@ -109,6 +118,11 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
             var values = target.Header.Columns.Select(c => c.Kind == "string" ? "" : "0").ToArray();
             for (var i = 0; i < values.Length; i++) if (target.Header.Columns[i].IsId) values[i] = N(id);
             values[edge] = role == CreatureDisplayTargetRole.Display ? "33" : N(ModelId);
+            if (role == CreatureDisplayTargetRole.Display && textured is not null)
+            {
+                int Column(string name) => target.Header.Columns.Select((c, i) => (c, i)).Single(x => x.c.Name == name).i;
+                values[Column("ExtendedDisplayInfoID")] = N(textured.Extended); values[Column("TextureVariationFileDataID[0]")] = N(textured.Variation);
+            }
             await targetWriter.RowAsync(new(id, false, null, values), default);
             var artifact = await targetWriter.CompleteAsync(target.Completion with { ConsumedBytes = table.Decoded.Length }, default);
             var targetAssociation = TableAssociation(role == CreatureDisplayTargetRole.Display ? "1108759" : "1365368");
@@ -149,8 +163,16 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
         {
             var uri = request.RequestUri!.AbsoluteUri; Requests.Add(uri); if (Before is not null) await Before(request, token);
             if (Offline) throw new HttpRequestException("Authored offline");
-            return Responses.TryGetValue(uri, out var bytes) ? new(HttpStatusCode.OK) { RequestMessage = request, Content = new ByteArrayContent(bytes) }
-                : new(HttpStatusCode.NotFound) { RequestMessage = request };
+            if (!Responses.TryGetValue(uri, out var bytes)) return new(HttpStatusCode.NotFound) { RequestMessage = request };
+            // Large objects are fetched in ranges; answer each with its exact slice.
+            if (request.Headers.Range?.Ranges.SingleOrDefault() is { From: { } from } range)
+            {
+                var to = Math.Min(range.To ?? bytes.Length - 1, bytes.Length - 1);
+                var content = new ByteArrayContent(bytes, (int)from, (int)(to - from + 1));
+                content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(from, to, bytes.Length);
+                return new(HttpStatusCode.PartialContent) { RequestMessage = request, Content = content };
+            }
+            return new(HttpStatusCode.OK) { RequestMessage = request, Content = new ByteArrayContent(bytes) };
         }
     }
     private sealed class NoTables : ITableDataStore
@@ -185,10 +207,11 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
         W(result, 86, 3); W(result, 90, empty ? (ushort)0 : (ushort)3); result[128] = 255;
         return result;
     }
-    private static byte[] Root(Blob model, Blob skin, Blob table, bool ambiguousModel, bool missingModel)
+    private static byte[] Root(Blob model, Blob skin, Blob table, bool ambiguousModel, bool missingModel, Blob? texture)
     {
         using var stream = new MemoryStream(); using var w = new BinaryWriter(stream);
-        var entries = new[] { (ModelId, model), (SkinId, skin), (uint.Parse(CreaturesPolicy.FileDataId), table), (1108759u, table), (1365368u, table) }.Where(x => !missingModel || x.Item1 != ModelId).OrderBy(x => x.Item1).ToArray();
+        var entries = new[] { (ModelId, model), (SkinId, skin), (uint.Parse(CreaturesPolicy.FileDataId), table), (1108759u, table), (1365368u, table) }
+            .Concat(texture is null ? [] : [(TextureId, texture)]).Where(x => !missingModel || x.Item1 != ModelId).OrderBy(x => x.Item1).ToArray();
         w.Write("TSFM"u8); w.Write(24u); w.Write(2u); w.Write((uint)(entries.Length + (ambiguousModel ? 1 : 0))); w.Write((uint)(entries.Length + (ambiguousModel ? 1 : 0))); w.Write(0u);
         w.Write((uint)entries.Length); w.Write(2u); w.Write(0u); w.Write(0u); w.Write((byte)0);
         uint previous = 0; foreach (var (id, _) in entries) { w.Write(id - previous); previous = id + 1; }

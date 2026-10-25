@@ -292,6 +292,39 @@
     "creatureGeometryStage": {
       "$ref": "#/definitions/CreatureGeometryStage"
     },
+    "creatureGeometryAppearanceState": {
+      "$ref": "#/definitions/CreatureGeometryAppearanceState"
+    },
+    "creatureGeometryTextureState": {
+      "$ref": "#/definitions/CreatureGeometryTextureState"
+    },
+    "creatureGeometryAppearanceRegion": {
+      "$ref": "#/definitions/CreatureGeometryAppearanceRegion"
+    },
+    "creatureGeometryAppearanceDisplay": {
+      "$ref": "#/definitions/CreatureGeometryAppearanceDisplay"
+    },
+    "creatureGeometryTextureImage": {
+      "$ref": "#/definitions/CreatureGeometryTextureImage"
+    },
+    "creatureGeometryTextureSource": {
+      "$ref": "#/definitions/CreatureGeometryTextureSource"
+    },
+    "creatureGeometryTexture": {
+      "$ref": "#/definitions/CreatureGeometryTexture"
+    },
+    "creatureGeometryEffects": {
+      "$ref": "#/definitions/CreatureGeometryEffects"
+    },
+    "creatureGeometryAppearanceProblem": {
+      "$ref": "#/definitions/CreatureGeometryAppearanceProblem"
+    },
+    "creatureAppearanceManifest": {
+      "$ref": "#/definitions/CreatureAppearanceManifest"
+    },
+    "creatureGeometryAppearance": {
+      "$ref": "#/definitions/CreatureGeometryAppearance"
+    },
     "creatureGeometryBufferRegion": {
       "$ref": "#/definitions/CreatureGeometryBufferRegion"
     },
@@ -15411,7 +15444,8 @@
         "metadata",
         "model",
         "skin",
-        "artifact"
+        "artifact",
+        "texture"
       ]
     },
     "CreatureGeometryStage": {
@@ -15430,7 +15464,14 @@
         "skinParsing",
         "artifactBuild",
         "artifactVerification",
-        "publication"
+        "publication",
+        "textureResolution",
+        "textureAcquisition",
+        "textureVerification",
+        "textureDecoding",
+        "appearanceBuild",
+        "appearanceVerification",
+        "appearancePublication"
       ]
     },
     "CreatureGeometryBufferRegion": {
@@ -15992,6 +16033,623 @@
       ],
       "additionalProperties": false
     },
+    "CreatureGeometryAppearanceState": {
+      "title": "CreatureGeometryAppearanceState",
+      "type": "string",
+      "enum": [
+        "notPrepared",
+        "ready",
+        "characterModel",
+        "multiTexture",
+        "blendUnsupported",
+        "textureWeight",
+        "textureTransform",
+        "materialUnsupported",
+        "textureUnresolved",
+        "textureMissing",
+        "textureAmbiguous",
+        "textureProtected",
+        "textureUnsupported",
+        "textureCorrupt",
+        "textureUnavailable",
+        "resourceLimit",
+        "corrupt"
+      ]
+    },
+    "CreatureGeometryTextureState": {
+      "title": "CreatureGeometryTextureState",
+      "type": "string",
+      "enum": [
+        "decoded",
+        "unresolved",
+        "notReached",
+        "missing",
+        "ambiguous",
+        "protected",
+        "unsupported",
+        "corrupt",
+        "unavailable",
+        "resourceLimit"
+      ]
+    },
+    "CreatureGeometryAppearanceRegion": {
+      "title": "CreatureGeometryAppearanceRegion",
+      "type": "object",
+      "properties": {
+        "offset": {
+          "type": "integer",
+          "minimum": 160,
+          "maximum": 10485760
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10485760
+        }
+      },
+      "required": [
+        "offset",
+        "byteLength"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureGeometryAppearanceDisplay": {
+      "title": "CreatureGeometryAppearanceDisplay",
+      "type": "object",
+      "properties": {
+        "displayId": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,9})$"
+        },
+        "extendedDisplayInfoId": {
+          "type": "string",
+          "pattern": "^(0|-?[1-9][0-9]{0,9})$"
+        },
+        "textureVariations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(0|-?[1-9][0-9]{0,9})$"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      },
+      "required": [
+        "displayId",
+        "extendedDisplayInfoId",
+        "textureVariations"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureGeometryTextureImage": {
+      "title": "CreatureGeometryTextureImage",
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "mipLevel": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "baseWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "baseHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "encoding": {
+          "enum": [
+            "palette",
+            "bc1",
+            "bc2",
+            "bc3",
+            "bgra8"
+          ]
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "mipLevel",
+        "baseWidth",
+        "baseHeight",
+        "encoding"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureGeometryTextureSource": {
+      "title": "CreatureGeometryTextureSource",
+      "type": "object",
+      "properties": {
+        "contentKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "encodingKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "encodedSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "encodedBytes": {
+          "type": "integer",
+          "minimum": 9,
+          "maximum": 16777216
+        },
+        "decodedBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "fullVerifierRevision": {
+          "const": "content-blte-v1"
+        }
+      },
+      "required": [
+        "contentKey",
+        "encodingKey",
+        "encodedSha256",
+        "encodedBytes",
+        "decodedBytes",
+        "fullVerifierRevision"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureGeometryTexture": {
+      "title": "CreatureGeometryTexture",
+      "type": "object",
+      "properties": {
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31
+        },
+        "type": {
+          "enum": [
+            0,
+            11,
+            12,
+            13
+          ]
+        },
+        "binding": {
+          "enum": [
+            "txid",
+            "variation"
+          ]
+        },
+        "variation": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fileDataId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,9})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/definitions/CreatureGeometryTextureState"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreatureGeometryTextureImage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreatureGeometryTextureSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "ordinal",
+        "type",
+        "binding",
+        "variation",
+        "fileDataId",
+        "state",
+        "image",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureGeometryEffects": {
+      "title": "CreatureGeometryEffects",
+      "type": "object",
+      "properties": {
+        "particles": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "ribbons": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "lights": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "shadowBatches": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "unbatchedSections": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "evaluation": {
+          "const": "notDrawn"
+        }
+      },
+      "required": [
+        "particles",
+        "ribbons",
+        "lights",
+        "shadowBatches",
+        "unbatchedSections",
+        "evaluation"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureGeometryAppearanceProblem": {
+      "title": "CreatureGeometryAppearanceProblem",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{1,64}$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "batchOrdinal": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 511
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "textureOrdinal": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 31
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable",
+        "batchOrdinal",
+        "textureOrdinal"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureAppearanceManifest": {
+      "title": "CreatureAppearanceManifest",
+      "description": "VMA1 textured appearance manifest; see contracts/geometry-vma1-v1.md.",
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bindingSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 160,
+          "maximum": 10485760
+        },
+        "formatVersion": {
+          "const": 1
+        },
+        "headerBytes": {
+          "const": 160
+        },
+        "coordinatePolicy": {
+          "const": "native-m2-position-normal-uv-winding-v1"
+        },
+        "vertexCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "indexCount": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 131070
+        },
+        "drawCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
+        },
+        "textureCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "positions": {
+          "$ref": "#/definitions/CreatureGeometryAppearanceRegion"
+        },
+        "uvs": {
+          "$ref": "#/definitions/CreatureGeometryAppearanceRegion"
+        },
+        "indices": {
+          "$ref": "#/definitions/CreatureGeometryAppearanceRegion"
+        },
+        "draws": {
+          "$ref": "#/definitions/CreatureGeometryAppearanceRegion"
+        },
+        "textures": {
+          "$ref": "#/definitions/CreatureGeometryAppearanceRegion"
+        },
+        "texels": {
+          "$ref": "#/definitions/CreatureGeometryAppearanceRegion"
+        },
+        "bounds": {
+          "$ref": "#/definitions/CreatureGeometryBounds"
+        },
+        "alphaReference": {
+          "const": 128
+        },
+        "displayId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "geometryBindingSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "materialPolicy": {
+          "const": "m2-single-texture-opaque-alphakey-v1"
+        },
+        "texturePolicy": {
+          "const": "blp2-largest-mip-within-1024-rgba8-v1"
+        },
+        "readerRevision": {
+          "const": "m2-appearance-batches-v1"
+        },
+        "decoderRevision": {
+          "const": "blp2-rgba8-v2"
+        },
+        "artifactRevision": {
+          "const": "model-appearance-vma1-v1"
+        }
+      },
+      "required": [
+        "artifactId",
+        "bindingSha256",
+        "sha256",
+        "byteLength",
+        "formatVersion",
+        "headerBytes",
+        "coordinatePolicy",
+        "vertexCount",
+        "indexCount",
+        "drawCount",
+        "textureCount",
+        "positions",
+        "uvs",
+        "indices",
+        "draws",
+        "textures",
+        "texels",
+        "bounds",
+        "alphaReference",
+        "displayId",
+        "geometryBindingSha256",
+        "materialPolicy",
+        "texturePolicy",
+        "readerRevision",
+        "decoderRevision",
+        "artifactRevision"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureGeometryAppearance": {
+      "title": "CreatureGeometryAppearance",
+      "description": "Textured draw of a ready geometry pair; see contracts/creature-geometry-v1.md#appearance.",
+      "type": "object",
+      "properties": {
+        "policy": {
+          "const": "creature-textured-appearance-v1"
+        },
+        "state": {
+          "$ref": "#/definitions/CreatureGeometryAppearanceState"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreatureGeometryAppearanceDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "textures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CreatureGeometryTexture"
+          },
+          "maxItems": 32
+        },
+        "effects": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreatureGeometryEffects"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "manifest": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreatureAppearanceManifest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreatureGeometryAppearanceProblem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "policy",
+        "state",
+        "display",
+        "textures",
+        "effects",
+        "manifest",
+        "problem"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "ready"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "manifest": {
+                "$ref": "#/definitions/CreatureAppearanceManifest"
+              },
+              "problem": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "manifest": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "notPrepared"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "problem": {
+                "type": "null"
+              },
+              "textures": {
+                "maxItems": 0
+              }
+            }
+          },
+          "else": {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "ready"
+                }
+              }
+            },
+            "then": {},
+            "else": {
+              "properties": {
+                "problem": {
+                  "$ref": "#/definitions/CreatureGeometryAppearanceProblem"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
     "CreatureGeometryResult": {
       "title": "CreatureGeometryResult",
       "type": "object",
@@ -16069,6 +16727,16 @@
             }
           ]
         },
+        "appearance": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreatureGeometryAppearance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "problem": {
           "anyOf": [
             {
@@ -16126,6 +16794,9 @@
           "else": {
             "properties": {
               "manifest": {
+                "type": "null"
+              },
+              "appearance": {
                 "type": "null"
               }
             }
@@ -16203,7 +16874,14 @@
           "pattern": "^[0-9a-f]{32}$"
         },
         "manifest": {
-          "$ref": "#/definitions/CreatureGeometryManifest"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreatureGeometryManifest"
+            },
+            {
+              "$ref": "#/definitions/CreatureAppearanceManifest"
+            }
+          ]
         }
       },
       "required": [

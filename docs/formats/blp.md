@@ -2,7 +2,7 @@
 
 Our original BLP2 decoder ([`src/backend/VibeMiner.Formats.Wow/Images/`](../../src/backend/VibeMiner.Formats.Wow/Images/), revision `blp2-rgba8-v2`) and the icon PNG pipeline built on it ([`src/backend/VibeMiner.Infrastructure/Assets/`](../../src/backend/VibeMiner.Infrastructure/Assets/)).
 
-The decoder takes a readable, seekable, caller-owned stream, a mip level (default 0) and limits. It returns owned, tightly packed **RGBA8, top-left origin, straight alpha**, plus the encoding, alpha facts, raw mip byte and all mip descriptors. No color-space conversion, premultiplication, resizing or PNG work happens inside it. It does not authenticate the source; the caller does.
+The decoder takes a readable, seekable, caller-owned stream, a mip level (default 0) or a largest side (`DecodeLargestWithinAsync`), and limits. It returns owned, tightly packed **RGBA8, top-left origin, straight alpha**, plus the encoding, alpha facts, raw mip byte and all mip descriptors. No color-space conversion, premultiplication, resizing or PNG work happens inside it. It does not authenticate the source; the caller does.
 
 ## Header (148 bytes, little-endian)
 
@@ -53,16 +53,20 @@ Every other combination is `BLP_UNSUPPORTED`, including BLP1, JPEG and raw BGRA 
 
 ## Limits
 
-| Limit | Decoder default | Icon pipeline |
-| --- | --- | --- |
-| Source bytes | 64 MiB | 8 MiB |
-| Width or height | 16,384 | 1,024 |
-| Selected mip pixels | 16,777,216 | 1,048,576 |
-| Selected mip bytes | 64 MiB | 4 MiB |
-| Selected RGBA bytes | 64 MiB | 4 MiB |
-| PNG output | | 5 MiB |
+| Limit | Decoder default | Icon pipeline | Model textures |
+| --- | --- | --- | --- |
+| Source bytes | 64 MiB | 8 MiB | 16 MiB |
+| Width or height | 16,384 | 1,024 | 16,384 (container) |
+| Selected mip pixels | 16,777,216 | 1,048,576 | 1,048,576 |
+| Selected mip bytes | 64 MiB | 4 MiB | 4 MiB |
+| Selected RGBA bytes | 64 MiB | 4 MiB | 4 MiB |
+| PNG output | | 5 MiB | |
 
-Reads are sliced at 64 KiB and loops check cancellation per row or block. Model textures are not icons: they can exceed 1,024 pixels and need their own measured limits.
+Reads are sliced at 64 KiB and loops check cancellation per row or block.
+
+## Model textures
+
+Creature textures (#63, D091) first read only the mip descriptors (`ReadMipsAsync`) and start at the first declared mip, in level order, whose width and height are both ≤ 1,024. While one display's slots together exceed 8 MiB of RGBA8, the image with the largest current level steps down one declared level; then each image is decoded once at its planned level with `DecodeAsync`. Nothing is resized. A container whose declared levels never get within 1,024 px is `BLP_MIP_UNAVAILABLE`, and slots that exceed 8 MiB even at their smallest declared levels are `CREATURE_APPEARANCE_TEXEL_LIMIT`; both report `resourceLimit`. The images go into a [VMA1 artifact](../../contracts/geometry-vma1-v1.md) as raw RGBA8, not PNG; the renderer uploads them without decoding.
 
 ## Icon pipeline
 

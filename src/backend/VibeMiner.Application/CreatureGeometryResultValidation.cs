@@ -53,8 +53,13 @@ public static partial class CreatureGeometryValidation
                 Require(value.Problem is null && sources.Length == 2 && metadata.State == CreatureDisplayMetadataState.MetadataResolved);
             else Require(value.Problem is not null && metadata.State == CreatureDisplayMetadataState.MetadataResolved);
         }
+        // Appearance is the textured draw of a ready geometry pair; it never accompanies another state.
+        Require(value.Appearance is null || value.State == CreatureGeometryState.Ready);
+        var appearance = value.Appearance is null ? null : Snapshot(value.Appearance);
+        if (appearance?.Manifest is { } textured) Require(manifest is not null && textured.VertexCount == manifest.VertexCount);
         var owned = value with
         {
+            Appearance = appearance,
             Context = value.Context with { },
             Opening = value.Opening with { },
             Metadata = metadata,

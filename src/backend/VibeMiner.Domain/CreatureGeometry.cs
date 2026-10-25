@@ -6,7 +6,7 @@ public enum CreatureGeometryState
     AmbiguousVariants, EncodingUnresolved, Protected, Unsupported, Unavailable, Corrupt, ResourceLimit
 }
 public enum CreatureGeometrySourceRole { Model, Skin }
-public enum CreatureGeometryDependency { Metadata, Model, Skin, Artifact }
+public enum CreatureGeometryDependency { Metadata, Model, Skin, Artifact, Texture }
 public sealed record CreatureGeometryTarget(CreatureDisplayTargetRole Role, string TableId, string ArtifactId,
     TableDataCoverage Coverage, string? MatchCount, CreatureDisplayRowEvidence? Row = null);
 public sealed record CreatureGeometryMetadata(CreatureDisplayMetadataState State,
@@ -25,4 +25,27 @@ public sealed record CreatureGeometryProgress(string Stage, string Label, string
 public sealed record CreatureGeometryResult(CreaturesContext Context, string ArtifactId, string CreatureId,
     int Slot, string Policy, OpeningSourceReference Opening, CreatureGeometryState State,
     CreatureGeometryMetadata Metadata, IReadOnlyList<CreatureGeometrySource> Sources,
-    CreatureGeometryManifest? Manifest = null, CreatureGeometryProblem? Problem = null);
+    CreatureGeometryManifest? Manifest = null, CreatureGeometryProblem? Problem = null,
+    CreatureGeometryAppearance? Appearance = null);
+
+public enum CreatureGeometryAppearanceState
+{
+    NotPrepared, Ready, CharacterModel, MultiTexture, BlendUnsupported, TextureWeight, TextureTransform, MaterialUnsupported,
+    TextureUnresolved, TextureMissing, TextureAmbiguous, TextureProtected, TextureUnsupported, TextureCorrupt, TextureUnavailable,
+    ResourceLimit, Corrupt
+}
+public enum CreatureGeometryTextureBinding { Txid, Variation }
+public enum CreatureGeometryTextureState { Decoded, Unresolved, NotReached, Missing, Ambiguous, Protected, Unsupported, Corrupt, Unavailable, ResourceLimit }
+/// <summary>The CreatureDisplayInfo row values the texture chain reads. TextureVariations keeps all four positions, zeros included.</summary>
+public sealed record CreatureGeometryAppearanceDisplay(string DisplayId, string ExtendedDisplayInfoId, IReadOnlyList<string> TextureVariations);
+public sealed record CreatureGeometryTextureImage(int Width, int Height, int MipLevel, int BaseWidth, int BaseHeight, string Encoding);
+public sealed record CreatureGeometryTextureSource(string ContentKey, string EncodingKey, string EncodedSha256, long EncodedBytes,
+    long DecodedBytes, string FullVerifierRevision);
+public sealed record CreatureGeometryTexture(int Ordinal, int Type, CreatureGeometryTextureBinding Binding, int? Variation,
+    string? FileDataId, CreatureGeometryTextureState State, CreatureGeometryTextureImage? Image = null, CreatureGeometryTextureSource? Source = null);
+/// <summary>Declared parts the textured draw leaves out; all are notEvaluated and never drawn.</summary>
+public sealed record CreatureGeometryEffects(int Particles, int Ribbons, int Lights, int ShadowBatches, int UnbatchedSections);
+public sealed record CreatureGeometryAppearanceProblem(string Code, string Message, bool Retryable, int? BatchOrdinal = null, int? TextureOrdinal = null);
+public sealed record CreatureGeometryAppearance(string Policy, CreatureGeometryAppearanceState State,
+    CreatureGeometryAppearanceDisplay? Display, IReadOnlyList<CreatureGeometryTexture> Textures, CreatureGeometryEffects? Effects,
+    CreatureGeometryAppearanceManifest? Manifest = null, CreatureGeometryAppearanceProblem? Problem = null);

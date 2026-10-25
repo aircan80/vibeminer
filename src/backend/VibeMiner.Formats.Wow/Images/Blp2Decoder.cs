@@ -12,7 +12,27 @@ public static partial class Blp2Decoder
     private static DiscoveryException Error(string code, string message) => new("BLP_" + code, message);
 
     public static async Task<Blp2Image> DecodeAsync(Stream source, int mipLevel = 0, Blp2Limits? limits = null,
+        CancellationToken token = default) => (await DecodeCoreAsync(source, mipLevel, 0, limits, token))!;
+
+    /// <summary>Validates the container header and every mip descriptor exactly as decoding would, and returns the
+    /// declared levels without reading pixels.</summary>
+    public static async Task<IReadOnlyList<Blp2Mip>> ReadMipsAsync(Stream source, Blp2Limits? limits = null, CancellationToken token = default)
+    {
+        var declared = new List<Blp2Mip>(); await DecodeCoreAsync(source, 0, 0, limits, token, declared); return declared.AsReadOnly();
+    }
+
+    /// <summary>Decodes the largest declared mip whose width and height are both at most <paramref name="maxSide"/>.
+    /// No declared level fitting is <c>BLP_MIP_UNAVAILABLE</c>; nothing is resized.</summary>
+    public static async Task<Blp2Image> DecodeLargestWithinAsync(Stream source, int maxSide, Blp2Limits? limits = null,
         CancellationToken token = default)
+    {
+        if (maxSide < 1) throw new ArgumentOutOfRangeException(nameof(maxSide));
+        return (await DecodeCoreAsync(source, 0, maxSide, limits, token))!;
+    }
+
+    // With `declared`, stops after the descriptor checks and returns null.
+    private static async Task<Blp2Image?> DecodeCoreAsync(Stream source, int mipLevel, int maxSide, Blp2Limits? limits,
+        CancellationToken token, List<Blp2Mip>? declared = null)
     {
         ArgumentNullException.ThrowIfNull(source); token.ThrowIfCancellationRequested(); limits ??= new();
         if (limits.MaxSourceBytes < HeaderBytes || limits.MaxDimension < 1 || limits.MaxPixels < 1
@@ -52,6 +72,12 @@ public static partial class Blp2Decoder
         long after = minimumOffset;
         foreach (var mip in mips.OrderBy(mip => mip.Offset))
         { if (mip.Offset < after) throw Error("INVALID", "BLP mip byte ranges overlap."); after = mip.Offset + mip.ByteLength; }
+        if (declared is not null) { declared.AddRange(mips); return null; }
+        if (maxSide > 0)
+        {
+            mipLevel = mips.FindIndex(mip => mip.Width <= maxSide && mip.Height <= maxSide);
+            if (mipLevel < 0) throw Error("MIP_UNAVAILABLE", "No declared mip fits the requested size; no level was resized or substituted.");
+        }
         if (mipLevel >= mips.Count) throw Error("MIP_UNAVAILABLE", "The requested mip is not present; no alternative level was substituted.");
         var selected = mips[mipLevel]; var pixels = selected.Width * (long)selected.Height;
         if (pixels > limits.MaxPixels || pixels > limits.MaxRgbaBytes / 4 || pixels > int.MaxValue / 4

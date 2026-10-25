@@ -4,7 +4,9 @@ using VibeMiner.Domain;
 
 namespace VibeMiner.Host;
 
-public sealed record CreatureGeometryLeaseDescriptor(string LeaseId, CreatureGeometryManifest Manifest);
+/// <summary>Appearance is set when the lease holds the display's VMA1 bytes; the wire then carries that manifest.</summary>
+public sealed record CreatureGeometryLeaseDescriptor(string LeaseId, CreatureGeometryManifest Manifest,
+    CreatureGeometryAppearanceManifest? Appearance = null);
 
 /// <summary>Opaque handles for at most two App reads, including opening, draining and failed cleanup.
 /// The App alone owns the absolute read deadline. No cancellation or dispose request is retirement proof.</summary>
@@ -69,11 +71,12 @@ public sealed class CreatureGeometryLeases : IAsyncDisposable
             entry.Authority = lease.Retirement ?? throw InvalidLease();
             entry.Observation = ObserveRetirementAsync(entry, entry.Authority);
             var manifest = CreatureGeometryValidation.Snapshot(lease.Manifest);
+            var appearance = lease.Appearance is null ? null : CreatureGeometryValidation.Snapshot(lease.Appearance);
             var stream = lease.Content;
-            if (manifest.ArtifactId != request.GeometryArtifactId || stream is null || !stream.CanRead ||
-                !stream.CanSeek || stream.CanWrite || stream.Position != 0 || stream.Length != manifest.ByteLength)
+            if ((appearance?.ArtifactId ?? manifest.ArtifactId) != request.GeometryArtifactId || stream is null || !stream.CanRead ||
+                !stream.CanSeek || stream.CanWrite || stream.Position != 0 || stream.Length != (appearance?.ByteLength ?? manifest.ByteLength))
                 throw InvalidLease();
-            descriptor = new(entry.Id, manifest);
+            descriptor = new(entry.Id, manifest, appearance);
         }
         catch (Exception error)
         {

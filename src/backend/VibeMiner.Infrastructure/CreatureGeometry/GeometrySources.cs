@@ -22,6 +22,8 @@ internal sealed partial class GeometrySourceClosure
         // ledger;16MiB remains charged by Store for its original C1/C2/opening capture.
         var reservation = payload.Reserve(SourcePayloadBytes); var transferred = false; var cleanupFailed = false;
         var reached = new List<CreatureGeometrySource>(2); var dependency = CreatureGeometryDependency.Model;
+        M2AppearanceModelFacts? appearanceFacts = null; M2AppearancePlan? appearancePlan = null; DiscoveryException? appearanceFailure = null;
+        GeometryAppearancePreparation? appearance = null;
         try
         {
             var original = selection.Original;
@@ -46,6 +48,9 @@ internal sealed partial class GeometrySourceClosure
                 reached.Add(Evidence(modelProof, modelAssociationSha));
                 await progress(new("modelParsing", "Reading original source model geometry", "stage", Dependency: dependency));
                 using (await services.Resources.EnterCpuAsync(null, token)) model = await M2ModelReader.ReadAsync(node.Decoded, Limits, token);
+                // Texture facts read the same verified bytes; their failure never fails geometry (#63).
+                try { node.Decoded.Position = 0; using (await services.Resources.EnterCpuAsync(null, token)) appearanceFacts = await M2Appearance.ReadModelAsync(node.Decoded, model, token); }
+                catch (DiscoveryException error) when (error.Code.StartsWith("MODEL_", StringComparison.Ordinal)) { appearanceFailure = error; }
             }
             if (!model.IsChunked || model.Version != 274 || model.SkeletonFileDataId != 0 || model.BoneFileDataIds.Any(id => id != 0))
                 throw new DiscoveryException("MODEL_UNSUPPORTED", "The model requires a source geometry profile or external dependency outside this capability.");
@@ -61,6 +66,9 @@ internal sealed partial class GeometrySourceClosure
                 reached.Add(Evidence(skinProof, skinAssociationSha));
                 await progress(new("skinParsing", "Reading all declared main-SKIN source geometry", "stage", Dependency: dependency));
                 using (await services.Resources.EnterCpuAsync(null, token)) skin = await M2GeometrySkinReader.ReadAsync(node.Decoded, model, Limits, token);
+                if (appearanceFacts is not null)
+                    try { node.Decoded.Position = 0; using (await services.Resources.EnterCpuAsync(null, token)) appearancePlan = await M2Appearance.AdmitAsync(node.Decoded, skin, appearanceFacts, token); }
+                    catch (DiscoveryException error) when (error.Code.StartsWith("MODEL_", StringComparison.Ordinal)) { appearanceFailure = error; }
             }
             // Both readers were given the same8MiB MaxOutputBytes; the original SKIN
             // core charges model retained output plus skin arrays/reserved resolved indices.
@@ -80,12 +88,13 @@ internal sealed partial class GeometrySourceClosure
             string bindingSha;
             using (await services.Resources.EnterCpuAsync(null, token)) bindingSha = ModelGeometryArtifacts.ComputeBindingSha256(binding, token);
             await selection.RevalidateAsync(token);
+            if (q != 0) appearance = await AppearanceAsync(services, handle, context, selection, appearancePlan, appearanceFailure, bindingSha, payload, progress, token);
             // Handle retirement happens before any source proof escapes or its budget can retire.
             handleRetirementAttempted = true;
             await RetireHandleAsync(handle, null); token.ThrowIfCancellationRequested();
             await selection.RevalidateAsync(token);
             var closure = new GeometrySourceClosure(encoding, binding, bindingSha);
-            transferred = true; return new(closure, skin, Array.AsReadOnly(reached.ToArray()), reservation);
+            transferred = true; return new(closure, skin, Array.AsReadOnly(reached.ToArray()), reservation, appearance);
             }
             catch (Exception error) { operationFailure = error; throw; }
             finally
@@ -103,7 +112,21 @@ internal sealed partial class GeometrySourceClosure
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         { throw Failure(new("CREATURE_GEOMETRY_SOURCE_UNAVAILABLE", "Original geometry source storage is unavailable.", true), dependency, reached); }
         catch (OverflowException) { throw Failure(GeometrySourceCapsuleCodec.Limit(), dependency, reached); }
-        finally { if (!transferred && !cleanupFailed) reservation.Dispose(); }
+        finally { if (!transferred) appearance?.Dispose(); if (!transferred && !cleanupFailed) reservation.Dispose(); }
+    }
+    // A texture integrity refusal is an appearance outcome, not a geometry failure. Request, stale and cleanup failures propagate.
+    private static async Task<GeometryAppearancePreparation> AppearanceAsync(GeometrySourceServices services, AssetResolutionSession handle,
+        GeometrySourceContextIdentity context, IGeometrySelectionFence selection, M2AppearancePlan? plan, DiscoveryException? failure,
+        string bindingSha, IGeometryPayloadBudget payload, Func<CreatureGeometryProgress, Task> progress, CancellationToken token)
+    {
+        try { return await GeometryAppearanceSources.PrepareAsync(services, handle, context, selection, plan, failure, bindingSha, payload, progress, token); }
+        catch (DiscoveryException error) when (!RequestFailure(error.Code) && error.Code is not ("ASSET_SOURCE_CLEANUP" or "ASSET_CLEANUP_FAILED"))
+        {
+            var limit = error.Code.Contains("LIMIT", StringComparison.Ordinal) || error.Code.Contains("CAPACITY", StringComparison.Ordinal);
+            return new(GeometryAppearanceSources.Outcome(limit ? CreatureGeometryAppearanceState.ResourceLimit : CreatureGeometryAppearanceState.Corrupt,
+                GeometryAppearanceSources.Display(selection.Original), [], plan is null ? null : GeometryAppearanceSources.Effects(plan.Effects),
+                new(error.Code.Length <= 64 ? error.Code : "CREATURE_APPEARANCE_FAILED", "The texture chain could not be admitted.", error.Retryable)), false);
+        }
     }
     internal static async Task RetireHandleAsync(IAsyncDisposable handle, Exception? operationFailure)
     {

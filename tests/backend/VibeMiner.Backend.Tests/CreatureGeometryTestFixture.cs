@@ -30,6 +30,16 @@ internal static class CreatureGeometryTestFixture
         4, 3, 6, 6, 12, 3, new(128, 48), new(176, 48), new(224, 96), new(new float[] { -6, -4, 0 }, new float[] { 3, 7, 8 }),
         800, 900, 0, "m2-static-native-v1", "m2-skin-geometry-v1", "skin-unfiltered-source-geometry-v1", "model-geometry-vmg1-v1", "all-sections-triangle-edges-v1");
 
+    // Authored VMA1 manifest for the four-vertex geometry above: three drawn indices, one 2x2 slot.
+    internal static CreatureGeometryAppearanceManifest AppearanceManifest(float[]? min = null, float[]? max = null) => new(new('7', 64), new('8', 64), new('9', 64),
+        160 + 48 + 32 + 12 + 32 + 32 + 16, 1, 160, "native-m2-position-normal-uv-winding-v1", 4, 3, 1, 1, new(160, 48), new(208, 32), new(240, 12), new(252, 32), new(284, 32),
+        new(316, 16), new(min ?? [-6, -4, 0], max ?? [3, 7, 8]), 128, 10, new('5', 64), "m2-single-texture-opaque-alphakey-v1", "blp2-largest-mip-within-1024-rgba8-v1",
+        "m2-appearance-batches-v1", "blp2-rgba8-v2", "model-appearance-vma1-v1");
+    internal static CreatureGeometryAppearance Appearance(CreatureGeometryAppearanceManifest? manifest = null) => new("creature-textured-appearance-v1",
+        CreatureGeometryAppearanceState.Ready, new("10", "0", ["779", "0", "0", "0"]),
+        [new(0, 11, CreatureGeometryTextureBinding.Variation, 0, "779", CreatureGeometryTextureState.Decoded, new(2, 2, 0, 2, 2, "bc1"),
+            new(new('a', 32), new('b', 32), new('c', 64), 100, 200, "content-blte-v1"))], new(4, 0, 0, 2, 0), manifest ?? AppearanceManifest());
+
     internal sealed class Store : ICreatureGeometryStore
     {
         internal int Reads, Prepares, Opens;
@@ -50,8 +60,9 @@ internal static class CreatureGeometryTestFixture
         internal int Closes, RetirementReads;
         private readonly TaskCompletionSource retired = Signal();
         public Task Retirement { get { RetirementReads++; return retired.Task; } }
-        public Stream Content { get; } = new MemoryStream(new byte[320], writable: false);
+        public Stream Content { get; set; } = new MemoryStream(new byte[320], writable: false);
         public CreatureGeometryManifest Manifest { get; set; } = CreatureGeometryTestFixture.Manifest();
+        public CreatureGeometryAppearanceManifest? Appearance { get; set; }
         public async ValueTask DisposeAsync()
         {
             Closes++; Closing.TrySetResult();

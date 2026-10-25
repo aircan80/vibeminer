@@ -1,18 +1,22 @@
 import type {CreatureGeometryResult,EngineProgress} from '../../../../contracts/generated/discovery';
 import type {BridgeReply,DiscoveryBridge} from '../shared/bridge';
-import {creatureGeometryMatches,geometrySelectionKey,sameGeometryManifest,validGeometryProgress,validGeometryRetirement,validGeometryToken,type GeometryBodyGrant,type GeometryBodyRetired,type GeometrySceneIdentity} from '../shared/creature-geometry';
+import {creatureGeometryMatches,geometrySelectionKey,sameBodyManifest,sameGeometryManifest,validGeometryProgress,validGeometryRetirement,validGeometryToken,type GeometryBodyGrant,type GeometryBodyRetired,type GeometrySceneIdentity} from '../shared/creature-geometry';
 import {fitGeometryCamera,type GeometryCameraAction} from './geometry-camera';
 import {createGeometryScene,geometryBackingSize,type GeometrySceneOwner,type GeometrySceneStatus} from './geometry-scene';
 import {validateGeometry,type GeometryValidationResult} from './geometry-vmg';
+import {validateAppearance,type ValidatedAppearance} from './geometry-vma';
 import {geometryAnchorMatches,sameGeometryAnchor,geometryIntentKey,geometryOutcome,ownGeometryIntent,ownGeometryValue,type GeometryFailure,type GeometryIntent,type GeometryLongAdmission,type GeometryOperation,type GeometrySnapshot,type GeometryViewState} from './geometry-state';
 
-type Validated=Extract<GeometryValidationResult,{state:'valid'}>['value'];
+type Validated=Extract<GeometryValidationResult,{state:'valid'}>['value']|ValidatedAppearance;
+const textured=(value:Validated|null):value is ValidatedAppearance=>!!value&&(value as {kind?:unknown}).kind==='appearance';
+/** Ready geometry whose display appearance was never prepared (or was not retained) still needs one Prepare. */
+const needsAppearance=(r:CreatureGeometryResult)=>r.state==='ready'&&r.appearance?.state==='notPrepared';
 function gate<T>(){let resolve!:(value:T)=>void;return{promise:new Promise<T>(r=>{resolve=r;}),resolve};}
 type View={intent:GeometryIntent;request:number;generation:number;revoked:boolean;abort:AbortController;left:ReturnType<typeof gate<void>>;icons:ReturnType<typeof gate<void>>;canvas:ReturnType<typeof gate<void>>;work:Promise<void>;retiring:Promise<void>|null;entered:{viewId:string;viewGeneration:number}|null;enterAttempted:boolean;openAttempted:boolean;observedToken:string|null|undefined;grant:GeometryBodyGrant|null;identity:GeometrySceneIdentity|null;validated:Validated|null;ack:GeometryBodyRetired|null;owner:GeometrySceneOwner|null;confirmed:boolean;mounted:boolean;sceneStatus:GeometrySceneStatus|null;inSceneCall:boolean;debt:boolean;responseDebt:Response|null;iconsCommitted:boolean;pendingCanvas:HTMLCanvasElement|null;mountedCanvas:HTMLCanvasElement|null;canvasTicket:number;canvasWork:Promise<void>|null;canvasDirty:boolean};
 type Operation={snapshot:GeometryOperation;result:CreatureGeometryResult|null;promise:Promise<void>;cancellation:Promise<void>|null};
 type Decision={kind:'stopped'|'failed';error:GeometryFailure|null};
 export interface GeometrySessionDependencies{
- readonly fetch?:typeof fetch;readonly validate?:typeof validateGeometry;readonly createScene?:typeof createGeometryScene;readonly requestId?:()=>string;
+ readonly fetch?:typeof fetch;readonly validate?:typeof validateGeometry;readonly validateAppearance?:typeof validateAppearance;readonly createScene?:typeof createGeometryScene;readonly requestId?:()=>string;
 }
 const unavailable:GeometryFailure=Object.freeze({code:'ENGINE_UNAVAILABLE',message:'Geometry could not finish. Retained source metadata remains usable.',retryable:true});
 const failure=(code:string,message:string,retryable=false):GeometryFailure=>Object.freeze({code,message,retryable});
@@ -42,10 +46,11 @@ export class GeometrySession{
  private shutdownTask:Promise<void>|null=null;
  private readonly receive:typeof fetch;
  private readonly validate:typeof validateGeometry;
+ private readonly validateTextured:typeof validateAppearance;
  private readonly createScene:typeof createGeometryScene;
  private readonly requestId:()=>string;
  constructor(private readonly bridge:DiscoveryBridge,admission:GeometryLongAdmission,dependencies:GeometrySessionDependencies={}){
-  this.admission=admission;this.receive=dependencies.fetch??((...args)=>fetch(...args));this.validate=dependencies.validate??validateGeometry;this.createScene=dependencies.createScene??createGeometryScene;this.requestId=dependencies.requestId??(()=>`geometry_${crypto.randomUUID()}`);
+  this.admission=admission;this.receive=dependencies.fetch??((...args)=>fetch(...args));this.validate=dependencies.validate??validateGeometry;this.validateTextured=dependencies.validateAppearance??validateAppearance;this.createScene=dependencies.createScene??createGeometryScene;this.requestId=dependencies.requestId??(()=>`geometry_${crypto.randomUUID()}`);
  }
  readonly snapshot=():GeometrySnapshot=>this.state;
  readonly subscribe=(listener:()=>void):(()=>void)=>{this.listeners.add(listener);this.connect();return()=>{this.listeners.delete(listener);this.detachIfIdle();};};
@@ -104,9 +109,11 @@ export class GeometrySession{
   if(!validGeometryToken(v.entered.viewId)||v.entered.viewGeneration!==v.generation)throw failure('GEOMETRY_RESULT_INVALID','The entered geometry view did not match this presentation.');
   this.requireCurrent(v);this.viewState(v,{phase:'checking',message:'Checking retained geometry'});
   let result=this.accept(v,unwrap(await this.bridge.creatureGeometryRead!(v.intent.selection)));this.requireCurrent(v);
-  if(result.state==='notPrepared'){
+  if(result.state==='notPrepared'||needsAppearance(result)){
+   // Ready lines stay drawable when only the texture Prepare fails; a Stop is still a stop.
+   const fallback=needsAppearance(result)?result:null;
    let op=this.operation;
-   if(op&&geometryIntentKey(op.snapshot.intent)===geometryIntentKey(v.intent)&&op.snapshot.status==='succeeded'&&op.result?.state==='ready')throw failure('GEOMETRY_NOT_PREPARED','Previously prepared geometry is no longer locally ready. Reassess this source and Retry explicitly.',true);
+   if(result.state==='notPrepared'&&op&&geometryIntentKey(op.snapshot.intent)===geometryIntentKey(v.intent)&&op.snapshot.status==='succeeded'&&op.result?.state==='ready')throw failure('GEOMETRY_NOT_PREPARED','Previously prepared geometry is no longer locally ready. Reassess this source and Retry explicitly.',true);
    // At most one already-started operation; a different intent stays one withdrawable waiter.
    while(op&&['pending','stopping'].includes(op.snapshot.status)&&geometryIntentKey(op.snapshot.intent)!==geometryIntentKey(v.intent)){
     this.viewState(v,{phase:'waiting',message:'Waiting for the current geometry preparation'});
@@ -115,15 +122,16 @@ export class GeometrySession{
    if(op&&geometryIntentKey(op.snapshot.intent)===geometryIntentKey(v.intent)&&['pending','stopping'].includes(op.snapshot.status)){
     this.viewState(v,{phase:op.snapshot.status==='stopping'?'stopping':'preparing',message:op.snapshot.progress?.stage??'Preparing required geometry sources'});
     await Promise.race([op.promise,v.left.promise]);this.requireCurrent(v);
-    if(op.snapshot.status!=='succeeded'||!op.result)throw op.snapshot.error??failure('CANCELED','Geometry preparation stopped.',true);
-    result=op.result;
-    if(result.state==='ready'){this.viewState(v,{phase:'checking',message:'Checking current retained geometry'});result=this.accept(v,unwrap(await this.bridge.creatureGeometryRead!(v.intent.selection)));this.requireCurrent(v);}
+    if(op.snapshot.status!=='succeeded'||!op.result){const error=op.snapshot.error??failure('CANCELED','Geometry preparation stopped.',true);if(!fallback||error.code==='CANCELED')throw error;}
+    else result=op.result;
+    if(result!==fallback&&result.state==='ready'){this.viewState(v,{phase:'checking',message:'Checking current retained geometry'});result=this.merge(result,this.accept(v,unwrap(await this.bridge.creatureGeometryRead!(v.intent.selection))));this.requireCurrent(v);}
    }else{
     let release:(()=>void)|null=null;
     while(!(release=this.admission.tryReserve())){this.viewState(v,{phase:'waiting',message:'Waiting for a Creature preparation credit'});const wake=this.capacity.promise;await Promise.race([wake,v.left.promise]);this.requireCurrent(v);}
     op=this.startPreparation(v.intent,release);this.viewState(v,{phase:'preparing',message:'Preparing required geometry sources'});
     await Promise.race([op.promise,v.left.promise]);this.requireCurrent(v);
-    if(op.snapshot.status!=='succeeded'||!op.result)throw op.snapshot.error??failure('CANCELED','Geometry preparation stopped.',true);result=op.result;
+    if(op.snapshot.status!=='succeeded'||!op.result){const error=op.snapshot.error??failure('CANCELED','Geometry preparation stopped.',true);if(!fallback||error.code==='CANCELED')throw error;}
+    else result=op.result;
    }
   }
   this.requireCurrent(v);result=this.accept(v,result);this.viewState(v,{result,message:geometryOutcome[result.state],phase:'outcome'});
@@ -131,12 +139,14 @@ export class GeometrySession{
    if(result.state==='notPrepared')throw failure('GEOMETRY_NOT_PREPARED','Geometry remains unprepared after the requested preparation. Retry explicitly after reviewing this source.',true);
    if(result.problem)this.remember(v.intent,{kind:'failed',error:result.problem});return;
   }
-  this.viewState(v,{phase:'receiving',message:'Receiving verified geometry'});
+  // A ready display appearance is drawn instead of the line geometry; any other appearance state keeps the untextured lines.
+  const surfaces=result.appearance?.state==='ready'?result.appearance.manifest:null,body=surfaces??result.manifest!;
+  this.viewState(v,{phase:'receiving',message:surfaces?'Receiving verified textured appearance':'Receiving verified geometry'});
   v.openAttempted=true;
-  const grant=unwrap(await this.bridge.geometryViewOpen!({viewId:v.entered.viewId,geometryArtifactId:result.manifest!.artifactId}));
+  const grant=unwrap(await this.bridge.geometryViewOpen!({viewId:v.entered.viewId,geometryArtifactId:body.artifactId}));
   // Preserve actual minted identity before inspecting the rest of a late/invalid reply.
   if(v.observedToken!==undefined&&v.observedToken!==grant.operationToken)v.debt=true;v.grant=grant;v.observedToken=grant.operationToken;
-  if(!validGeometryToken(grant.operationToken)||grant.viewId!==v.entered.viewId||grant.viewGeneration!==v.generation||!sameGeometryManifest(grant.manifest,result.manifest)||!/^vibeminer-geometry:\/\/body\/[0-9a-f]{32}$/.test(grant.url))throw failure('GEOMETRY_RESULT_INVALID','Geometry body grant did not match this exact current view.');
+  if(!validGeometryToken(grant.operationToken)||grant.viewId!==v.entered.viewId||grant.viewGeneration!==v.generation||!sameBodyManifest(grant.manifest,body)||!/^vibeminer-geometry:\/\/body\/[0-9a-f]{32}$/.test(grant.url))throw failure('GEOMETRY_RESULT_INVALID','Geometry body grant did not match this exact current view.');
   v.identity=Object.freeze({viewId:grant.viewId,viewGeneration:grant.viewGeneration,operationToken:grant.operationToken,geometryArtifactId:grant.manifest.artifactId});
   this.requireCurrent(v);await Promise.race([v.icons.promise,v.left.promise]);this.requireCurrent(v);
   let response:Response|null=await this.receive(grant.url,{credentials:'omit',redirect:'error',cache:'no-store',signal:v.abort.signal});
@@ -149,14 +159,15 @@ export class GeometrySession{
    response=null;
   }
   this.viewState(v,{phase:'validating',message:'Checking geometry framing'});
-  const validated=await this.validate(buffer,grant.manifest,{signal:v.abort.signal,isCurrent:()=>this.current(v)});buffer=null;this.requireCurrent(v);
+  const work={signal:v.abort.signal,isCurrent:()=>this.current(v)};
+  const validated=surfaces?await this.validateTextured(buffer,grant.manifest,work):await this.validate(buffer,grant.manifest,work);buffer=null;this.requireCurrent(v);
   if(validated.state!=='valid')throw failure('GEOMETRY_BODY_INVALID','Geometry framing could not be validated.',false);
   v.validated=validated.value;
   if(fitGeometryCamera(grant.manifest.bounds).state!=='ready')throw failure('GEOMETRY_CAMERA_UNSUPPORTED','This source cannot be framed safely by the geometry camera.',false);
   const ack=unwrap(await this.bridge.geometryViewBodyRetired!({viewId:grant.viewId,operationToken:grant.operationToken}));
   if(!this.sameIdentity(v.identity,ack)||ack.retired!==true)throw failure('GEOMETRY_RETIREMENT_INVALID','Geometry body retirement did not match the actual grant.');
   v.ack=ack;this.requireCurrent(v);
-  this.viewState(v,{canMount:true,phase:'validating',message:'Drawing geometry'});
+  this.viewState(v,{canMount:true,phase:'validating',message:surfaces?'Drawing textured appearance':'Drawing geometry'});
   await Promise.race([v.canvas.promise,v.left.promise]);this.requireCurrent(v);
  }
  private startPreparation(intent:GeometryIntent,release:()=>void):Operation{
@@ -171,6 +182,11 @@ export class GeometrySession{
    }catch(e){const error=op.snapshot.status==='stopping'?failure('CANCELED','Geometry preparation stopped. Verified source work is preserved.',true):errorValue(e);this.remember(intent,{kind:error.code==='CANCELED'?'stopped':'failed',error});terminal=Object.freeze({...op.snapshot,status:error.code==='CANCELED'?'canceled':'failed',error});}
    finally{if(op.cancellation)await op.cancellation;release();op.snapshot=Object.freeze({...op.snapshot,status:terminal.status,error:terminal.error});this.publish({operation:op.snapshot});if(this.state.view&&geometryIntentKey(this.state.view.intent)===geometryIntentKey(intent)&&this.state.view.phase==='stopping')this.publish({view:Object.freeze({...this.state.view,phase:'outcome',message:'Geometry preparation stopped',error:op.snapshot.error})});this.detachIfIdle();}
   });return op;
+ }
+ /** The retained read is authoritative; a prepared appearance outcome that is never retained (unavailable, protected) is kept for this view only. */
+ private merge(prepared:CreatureGeometryResult,read:CreatureGeometryResult):CreatureGeometryResult{
+  if(read.state==='ready'&&needsAppearance(read)&&prepared.state==='ready'&&prepared.appearance&&prepared.appearance.state!=='ready'&&sameGeometryManifest(read.manifest,prepared.manifest))return ownGeometryValue({...read,appearance:prepared.appearance});
+  return read;
  }
  private sameIdentity(a:GeometrySceneIdentity,b:GeometrySceneIdentity){return a.viewId===b.viewId&&a.viewGeneration===b.viewGeneration&&a.operationToken===b.operationToken&&a.geometryArtifactId===b.geometryArtifactId;}
  private remember(intent:GeometryIntent,decision:Decision){const key=geometryIntentKey(intent);if(this.decisions.has(key)||this.decisions.size<256)this.decisions.set(key,decision);}
@@ -206,7 +222,7 @@ export class GeometrySession{
   finally{v.inSceneCall=false;v.canvas.resolve();if(v.sceneStatus)this.sceneStatus(v,v.sceneStatus);}
  }
  private sceneStatus(v:View,status:GeometrySceneStatus){
-  if(status.code==='drawn'){if(this.current(v)&&v.mounted)this.viewState(v,{phase:'ready',message:'Unposed source edges drawn'});return;}
+  if(status.code==='drawn'){if(this.current(v)&&v.mounted)this.viewState(v,{phase:'ready',message:textured(v.validated)?'Unposed textured surfaces drawn':'Unposed source edges drawn'});return;}
   if(status.code==='cameraFitUnsupported'&&v.mounted){this.viewState(v,{message:'That camera move could not be framed safely; the previous view is preserved'});return;}
   if(status.code==='cleanupFailed')v.debt=true;
   this.failView(v,failure('GEOMETRY_'+status.code.toUpperCase(),status.code==='contextLost'?'The graphics context was lost. Source metadata remains available.':'The geometry presentation needs attention.',status.code!=='cleanupFailed'));void this.retire(v);
@@ -214,7 +230,7 @@ export class GeometrySession{
  /** Follows the displayed canvas size; only the backing store changes, never the camera. */
  resizeCanvas(generation:number){const v=this.active;if(!v||v.generation!==generation||!this.current(v)||!v.mountedCanvas)return;v.owner?.resize?.(backingSize(v.mountedCanvas));/* Failures arrive through the scene status. */}
  move(action:GeometryCameraAction){const v=this.active;if(v&&this.current(v)&&this.state.view?.phase==='ready')v.owner?.move(action);}
- sectionPage(offset:number){const v=this.active;if(!v||!this.current(v)||!v.validated||this.state.view?.phase!=='ready'||!Number.isSafeInteger(offset)||offset<0||offset>=v.validated.manifest.sectionCount)return;this.viewState(v,{sections:ownGeometryValue(v.validated.sectionPage(offset,16)),sectionOffset:offset});}
+ sectionPage(offset:number){const v=this.active;if(!v||!this.current(v)||!v.validated||textured(v.validated)||this.state.view?.phase!=='ready'||!Number.isSafeInteger(offset)||offset<0||offset>=v.validated.manifest.sectionCount)return;this.viewState(v,{sections:ownGeometryValue(v.validated.sectionPage(offset,16)),sectionOffset:offset});}
  private retire(v:View):Promise<void>{
   if(v.retiring)return v.retiring;
   v.revoked=true;v.abort.abort();v.left.resolve();this.publish({retirement:Object.freeze({intent:v.intent,phase:'releasing',error:null})});this.viewState(v,{canMount:false,sections:[],message:this.state.view?.phase==='ready'?'Closing geometry view':this.state.view?.message??'Closing geometry view'});
@@ -250,6 +266,14 @@ export class GeometrySession{
    op.cancellation=Promise.resolve().then(()=>this.bridge.cancel(op.snapshot.id)).then(reply=>{if(!reply.ok){op.snapshot=Object.freeze({...op.snapshot,error:reply.error});this.publish({operation:op.snapshot});}},()=>{op.snapshot=Object.freeze({...op.snapshot,error:unavailable});this.publish({operation:op.snapshot});});
   }
   if(v&&geometryIntentKey(v.intent)===geometryIntentKey(intent)){this.viewState(v,{phase:op?.snapshot.status==='stopping'?'stopping':'outcome',message:op?.snapshot.status==='stopping'?'Stopping geometry preparation…':'Geometry preparation stopped',canMount:false});void this.retire(v);}
+ }
+ /** Prepares the textures again after a retryable texture outcome: the drawn lines retire first, then the view re-enters. */
+ retryAppearance():void{
+  const v=this.active,view=this.state.view,appearance=view?.result?.appearance;
+  if(this.closing||!v||!this.current(v)||view?.phase!=='ready'||!appearance||!(appearance.problem?.retryable===true||appearance.state==='notPrepared'))return;
+  const key=geometryIntentKey(v.intent);this.decisions.delete(key);
+  if(this.operation&&geometryIntentKey(this.operation.snapshot.intent)===key&&!['pending','stopping'].includes(this.operation.snapshot.status)){this.operation=null;this.publish({operation:null});}
+  this.request++;void this.retire(v);
  }
  dismissActivity(){if(this.state.retirement||this.operation&&['pending','stopping'].includes(this.operation.snapshot.status))return;this.operation=null;this.publish({operation:null});this.detachIfIdle();}
  shutdown(_reason:'documentReplaced'|'bridgeClosing'|'applicationExit'):Promise<void>{

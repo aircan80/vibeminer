@@ -19,13 +19,24 @@ internal interface IGeometryStoreRetained
     IReadOnlyList<CreatureGeometrySource> Sources { get; }
     Task<Stream> OpenVerifiedAsync(CancellationToken token);
     Task FinalizeAsync(GeometryDisplayAuthorization selection, CancellationToken token);
+    /// <summary>The retained display-keyed appearance of this geometry, or null when none is retained.</summary>
+    Task<IGeometryStoreAppearance?> FindAppearanceAsync(GeometryDisplayAuthorization selection, CancellationToken token) => Task.FromResult<IGeometryStoreAppearance?>(null);
 }
-internal sealed record GeometryStoreFinalized(CreatureGeometryManifest? Manifest, IReadOnlyList<CreatureGeometrySource> Sources);
+/// <summary>A retained Ready appearance or retained refusal. Only Ready has bytes to open.</summary>
+internal interface IGeometryStoreAppearance
+{
+    CreatureGeometryAppearance Appearance { get; }
+    Task<Stream> OpenVerifiedAsync(CancellationToken token);
+    Task FinalizeAsync(GeometryDisplayAuthorization selection, CancellationToken token);
+}
+internal sealed record GeometryStoreFinalized(CreatureGeometryManifest? Manifest, IReadOnlyList<CreatureGeometrySource> Sources,
+    CreatureGeometryAppearance? Appearance = null);
 internal interface IGeometryStorePublication : IAsyncDisposable
 {
     CreatureGeometryState State { get; }
     CreatureGeometryManifest? Manifest { get; }
     IReadOnlyList<CreatureGeometrySource> Sources { get; }
     CreatureGeometryProblem? Problem { get; }
+    CreatureGeometryAppearance? Appearance => null;
     Task<GeometryStoreFinalized> FinalizeAsync(GeometryDisplayAuthorization selection, CancellationToken token);
 }

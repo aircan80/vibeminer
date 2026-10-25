@@ -62,8 +62,11 @@ public sealed partial class CreatureGeometryStore
             {return Result(selection,await ReauthorizeAsync(selection,proof,slot.Cancellation.Token),CreatureGeometryState.NotPrepared);}
             catch(DiscoveryException error)when(error.Code=="LOCAL_OBJECT_CORRUPT")
             {return Result(selection,await ReauthorizeAsync(selection,proof,slot.Cancellation.Token),CreatureGeometryState.Corrupt,problem:new(error.Code,error.Message,error.Retryable,CreatureGeometryDependency.Artifact));}
-            var result=Result(selection,proof,CreatureGeometryState.Ready,retained.Sources,retained.Manifest);
-            await retained.FinalizeAsync(proof.Authorization,slot.Cancellation.Token);slot.Cancellation.Token.ThrowIfCancellationRequested();
+            var appearance=await AppearanceAsync(retained,proof.Authorization,slot.Cancellation.Token);
+            var result=Result(selection,proof,CreatureGeometryState.Ready,retained.Sources,retained.Manifest,appearance:appearance.Value);
+            await retained.FinalizeAsync(proof.Authorization,slot.Cancellation.Token);
+            if(appearance.Retained is not null)await appearance.Retained.FinalizeAsync(proof.Authorization,slot.Cancellation.Token);
+            slot.Cancellation.Token.ThrowIfCancellationRequested();
             return result;
         }
         catch(Exception error)when(CleanupFailure(error)){slot.Failure=error;FailClosed(error);throw;}
@@ -77,24 +80,44 @@ public sealed partial class CreatureGeometryStore
         {
             var proof=await work.AuthorizeAsync(selection,slot.Cancellation.Token);await CheckCaptureAsync(proof,slot.Cancellation.Token);
             if(proof.Authorization is null)throw NotPrepared();
-            var retained=await work.FindAsync(proof.Authorization,request.GeometryArtifactId,slot.Cancellation.Token)??throw NotPrepared();slot.Owner=retained;
-            try{slot.Stream=await retained.OpenVerifiedAsync(slot.Cancellation.Token);}
+            var retained=await work.FindAsync(proof.Authorization,null,slot.Cancellation.Token)??throw NotPrepared();slot.Owner=retained;
+            // The requested artifact is either this geometry (VMG1) or its retained display appearance (VMA1).
+            IGeometryStoreAppearance? appearance=null;
+            if(retained.Manifest.ArtifactId!=request.GeometryArtifactId)
+            {
+                appearance=await retained.FindAppearanceAsync(proof.Authorization,slot.Cancellation.Token);
+                if(appearance?.Appearance.Manifest?.ArtifactId!=request.GeometryArtifactId)throw Stale();
+            }
+            try{slot.Stream=appearance is null?await retained.OpenVerifiedAsync(slot.Cancellation.Token):await appearance.OpenVerifiedAsync(slot.Cancellation.Token);}
             catch(DiscoveryException error)when(error.Code=="LOCAL_OBJECT_MISSING"){throw NotPrepared();}
-            var ready=Result(selection,proof,CreatureGeometryState.Ready,retained.Sources,retained.Manifest);
+            var ready=Result(selection,proof,CreatureGeometryState.Ready,retained.Sources,retained.Manifest,appearance:appearance?.Appearance);
             await retained.FinalizeAsync(proof.Authorization,slot.Cancellation.Token);
+            if(appearance is not null)await appearance.FinalizeAsync(proof.Authorization,slot.Cancellation.Token);
             lock(slot.Sync)
             {
                 slot.Cancellation.Token.ThrowIfCancellationRequested();if(slot.Stopping)throw new OperationCanceledException(slot.Cancellation.Token);
-                slot.Stream.Position=0;transferred=true;return new ReadLease(this,slot,ready.Manifest!);
+                slot.Stream.Position=0;transferred=true;return new ReadLease(this,slot,ready.Manifest!,ready.Appearance?.Manifest);
             }
         }
         catch(Exception error)when(CleanupFailure(error)){slot.Failure=error;FailClosed(error);throw;}
         finally{slot.Opened.TrySetResult();if(!transferred){StartReadRetirement(slot);await slot.Retired.Task;}}
     }
+    // Read reports the retained appearance: Ready after full VMA1 verification, a retained refusal as is, otherwise notPrepared.
+    private static async Task<(CreatureGeometryAppearance Value,IGeometryStoreAppearance? Retained)> AppearanceAsync(IGeometryStoreRetained geometry,
+        GeometryDisplayAuthorization selection,CancellationToken token)
+    {
+        var retained=await geometry.FindAppearanceAsync(selection,token);
+        if(retained is null)return(GeometryAppearanceSources.NotPrepared(selection),null);
+        if(retained.Appearance.Manifest is null)return(retained.Appearance,retained);
+        try{await (await retained.OpenVerifiedAsync(token)).DisposeAsync();return(retained.Appearance,retained);}
+        catch(DiscoveryException error)when(error.Code=="LOCAL_OBJECT_MISSING"){return(GeometryAppearanceSources.NotPrepared(selection),null);}
+        catch(DiscoveryException error)when(error.Code=="LOCAL_OBJECT_CORRUPT"){return(Corrupt(retained.Appearance),null);}
+    }
     private static DiscoveryException NotPrepared()=>new("CREATURE_GEOMETRY_NOT_PREPARED","The exact geometry artifact is not available locally. Prepare the selected slot first.",true);
-    private sealed class ReadLease(CreatureGeometryStore owner,ReadSlot slot,CreatureGeometryManifest manifest):ICreatureGeometryReadLease
+    private sealed class ReadLease(CreatureGeometryStore owner,ReadSlot slot,CreatureGeometryManifest manifest,CreatureGeometryAppearanceManifest? appearance=null):ICreatureGeometryReadLease
     {
         public CreatureGeometryManifest Manifest=>manifest;
+        public CreatureGeometryAppearanceManifest? Appearance=>appearance;
         public Stream Content{get;}=new LeaseStream(slot);
         public Task Retirement=>slot.Retired.Task;
         public ValueTask DisposeAsync(){owner.StartReadRetirement(slot);return new(slot.Retired.Task);}

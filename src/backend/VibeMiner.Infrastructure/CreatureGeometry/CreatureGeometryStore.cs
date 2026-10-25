@@ -38,10 +38,11 @@ public sealed partial class CreatureGeometryStore : ICreatureGeometryStore, IAsy
     private static CreatureGeometryProblem MetadataProblem(CreatureDisplayMetadataProblem problem) =>
         new(problem.Code, problem.Message, problem.Retryable, CreatureGeometryDependency.Metadata, problem.Target);
     private static CreatureGeometryResult Result(CreatureDisplayMetadataRequest request, GeometryDisplayAuthorizationResult metadata,
-        CreatureGeometryState state, IReadOnlyList<CreatureGeometrySource>? sources = null, CreatureGeometryManifest? manifest = null, CreatureGeometryProblem? problem = null) =>
+        CreatureGeometryState state, IReadOnlyList<CreatureGeometrySource>? sources = null, CreatureGeometryManifest? manifest = null, CreatureGeometryProblem? problem = null,
+        CreatureGeometryAppearance? appearance = null) =>
         CreatureGeometryValidation.Snapshot(new(request.Context, request.ArtifactId, request.CreatureId, request.Slot,
             CreatureGeometryValidation.Policy, metadata.Core.Opening.Reference, state, metadata.Metadata,
-            sources ?? Array.Empty<CreatureGeometrySource>(), manifest, problem), request);
+            sources ?? Array.Empty<CreatureGeometrySource>(), manifest, problem, state == CreatureGeometryState.Ready ? appearance : null), request);
     private static CreatureGeometryResult MetadataResult(CreatureDisplayMetadataRequest request, GeometryDisplayAuthorizationResult value) =>
         Result(request, value, value.Metadata.State == CreatureDisplayMetadataState.NotPrepared ? CreatureGeometryState.NotPrepared : CreatureGeometryState.MetadataNotResolved,
             problem: value.Problem is null ? null : MetadataProblem(value.Problem));

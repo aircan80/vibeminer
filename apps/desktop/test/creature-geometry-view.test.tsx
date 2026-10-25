@@ -2,6 +2,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import readyJson from '../../../contracts/examples/creature-geometry-ready.json';
+import texturedJson from '../../../contracts/examples/creature-geometry-textured.json';
 import type {CreatureGeometryResult} from '../../../contracts/generated/discovery';
 import {CreatureGeometryView} from '../src/renderer/CreatureGeometryView';
 import {CreatureGeometryActivity} from '../src/renderer/CreatureGeometryActivity';
@@ -52,4 +53,40 @@ it('does not offer empty early section inspection, then preserves the focused pa
  const readyFlow={...initial,snapshot:{...initial.snapshot,view:{...initial.snapshot.view!,phase:'ready' as const}}};rerender(<CreatureGeometryView flow={readyFlow} onReturn={()=>{}}/>);fireEvent.click(screen.getByText('Declared section evidence'));await waitFor(()=>expect(session.sectionPage).toHaveBeenCalledWith(0));
  const next=screen.getByRole('button',{name:'Next section records'});next.focus();rerender(<CreatureGeometryView flow={{...readyFlow,snapshot:{...readyFlow.snapshot,view:{...readyFlow.snapshot.view!,sectionOffset:32,sections:[{ordinal:32,id:5,level:0,vertexStart:0,vertexCount:3,triangleStart:0,triangleCount:3,lineStart:0,lineCount:6}]}}}} onReturn={()=>{}}/>);expect(next).toHaveFocus();expect(next).toHaveAttribute('aria-disabled','true');session.sectionPage.mockClear();fireEvent.click(next);expect(session.sectionPage).not.toHaveBeenCalled();
  const previous=screen.getByRole('button',{name:'Previous section records'});previous.focus();rerender(<CreatureGeometryView flow={readyFlow} onReturn={()=>{}}/>);expect(previous).toHaveFocus();expect(previous).toHaveAttribute('aria-disabled','true');fireEvent.click(previous);expect(session.sectionPage).not.toHaveBeenCalled();
+});
+
+it('shows the texture chain for a textured draw and names a refusal while the edges stay drawn',()=>{
+ const textured=texturedJson as unknown as CreatureGeometryResult,{flow}=fixture();
+ const view={...flow.snapshot.view!,result:textured,message:'Unposed textured surfaces drawn'};
+ const {rerender}=render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view}}} onReturn={()=>{}}/>);
+ expect(screen.getByText('Unposed textured surfaces · bind pose, unlit')).toBeVisible();
+ expect(screen.getByRole('region',{name:'Texture chain'})).toHaveTextContent('Texture 0 · type 11 → TextureVariationFileDataID[0] → FileDataID 779 · BC1, mip 0 2×2 of 2×2');
+ expect(screen.getByText(/Not drawn: 4 particle emitters, 0 ribbons/)).toBeVisible();
+ const refused={...textured,appearance:{...textured.appearance!,state:'multiTexture' as const,textures:[],manifest:null,problem:{code:'CREATURE_APPEARANCE_MULTI_TEXTURE',message:'The batch combines more than one texture stage.',retryable:false,batchOrdinal:3,textureOrdinal:null}}};
+ rerender(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...view,result:refused}}}} onReturn={()=>{}}/>);
+ expect(screen.getByText('Unposed source edges · a batch combines several textures')).toBeVisible();
+ expect(screen.getByRole('region',{name:'Texture chain'})).toHaveTextContent('CREATURE_APPEARANCE_MULTI_TEXTURE: The batch combines more than one texture stage. Batch 3.');
+});
+
+it('names texture chain states in plain words, counts in the singular and offers Retry textures for a retryable texture outcome',()=>{
+ const textured=texturedJson as unknown as CreatureGeometryResult,{flow,session}=fixture();
+ const appearance={...textured.appearance!,state:'textureUnavailable' as const,manifest:null,effects:{...textured.appearance!.effects!,ribbons:1,shadowBatches:1},
+  textures:[{...textured.appearance!.textures[0]!,state:'unavailable' as const,image:null,source:null},{...textured.appearance!.textures[0]!,ordinal:1,state:'notReached' as const,image:null,source:null}],
+  problem:{code:'CREATURE_APPEARANCE_TEXTURE_UNAVAILABLE',message:'Texture ordinal 0 source storage is unavailable.',retryable:true,batchOrdinal:null,textureOrdinal:0}};
+ const retryAppearance=vi.fn();Object.assign(session,{retryAppearance});
+ render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:{...textured,appearance}}}}} onReturn={()=>{}}/>);
+ const chain=screen.getByRole('region',{name:'Texture chain'});
+ expect(chain).toHaveTextContent('FileDataID 779 · unavailable');expect(chain).toHaveTextContent('· not reached');expect(chain).not.toHaveTextContent('notReached');
+ expect(chain).toHaveTextContent('Not drawn: 4 particle emitters, 1 ribbon, 0 lights, 1 shadow batch.');
+ fireEvent.click(screen.getByRole('button',{name:'Retry textures'}));expect(retryAppearance).toHaveBeenCalledTimes(1);
+ expect(screen.queryByRole('button',{name:'Retry geometry'})).not.toBeInTheDocument();
+});
+
+it('shows an unresolved zero FileDataID once, as its state',()=>{
+ const textured=texturedJson as unknown as CreatureGeometryResult,{flow}=fixture();
+ const appearance={...textured.appearance!,state:'textureUnresolved' as const,manifest:null,textures:[{...textured.appearance!.textures[0]!,fileDataId:null,state:'unresolved' as const,image:null,source:null}],
+  problem:{code:'CREATURE_APPEARANCE_TEXTURE_UNRESOLVED',message:'Texture ordinal 0 has a zero FileDataID.',retryable:false,batchOrdinal:null,textureOrdinal:0}};
+ render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:{...textured,appearance}}}}} onReturn={()=>{}}/>);
+ const row=screen.getByRole('region',{name:'Texture chain'}).querySelector('li')!;
+ expect(row).toHaveTextContent('Texture 0 · type 11 → TextureVariationFileDataID[0] → FileDataID 0 · unresolved');expect(row.textContent!.match(/unresolved/g)).toHaveLength(1);
 });

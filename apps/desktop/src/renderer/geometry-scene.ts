@@ -1,11 +1,16 @@
-import { BufferAttribute, BufferGeometry, LineBasicMaterial, LineSegments, Matrix4, NoToneMapping,
-  PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer, type Camera, type WebGLRendererParameters } from 'three';
+import { BufferAttribute, BufferGeometry, ClampToEdgeWrapping, DataTexture, DoubleSide, FrontSide, LinearFilter, LinearMipmapLinearFilter,
+  LineBasicMaterial, LineSegments, Matrix4, Mesh, MeshBasicMaterial, NoToneMapping, PerspectiveCamera, RepeatWrapping, RGBAFormat, Scene,
+  SRGBColorSpace, UnsignedByteType, WebGLRenderer, type Camera, type Material, type Object3D, type WebGLRendererParameters } from 'three';
+import type { ValidatedAppearance } from './geometry-vma';
 import type { GeometryBodyRetired, GeometrySceneDisposal, GeometrySceneIdentity } from '../shared/geometry-lifecycle';
 import { fitGeometryCamera, moveGeometryCamera, type GeometryCamera, type GeometryCameraAction } from './geometry-camera';
 import type { GeometryValidationResult } from './geometry-vmg';
 export type { GeometryBodyRetired, GeometrySceneDisposal, GeometrySceneIdentity } from '../shared/geometry-lifecycle';
 
-type ValidatedGeometry = Extract<GeometryValidationResult, { state: 'valid' }>['value'];
+type ValidatedLines = Extract<GeometryValidationResult, { state: 'valid' }>['value'];
+/** Either the VMG1 line set or the display's VMA1 textured surfaces. */
+type ValidatedGeometry = ValidatedLines | ValidatedAppearance;
+const isAppearance = (input: ValidatedGeometry): input is ValidatedAppearance => (input as { kind?: unknown }).kind === 'appearance';
 type Refusal = 'disposed' | 'busy' | 'stale' | 'invalidIdentity' | 'invalidGeometry' | 'retirementRequired'
   | 'cameraFitUnsupported' | 'webglUnsupported' | 'resourceLimit' | 'renderFailed' | 'cleanupFailed' | 'observerFailed';
 export type GeometrySceneStatus = Readonly<{ code: 'drawn' | 'contextLost' | 'stale' | 'cameraFitUnsupported' | 'renderFailed' | 'cleanupFailed' }>;
@@ -64,8 +69,8 @@ const refused = (code: Refusal): Refused => ({ state: 'refused', code });
 const lowerId = /^[a-f0-9]{32}$/, artifactId = /^[a-f0-9]{64}$/;
 const heldCanvases = new WeakSet<HTMLCanvasElement>();
 interface Mounted {
-  readonly scene: Scene; readonly geometry: BufferGeometry; readonly material: LineBasicMaterial;
-  readonly line: LineSegments<BufferGeometry, LineBasicMaterial>; readonly camera: PerspectiveCamera;
+  readonly scene: Scene; readonly geometry: BufferGeometry; readonly materials: readonly Material[]; readonly textures: readonly DataTexture[];
+  readonly line: Object3D; readonly camera: PerspectiveCamera;
   readonly bounds: ValidatedGeometry['manifest']['bounds']; readonly identity: GeometrySceneIdentity;
   cameraState: GeometryCamera;
 }
@@ -149,11 +154,13 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
     if (!previous) { retiringScene = false; return; }
     attempt(() => previous.scene.remove(previous.line));
     const geometryClosed = attempt(() => previous.geometry.dispose());
-    const materialClosed = attempt(() => previous.material.dispose());
+    const materialClosed = previous.materials.map(material => attempt(() => material.dispose())).every(Boolean);
+    const texturesClosed = previous.textures.map(texture => attempt(() => texture.dispose())).every(Boolean);
     attempt(() => graphics?.renderLists.dispose());
-    if (geometryClosed && materialClosed && !cleanupFailed) {
-      // Even an external diagnostics reference to this object cannot retain the received body through attributes.
-      attempt(() => previous.geometry.deleteAttribute('position')); attempt(() => previous.geometry.setIndex(null));
+    if (geometryClosed && materialClosed && texturesClosed && !cleanupFailed) {
+      // Even an external diagnostics reference to this object cannot retain the received body through attributes or texels.
+      attempt(() => previous.geometry.deleteAttribute('position')); attempt(() => previous.geometry.deleteAttribute('uv')); attempt(() => previous.geometry.setIndex(null));
+      for (const texture of previous.textures) attempt(() => { texture.image = { data: null, width: 1, height: 1 } as unknown as typeof texture.image; });
     }
     if (cleanupFailed) debt = previous;
     retiringScene = false;
@@ -281,9 +288,12 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
       if (disposed) return refused('disposed'); if (cleanupFailed || debt) return refused('cleanupFailed');
       if (!validIdentity(identity) || identity === null || !retired || !same(identity, retired) || retired.retired !== true) return refused('invalidIdentity');
       if (consumedToken === identity.operationToken) return refused('retirementRequired');
-      if (input.manifest.artifactId !== identity.geometryArtifactId || !(input.positions instanceof Float32Array) || !(input.lineIndices instanceof Uint32Array)
-        || input.positions.buffer !== input.lineIndices.buffer || input.positions.buffer.byteLength !== input.manifest.byteLength
-        || input.positions.byteLength + input.lineIndices.byteLength > 2097152) return refused('invalidGeometry');
+      if (input.manifest.artifactId !== identity.geometryArtifactId || !(input.positions instanceof Float32Array) || input.positions.buffer.byteLength !== input.manifest.byteLength)
+        return refused('invalidGeometry');
+      if (isAppearance(input) ? !(input.uvs instanceof Float32Array) || !(input.indices instanceof Uint32Array) || input.uvs.buffer !== input.positions.buffer
+          || input.indices.buffer !== input.positions.buffer || input.manifest.byteLength > 10485760 || input.textures.some(t => t.texels.buffer !== input.positions.buffer)
+        : !(input.lineIndices instanceof Uint32Array) || input.positions.buffer !== input.lineIndices.buffer
+          || input.positions.byteLength + input.lineIndices.byteLength > 2097152) return refused('invalidGeometry');
       const fitted = fitGeometryCamera(input.manifest.bounds); if (fitted.state !== 'ready') return refused('cameraFitUnsupported');
       const camera = new PerspectiveCamera(45, 4 / 3, fitted.value.near, fitted.value.far);
       if (!installCamera(camera, fitted.value, input.manifest.bounds)) return refused('cameraFitUnsupported');
@@ -293,12 +303,32 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
       if (!isCurrent()) return refused('stale');
       if (disposed) return refused('disposed'); if (cleanupFailed || debt) return refused('cleanupFailed');
       consumedToken = identity.operationToken;
-      const geometry = new BufferGeometry(), material = new LineBasicMaterial({ color: '#176e66', linewidth: 1, opacity: 1, transparent: false, toneMapped: false });
-      const line = new LineSegments(geometry, material), scene = new Scene();
-      mounted = { scene, geometry, material, line, camera, cameraState: fitted.value, bounds: input.manifest.bounds, identity: snapshot(identity) };
+      const geometry = new BufferGeometry(), scene = new Scene();
+      let line: Object3D, materials: Material[], textures: DataTexture[] = [];
+      if (isAppearance(input)) {
+        // Unlit: each drawn batch samples its one RGBA8 texture as decoded in C#. No colour, weight or lighting animation is evaluated.
+        textures = input.textures.map(t => {
+          const texture = new DataTexture(t.texels, t.width, t.height, RGBAFormat, UnsignedByteType);
+          texture.colorSpace = SRGBColorSpace; texture.flipY = false; texture.generateMipmaps = true;
+          texture.magFilter = LinearFilter; texture.minFilter = LinearMipmapLinearFilter;
+          texture.wrapS = t.wrapU ? RepeatWrapping : ClampToEdgeWrapping; texture.wrapT = t.wrapV ? RepeatWrapping : ClampToEdgeWrapping;
+          texture.needsUpdate = true; return texture;
+        });
+        materials = input.draws.map(d => new MeshBasicMaterial({ map: textures[d.slot], side: d.twoSided ? DoubleSide : FrontSide, transparent: false,
+          alphaTest: d.alphaKey ? input.manifest.alphaReference / 255 : 0, depthTest: d.depthTest, depthWrite: d.depthWrite, toneMapped: false }));
+        line = new Mesh(geometry, materials);
+      } else {
+        materials = [new LineBasicMaterial({ color: '#176e66', linewidth: 1, opacity: 1, transparent: false, toneMapped: false })];
+        line = new LineSegments(geometry, materials[0]);
+      }
+      mounted = { scene, geometry, materials, textures, line, camera, cameraState: fitted.value, bounds: input.manifest.bounds, identity: snapshot(identity) };
       try {
-        geometry.setAttribute('position', new BufferAttribute(input.positions, 3)); geometry.setIndex(new BufferAttribute(input.lineIndices, 1));
-        geometry.setDrawRange(0, input.lineIndices.length); line.frustumCulled = false; line.matrixAutoUpdate = false; line.matrixWorldAutoUpdate = false;
+        geometry.setAttribute('position', new BufferAttribute(input.positions, 3));
+        if (isAppearance(input)) {
+          geometry.setAttribute('uv', new BufferAttribute(input.uvs, 2)); geometry.setIndex(new BufferAttribute(input.indices, 1));
+          input.draws.forEach((d, index) => geometry.addGroup(d.indexStart, d.indexCount, index)); geometry.setDrawRange(0, input.indices.length);
+        } else { geometry.setIndex(new BufferAttribute(input.lineIndices, 1)); geometry.setDrawRange(0, input.lineIndices.length); }
+        line.frustumCulled = false; line.matrixAutoUpdate = false; line.matrixWorldAutoUpdate = false;
         line.matrix.copy(rotation); line.matrixWorld.copy(rotation); scene.matrixAutoUpdate = false; scene.matrixWorldAutoUpdate = false;
         scene.add(line); bindControls(); schedule();
         return disposed ? refused(cleanupFailed ? 'cleanupFailed' : 'renderFailed') : { state: 'mounted' as const };

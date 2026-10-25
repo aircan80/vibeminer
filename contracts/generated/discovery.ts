@@ -13,8 +13,15 @@ export type CreatureGeometryStage =
   | 'skinParsing'
   | 'artifactBuild'
   | 'artifactVerification'
-  | 'publication';
-export type CreatureGeometryDependency = 'metadata' | 'model' | 'skin' | 'artifact';
+  | 'publication'
+  | 'textureResolution'
+  | 'textureAcquisition'
+  | 'textureVerification'
+  | 'textureDecoding'
+  | 'appearanceBuild'
+  | 'appearanceVerification'
+  | 'appearancePublication';
+export type CreatureGeometryDependency = 'metadata' | 'model' | 'skin' | 'artifact' | 'texture';
 export type EngineRequest = EngineRequest1;
 export type WorkspaceSnapshot = WorkspaceSnapshot1;
 /**
@@ -174,6 +181,39 @@ export type CreatureGeometryState =
   | 'corrupt'
   | 'resourceLimit';
 export type CreatureGeometrySourceRole = 'model' | 'skin';
+export type CreatureGeometryAppearanceState =
+  | 'notPrepared'
+  | 'ready'
+  | 'characterModel'
+  | 'multiTexture'
+  | 'blendUnsupported'
+  | 'textureWeight'
+  | 'textureTransform'
+  | 'materialUnsupported'
+  | 'textureUnresolved'
+  | 'textureMissing'
+  | 'textureAmbiguous'
+  | 'textureProtected'
+  | 'textureUnsupported'
+  | 'textureCorrupt'
+  | 'textureUnavailable'
+  | 'resourceLimit'
+  | 'corrupt';
+export type CreatureGeometryTextureState =
+  | 'decoded'
+  | 'unresolved'
+  | 'notReached'
+  | 'missing'
+  | 'ambiguous'
+  | 'protected'
+  | 'unsupported'
+  | 'corrupt'
+  | 'unavailable'
+  | 'resourceLimit';
+/**
+ * Textured draw of a ready geometry pair; see contracts/creature-geometry-v1.md#appearance.
+ */
+export type CreatureGeometryAppearance = CreatureGeometryAppearance1;
 export type CreatureGeometryResult = CreatureGeometryResult1;
 export type SettingsTimestamp = string;
 
@@ -274,6 +314,17 @@ export interface DiscoveryContract {
   creatureGeometrySourceRole?: CreatureGeometrySourceRole;
   creatureGeometryDependency?: CreatureGeometryDependency;
   creatureGeometryStage?: CreatureGeometryStage;
+  creatureGeometryAppearanceState?: CreatureGeometryAppearanceState;
+  creatureGeometryTextureState?: CreatureGeometryTextureState;
+  creatureGeometryAppearanceRegion?: CreatureGeometryAppearanceRegion;
+  creatureGeometryAppearanceDisplay?: CreatureGeometryAppearanceDisplay;
+  creatureGeometryTextureImage?: CreatureGeometryTextureImage;
+  creatureGeometryTextureSource?: CreatureGeometryTextureSource;
+  creatureGeometryTexture?: CreatureGeometryTexture;
+  creatureGeometryEffects?: CreatureGeometryEffects;
+  creatureGeometryAppearanceProblem?: CreatureGeometryAppearanceProblem;
+  creatureAppearanceManifest?: CreatureAppearanceManifest;
+  creatureGeometryAppearance?: CreatureGeometryAppearance;
   creatureGeometryBufferRegion?: CreatureGeometryBufferRegion;
   creatureGeometryEvaluations?: CreatureGeometryEvaluations;
   creatureGeometryBounds?: CreatureGeometryBounds;
@@ -3049,15 +3100,90 @@ export interface ItemEffectNamesParams {
       ];
   policyRevision?: 'spell-name-by-emitted-id-v1';
 }
-export interface CreatureGeometryBufferRegion {
+export interface CreatureGeometryAppearanceRegion {
   offset: number;
   byteLength: number;
 }
-export interface CreatureGeometryEvaluations {
-  material: 'notEvaluated';
-  pose: 'notEvaluated';
-  visibility: 'notEvaluated';
-  appearance: 'notEvaluated';
+export interface CreatureGeometryAppearanceDisplay {
+  displayId: string;
+  extendedDisplayInfoId: string;
+  /**
+   * @minItems 4
+   * @maxItems 4
+   */
+  textureVariations: [string, string, string, string];
+}
+export interface CreatureGeometryTextureImage {
+  width: number;
+  height: number;
+  mipLevel: number;
+  baseWidth: number;
+  baseHeight: number;
+  encoding: 'palette' | 'bc1' | 'bc2' | 'bc3' | 'bgra8';
+}
+export interface CreatureGeometryTextureSource {
+  contentKey: string;
+  encodingKey: string;
+  encodedSha256: string;
+  encodedBytes: number;
+  decodedBytes: number;
+  fullVerifierRevision: 'content-blte-v1';
+}
+export interface CreatureGeometryTexture {
+  ordinal: number;
+  type: 0 | 11 | 12 | 13;
+  binding: 'txid' | 'variation';
+  variation: number | null;
+  fileDataId: string | null;
+  state: CreatureGeometryTextureState;
+  image: CreatureGeometryTextureImage | null;
+  source: CreatureGeometryTextureSource | null;
+}
+export interface CreatureGeometryEffects {
+  particles: number;
+  ribbons: number;
+  lights: number;
+  shadowBatches: number;
+  unbatchedSections: number;
+  evaluation: 'notDrawn';
+}
+export interface CreatureGeometryAppearanceProblem {
+  code: string;
+  message: string;
+  retryable: boolean;
+  batchOrdinal: number | null;
+  textureOrdinal: number | null;
+}
+/**
+ * VMA1 textured appearance manifest; see contracts/geometry-vma1-v1.md.
+ */
+export interface CreatureAppearanceManifest {
+  artifactId: string;
+  bindingSha256: string;
+  sha256: string;
+  byteLength: number;
+  formatVersion: 1;
+  headerBytes: 160;
+  coordinatePolicy: 'native-m2-position-normal-uv-winding-v1';
+  vertexCount: number;
+  indexCount: number;
+  drawCount: number;
+  textureCount: number;
+  positions: CreatureGeometryAppearanceRegion;
+  uvs: CreatureGeometryAppearanceRegion;
+  indices: CreatureGeometryAppearanceRegion;
+  draws: CreatureGeometryAppearanceRegion;
+  textures: CreatureGeometryAppearanceRegion;
+  texels: CreatureGeometryAppearanceRegion;
+  bounds: CreatureGeometryBounds;
+  alphaReference: 128;
+  displayId: number;
+  geometryBindingSha256: string;
+  materialPolicy: 'm2-single-texture-opaque-alphakey-v1';
+  texturePolicy: 'blp2-largest-mip-within-1024-rgba8-v1';
+  readerRevision: 'm2-appearance-batches-v1';
+  decoderRevision: 'blp2-rgba8-v2';
+  artifactRevision: 'model-appearance-vma1-v1';
 }
 export interface CreatureGeometryBounds {
   /**
@@ -3070,6 +3196,28 @@ export interface CreatureGeometryBounds {
    * @maxItems 3
    */
   max: [number, number, number];
+}
+export interface CreatureGeometryAppearance1 {
+  policy: 'creature-textured-appearance-v1';
+  state: CreatureGeometryAppearanceState;
+  display: CreatureGeometryAppearanceDisplay | null;
+  /**
+   * @maxItems 32
+   */
+  textures: CreatureGeometryTexture[];
+  effects: CreatureGeometryEffects | null;
+  manifest: CreatureAppearanceManifest | null;
+  problem: CreatureGeometryAppearanceProblem | null;
+}
+export interface CreatureGeometryBufferRegion {
+  offset: number;
+  byteLength: number;
+}
+export interface CreatureGeometryEvaluations {
+  material: 'notEvaluated';
+  pose: 'notEvaluated';
+  visibility: 'notEvaluated';
+  appearance: 'notEvaluated';
 }
 export interface CreatureGeometryManifest {
   artifactId: string;
@@ -3208,11 +3356,12 @@ export interface CreatureGeometryResult1 {
         }
       ];
   manifest: CreatureGeometryManifest | null;
+  appearance?: CreatureGeometryAppearance | null;
   problem: CreatureGeometryProblem | null;
 }
 export interface CreatureGeometryLeaseDescriptor {
   leaseId: string;
-  manifest: CreatureGeometryManifest;
+  manifest: CreatureGeometryManifest | CreatureAppearanceManifest;
 }
 export interface CreatureGeometryParams {
   productId: string;

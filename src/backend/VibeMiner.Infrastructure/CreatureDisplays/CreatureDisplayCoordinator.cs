@@ -4,7 +4,12 @@ using VibeMiner.Domain;
 namespace VibeMiner.Infrastructure;
 
 internal sealed record CreatureDisplayProbe(CreatureDisplayTarget Target, CreatureDisplayCatalogBinding Binding,
-    string? Edge, CreatureDisplayMetadataState? Failure = null, CreatureDisplayMetadataProblem? Problem = null);
+    string? Edge, CreatureDisplayMetadataState? Failure = null, CreatureDisplayMetadataProblem? Problem = null,
+    CreatureDisplayTextureEvidence? Textures = null);
+/// <summary>The same admitted CreatureDisplayInfo row's texture fields, read with its ModelID edge. Values are canonical
+/// signed32 decimal strings; all four variation positions are kept, zeros included. Null when the row cannot supply them.</summary>
+internal sealed record CreatureDisplayTextureEvidence(int ExtendedColumn, string ExtendedDisplayInfoId,
+    IReadOnlyList<int> VariationColumns, IReadOnlyList<string> TextureVariations);
 internal interface ICreatureDisplaySources : IAsyncDisposable
 {
     Task<CreaturesDisplayAuthorization> AuthorizeAsync(CreatureDisplayMetadataRequest request, CancellationToken token);

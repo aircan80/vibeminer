@@ -82,7 +82,8 @@ internal sealed class CreatureDisplaySources(DiscoveryCatalog catalog, VerifiedO
             var row = page.Rows[0]; var edge = CreatureDisplayPolicy.Edge(row, column, role, id);
             var evidence = new CreatureDisplayRowEvidence(new(snapshot.TableId, snapshot.ArtifactId, id, column), row.IsCopy,
                 row.CopySourceId?.ToString(CultureInfo.InvariantCulture), new(snapshot.TableId, column, edge));
-            return new(new(role, snapshot, count, evidence), binding, edge);
+            return new(new(role, snapshot, count, evidence), binding, edge,
+                Textures: role == CreatureDisplayTargetRole.Display ? CreatureDisplayPolicy.TextureEvidence(row, admission.Artifact.Header) : null);
         }
         catch { borrow.Invalidate(); throw; }
     }

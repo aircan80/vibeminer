@@ -1,6 +1,6 @@
 # Selected Creature geometry v1
 
-Capability `creature-source-geometry-v1` turns one explicitly selected Creature display slot into a verified [VMG1 geometry artifact](geometry-vmg1-v1.md): the model's native vertex positions and the triangle edges of its main SKIN, as a line set. It is a diagnostic source-geometry view, not an appearance. Material, pose, visibility and appearance are always `notEvaluated`.
+Capability `creature-source-geometry-v1` turns one explicitly selected Creature display slot into a verified [VMG1 geometry artifact](geometry-vmg1-v1.md): the model's native vertex positions and the triangle edges of its main SKIN, as a line set. It is a diagnostic source-geometry view. Pose and visibility are always `notEvaluated`. When the display's texture chain is ready the same result also carries a [VMA1 textured appearance](geometry-vma1-v1.md), drawn instead of the lines ([appearance](#appearance), D088–D091).
 
 The Host composes the geometry service in `Program.cs` and the Creatures area offers it as a Geometry step on resolved slot metadata ([D083](../docs/DECISIONS.md)).
 
@@ -14,7 +14,7 @@ All selection requests use the flattened display-metadata selection: `productId`
 | --- | --- | --- | --- |
 | `creatures.geometry.read` | optional `expectedGeometryArtifactId` (string or null) | `CreatureGeometryResult` | Local only |
 | `creatures.geometry.prepare` | none | `CreatureGeometryResult`, with progress | May acquire |
-| `creatures.geometry.open` | required `geometryArtifactId` | `{leaseId, manifest}` | Local only |
+| `creatures.geometry.open` | required `geometryArtifactId` (the VMG1 or the ready VMA1 artifact) | `{leaseId, manifest}`; the manifest is the opened artifact's | Local only |
 | `creatures.geometry.close` | only `leaseId` (32 lowercase hex) | `{closed: true}` | Cleanup |
 
 - **read** authorizes the selection, finds the exact retained artifact, fully re-verifies VMG1 bytes and runs the final catalog fence. It never prepares metadata, opens an asset session, scans ROOT/ENCODING or touches the network. No retained artifact means `notPrepared`. If `expectedGeometryArtifactId` is given and a different artifact is current, the reply is `CREATURE_GEOMETRY_STALE`, never the other artifact.
@@ -34,6 +34,7 @@ Every geometry reply frame (envelope and newline included) is at most 65,536 UTF
 | `metadata` | Display-metadata state, Creature source and coverage, `selected` slot (or null when the Creature row is missing), up to two `targets` (CDI table `bfdaf9f1`, CMD table `7f695fa5`) with coverage, `matchCount` and row evidence, `absence`, `modelId`, `modelFileDataId`, `requiredTableId`, `appearance: notEvaluated` |
 | `sources` | Exactly two (`model`, then `skin`) for `ready` and `noDeclaredTriangles`; empty for every other state |
 | `manifest` | VMG1 manifest; present only for `ready` |
+| `appearance` | Present (possibly `notPrepared`) only for `ready`; null otherwise. See [appearance](#appearance) |
 | `problem` | `code` (≤64 uppercase chars), `message` (≤512), `retryable`, `dependency` (`metadata`/`model`/`skin`/`artifact`), `target` (only for metadata problems) |
 
 Each source record: `role`, `fileDataId`, `contentKey`, `encodingKey`, `encodedSha256` (of the original encoded bytes), `encodedBytes`, `decodedBytes`, `fullVerifierRevision` (`content-blte-v1`), `associationSha256`, `variantPolicy` (`all-root-variants-consistent-asset-v1`), `encodingLookupRevision`, `rootLookupRevision`, `encodingSelectionPolicy` (`lexicographic-complete-encoding-v1`). No URLs, routes or paths.
@@ -59,7 +60,43 @@ Busy, stale authority, deadline and cleanup failure are request errors, not stat
 
 ### Progress
 
-Prepare progress keeps the normal envelope (honest label, unit `stage`/`bytes`/`entries`, optional completed/total) and adds `geometryStage` and `geometryDependency`. Stages: `metadata`, `sourceContext`, `modelResolution`, `modelAcquisition`, `modelVerification`, `modelParsing`, `skinResolution`, `skinAcquisition`, `skinVerification`, `skinParsing`, `artifactBuild`, `artifactVerification`, `publication`. At most one update per 100 ms. No overall percentage.
+Prepare progress keeps the normal envelope (honest label, unit `stage`/`bytes`/`entries`, optional completed/total) and adds `geometryStage` and `geometryDependency`. Stages: `metadata`, `sourceContext`, `modelResolution`, `modelAcquisition`, `modelVerification`, `modelParsing`, `skinResolution`, `skinAcquisition`, `skinVerification`, `skinParsing`, `artifactBuild`, `artifactVerification`, `publication`, then for textures `textureResolution`, `textureAcquisition`, `textureVerification`, `textureDecoding`, `appearanceBuild`, `appearanceVerification`, `appearancePublication` (dependency `texture`). At most one update per 100 ms. No overall percentage.
+
+## Appearance
+
+Policy `creature-textured-appearance-v1`. It runs inside the same Prepare, on the same verified model and SKIN bytes and the same asset handle, after the geometry pair is sealed. No appearance outcome changes the geometry state; a non-ready appearance leaves the VMG1 lines drawn.
+
+Texture chain, per drawn batch ([m2-skin.md](../docs/formats/m2-skin.md#single-texture-appearance-profile)):
+
+1. `CreatureDisplayInfo.ExtendedDisplayInfoID` ≠ 0 → `characterModel` (baked CreatureDisplayInfoExtra textures are not resolved).
+2. The batch's `TextureCombos[TextureComboIndex]` names one texture ordinal. Type 0 → `TXID[ordinal]`; types 11, 12, 13 → `TextureVariationFileDataID[0]`, `[1]`, `[2]` of the same admitted display row (all four positions are read with the ModelID edge). A zero FileDataID is `textureUnresolved`, naming the ordinal; nothing is substituted.
+3. Each distinct FileDataID is resolved through the open handle under `all-root-variants-consistent-asset-v1`, acquired at interactive priority (≤ 16 MiB encoded and decoded) and fully BLTE-verified. Its mip descriptors fix one level per image first: the largest ≤ 1,024 px each side, stepped down largest first while the slots exceed 8 MiB ([blp.md](../docs/formats/blp.md#model-textures)); each image is then decoded once at that level.
+4. The VMA1 artifact is built into ≤ 10 MiB staging, verified, published to CAS and fenced in one transaction with the geometry locator, the CDI/CMD admissions and the known invalidity of the VMA1 file and every texture source.
+
+| Field | Meaning |
+| --- | --- |
+| `policy`, `state` | Fixed policy; state below |
+| `display` | The display ID, ExtendedDisplayInfoID and four TextureVariationFileDataID values read; null if the row cannot supply them |
+| `textures` | One entry per drawn texture ordinal: `ordinal`, `type`, `binding` (`txid`/`variation`), `variation`, `fileDataId` (null when zero), `state`, and for `decoded` the chosen `image` (size, mip, base size, encoding) and verified `source` receipt |
+| `effects` | Counts of particles, ribbons, lights, shadow batches and sections without a batch; `evaluation: notDrawn` |
+| `manifest` | VMA1 manifest, only for `ready` |
+| `problem` | `code`, `message`, `retryable`, optional `batchOrdinal` and `textureOrdinal` |
+
+| State | Meaning | Retained |
+| --- | --- | --- |
+| `notPrepared` | No retained appearance (Read only); the desktop then Prepares once | — |
+| `ready` | Every drawn texture decoded; VMA1 verified | yes |
+| `characterModel` | ExtendedDisplayInfoID ≠ 0 | yes |
+| `multiTexture`, `blendUnsupported`, `textureWeight`, `textureTransform`, `materialUnsupported` | The first refused batch, in SKIN order (`batchOrdinal`) | yes |
+| `textureUnresolved` | A zero TXID entry or display variation (`textureOrdinal`), or an unreadable display row | yes |
+| `textureMissing`, `textureAmbiguous` | No ROOT membership or encoding; memberships disagree | no |
+| `textureProtected`, `textureUnsupported`, `textureCorrupt`, `textureUnavailable` | Encrypted; BLP variant outside the decoder; integrity failure; CDN or storage unavailable | no |
+| `resourceLimit` | A texture source, mip or the texel/artifact bound | no |
+| `corrupt` | The VMA1 artifact failed verification | no |
+
+Retained outcomes depend only on the verified model, SKIN and display row and the revisions, so they are stored in `geometry_appearances` (catalog version 19), keyed by the geometry locator, the CDI rows artifact, row and texture fields and every revision. A ready geometry is reused only with its retained appearance; otherwise Prepare produces both again from local CAS. Read re-verifies a retained VMA1 fully; missing bytes read as `notPrepared`, same-size corruption as `corrupt`.
+
+Particles and ribbons do not block texturing (D090): they are counted and not drawn. Lights, shadow batches, geosets and colour/alpha animation are not drawn or evaluated either.
 
 ### Float32 bounds
 
@@ -90,9 +127,10 @@ Retained reuse: missing original model/SKIN CAS bytes do not block read/open if 
 
 | Owner | Bound |
 | --- | --- |
-| Engine payload ledger | 64 MiB total = 48 MiB producer + two 8 MiB read slots (local read verification, opening, held or draining leases). A third read is immediately busy; no queue. |
+| Engine payload ledger | 80 MiB total = 64 MiB producer + two 8 MiB read slots (local read verification, opening, held or draining leases). A third read is immediately busy; no queue. |
 | Producer capture | 16 MiB child of the producer. Conservative retained-graph estimate per anchor: 128 KiB + raw versions + raw CDNs + 8× each serialized record, ≤2 MiB. |
-| Source staging | 32 MiB aggregate; one decoded source (≤8 MiB) held at a time; ≤2 MiB VMG staging. |
+| Source staging | 32 MiB aggregate; one decoded source (≤8 MiB, ≤16 MiB for a texture) held at a time; ≤2 MiB VMG staging; ≤10 MiB VMA staging. |
+| Decoded textures | 16 MiB child of the producer: ≤8 MiB of held slots, planned before decoding and checked after each decode, plus one decode's working mip and image. Released when the VMA1 build ends. |
 | Producer | One per selection, ≤2 compatible consumers. A different selection is busy. |
 | Service | ≤2 prepares, ≤2 local calls, ≤2 leases. Host shares the Creature preparation (2) and publication (4) credits. |
 | Deadlines | Preparation 15 minutes per consumer. Read lease 30 seconds absolute, starting at admission, before the asynchronous open. |
@@ -119,7 +157,7 @@ Flow:
 
 Body request rules: GET only; `Range` → 416; credential headers → 403; no query, fragment or aliases. Response: `application/octet-stream`, exact `Content-Length`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Access-Control-Allow-Origin: null`, `Vary: Origin`. Scheme privileges: standard, secure, `supportFetchAPI`, `corsEnabled`; no CSP bypass or service workers.
 
-Desktop presentation budget: 16 MiB of reachable app buffers and graphics reservations (8 MiB canvas surfaces + 2 MiB each for snapshot, response, received buffer and margin while fetching). It is accounting, not a Chromium or driver memory cap. The canvas backing store is its displayed size × devicePixelRatio at the camera's fixed 4:3, between 64×48 and 836×627 pixels, so 16 bytes per pixel (two colour buffers, depth, one compositor copy) stays within the 8 MiB canvas share. Resizing changes only the backing store; the camera fit is unchanged.
+Desktop presentation budget: 16 MiB of reachable app buffers and graphics reservations for VMG1 (8 MiB canvas surfaces + 2 MiB each for snapshot, response, received buffer and margin while fetching). A VMA1 body raises it to 48 MiB: 8 MiB canvas, 10 MiB snapshot, 10 MiB received buffer, up to 11 MiB of mipmapped texture and 2 MiB of buffer uploads, plus margin. It is accounting, not a Chromium or driver memory cap. The canvas backing store is its displayed size × devicePixelRatio at the camera's fixed 4:3, between 64×48 and 836×627 pixels, so 16 bytes per pixel (two colour buffers, depth, one compositor copy) stays within the 8 MiB canvas share. Resizing changes only the backing store; the camera fit is unchanged.
 
 ### Electron 44 provenance gotchas
 

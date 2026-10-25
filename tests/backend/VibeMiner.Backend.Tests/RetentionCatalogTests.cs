@@ -249,7 +249,7 @@ public sealed class RetentionCatalogTests
     {
         await using var h = await Harness.Create(); await h.RecordPayloads();
         await h.Execute(CatalogMigrationFixture.RemoveV9 + "PRAGMA user_version=8");
-        await h.Restart(); Assert.Equal(18, await h.Scalar("PRAGMA user_version"));
+        await h.Restart(); Assert.Equal(19, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(2, await h.Scalar("SELECT COUNT(*) FROM encoded_objects"));
         Assert.Equal(0, await h.Scalar("SELECT COUNT(*) FROM retention_jobs"));
         Assert.Equal(0, await h.Scalar("SELECT COUNT(*) FROM retention_coverage"));
@@ -263,7 +263,7 @@ public sealed class RetentionCatalogTests
         var saved = await h.Set(RetentionAction.Pause);
         await h.Execute(CatalogMigrationFixture.RemoveV10 + "PRAGMA user_version=9");
         await h.Restart();
-        Assert.Equal(18, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(19, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(2, await h.Scalar("SELECT COUNT(*) FROM encoded_objects"));
         Assert.Equal(0, await h.Scalar("SELECT COUNT(*) FROM icon_artifacts"));
         Assert.Equal(0, await h.Scalar("SELECT COUNT(*) FROM item_icon_admissions"));
@@ -282,7 +282,7 @@ public sealed class RetentionCatalogTests
             "INSERT INTO icon_artifacts VALUES('original-icon','icon-evidence');" +
             CatalogMigrationFixture.RemoveV11 + "PRAGMA user_version=10");
         await h.Restart();
-        Assert.Equal(18, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(19, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(2, await h.Scalar("SELECT COUNT(*) FROM encoded_objects"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM items_artifacts WHERE descriptor='item-evidence'"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM icon_artifacts WHERE descriptor='icon-evidence'"));
@@ -304,7 +304,7 @@ public sealed class RetentionCatalogTests
             "INSERT INTO item_classification_artifacts VALUES('original-label','label-evidence');" +
             CatalogMigrationFixture.RemoveV12 + "PRAGMA user_version=11");
         await h.Restart();
-        Assert.Equal(18, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(19, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(2, await h.Scalar("SELECT COUNT(*) FROM encoded_objects"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM items_artifacts WHERE descriptor='item-evidence'"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM icon_artifacts WHERE descriptor='icon-evidence'"));

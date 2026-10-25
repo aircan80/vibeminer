@@ -39,7 +39,8 @@ public sealed partial class CreatureGeometryStore
                     await progress(new("artifactBuild","Building geometry artifact","stage",Dependency:CreatureGeometryDependency.Artifact));
                     descriptor=await BuildAsync(prepared,progress,token);
                 }
-                var result=new Publication(catalog,budget,prepared,descriptor);prepared=null;return result;
+                var (appearance,binding,retain)=descriptor is null?(null,null,false):await BuildAppearanceAsync(prepared,progress,token);
+                var result=new Publication(catalog,budget,prepared,descriptor,appearance,binding,retain);prepared=null;return result;
             }
             catch(GeometrySourceFailureException error)
             {return new FailurePublication(error.State,error.Sources,new(error.Problem.Code,error.Problem.Message,error.Problem.Retryable,error.Dependency));}
@@ -47,6 +48,41 @@ public sealed partial class CreatureGeometryStore
             {return new FailurePublication(error.Code=="GEOMETRY_ARTIFACT_LIMIT"?CreatureGeometryState.ResourceLimit:error.Code=="GEOMETRY_ARTIFACT_UNSUPPORTED"?CreatureGeometryState.Unsupported:CreatureGeometryState.Corrupt,
                 prepared.Sources,new(error.Code,error.Message,error.Retryable,CreatureGeometryDependency.Artifact));}
             finally{if(prepared is not null)await prepared.DisposeAsync();}
+        }
+        // A ready texture chain becomes one verified VMA1 object. An artifact failure is an appearance outcome, never a geometry one.
+        // Decoded texture slots retire as soon as the build ends, before the final transaction.
+        private async Task<(CreatureGeometryAppearance?,AppearanceBinding?,bool)> BuildAppearanceAsync(GeometryPreparedSources prepared,
+            Func<CreatureGeometryProgress,Task> progress,CancellationToken token)
+        {
+            var source=prepared.Appearance;if(source is null)return(null,null,false);
+            try
+            {
+                if(source.Evidence.State!=CreatureGeometryAppearanceState.Ready||!source.HasImages)return(source.Evidence,null,source.Cacheable);
+                await progress(new("appearanceBuild","Building textured appearance artifact","stage",Dependency:CreatureGeometryDependency.Texture));
+                var reservation=await services.Resources.ReserveStagingAsync(ModelAppearanceArtifacts.MaximumBytes,null,token);
+                var staging=new DerivedArtifactStaging(reservation,File.Delete,"CREATURE_GEOMETRY_CLEANUP_FAILED");
+                try
+                {
+                    var stage=await staging.CreateAsync(objects.CreateStagingFileAsync,token);var path=stage.Name;
+                    var artifact=await ModelAppearanceArtifacts.BuildAsync(prepared.Skin,source.Draws!,source.Binding!,source.Texels,stage,budget,token);
+                    source.Dispose();
+                    await stage.FlushAsync(token);stage.Position=0;
+                    await progress(new("appearanceVerification","Verifying complete appearance artifact","bytes",0,artifact.ByteLength,CreatureGeometryDependency.Texture));
+                    await ModelAppearanceArtifacts.VerifyAsync(stage,artifact,budget,token);
+                    await staging.CloseAsync();
+                    await progress(new("appearancePublication","Publishing verified appearance artifact","bytes",artifact.ByteLength,artifact.ByteLength,CreatureGeometryDependency.Texture));
+                    var sha=await objects.PublishFileAsync(path,artifact.ByteLength,services.Resources,null,token);
+                    if(sha!=artifact.Sha256)throw new DiscoveryException("LOCAL_OBJECT_CORRUPT","The published appearance identity differs from the verified artifact.");
+                    return(source.Evidence with{Manifest=ToDomain(artifact.Manifest)},artifact.Binding,true);
+                }
+                finally{if(!await staging.RetireAsync()){stagingDebt=staging;throw staging.Failure();}}
+            }
+            catch(DiscoveryException error)when(error.Code.StartsWith("GEOMETRY_ARTIFACT_",StringComparison.Ordinal)||error.Code=="LOCAL_OBJECT_CORRUPT")
+            {
+                return(GeometryAppearanceSources.Outcome(error.Code=="GEOMETRY_ARTIFACT_LIMIT"?CreatureGeometryAppearanceState.ResourceLimit:CreatureGeometryAppearanceState.Corrupt,
+                    source.Evidence.Display,source.Evidence.Textures,source.Evidence.Effects,new(error.Code,"The textured appearance artifact could not be built and verified.",error.Retryable)),null,false);
+            }
+            finally{source.Dispose();}
         }
         private async Task<GeometryArtifactDescriptor> BuildAsync(GeometryPreparedSources prepared,Func<CreatureGeometryProgress,Task> progress,CancellationToken token)
         {
@@ -95,6 +131,37 @@ public sealed partial class CreatureGeometryStore
             finally{if(stream is not null)try{await stream.DisposeAsync();}catch(Exception){closeDebt=stream;throw Cleanup();}}
         }
         public Task FinalizeAsync(GeometryDisplayAuthorization selection,CancellationToken token)=>catalog.FinalizeCreatureGeometryReuseAsync(selection,locator,budget,token);
+        public async Task<IGeometryStoreAppearance?> FindAppearanceAsync(GeometryDisplayAuthorization selection,CancellationToken token)
+        {
+            var record=await catalog.FindCreatureGeometryAppearanceAsync(selection,locator,budget,token);
+            return record is null?null:new RetainedAppearance(catalog,objects,resources,budget,locator,record);
+        }
+    }
+    private sealed class RetainedAppearance(DiscoveryCatalog catalog,VerifiedObjectStore objects,AcquisitionResources resources,
+        IGeometryArtifactWorkBudget budget,GeometryLocator locator,GeometryAppearanceRecord record):IGeometryStoreAppearance
+    {
+        private Stream? closeDebt;
+        public CreatureGeometryAppearance Appearance=>record.Descriptor.Appearance;
+        public async Task<Stream> OpenVerifiedAsync(CancellationToken token)
+        {
+            if(closeDebt is not null)throw Cleanup();
+            var manifest=Appearance.Manifest??throw new DiscoveryException("CREATURE_GEOMETRY_NOT_PREPARED","This display has no retained textured appearance.",true);
+            Stream? stream=null;
+            try
+            {
+                stream=await objects.OpenVerifiedAsync(manifest.Sha256,manifest.ByteLength,resources,null,token);
+                try{await ModelAppearanceArtifacts.VerifyAsync(stream,ToPure(record.Descriptor),budget,token);}
+                catch(DiscoveryException error)when(error.Code.StartsWith("GEOMETRY_ARTIFACT_",StringComparison.Ordinal))
+                {
+                    await catalog.RecordObjectInvalidityAsync(manifest.Sha256,manifest.ByteLength,"LOCAL_OBJECT_CORRUPT",CancellationToken.None);
+                    throw new DiscoveryException("LOCAL_OBJECT_CORRUPT","The retained appearance artifact failed complete structural verification.");
+                }
+                stream.Position=0;var result=stream;stream=null;return result;
+            }
+            finally{if(stream is not null)try{await stream.DisposeAsync();}catch(Exception){closeDebt=stream;throw Cleanup();}}
+        }
+        public Task FinalizeAsync(GeometryDisplayAuthorization selection,CancellationToken token)=>
+            catalog.FinalizeCreatureGeometryAppearanceAsync(selection,locator,record.Descriptor,false,budget,token);
     }
     private sealed class FailurePublication(CreatureGeometryState state,IReadOnlyList<CreatureGeometrySource> observations,CreatureGeometryProblem problem):IGeometryStorePublication
     {
@@ -108,8 +175,9 @@ public sealed partial class CreatureGeometryStore
         public ValueTask DisposeAsync()=>ValueTask.CompletedTask;
     }
     private sealed class Publication(DiscoveryCatalog catalog,IGeometryArtifactWorkBudget budget,GeometryPreparedSources prepared,
-        GeometryArtifactDescriptor? descriptor):IGeometryStorePublication
+        GeometryArtifactDescriptor? descriptor,CreatureGeometryAppearance? appearance=null,AppearanceBinding? binding=null,bool retain=false):IGeometryStorePublication
     {
+        public CreatureGeometryAppearance? Appearance=>appearance;
         private readonly object sync=new();
         private GeometryPreparedSources? owned=prepared;
         private int active;
@@ -126,7 +194,11 @@ public sealed partial class CreatureGeometryStore
             {
                 var canonical=await catalog.FinalizeCreatureGeometryAsync(selection,source.Closure,descriptor,
                     descriptor is null?GeometryFinalAction.ValidateNoDeclaredTriangles:GeometryFinalAction.Publish,budget,token);
-                return new(canonical?.Descriptor.Manifest,canonical?.Sources??source.Sources);
+                var final=appearance;
+                // Ready and model/display-determined refusals are retained; transient texture outcomes are reported, never cached.
+                if(canonical is not null&&appearance is not null&&retain)
+                    final=(await catalog.FinalizeCreatureGeometryAppearanceAsync(selection,canonical,new(appearance,binding),true,budget,token)).Descriptor.Appearance;
+                return new(canonical?.Descriptor.Manifest,canonical?.Sources??source.Sources,canonical is null?null:final);
             }
             finally{lock(sync){active--;if(active==0)idle?.TrySetResult();}}
         }
@@ -150,6 +222,20 @@ public sealed partial class CreatureGeometryStore
         new(m.Evaluations.Material,m.Evaluations.Pose,m.Evaluations.Visibility,m.Evaluations.Appearance),m.VertexCount,m.VertexLookupCount,m.SourceTriangleIndexCount,m.SectionIndexCount,m.LineIndexCount,m.SectionCount,
         new(m.Positions.Offset,m.Positions.ByteLength),new(m.LineIndices.Offset,m.LineIndices.ByteLength),new(m.Sections.Offset,m.Sections.ByteLength),new(m.Bounds.Min,m.Bounds.Max),
         m.ModelFileDataId,m.SkinFileDataId,m.MainSkinOrdinal,m.ModelReaderRevision,m.SkinReaderRevision,m.InterpretationPolicy,m.ArtifactRevision,m.EdgePolicy);
+    private static CreatureGeometryAppearanceManifest ToDomain(AppearanceManifest m)=>new(m.ArtifactId,m.BindingSha256,m.Sha256,m.ByteLength,m.FormatVersion,m.HeaderBytes,
+        m.CoordinatePolicy,m.VertexCount,m.IndexCount,m.DrawCount,m.TextureCount,new(m.Positions.Offset,m.Positions.ByteLength),new(m.Uvs.Offset,m.Uvs.ByteLength),
+        new(m.Indices.Offset,m.Indices.ByteLength),new(m.Draws.Offset,m.Draws.ByteLength),new(m.Textures.Offset,m.Textures.ByteLength),new(m.Texels.Offset,m.Texels.ByteLength),
+        new(m.Bounds.Min,m.Bounds.Max),m.AlphaReference,m.DisplayId,m.GeometryBindingSha256,m.MaterialPolicy,m.TexturePolicy,m.ReaderRevision,m.DecoderRevision,m.ArtifactRevision);
+    private static AppearanceArtifact ToPure(GeometryAppearanceDescriptor descriptor)
+    {
+        var m=descriptor.Appearance.Manifest??throw new DiscoveryException("CREATURE_GEOMETRY_NOT_PREPARED","This display has no retained textured appearance.",true);
+        var manifest=new AppearanceManifest(m.ArtifactId,m.BindingSha256,m.Sha256,m.ByteLength,m.FormatVersion,m.HeaderBytes,m.CoordinatePolicy,m.VertexCount,m.IndexCount,
+            m.DrawCount,m.TextureCount,new(m.Positions.Offset,m.Positions.ByteLength),new(m.Uvs.Offset,m.Uvs.ByteLength),new(m.Indices.Offset,m.Indices.ByteLength),
+            new(m.Draws.Offset,m.Draws.ByteLength),new(m.Textures.Offset,m.Textures.ByteLength),new(m.Texels.Offset,m.Texels.ByteLength),
+            new(new Vector3(m.Bounds.Min[0],m.Bounds.Min[1],m.Bounds.Min[2]),new Vector3(m.Bounds.Max[0],m.Bounds.Max[1],m.Bounds.Max[2])),m.AlphaReference,m.DisplayId,
+            m.GeometryBindingSha256,m.MaterialPolicy,m.TexturePolicy,m.ReaderRevision,m.DecoderRevision,m.ArtifactRevision);
+        return new(descriptor.Binding!,m.BindingSha256,m.ArtifactId,m.Sha256,m.ByteLength,manifest);
+    }
     private static GeometryArtifact ToPure(GeometryArtifactDescriptor descriptor)
     {
         var m=descriptor.Manifest;

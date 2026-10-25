@@ -21,8 +21,8 @@ FileDataIDs and table hashes come from the pinned manifest. "Bundled" means the 
 | SpellEffect | 1140088 | `F04238A5` | `5362E3D4` | no | Keyed by relation SpellID + DifficultyID + EffectIndex. |
 | SpellMisc | 1003144 | `C603EE28` | `434B3607` | no | Relational. |
 | Creature | 841631 | `C9D6B6B3` | `6E14C900` | yes | |
-| CreatureDisplayInfo | 1108759 | `BFDAF9F1` | `7275F5F6` | yes | DBC FDID 801605. |
-| CreatureModelData | 1365368 | `7F695FA5` | `0F5449F8` | yes | DBC FDID 801608. |
+| CreatureDisplayInfo | 1108759 | `BFDAF9F1` | `7275F5F6` | yes | DBC FDID 801605. Classic builds use `F75F884C`; display metadata accepts both where the CreatureModelData layout is also accepted (D089). |
+| CreatureModelData | 1365368 | `7F695FA5` | `0F5449F8` | yes | DBC FDID 801608. Classic layout `3FFEE408` is accepted too: 1.15.9, 2.5.5, 2.5.6, 3.80.1–3.80.2, 5.5.4 and most 5.5.3 builds. 1.15.8, 3.4.5, 3.80.0 and 5.5.0–5.5.2 use another layout and still refuse (D089). |
 | CreatureXDisplayInfo | 1864302 | `23CBE682` | `2EA19FCF` | no | `$noninline,relation$CreatureID`. |
 | CreatureDisplayInfoGeosetData | 1720141 | `A82DCC8C` | `5E539080` | no | `$noninline,relation$CreatureDisplayInfoID`. |
 | CreatureDisplayInfoExtra | 1264997 | `66A5C5B7` | `4D9FE25C` | no | Current layout has no historical hair/skin/equipment fields. |
@@ -98,7 +98,8 @@ Effects rules:
 
   Only these exact definition/layout/field tuples get the exception. ItemEffect `SpellID` (ordinal 7) keeps its normal signed32 `Spell.ID` reference. See [table data](../contracts/table-data-v1.md) and [item effects](../contracts/item-effects-v1.md).
 - **Pallet and common values carry junk upper bits.** Any other verified 8- or 16-bit field stored as 32-bit pallet or common values keeps the low bits at its declared width when some value doesn't fit (D079), and keeps its reference: on 5.5.4.67849 Item.ItemGroupSoundsID `0x780107` is ItemGroupSounds 7. The column's `narrowing` says so. Only a column whose misfit values all share one upper-bit pattern narrows (D087), as in every case seen (see [WDC5 numbers](formats/wdc5.md#numbers)); varying upper bits and inline fields that don't fit still fail.
-- **Creature replacement textures 11/12/13 map to CDI variation positions 0/1/2.** `CreatureDisplayInfo.TextureVariationFileDataID[4]` keeps all four positions, zeros included. Position 3 is source evidence; texture type 14 is not "slot 4". A required zero or missing texture is unresolved, not a reason to substitute another BLP. No textured model path exists yet; this is the rule it must follow.
+- **Creature replacement textures 11/12/13 map to CDI variation positions 0/1/2.** `CreatureDisplayInfo.TextureVariationFileDataID[4]` keeps all four positions, zeros included. Position 3 is source evidence; texture type 14 is not "slot 4". A required zero or missing texture is unresolved, not a reason to substitute another BLP. The textured appearance (#63) follows this rule: type 0 reads `TXID[ordinal]`, types 11–13 read variation 0–2 of the same admitted row, and `ExtendedDisplayInfoID ≠ 0` is a character model whose baked textures are not resolved.
+- **Classic creature textures have several ROOT variants.** On wow_classic_ptr 5.5.4.67849 every creature texture checked (Imp, Felhunter, Rat, cats, frog, snake, owl, whelpling, Infernal) has ROOT memberships that disagree on the CKey, so `all-root-variants-consistent-asset-v1` reports them as `textureAmbiguous`. Picking one needs its own variant decision. The Classic Era 1.15.9.70003 Creature table holds a single row.
 - **Header `recordSize` is not a Sparse record's length.** ItemSparse records are variable; read them through the offset map.
 - **Partial tables are normal.** Keyed (encrypted) WDC5 sections are excluded by policy, and BLTE clear-chunk projections can admit readable rows without verifying the full decoded CKey. Retail `12.1.5.70448` examples:
 

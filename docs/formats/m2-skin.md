@@ -9,6 +9,7 @@ Our original static model readers in [`src/backend/VibeMiner.Formats.Wow/Models/
 | `M2GeometrySkinReader` | `m2-skin-geometry-v1` | `M2GeometrySkin`: geometry only; batches kept as uninterpreted array declarations |
 | `M2StaticGeometry.Create` | `native-m2-position-normal-uv-winding-v1` | Resolved triangle indices and section-referenced bounds |
 | `M2StaticMaterials.AdmitOpaque` | `m2-opaque-shader0-flags0-uv0-absent-channels-v1` | Draw list for the narrow opaque profile, or `MODEL_MATERIAL_UNSUPPORTED` |
+| `M2Appearance.ReadModelAsync` / `AdmitAsync` | `m2-appearance-batches-v1`, `m2-single-texture-opaque-alphakey-v1` | Texture-weight proofs, SKIN batch records and the textured draw plan, or the first refused batch |
 
 Input streams must be readable, seekable, start at 0 and be complete. A BLTE projection with holes is unsupported. Every read is asynchronous and bounded; nothing is published until EOF and length checks pass.
 
@@ -122,6 +123,27 @@ The geometry-only reader exists for models whose materials fail the strict profi
 Render flags: the pinned wow.export renderer uses `0x01` unlit, `0x04` two-sided, `0x08` no depth test, `0x10` no depth write. Old pywowlib enum labels disagree. With flags 0 our preview is lit, back-face culled, depth tested and written. Do not import historical labels or interpret new bits.
 
 Keep all four `TextureVariationFileDataID` slots from CreatureDisplayInfo, zeros included. Never compact them or pick the first nonzero.
+
+## Single-texture appearance profile
+
+`M2Appearance` (#63) reads what the geometry-only reader leaves uninterpreted, from the same verified bytes, and never fails geometry. Model phase: sequence flags and, per texture-weight track, a proof that every key stored in this model is `32767`. A sequence without flag `0x20` keeps its keys in an `.anim` file, so keys there leave the track unproven; a track with no keys at all has the default full opacity, as the pinned wow.export renderer evaluates it. SKIN phase: the 24-byte batch records, then every batch in order until the first refusal:
+
+| Check | Refusal |
+| --- | --- |
+| Section, material and color indices exist | `MaterialUnsupported` |
+| Texture count is exactly 1 | `MultiTexture` |
+| Material blend is 0 (opaque) or 1 (alpha key) | `BlendUnsupported` |
+| Render flags only `0x01`, `0x04`, `0x08`, `0x10`; batch flags 0 or `0x10`; shader `0x0` or `0x10`; second raw field and material layer 0 | `MaterialUnsupported` |
+| Texture combo names a declared texture; texture flags only U/V wrap | `MaterialUnsupported` |
+| Coordinate: shaders 0 and `0x10` sample UV0. A non-empty coordinate lookup must also say 0. Retail models usually ship an empty lookup | `MaterialUnsupported` |
+| Weight lookup is `0xFFFF` or a proven constant full opacity | `TextureWeight` |
+| Transform lookup is `0xFFFF` | `TextureTransform` |
+| Texture type 0 (TXID) or 11/12/13 (display variation 0/1/2) | `MaterialUnsupported` |
+| One batch per section | `MaterialUnsupported` |
+
+Particles, ribbons, lights and shadow batches are counted, not drawn, and do not refuse (D090). Priority planes are ignored: nothing blends. Color tracks (vertex color/alpha animation, often used to hide alternate geosets) are not evaluated, like pose. Alpha key applies only to shader `0x10` (`Combiners_Mod`, texture alpha), at 128/255; shader `0` (`Combiners_Opaque`) has no texture alpha. Render flag `0x01` (unlit) has no effect because the preview is unlit; `0x04` draws both sides; `0x08`/`0x10` turn off depth test/write.
+
+Live observation on wowxptr 12.1.5.70340 (#63): most modern creature bodies use two-texture combiner batches (`0x4011`, `0x4014`, `0x8000`, `0x8002`) and are refused as `MultiTexture`; Ragnaros' lava batches animate their weights and UVs. Imp (display 64799) passes.
 
 ## Coordinates
 

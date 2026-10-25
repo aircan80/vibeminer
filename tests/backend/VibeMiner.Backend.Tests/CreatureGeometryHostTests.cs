@@ -79,6 +79,44 @@ public sealed class CreatureGeometryHostTests
     }
 
     [Theory]
+    [InlineData("read")]
+    [InlineData("prepare")]
+    [InlineData("open")]
+    public async Task Appearance_manifest_bounds_cross_the_real_route_as_exact_float32_and_open_carries_the_VMA1_manifest(string operation)
+    {
+        var textured = AppearanceManifest([-0.1f, 0.2f, 0.3f], [0.4f, 0.5f, 0.6f]);
+        var store = new Store
+        {
+            Read = (r, _) => Task.FromResult(Result(r.Selection, true) with { Appearance = Appearance(textured) }),
+            Prepare = (r, _, _) => Task.FromResult(Result(r.Selection, true) with { Appearance = Appearance(textured) }),
+            Open = (_, _) => Task.FromResult<ICreatureGeometryReadLease>(new Lease { Appearance = textured, Content = new MemoryStream(new byte[textured.ByteLength], writable: false) })
+        };
+        await using var app = new CreatureGeometryService(store); await using var registry = new CreatureGeometryLeases(app);
+        await using var session = await Session.Start(app, registry);
+        var parameters = Scope();
+        if (operation == "open") parameters["geometryArtifactId"] = textured.ArtifactId;
+        await session.Send("textured", "creatures.geometry." + operation, parameters);
+        var result = (await session.Receive()).GetProperty("result");
+        var wire = operation == "open" ? result.GetProperty("manifest") : result.GetProperty("appearance").GetProperty("manifest");
+        Assert.Equal(textured.ArtifactId, wire.GetProperty("artifactId").GetString()); Assert.Equal("model-appearance-vma1-v1", wire.GetProperty("artifactRevision").GetString());
+        if (operation != "open")
+        {
+            var appearance = result.GetProperty("appearance"); Assert.Equal("ready", appearance.GetProperty("state").GetString());
+            Assert.Equal("variation", appearance.GetProperty("textures")[0].GetProperty("binding").GetString());
+            Assert.Equal("notDrawn", appearance.GetProperty("effects").GetProperty("evaluation").GetString());
+        }
+        foreach (var (name, expected) in new[] { ("min", textured.Bounds.Min), ("max", textured.Bounds.Max) })
+        {
+            var numbers = wire.GetProperty("bounds").GetProperty(name).EnumerateArray().ToArray();
+            for (var i = 0; i < 3; i++)
+            {
+                var number = numbers[i].GetDouble();
+                Assert.Equal((double)expected[i], number); Assert.Equal(BitConverter.SingleToInt32Bits(expected[i]), BitConverter.SingleToInt32Bits((float)number));
+            }
+        }
+    }
+
+    [Theory]
     [InlineData("slot", "\"0\"")]
     [InlineData("slot", "4")]
     [InlineData("fileDataId", "\"800\"")]

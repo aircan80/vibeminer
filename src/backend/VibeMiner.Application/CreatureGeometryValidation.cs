@@ -13,7 +13,8 @@ public static partial class CreatureGeometryValidation
     internal const long SafeInteger = 9_007_199_254_740_991;
     private static readonly string[] Stages = ["metadata", "sourceContext", "modelResolution", "modelAcquisition",
         "modelVerification", "modelParsing", "skinResolution", "skinAcquisition", "skinVerification", "skinParsing",
-        "artifactBuild", "artifactVerification", "publication"];
+        "artifactBuild", "artifactVerification", "publication", "textureResolution", "textureAcquisition", "textureVerification",
+        "textureDecoding", "appearanceBuild", "appearanceVerification", "appearancePublication"];
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { MaxDepth = 16, Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, false) } };
 

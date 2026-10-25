@@ -21,7 +21,7 @@ public sealed partial class CreatureGeometryStoreTests
         f.ExpectDebt=true;
         var prepare=f.Store.PrepareAsync(new(f.Request),async _=>{observerEntered.TrySetResult();await observerRelease.Task;},default);
         await canceled.Task.WaitAsync(Guard);Assert.False(prepare.IsCompleted);Assert.NotNull(sourceDebt);
-        Assert.True(f.Store.Pressure.Closed);Assert.Equal(48L<<20,f.Store.Pressure.Payload);
+        Assert.True(f.Store.Pressure.Closed);Assert.Equal(64L<<20,f.Store.Pressure.Payload);
         Assert.Equal("CREATURE_GEOMETRY_CLEANUP_FAILED",(await Assert.ThrowsAsync<DiscoveryException>(()=>f.Store.ReadAsync(new(f.Request),default))).Code);
         Assert.Equal("CREATURE_GEOMETRY_CLEANUP_FAILED",(await Assert.ThrowsAsync<DiscoveryException>(()=>f.Store.OpenAsync(new(f.Request,CreatureGeometryTestFixture.Manifest().ArtifactId),default))).Code);
         observerRelease.SetResult();await Assert.ThrowsAsync<DiscoveryException>(()=>prepare.WaitAsync(Guard));await notification.DisposeAsync();
@@ -42,7 +42,7 @@ public sealed partial class CreatureGeometryStoreTests
         f.ExpectDebt=true;
         Assert.Equal("CREATURE_GEOMETRY_CLEANUP_FAILED",(await Assert.ThrowsAsync<DiscoveryException>(()=>f.Store.PrepareAsync(new(f.Request),Progress,default).WaitAsync(Guard))).Code);
         Assert.NotNull(retained);Assert.False(await retained.RetireAsync());Assert.False(charge!.Released);
-        Assert.Equal(releaseFault?1:0,charge.Attempts);Assert.Equal((0,0,48L<<20,true),f.Store.Pressure);
+        Assert.Equal(releaseFault?1:0,charge.Attempts);Assert.Equal((0,0,64L<<20,true),f.Store.Pressure);
         Assert.Equal("CREATURE_GEOMETRY_CLEANUP_FAILED",(await Assert.ThrowsAsync<DiscoveryException>(()=>f.Store.ReadAsync(new(f.Request),default))).Code);
     }
     private sealed class FaultCharge(IDisposable inner,bool fail):IDisposable
@@ -63,7 +63,7 @@ public sealed partial class CreatureGeometryStoreTests
         var publication=new Publication{Dispose=()=>{Assert.True(bodyFinished);return Task.CompletedTask;}};
         f.Work.Produce=(_,_,_,token)=>{notification=token.Register(()=>canceled.TrySetResult());return Task.FromResult<IGeometryStorePublication>(publication);};
         using var stop=new CancellationTokenSource();var prepare=f.Store.PrepareAsync(new(f.Request),Progress,stop.Token);await entered.Task.WaitAsync(Guard);
-        stop.Cancel();await canceled.Task.WaitAsync(Guard);Assert.False(prepare.IsCompleted);Assert.Equal(48L<<20,f.Store.Pressure.Payload);
+        stop.Cancel();await canceled.Task.WaitAsync(Guard);Assert.False(prepare.IsCompleted);Assert.Equal(64L<<20,f.Store.Pressure.Payload);
         bodyRelease.SetResult();await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>prepare.WaitAsync(Guard));await notification.DisposeAsync();
         Assert.Equal(1,publication.Closes);Assert.Equal(0,f.Store.Pressure.Payload);
     }
@@ -78,7 +78,7 @@ public sealed partial class CreatureGeometryStoreTests
             catch(GeometrySourceCleanupException error){error.RetainPayload(source);throw;}
         };
         Assert.Equal("CREATURE_GEOMETRY_CLEANUP_FAILED",(await Assert.ThrowsAsync<DiscoveryException>(()=>f.Store.PrepareAsync(new(f.Request),Progress,default).WaitAsync(Guard))).Code);
-        Assert.False(staging.Released);Assert.Equal((0,0,48L<<20,true),f.Store.Pressure);f.ExpectDebt=true;
+        Assert.False(staging.Released);Assert.Equal((0,0,64L<<20,true),f.Store.Pressure);f.ExpectDebt=true;
     }
     private sealed class Charge:IDisposable{internal bool Released;public void Dispose()=>Released=true;}
     [Fact]
@@ -128,7 +128,7 @@ public sealed partial class CreatureGeometryStoreTests
         };
         using var stop=new CancellationTokenSource();var task=f.Store.PrepareAsync(new(f.Request),Progress,stop.Token);await entered.Task.WaitAsync(Guard);
         stop.Cancel();await invoked.Task.WaitAsync(Guard);Assert.False(task.IsCompleted);producerExit.SetResult();await closing.Task.WaitAsync(Guard);
-        Assert.False(task.IsCompleted);Assert.Equal(48L<<20,f.Store.Pressure.Payload);cleanup.SetResult();
+        Assert.False(task.IsCompleted);Assert.Equal(64L<<20,f.Store.Pressure.Payload);cleanup.SetResult();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>task.WaitAsync(Guard));Assert.Equal(0,f.Store.Pressure.Payload);
     }
     [Fact]
@@ -140,7 +140,7 @@ public sealed partial class CreatureGeometryStoreTests
         await report!(new("modelParsing","Reading model","bytes",1,2));await entered.Task.WaitAsync(Guard);producerExit.SetResult();
         // The actual callback has entered and is independently held; completing producer work cannot retire it.
         var read=await f.Store.ReadAsync(new(f.Request),default);Assert.Equal(CreatureGeometryState.NotPrepared,read.State);
-        Assert.False(prepare.IsCompleted);Assert.Equal(48L<<20,f.Store.Pressure.Payload);release.SetResult();await prepare.WaitAsync(Guard);
+        Assert.False(prepare.IsCompleted);Assert.Equal(64L<<20,f.Store.Pressure.Payload);release.SetResult();await prepare.WaitAsync(Guard);
         Assert.Equal(0,f.Store.Pressure.Payload);
     }
     [Fact]

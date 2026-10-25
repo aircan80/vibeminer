@@ -220,12 +220,13 @@ public sealed class CreatureGeometrySourcesTests
     public void Shared_payload_ledger_and_producer_child_slices_keep_debt_until_actual_retirement()
     {
         var ledger = new GeometryPayloadBudget(); var producer = ledger.ReserveProducer(); var capture = producer.Reserve(16 << 20); var source = producer.Reserve(32 << 20);
+        var textures = producer.Reserve(16 << 20);
         using var one = ledger.Reserve(8 << 20); using var two = ledger.Reserve(8 << 20);
-        Assert.Equal(64L << 20, ledger.ReservedBytes);
+        Assert.Equal(80L << 20, ledger.ReservedBytes);
         Assert.Equal("CREATURE_GEOMETRY_RESOURCE_LIMIT", Assert.Throws<DiscoveryException>(() => ledger.Reserve(1)).Code);
         Assert.Equal("CREATURE_GEOMETRY_RESOURCE_LIMIT", Assert.Throws<DiscoveryException>(() => producer.Reserve(1)).Code);
         Assert.Equal("CREATURE_GEOMETRY_CLEANUP_FAILED", Assert.Throws<DiscoveryException>(() => producer.Dispose()).Code);
-        Assert.Equal(64L << 20, ledger.ReservedBytes); source.Dispose(); Assert.Equal(64L << 20, ledger.ReservedBytes);
+        Assert.Equal(80L << 20, ledger.ReservedBytes); source.Dispose(); textures.Dispose(); Assert.Equal(80L << 20, ledger.ReservedBytes);
         capture.Dispose(); Assert.Equal(16L << 20, ledger.ReservedBytes); producer.Dispose(); Assert.Equal(16L << 20, ledger.ReservedBytes);
     }
     [Theory]
@@ -268,7 +269,7 @@ public sealed class CreatureGeometrySourcesTests
             Assert.Same(failure, await Assert.ThrowsAsync<GeometrySourceCleanupException>(() => owner.DisposeAsync().AsTask()));
             Assert.Equal(1, encoded.CloseCalls); Assert.Equal(1, decoded.CloseCalls);
             Assert.Equal(fault == "staging" ? 1 : 0, release.Calls);
-            Assert.IsType<IOException>(failure.InnerException); Assert.Equal(48L << 20, ledger.ReservedBytes);
+            Assert.IsType<IOException>(failure.InnerException); Assert.Equal(64L << 20, ledger.ReservedBytes);
             Assert.Equal("CREATURE_GEOMETRY_RESOURCE_LIMIT", Assert.Throws<DiscoveryException>(() => ledger.ReserveProducer()).Code);
             Assert.Equal("CREATURE_GEOMETRY_CLEANUP_FAILED", Assert.Throws<DiscoveryException>(() => producer.Dispose()).Code);
             using var stop = new CancellationTokenSource();

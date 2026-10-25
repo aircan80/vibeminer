@@ -23,20 +23,20 @@ public sealed partial class DiscoveryCatalog
     private static DiscoveryException GeometryCorrupt() => new("CREATURE_GEOMETRY_CORRUPT", "A geometry source or artifact has known corruption.");
 
     internal Task<GeometryCanonicalSources> ReadGeometryOriginalSourcesAsync(AssetSourceAssociation association,
-        MetadataExpectation expectation, ContentReceipt verifiedCandidate, CancellationToken token)
+        MetadataExpectation expectation, ContentReceipt verifiedCandidate, CancellationToken token, bool texture = false)
     {
         token.ThrowIfCancellationRequested();
         association = GeometryCopyAssociation(association);
-        GeometryAssociationShape(association, expectation, verifiedCandidate);
+        GeometryAssociationShape(association, expectation, verifiedCandidate, texture);
         // Bound serialization before copying; caller lists cannot change the queued source identity.
         var frozenBytes = GeometryBytes(new GeometrySourceCapsule("source",
             association.Memberships[0].Entry.FileDataId, expectation, verifiedCandidate, association), GeometrySourceBytes);
         var frozen = GeometryDecode<GeometrySourceCapsule>(frozenBytes);
-        GeometryAssociationShape(frozen.Association, frozen.Expectation, frozen.Receipt);
+        GeometryAssociationShape(frozen.Association, frozen.Expectation, frozen.Receipt, texture);
         return Schedule(() =>
         {
             using var transaction = Db.BeginTransaction(); var budget = GeometrySourceBytes - frozenBytes.Length;
-            var result = GeometryOriginalSources(frozen.Association, frozen.Expectation, frozen.Receipt, transaction, ref budget, insert: true);
+            var result = GeometryOriginalSources(frozen.Association, frozen.Expectation, frozen.Receipt, transaction, ref budget, insert: true, texture);
             token.ThrowIfCancellationRequested(); transaction.Commit(); return result;
         }, token);
     }
@@ -63,9 +63,9 @@ public sealed partial class DiscoveryCatalog
     }
 
     private GeometryCanonicalSources GeometryOriginalSources(AssetSourceAssociation association, MetadataExpectation expected,
-        ContentReceipt candidate, SqliteTransaction transaction, ref int budget, bool insert)
+        ContentReceipt candidate, SqliteTransaction transaction, ref int budget, bool insert, bool texture = false)
     {
-        GeometryAssociationShape(association, expected, candidate);
+        GeometryAssociationShape(association, expected, candidate, texture);
         GeometryAssociationOpening(association, transaction);
         foreach (var configuration in association.Configurations)
         {
@@ -164,7 +164,8 @@ public sealed partial class DiscoveryCatalog
         return receipt;
     }
 
-    private static void GeometryAssociationShape(AssetSourceAssociation source, MetadataExpectation expected, ContentReceipt receipt)
+    // Texture sources (#63) allow 16 MiB encoded and decoded; model and SKIN keep 4 MiB / 8 MiB.
+    private static void GeometryAssociationShape(AssetSourceAssociation source, MetadataExpectation expected, ContentReceipt receipt, bool texture = false)
     {
         if (source?.Request is null || source.SourceReference is null || source.Configurations is null || source.Configurations.Count != 2 ||
             source.Configurations.Any(c => c is null) || source.Configurations.Count(c => c.Role == "buildConfig") != 1 ||
@@ -174,7 +175,8 @@ public sealed partial class DiscoveryCatalog
             source.ResearchLocale != "enUS" || source.SourceReference.Region != source.Request.SourceRegion ||
             source.VariantPolicy != AssetResolutionSession.VariantPolicy || source.EncodingLookupRevision != ResolverArtifacts.EncodingRevision ||
             source.RootLookupRevision != AssetResolutionSessions.RootArtifactRevision || source.EncodingSelectionPolicy != AssetResolutionSession.EncodingSelectionPolicy ||
-            expected.Role != "asset" || expected.EncodedBytes is < 9 or > (4 << 20) || expected.DecodedBytes is < 1 or > (8 << 20) ||
+            expected.Role != "asset" || expected.EncodedBytes < 9 || expected.EncodedBytes > (texture ? 16 << 20 : 4 << 20) ||
+            expected.DecodedBytes < 1 || expected.DecodedBytes > (texture ? 16 << 20 : 8 << 20) ||
             receipt.ContentKey != expected.ContentKey || receipt.EncodingKey != expected.EncodingKey || DownloadNumber(receipt.EncodedBytes) != expected.EncodedBytes ||
             DownloadNumber(receipt.DecodedBytes) != expected.DecodedBytes || source.Memberships.Any(m => m.BlockOrdinal < 0 || m.EntryOrdinal < 0 ||
                 m.Entry.FileDataId == 0 || m.Entry.FileDataId != source.Memberships[0].Entry.FileDataId || m.Entry.ContentKey != expected.ContentKey)) throw GeometryInvalid();

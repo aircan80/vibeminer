@@ -16,7 +16,7 @@ public sealed partial class CreatureGeometryStoreTests
         await using var f=await Fixture.Create();
         f.Work.Authorize=(_,_)=>
         {
-            Assert.Equal(48L<<20,f.Store.Pressure.Payload);
+            Assert.Equal(64L<<20,f.Store.Pressure.Payload);
             return Task.FromResult(f.Proof with{Core=f.Proof.Core with{Opening=f.Proof.Core.Opening with
                 {Versions=f.Proof.Core.Opening.Versions with{Bytes=new byte[(1<<20)+1]}}}});
         };
@@ -42,7 +42,7 @@ public sealed partial class CreatureGeometryStoreTests
             Assert.Same(original.Delivered[0],selection.Original.Display);return Task.FromResult<IGeometryStorePublication>(new Publication());
         };
         var prepare=f.Store.PrepareAsync(new(f.Request),Progress,default);await entered.Task.WaitAsync(Guard);
-        Assert.Equal(48L<<20,f.Store.Pressure.Payload);release.SetResult();Assert.Equal(CreatureGeometryState.NoDeclaredTriangles,(await prepare.WaitAsync(Guard)).State);
+        Assert.Equal(64L<<20,f.Store.Pressure.Payload);release.SetResult();Assert.Equal(CreatureGeometryState.NoDeclaredTriangles,(await prepare.WaitAsync(Guard)).State);
         Assert.Equal(1,f.Work.Ensures);Assert.Equal(1,f.Work.Produces);
     }
     [Theory]

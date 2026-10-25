@@ -12,7 +12,30 @@ internal static class CreatureDisplayPolicy
     internal static string Definition(CreatureDisplayTargetRole role) => role == CreatureDisplayTargetRole.Display
         ? "64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425"
         : "ace9dfbb1acdec0eae7899273a4e983d851d2de8d6471fd8eb95ac8e70584e2a";
-    internal static string Layout(CreatureDisplayTargetRole role) => role == CreatureDisplayTargetRole.Display ? "7275F5F6" : "0F5449F8";
+    // Retail layouts, then the Classic layouts (F75F884C/3FFEE408) that 1.15, 2.5 and 5.5 builds share.
+    internal static IReadOnlyList<string> Layouts(CreatureDisplayTargetRole role) => role == CreatureDisplayTargetRole.Display ? ["7275F5F6", "F75F884C"] : ["0F5449F8", "3FFEE408"];
+    internal static string Layout(CreatureDisplayTargetRole role) => Layouts(role)[0];
+    internal static bool IsLayout(CreatureDisplayTargetRole role, string? layout) => layout is not null && Layouts(role).Contains(layout.ToUpperInvariant());
+    internal const string ExtendedField = "ExtendedDisplayInfoID", VariationField = "TextureVariationFileDataID";
+    /// <summary>Texture fields of an already-read CreatureDisplayInfo row. Null when a field is absent, not a plain
+    /// integer column, has a text issue or is not a canonical signed32 value; nothing is guessed or defaulted.</summary>
+    internal static CreatureDisplayTextureEvidence? TextureEvidence(Db2Row row, Wdc5TableHeader header)
+    {
+        int Column(string name)
+        {
+            var index = -1;
+            for (var i = 0; i < header.Columns.Count; i++)
+                if (header.Columns[i].Name == name) { if (index != -1) return -1; index = i; }
+            return index >= 0 && header.Columns[index] is { Kind: "integer", IsId: false, Interpretation: null } && index < row.Values.Count &&
+                row.TextIssues?.Any(issue => issue.ColumnIndex == index) != true ? index : -1;
+        }
+        string? Value(int column) => column >= 0 && int.TryParse(row.Values[column], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value) &&
+            N(value) == row.Values[column] ? row.Values[column] : null;
+        var extended = Column(ExtendedField); var variations = Enumerable.Range(0, 4).Select(i => Column(VariationField + "[" + i + "]")).ToArray();
+        var extendedValue = Value(extended); var values = variations.Select(Value).ToArray();
+        if (extendedValue is null || values.Any(v => v is null)) return null;
+        return new(extended, extendedValue, Array.AsReadOnly(variations), Array.AsReadOnly(values.Select(v => v!).ToArray()));
+    }
     internal static string File(CreatureDisplayTargetRole role) => role == CreatureDisplayTargetRole.Display ? "1108759" : "1365368";
     internal static string Field(CreatureDisplayTargetRole role) => role == CreatureDisplayTargetRole.Display ? "ModelID" : "FileDataID";
     internal static CreatureDisplayAbsence Absence(TableDataCoverage coverage) => coverage.Scope switch
@@ -49,7 +72,7 @@ internal static class CreatureDisplayPolicy
     }
     internal static int SelectField(DbdDocument definition, string version, TableRowsArtifact rows, CreatureDisplayTargetRole role)
     {
-        if (!string.Equals(rows.Header.TableHash, Table(role), StringComparison.OrdinalIgnoreCase) || rows.Header.LayoutHash.ToUpperInvariant() != Layout(role)) throw Unsupported();
+        if (!string.Equals(rows.Header.TableHash, Table(role), StringComparison.OrdinalIgnoreCase) || !IsLayout(role, rows.Header.LayoutHash)) throw Unsupported();
         var selected = definition.SelectBuild(version, rows.Header.LayoutHash);
         if (selected.Blocks.Count != 1) throw Unsupported();
         var offset = 0; var result = -1;

@@ -4,13 +4,13 @@ import {lstat,realpath,open,type FileHandle} from 'node:fs/promises';
 import {isAbsolute,join,resolve} from 'node:path';
 import {performance} from 'node:perf_hooks';
 import type {CreatureGeometryLeaseDescriptor} from '../../../../contracts/generated/discovery';
-import {geometryLeaseMatches,sameGeometryManifest,snapshotGeometryManifest,validGeometryParams,validGeometryToken,type GeometryParams,type GeometryOpenParams,type GeometrySceneIdentity,type GeometryBodyGrant,type ReadonlyGeometryManifest} from '../shared/creature-geometry';
+import {geometryLeaseMatches,isAppearanceManifest,sameBodyManifest,snapshotBodyManifest,validGeometryParams,validGeometryToken,type GeometryParams,type GeometryOpenParams,type GeometrySceneIdentity,type GeometryBodyGrant,type ReadonlyAppearanceManifest,type ReadonlyBodyManifest,type ReadonlyGeometryManifest} from '../shared/creature-geometry';
 import {authorizedGeometryRequest} from './geometry-provenance';
 import {EngineFailure} from './engine-client';
 const WINDOW=65536,LIFETIME=30000;
 interface Options{dataDirectory:string;openGeometry(request:GeometryOpenParams,signal:AbortSignal):Promise<CreatureGeometryLeaseDescriptor>;closeGeometry(leaseId:string):Promise<void>;hasEngineExited():boolean;now?():number;}
 interface RecordState{
- identity:GeometrySceneIdentity;selection:GeometryParams;manifest:ReadonlyGeometryManifest;capability:string;deadline:number;current():boolean;
+ identity:GeometrySceneIdentity;selection:GeometryParams;manifest:ReadonlyBodyManifest;capability:string;deadline:number;current():boolean;
  abort:AbortController;timer:ReturnType<typeof setTimeout>;used:boolean;worker:Promise<void>|null;workerDone:boolean;
  file:FileHandle|null;leaseId:string|null;uncertainOpen:boolean;cleanupFailed:boolean;fileCloseFailed:boolean;
  bytes:Buffer|undefined;body:ReadableStreamDefaultController<Uint8Array>|null;bodyDone:boolean;delivered:boolean;done:Promise<void>;resolve():void;reject(error:Error):void;settled:boolean;
@@ -23,10 +23,10 @@ export class GeometryBinaryProtocol{
  private root:string;private now:()=>number;
  constructor(private readonly options:Options,private readonly openFile:typeof open=open){if(!isAbsolute(options.dataDirectory))throw new TypeError('Geometry storage requires an absolute app-owned directory.');this.root=join(resolve(options.dataDirectory),'objects-v1');this.now=options.now??(()=>performance.now());}
  get stats(){return{records:this.records.size,active:this.active!==null,snapshotBytes:[...this.records.values()].reduce((n,r)=>n+(r.bytes?.length??0),0),fileDebt:[...this.records.values()].filter(r=>r.file!==null).length,engineDebt:[...this.records.values()].filter(r=>r.leaseId!==null||r.uncertainOpen).length,failed:this.failed};}
- issue(identity:GeometrySceneIdentity,selection:GeometryParams,manifest:ReadonlyGeometryManifest,current:()=>boolean):GeometryBodyGrant{
+ issue(identity:GeometrySceneIdentity,selection:GeometryParams,manifest:ReadonlyBodyManifest,current:()=>boolean):GeometryBodyGrant{
   if(this.closed||this.failed)throw cleanup();if(this.records.size>=2||this.active)throw new EngineFailure('CREATURE_GEOMETRY_BUSY','A geometry body is still opening or retiring.',true);
   if(!validGeometryParams(selection)||!validGeometryToken(identity.viewId)||!validGeometryToken(identity.operationToken)||!Number.isSafeInteger(identity.viewGeneration)||identity.viewGeneration<1||identity.geometryArtifactId!==manifest.artifactId||this.records.has(identity.operationToken)||!current())throw new EngineFailure('INVALID_REQUEST','Choose the current geometry view and exact ready artifact.');
-  const owned=snapshotGeometryManifest(manifest),capability=randomBytes(16).toString('hex'),deadline=this.now()+LIFETIME;let accept!:()=>void,refuse!:(e:Error)=>void;
+  const owned=snapshotBodyManifest(manifest),capability=randomBytes(16).toString('hex'),deadline=this.now()+LIFETIME;let accept!:()=>void,refuse!:(e:Error)=>void;
   const done=new Promise<void>((yes,no)=>{accept=yes;refuse=no;});void done.catch(()=>{});
   const r:RecordState={identity:Object.freeze({...identity}),selection:{...selection},manifest:owned,capability,deadline,current,abort:new AbortController(),timer:null as unknown as ReturnType<typeof setTimeout>,used:false,worker:null,workerDone:false,file:null,leaseId:null,uncertainOpen:false,cleanupFailed:false,fileCloseFailed:false,bytes:undefined,body:null,bodyDone:false,delivered:false,done,resolve:accept,reject:refuse,settled:false};
   r.timer=setTimeout(()=>r.abort.abort(),LIFETIME);r.timer.unref?.();r.abort.signal.addEventListener('abort',()=>{if(!r.worker){r.workerDone=true;this.finishBody(r,false);}else if(r.body)this.finishBody(r,false);},{once:true});this.records.set(identity.operationToken,r);
@@ -54,7 +54,7 @@ export class GeometryBinaryProtocol{
    if(lease&&validGeometryToken(lease.leaseId))r.leaseId=lease.leaseId;
    try{
     if(!r.leaseId&&!this.options.hasEngineExited()){r.uncertainOpen=true;r.cleanupFailed=true;this.failed=true;throw new Refusal(502);}
-    this.check(r);if(!geometryLeaseMatches(lease,parameters)||!sameGeometryManifest(lease.manifest,r.manifest))throw new Refusal(502);
+    this.check(r);if(!geometryLeaseMatches(lease,parameters)||!sameBodyManifest(lease.manifest,r.manifest))throw new Refusal(502);
     r.bytes=await this.copy(r);this.check(r);
    }finally{await this.closeOwned(r);}
    this.check(r);const length=r.manifest.byteLength;let offset=0;
@@ -87,7 +87,14 @@ export class GeometryBinaryProtocol{
  private require(token:string):RecordState{const r=this.records.get(token);if(!r)throw new EngineFailure('CREATURE_GEOMETRY_VIEW_RETIRED','This geometry operation is no longer owned.');return r;}
 }
 function failure(error:unknown):Response{return new Response('Geometry body unavailable.',{status:error instanceof Refusal?error.status:error instanceof EngineFailure&&error.code.endsWith('CLEANUP_FAILED')?502:500,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':'null','Vary':'Origin'}});}
-function headerMatches(b:Buffer,m:ReadonlyGeometryManifest):boolean{
+function headerMatches(b:Buffer,m:ReadonlyBodyManifest):boolean{return isAppearanceManifest(m)?appearanceHeaderMatches(b,m):geometryHeaderMatches(b,m as ReadonlyGeometryManifest);}
+// VMA1 header (contracts/geometry-vma1-v1.md); the renderer then scans every region before any upload.
+function appearanceHeaderMatches(b:Buffer,m:ReadonlyAppearanceManifest):boolean{
+ if(b.length<160||b.toString('ascii',0,4)!=='VMA1'||b.readUInt16LE(4)!==1||b.readUInt16LE(6)!==160||b.readUInt32LE(8)!==m.byteLength||b.readUInt32LE(12)!==1||b.subarray(16,48).toString('hex')!==m.bindingSha256)return false;
+ const expected=[[48,m.vertexCount],[52,m.indexCount],[56,m.drawCount],[60,m.textureCount],[64,m.positions.offset],[68,m.positions.byteLength],[72,m.uvs.offset],[76,m.uvs.byteLength],[80,m.indices.offset],[84,m.indices.byteLength],[88,m.draws.offset],[92,m.draws.byteLength],[96,m.textures.offset],[100,m.textures.byteLength],[104,m.texels.offset],[108,m.texels.byteLength],[136,m.alphaReference],[140,m.displayId],[144,0],[148,0],[152,0],[156,0]];
+ if(expected.some(([offset,value])=>b.readUInt32LE(offset)!==value))return false;for(let i=0;i<3;i++){const min=b.readFloatLE(112+i*4),max=b.readFloatLE(124+i*4);if(!Number.isFinite(min)||!Number.isFinite(max)||Object.is(min,-0)||Object.is(max,-0)||min!==m.bounds.min[i]||max!==m.bounds.max[i])return false;}return true;
+}
+function geometryHeaderMatches(b:Buffer,m:ReadonlyGeometryManifest):boolean{
  if(b.length<128||b.toString('ascii',0,4)!=='VMG1'||b.readUInt16LE(4)!==1||b.readUInt16LE(6)!==128||b.readUInt32LE(8)!==m.byteLength||b.readUInt32LE(12)!==1||b.subarray(16,48).toString('hex')!==m.bindingSha256)return false;
  const expected=[[48,m.vertexCount],[52,m.lineIndexCount],[56,m.sectionCount],[60,m.vertexLookupCount],[64,m.positions.offset],[68,m.positions.byteLength],[72,m.lineIndices.offset],[76,m.lineIndices.byteLength],[80,m.sections.offset],[84,m.sections.byteLength],[112,m.sectionIndexCount],[116,1],[120,m.sourceTriangleIndexCount],[124,0]];
  if(expected.some(([offset,value])=>b.readUInt32LE(offset)!==value))return false;for(let i=0;i<3;i++){const min=b.readFloatLE(88+i*4),max=b.readFloatLE(100+i*4);if(!Number.isFinite(min)||!Number.isFinite(max)||Object.is(min,-0)||Object.is(max,-0)||min!==m.bounds.min[i]||max!==m.bounds.max[i])return false;}return true;
