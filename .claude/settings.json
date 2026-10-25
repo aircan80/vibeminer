@@ -1,6 +1,8 @@
 {
   "permissions": {
     "allow": [
+      "Bash(git:*)",
+      "Bash(gh pr merge:*)",
       "Bash(gh issue view:*)",
       "Bash(gh issue list:*)",
       "Bash(gh issue create:*)",
@@ -12,12 +14,6 @@
       "Bash(gh pr list:*)",
       "Bash(gh pr diff:*)",
       "Bash(gh pr checks:*)",
-      "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(git branch:*)",
-      "Bash(git worktree:*)",
       "Bash(npm test:*)",
       "Bash(npm run build:*)",
       "Bash(npm run test:*)",
@@ -25,8 +21,6 @@
       "Bash(node tools/dotnet.mjs:*)"
     ],
     "ask": [
-      "Bash(git push:*)",
-      "Bash(gh pr merge:*)",
       "Bash(gh release:*)",
       "Bash(gh repo edit:*)"
     ],
@@ -34,7 +28,8 @@
       "Bash(gh repo delete:*)",
       "Bash(gh api:*)",
       "Bash(git push --force:*)",
-      "Bash(git push -f:*)"
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)"
     ]
   }
 }
