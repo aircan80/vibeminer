@@ -124,7 +124,7 @@ Items, Effects and the geometry view keep their own stylesheets inside the Home 
 
 - Modal dialogs (Source details): named heading, initial focus inside, Tab trap, Escape, inert background, focus returns to the invoker.
 - Nonmodal panels and popovers (activity, Status, identity): no trap, ordinary Tab exit, Close/Escape returns to the invoker and its window position, and an outside click leaves focus on whatever was clicked. Only one surface is open at a time. Clicking the same trigger again closes it.
-- The one exception: while the Home shell scrolls as a whole (600×480 at 200% text), the open activity panel covers everything, so it is a sheet. The header, the area and the floating entry are inert, and Tab stays in the panel and the status bar. Escape and Close return to the opener with its scroll position ([D086](DECISIONS.md)).
+- The one exception: while the Home shell scrolls as a whole (600×480 at 200% text), the open activity panel covers everything, so it is a sheet. The header, the area and the floating entry are inert, and Tab stays in the panel and the status bar. Escape and Close return to the opener with its scroll position ([D086](DECISIONS.md)). When the window or text size switches to the sheet while the panel is open, focus under it moves to the panel heading. When the opening entry is gone on close (the floating entry after the header came back into view), focus goes to the header's activity entry, else to the area heading, scrolled into view.
 
 ### Announcements
 

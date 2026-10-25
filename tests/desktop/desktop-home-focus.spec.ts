@@ -181,3 +181,73 @@ test('a held keyboard page read neither reflows the grid nor undoes a later move
     await text(page, 1);
   } finally { await session.close(); }
 });
+
+// #68: the window or text size changing while the activity panel is open never drops focus to the page.
+const focusInView = (page: Page) => page.evaluate(() => { const el = document.activeElement!, r = el.getBoundingClientRect(), bar = document.querySelector('.dh-statusbar')!.getBoundingClientRect(), floor = el.closest('.dh-statusbar') || !el.closest('.dh-app') ? innerHeight : bar.top; return r.height > 0 && r.top >= -1 && r.bottom <= floor + 1; });
+const settle = (page: Page) => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+async function openFromFloating(session: Awaited<ReturnType<typeof opened>>) {
+  const { page } = session, floating = page.locator('.download-activity-floating');
+  await size(session, 600, 480); await text(page, 2); await settle(page);
+  await page.locator('.dh-app').evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await expect(floating).toBeVisible(); await floating.click();
+  await expect(page.getByRole('heading', { name: 'Downloads & activity', exact: true })).toBeFocused();
+  await expect(floating).toHaveCount(0);
+}
+
+test('closing the panel after its floating opener is gone returns focus to the header entry, else to the area heading, in view', async () => {
+  const session = await opened(true, false, true);
+  try {
+    const { page } = session, panel = page.locator('#download-activity-panel');
+    await page.getByRole('switch', { name: /^Download mode / }).click(); await expect(page.locator('.dv-chip:visible')).toBeVisible();
+    // Opened from the floating entry, then the window grows: the header is back, so there is no floating entry to return to.
+    await openFromFloating(session);
+    await size(session, 1280, 800); await settle(page);
+    await page.keyboard.press('Escape'); await expect(panel).toBeHidden();
+    await expect(page.locator('.download-activity-floating')).toHaveCount(0);
+    await expect(page.locator('.dv-chip:visible')).toBeFocused();
+    expect(await focusInView(page), 'header entry in view').toBe(true);
+    // The same at 600x480 when the text goes back to 100%: the shell stops scrolling and the header entry takes focus.
+    await openFromFloating(session);
+    await text(page, 1); await settle(page);
+    await page.keyboard.press('Escape'); await expect(panel).toBeHidden();
+    await expect(page.locator('.dv-chip:visible')).toBeFocused();
+    expect(await focusInView(page), 'header entry in view at 600x480 100%').toBe(true);
+    // With the header entry retired too (the pass completed while the panel was open), focus goes to the area heading, in view.
+    await openFromFloating(session);
+    await writeFile(path.join(session.data, 'retention-state.json'), JSON.stringify({ state: 'completed', pendingObjects: 0, progress: null, problem: null, unresolvedObjects: '0', coverage: { receiptObjects: '60', receiptBytes: '6000', receiptedAt: '2026-10-19T00:00:00Z', presenceState: 'assessed', presenceAssessedAt: '2026-10-19T01:00:00Z', observedObjects: '60', presentObjects: '60', presentBytes: '6000', missingObjects: '0', corruptObjects: '0' } }));
+    await panel.getByRole('button', { name: 'Check download status', exact: true }).click();
+    await expect(page.locator('.retention-state')).toHaveText('Encoded retention pass complete');
+    await size(session, 1280, 800); await settle(page);
+    await page.keyboard.press('Escape'); await expect(panel).toBeHidden();
+    await expect(page.locator('.dv-chip')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeFocused();
+    expect(await focusInView(page), 'area heading in view').toBe(true);
+    await text(page, 1);
+  } finally { await session.close(); }
+});
+
+test('the header turning inert under focus when the open panel becomes a sheet moves focus to the panel heading', async () => {
+  const session = await opened(true, false, true);
+  try {
+    const { page } = session, panel = page.locator('#download-activity-panel'), heading = page.getByRole('heading', { name: 'Downloads & activity', exact: true });
+    const settings = page.locator('.dh-toolbar').getByRole('button', { name: 'Settings', exact: true }), inert = () => settings.evaluate(el => !!el.closest('[inert]'));
+    await page.getByRole('switch', { name: /^Download mode / }).click(); await expect(page.locator('.dv-chip:visible')).toBeVisible();
+    // 1280x800 doesn't switch to the sheet at 200%: the panel stays nonmodal and focus moved to the header stays there.
+    await page.locator('.dv-chip:visible').click(); await expect(heading).toBeFocused();
+    await settings.focus(); await text(page, 2); await settle(page);
+    await expect(settings).toBeFocused(); expect(await inert()).toBe(false);
+    await page.keyboard.press('Escape'); await expect(panel).toBeHidden(); await expect(settings).toBeFocused();
+    // 600x480: 200% text makes the open panel a sheet and the header inert, so focus moves into the panel, to its heading, in view.
+    await text(page, 1); await size(session, 600, 480);
+    await page.locator('.dv-chip:visible').click(); await expect(heading).toBeFocused();
+    await settings.focus(); await expect(settings).toBeFocused();
+    await text(page, 2); await settle(page);
+    expect(await inert(), 'header inert under the sheet').toBe(true);
+    await expect(heading).toBeFocused();
+    expect(await heading.evaluate(el => { const r = el.getBoundingClientRect(); return r.height > 0 && r.top >= -1 && r.bottom <= innerHeight + 1; }), 'panel heading in view').toBe(true);
+    // Escape from there still returns to the opener, in view.
+    await page.keyboard.press('Escape'); await expect(panel).toBeHidden(); await expect(page.locator('.dv-chip:visible')).toBeFocused();
+    expect(await focusInView(page)).toBe(true);
+    await text(page, 1);
+  } finally { await session.close(); }
+});

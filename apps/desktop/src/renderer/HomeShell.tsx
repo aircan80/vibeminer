@@ -83,10 +83,15 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
  // While the shell scrolls the open panel covers everything, so it is a sheet: everything under it is inert (the skip link, the header
  // apart from the panel's own slot, and the area), so Tab stays in the panel and the status bar. This runs before the activity provider
  // restores focus on close, so the opener is no longer inert by then. Larger sizes keep the nonmodal panel.
- const sheet=scrolling&&expanded;
- useLayoutEffect(()=>{const root=host.current,bar=toolbar.current;if(!sheet||!root||!bar)return;
+ // When the layout switches to the sheet with the panel already open (the window or text size changed), focus under it (or on body,
+ // where Chromium leaves an element that just became inert) moves into the panel, to its heading (#68).
+ const sheet=scrolling&&expanded,sheetBefore=useRef(false),openBefore=useRef(false);
+ useLayoutEffect(()=>{const switched=sheet&&!sheetBefore.current&&openBefore.current;sheetBefore.current=sheet;openBefore.current=expanded;
+  const root=host.current,bar=toolbar.current;if(!sheet||!root||!bar)return;
   const covered=[root.querySelector<HTMLElement>('.dh-skip'),...[...bar.children].flatMap(el=>el.classList.contains('dh-hgroup')?[...el.children].filter(child=>!child.hasAttribute('data-activity-slot')):[el])].filter(Boolean) as HTMLElement[];
+  const active=document.activeElement;
   for(const el of covered)el.inert=true;
+  if(switched&&(active===document.body||covered.some(el=>el.contains(active))||!!areaNode.current?.contains(active)))document.querySelector<HTMLElement>('#download-activity-panel #download-surface-heading')?.focus({preventScroll:true});
   return()=>{for(const el of covered)el.inert=false;};
  });
  // The panel's heading is sticky: its height is the panel's top scroll padding, so a control Tab scrolls into view never lands under it.
