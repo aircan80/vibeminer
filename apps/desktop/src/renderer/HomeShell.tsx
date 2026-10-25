@@ -15,11 +15,12 @@ import './desktop-home.css';
 // Narrow (#52, D093): below 28rem the Files object rows take two lines, so their local state stays in view.
 const MEDIUM_REM=78.4,COMPACT_REM=65.333333,NARROW_REM=28;
 type Shell={compact:boolean;statusSlot:HTMLElement|null};
-const ShellContext=createContext<Shell>({compact:false,statusSlot:null});
+export const ShellContext=createContext<Shell>({compact:false,statusSlot:null});
 export function useShell(){return useContext(ShellContext);}
 // Areas can add their own status bar facts through statusSlot (Tables names its definitions revision and admitted rows).
 // The docked activity panel covers the side column or inspector (and the end of the Home pane head), which are inert while it is open.
-// In the compact layout, and on Items and Creatures whose own layouts don't reserve that column, the whole area is inert instead.
+// In the compact layout, and on Creatures whose layout doesn't reserve that column, the whole area is inert instead. On Items the
+// panel covers exactly the item detail, which the Items view makes inert itself (docs/design/items-view).
 export function useCoveredSide(){const ui=useDownloadActivity(),{compact}=useShell();return !!ui?.expanded&&!compact;}
 export type ShellArea='home'|'tables'|'files'|'items'|'creatures';
 export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,areas,status,fixtureLabel,children,dialog}:{snapshot:WorkspaceSnapshot;catalogBuild?:Build|null;label:string;retention?:RetentionController;onChoose:()=>void;area:ShellArea;areas:ReactNode;status?:ReactNode;fixtureLabel?:string|null;children:ReactNode;dialog?:ReactNode}){
@@ -105,7 +106,7 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   <a className="dh-skip" href="#dh-area">Skip to content</a>
   <div ref={shell} className="dh-app">
    <BuildHeader ref={toolbar} snapshot={snapshot} catalogBuild={catalogBuild} label={label} retention={retention} onChoose={onChoose} areas={areas} area={area}/>
-   <main ref={areaNode} id="dh-area" className="dh-area" tabIndex={-1} inert={!!ui?.expanded&&(size.compact||sheet||area==='items'||area==='creatures')}>{children}</main>
+   <main ref={areaNode} id="dh-area" className="dh-area" tabIndex={-1} inert={!!ui?.expanded&&(size.compact||sheet||area==='creatures')}>{children}</main>
    <footer className="dh-statusbar" ref={statusBar}>
     <span><strong>{snapshot.build.productId} {snapshot.build.version}</strong> · {snapshot.sourceReference.region.toUpperCase()} · enUS</span>
     {status}<span ref={setStatusSlot} className="dh-status-slot"/>

@@ -5,4 +5,7 @@ export function itemSummary(snapshot:ItemsSnapshot,id:string,withIcons?:boolean)
 export function itemDetail(snapshot:ItemsSnapshot,id:string,withIcons?:boolean):ItemDetail|null;
 export function itemsPage(snapshot:ItemsSnapshot,params:ItemsPageParams,withIcons?:boolean):ItemsPage;
 export function itemsDefinition(snapshot:ItemsSnapshot,tableId:string,buildVersion:string):import('../../../contracts/generated/discovery').TableDefinitionSnapshot;
+export const itemLabelLists:import('../../../contracts/generated/discovery').ItemLabelLists;
+export const itemFactKeys:readonly (readonly [string,readonly string[]])[];
+export function itemFacts(snapshot:ItemsSnapshot,params:{itemId:string},withIcons?:boolean):import('../../../contracts/generated/discovery').ItemFactsResult;
 export function itemRows(snapshot:ItemsSnapshot,id:string,withIcons?:boolean):{itemRow:import('../../../contracts/generated/discovery').TableDataRow;sparseRow:import('../../../contracts/generated/discovery').TableDataRow|null}|null;

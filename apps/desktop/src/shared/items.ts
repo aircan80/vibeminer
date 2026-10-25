@@ -1,4 +1,4 @@
-import type {ItemsContext,ItemsSnapshot,ItemsReadiness,ItemsPage,ItemInspectResult,ItemSummary,TableDataSnapshot,TableDataRow} from '../../../../contracts/generated/discovery';
+import type {ItemsContext,ItemsSnapshot,ItemsReadiness,ItemsPage,ItemInspectResult,ItemSummary,TableDataSnapshot,TableDataRow,ItemFactsResult,ItemLabelLists} from '../../../../contracts/generated/discovery';
 import {validOpen} from './bridge';
 import {tableDataMatches,validRecordId,validTableTextIssues} from './table-data';
 export type ItemsPageParams=ItemsContext&{artifactId:string;query?:string;exactItemId?:string;limit?:number;after?:string};
@@ -46,4 +46,46 @@ export function itemInspectMatches(r:ItemInspectResult,p:ItemInspectParams,snaps
  if(d.sparseRow){const index=snapshot.sparseSource.columns.findIndex(c=>c.name==='Display_lang'&&c.family==='string'&&!c.interpretation);if(index<0)return false;const issue=d.sparseRow.textIssues?.some(i=>i.columnIndex===index),value=d.sparseRow.values[index];if(issue?d.summary.name.state!=='invalid':d.summary.name.value!==value||d.summary.name.state!==(value.length?'valid':'empty'))return false;}
  const icon=snapshot.itemSource.columns.findIndex(c=>c.name==='IconFileDataID'&&c.family==='integer'&&!c.interpretation);const value=icon>=0?d.itemRow.values[icon]:null;
  return d.summary.iconFileDataId===(value!==null&&validRecordId(value)?value:null);
+}
+// item-facts-v1 (#61): the engine's reviewed projection of one item's Item/ItemSparse rows, and its label lists.
+export const itemFactKeys=['description','display1','display2','display3','icon','quality','itemLevel','itemSquishEra','contentTuning','playerLevelCurve','itemLevelOffsetCurve','itemLevelOffset','class','subclass','inventoryType','requiredLevel','requiredSkill','requiredSkillRank','requiredAbility','minFaction','minReputation','allowableClass','allowableRaces','bonding','stackable','maxCount','containerSlots','buyPrice','sellPrice','vendorStackCount','durationInInventory','statType','statAmount','statPercentEditor','statSocketShare','socketType','socketBonus','gemProperties','damageType','itemDelay','dmgVariance','itemRange','flags','zoneBound','instanceBound','requiredHoliday','priceVariance','priceRandomValue'] as const;
+export type ItemFactKey=typeof itemFactKeys[number];
+const labelValue=/^(0|[1-9][0-9]{0,2})$/;
+export function validItemLabelsParams(value:unknown):boolean{return value===undefined||!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===0;}
+export function itemLabelListsMatches(r:ItemLabelLists):boolean{
+ if(!r||r.labelRevision!=='item-labels-v1')return false;
+ return [r.quality,r.inventoryType,r.bonding,r.trigger].every(list=>Array.isArray(list)&&list.length<=64&&list.every((l,i)=>labelValue.test(l.value)&&typeof l.label==='string'&&l.label.length>0&&l.label.length<=64&&(i===0||BigInt(l.value)>BigInt(list[i-1].value))));
+}
+export function itemFactsMatches(r:ItemFactsResult,p:ItemInspectParams,snapshot?:ItemsSnapshot):boolean{
+ if(!sameItemsContext(r.context,p)||r.artifactId!==p.artifactId||r.itemId!==p.itemId||r.policyRevision!=='item-facts-v1'||r.labelRevision!=='item-labels-v1'||!['present','missing','unknown'].includes(r.sparse)||utf8.encode(JSON.stringify(r)).byteLength>512*1024||snapshot&&snapshot.artifactId!==r.artifactId)return false;
+ if(snapshot&&r.sparse!=='present'&&r.sparse!==(snapshot.sparseSource.coverage.scope==='complete'?'missing':'unknown'))return false;
+ // Outside the Item scope the engine looks the ItemSparse row up: a Sparse-only row is present without facts.
+ if(r.facts===null)return true;
+ if(r.facts.length!==itemFactKeys.length||r.facts.some((f,i)=>f.key!==itemFactKeys[i]))return false;
+ const seen=new Set<string>();
+ for(const fact of r.facts){
+  if(fact.values.length>16)return false;
+  if((fact.state==='missing'||fact.state==='unknown'||fact.state==='unsupported')!==(fact.values.length===0))return false;
+  if((fact.state==='missing'||fact.state==='unknown')&&fact.state!==r.sparse)return false;
+  // Item cells come first, then ItemSparse cells. single: one table; agree/disagree: both, same element count, compared in
+  // order; separate: both, different element counts (Classic Item.DamageType[0–4] beside ItemSparse.DamageType).
+  const item=fact.values.filter(v=>v.tableId==='50238ec2'),sparse=fact.values.filter(v=>v.tableId==='919be54e');
+  if(fact.values.some((v,i)=>i<item.length?v.tableId!=='50238ec2':v.tableId!=='919be54e'))return false;
+  if(!['single','agree','disagree','separate'].includes(fact.agreement))return false;
+  if(fact.agreement==='single'){if(item.length&&sparse.length)return false;}
+  else{
+   if(!item.length||!sparse.length)return false;
+   if(fact.agreement==='separate'){if(item.length===sparse.length)return false;}
+   else if(item.length!==sparse.length||(fact.agreement==='agree')!==item.every((v,i)=>v.value===sparse[i]!.value))return false;
+  }
+  for(const v of fact.values){
+   const key=`${v.tableId}:${v.columnIndex}`;
+   if(seen.has(key)||!validRecordId(v.recordId)||v.recordId!==p.itemId||!['50238ec2','919be54e'].includes(v.tableId)||(v.tableId==='50238ec2')!==(v.table==='Item')||!Number.isInteger(v.columnIndex)||v.columnIndex<0||v.columnIndex>511||typeof v.value!=='string'||!wellFormedText(v.value)||v.label!==null&&(typeof v.label!=='string'||!v.label.length||v.label.length>64))return false;
+   seen.add(key);
+   if(v.tableId==='919be54e'&&r.sparse!=='present')return false;
+   if(snapshot){const column=(v.tableId==='50238ec2'?snapshot.itemSource:snapshot.sparseSource).columns[v.columnIndex];if(!column||column.name!==v.column)return false;}
+  }
+  if(fact.state==='invalidText'&&!fact.values.some(v=>v.value===''))return false;
+ }
+ return true;
 }

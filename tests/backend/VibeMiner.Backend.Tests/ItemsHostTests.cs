@@ -110,6 +110,7 @@ public sealed class ItemsHostTests
                 [Summary("0", ItemNameState.Valid, "Authored name"), Summary("7", ItemNameState.Empty, ""),
                     Summary("8", ItemNameState.Invalid, null), Summary("4294967295", ItemNameState.MissingSparse, null)], null));
         }
+        public Task<bool> SparseRowExistsAsync(ItemInspectRequest request, CancellationToken token) => Task.FromResult(false);
         public Task<ItemInspectResult> InspectAsync(ItemInspectRequest request, CancellationToken token)
         {
             Inspects++;

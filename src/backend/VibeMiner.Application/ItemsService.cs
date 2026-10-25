@@ -116,6 +116,36 @@ public sealed class ItemsService(IItemsStore store) : IAsyncDisposable
         lock (gate) ThrowIfClosed();
         return store.InspectAsync(request, token);
     }
+    /// <summary>items.facts (item-facts-v1): the reviewed projection of the same rows <see cref="InspectAsync"/> returns.</summary>
+    public async Task<ItemFactsResult> FactsAsync(ItemInspectRequest request, CancellationToken token = default)
+    {
+        Validate(request); token.ThrowIfCancellationRequested();
+        lock (gate) ThrowIfClosed();
+        var snapshot = (await store.ReadAsync(request.Context, token)).Snapshot;
+        if (snapshot is null || snapshot.ArtifactId != request.ArtifactId || snapshot.Context != request.Context)
+            throw new DiscoveryException("ITEMS_ARTIFACT_STALE", "The requested Items feature is not the current admission for this exact context.");
+        var inspected = await store.InspectAsync(request, token);
+        if (inspected.Context != request.Context || inspected.ArtifactId != request.ArtifactId || inspected.ItemId != request.ItemId ||
+            inspected.Detail is { } found && found.Summary.Id != request.ItemId)
+            throw new DiscoveryException("ITEMS_DETAIL_CONTEXT_MISMATCH", "The item detail differs from the exact requested item.");
+        ItemFactsResult result;
+        if (inspected.Detail is not { } detail)
+        {
+            // Outside the Item scope: ItemSparse-only rows exist, so the Sparse row is looked up rather than assumed absent.
+            var sparse = await store.SparseRowExistsAsync(request, token) ? "present"
+                : snapshot.SparseSource.Coverage.Scope == "complete" ? "missing" : "unknown";
+            result = new(request.Context, request.ArtifactId, request.ItemId, ItemFacts.PolicyRevision, ItemFacts.LabelRevision, sparse, null);
+        }
+        else result = new(request.Context, request.ArtifactId, request.ItemId, ItemFacts.PolicyRevision, ItemFacts.LabelRevision,
+            ItemFacts.SparseState(snapshot, detail), ItemFacts.Project(snapshot, detail));
+        return ItemFacts.Bounded(result);
+    }
+    /// <summary>items.labels (item-facts-v1): the reviewed label lists. Local and constant; it reads no build data.</summary>
+    public ItemLabelLists Labels()
+    {
+        lock (gate) ThrowIfClosed();
+        return ItemFacts.LabelLists;
+    }
 
     private async Task RunAsync(Preparation preparation)
     {

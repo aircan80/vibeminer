@@ -150,6 +150,16 @@ public sealed class ItemsStore(DiscoveryCatalog catalog, VerifiedObjectStore obj
         }
         finally { sessionsGate.Release(); }
     }
+    public async Task<bool> SparseRowExistsAsync(ItemInspectRequest request, CancellationToken token)
+    {
+        ItemsService.Validate(request); await sessionsGate.WaitAsync(token);
+        try
+        {
+            var session = await RequireSession(request.Context, request.ArtifactId, token);
+            return await session.SparseRowExistsAsync(request, token);
+        }
+        finally { sessionsGate.Release(); }
+    }
     internal async Task<ItemsSummaryAuthorization> AuthorizeSummariesAsync(ItemsContext context, string artifactId,
         IReadOnlyList<string> itemIds, CancellationToken token)
     {

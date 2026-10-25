@@ -6,7 +6,7 @@ import {creaturesSnapshot,creaturesPage,creatureInspect,creatureSummary,creature
 import {classificationBatch,classificationSource,classificationRows,classificationDefinition} from './classifications.mjs';
 import {png,pngSha,iconOutcome} from './icons.mjs';
 import {randomBytes} from 'node:crypto';
-import {itemsSnapshot,itemRows,itemsPage,itemDetail,itemsDefinition} from './items.mjs';
+import {itemsSnapshot,itemRows,itemsPage,itemDetail,itemsDefinition,itemFacts,itemLabelLists} from './items.mjs';
 // Authored Electron boundary fixture. No network, game parser, or production fallback.
 import { createInterface } from 'node:readline';
 import { readFileSync, existsSync, writeFileSync, appendFileSync, watch, unlinkSync, mkdirSync, renameSync } from 'node:fs';
@@ -187,7 +187,7 @@ function settingsSnapshot() {
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1', 'download-check-v1', 'inventory-files-v1',...(fileCatalogEnabled?['file-catalog-v1']:[]),...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1']:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(geometryEnabled?['creature-source-geometry-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1', 'download-check-v1', 'inventory-files-v1',...(fileCatalogEnabled?['file-catalog-v1']:[]),...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1',...(process.env.VIBEMINER_FIXTURE_FACTS==='0'?[]:['item-facts-v1'])]:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(geometryEnabled?['creature-source-geometry-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
   if(geometryEnabled&&method==='creatures.geometry.close'){geometryLeases.delete(params.leaseId);return reply(id,{closed:true});}
   if(creaturesEnabled&&method.startsWith('creatures.')){
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
@@ -214,6 +214,7 @@ async function dispatch(request) {
   }
   if(itemsEnabled&&method.startsWith('items.')){
     if(iconsEnabled&&method==='items.icon.close'){iconLeases.delete(params.leaseId);return reply(id,{closed:true});}
+    if(method==='items.labels'){if(process.env.VIBEMINER_FIXTURE_FACTS==='0')return fail(id,'UNKNOWN_METHOD','This authored engine has no item facts.');if(Object.keys(params??{}).length)return fail(id,'INVALID_REQUEST','items.labels takes no parameters.');return reply(id,structuredClone(itemLabelLists));}
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
     if(!opened.has(key))return fail(id,'WORKSPACE_NOT_OPEN','Open this exact authored workspace first.');
     function admit(){const value=itemsSnapshot(context);itemsAdmissions.set(key,value);for(const source of[value.itemSource,value.sparseSource])tableData.set(`${key}|${source.tableId}|enUS`,source);return value;}
@@ -236,6 +237,7 @@ async function dispatch(request) {
     if(iconsEnabled&&method==='items.icon.close'){iconLeases.delete(params.leaseId);return reply(id,{closed:true});}
     if(method==='items.page'){if(existsSync(path.join(directory,'hold-items-page')))await waitForRelease('release-items-page',shutdown.signal);if(existsSync(path.join(directory,'items-page-error')))return fail(id,'LOCAL_ITEMS_READ_FAILED','Authored local Items page could not be read.');return reply(id,itemsPage(value,params,iconsEnabled));}
     if(method==='items.inspect'){if(existsSync(path.join(directory,'hold-item-inspect')))await waitForRelease('release-item-inspect',shutdown.signal);if(existsSync(path.join(directory,'items-detail-error')))return fail(id,'LOCAL_ITEM_READ_FAILED','Authored item detail could not be read.');return reply(id,{context,artifactId:value.artifactId,itemId:params.itemId,detail:itemDetail(value,params.itemId,iconsEnabled)});}
+    if(method==='items.facts'&&process.env.VIBEMINER_FIXTURE_FACTS!=='0'){if(existsSync(path.join(directory,'hold-item-facts')))await waitForRelease('release-item-facts',shutdown.signal);if(existsSync(path.join(directory,'items-facts-error')))return fail(id,'LOCAL_ITEM_READ_FAILED','Authored item facts could not be read.');return reply(id,itemFacts(value,params,iconsEnabled));}
   }
   if(method.startsWith('retention.')&&retentionEnabled){
     if(existsSync(path.join(directory,'retention-read-error'))&&method!=='retention.set')return fail(id,'LOCAL_STATUS_UNAVAILABLE','Authored local status read is unavailable.');

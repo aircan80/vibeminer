@@ -16,6 +16,7 @@ Cross-screen rules (tokens, states, progress, focus, verification) are in [UI gu
 | Home and Tables with area navigation | [Home](top-navigation/home.html), [Tables](top-navigation/tables.html) | Superseded layout; its Tables meaning still applies |
 | Desktop settings | [`desktop-settings/index.html?view=settings`](desktop-settings/index.html?view=settings) (states via `?state=`; see its [README](desktop-settings/README.md)) | Selected Settings view and its top-bar entry |
 | Downloads and activity | [Option A: side panel](download-activity/index.html?concept=drawer&state=active&panel=open) | Option A selected as the default; B kept for comparison |
+| Items view | [`items-view/index.html`](items-view/index.html) (states via `?state=`; see its [README](items-view/README.md)) | Selected Items view, approved on [#61](https://github.com/aircan80/vibeminer/issues/61) ([D098](../DECISIONS.md)) |
 
 The HTML files can contain older alternatives. Only the views above guide the app. Their selectors, demo controls, counters, product aliases and quantities are authored examples, not production controls or facts.
 

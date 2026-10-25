@@ -18,3 +18,5 @@ Summary `baseValues` contains at most8 separately attributed verified source fie
 Complete page/detail response budgets are512KiB including a conservative protocol envelope/enum reserve. Exact integers remain strings. Optional icon FDIDs are source facts; image resolution/acquisition and opaque image delivery are separate bounded capabilities. The Items list remains useful when an optional image is missing, ambiguous, protected, unsupported or corrupt.
 
 Known snapshot feature revisions are `items-projection-v1` and `items-projection-v2`; unknown revisions fail ingress. Historical v1 descriptors remain readable for source-preserving refresh, while current readiness requires v2. Revision v2 corrects the exact pinned Sparse field names `Socket_match_enchantment_ID` and `Gem_properties` in the sockets/stat-input group. It preserves original rows and does not add calculated semantics. New artifacts/cursors bind their actual revision; refreshing leaves historical CAS bytes intact.
+
+The reviewed per-item projection and label lists are [item facts](item-facts-v1.md) (`item-facts-v1`); they read the same rows as `items.inspect` and calculate nothing.

@@ -148,6 +148,12 @@
     "itemInspectResult": {
       "$ref": "#/definitions/ItemInspectResult"
     },
+    "itemFactsResult": {
+      "$ref": "#/definitions/ItemFactsResult"
+    },
+    "itemLabelLists": {
+      "$ref": "#/definitions/ItemLabelLists"
+    },
     "itemIconImage": {
       "$ref": "#/definitions/ItemIconImage"
     },
@@ -1126,6 +1132,8 @@
             "items.prepare",
             "items.page",
             "items.inspect",
+            "items.facts",
+            "items.labels",
             "items.icons",
             "items.icon.open",
             "items.icon.close",
@@ -6769,6 +6777,287 @@
         "artifactId",
         "itemId",
         "detail"
+      ],
+      "additionalProperties": false
+    },
+    "ItemFactValue": {
+      "title": "ItemFactValue",
+      "type": "object",
+      "properties": {
+        "tableId": {
+          "type": "string",
+          "enum": [
+            "50238ec2",
+            "919be54e"
+          ]
+        },
+        "table": {
+          "type": "string",
+          "enum": [
+            "Item",
+            "ItemSparse"
+          ]
+        },
+        "column": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "columnIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 511
+        },
+        "recordId": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,9})$"
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "tableId",
+        "table",
+        "column",
+        "columnIndex",
+        "recordId",
+        "value",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "ItemFact": {
+      "title": "ItemFact",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "description",
+            "display1",
+            "display2",
+            "display3",
+            "icon",
+            "quality",
+            "itemLevel",
+            "itemSquishEra",
+            "contentTuning",
+            "playerLevelCurve",
+            "itemLevelOffsetCurve",
+            "itemLevelOffset",
+            "class",
+            "subclass",
+            "inventoryType",
+            "requiredLevel",
+            "requiredSkill",
+            "requiredSkillRank",
+            "requiredAbility",
+            "minFaction",
+            "minReputation",
+            "allowableClass",
+            "allowableRaces",
+            "bonding",
+            "stackable",
+            "maxCount",
+            "containerSlots",
+            "buyPrice",
+            "sellPrice",
+            "vendorStackCount",
+            "durationInInventory",
+            "statType",
+            "statAmount",
+            "statPercentEditor",
+            "statSocketShare",
+            "socketType",
+            "socketBonus",
+            "gemProperties",
+            "damageType",
+            "itemDelay",
+            "dmgVariance",
+            "itemRange",
+            "flags",
+            "zoneBound",
+            "instanceBound",
+            "requiredHoliday",
+            "priceVariance",
+            "priceRandomValue"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "value",
+            "missing",
+            "unknown",
+            "unsupported",
+            "invalidText"
+          ]
+        },
+        "agreement": {
+          "type": "string",
+          "enum": [
+            "single",
+            "agree",
+            "disagree",
+            "separate"
+          ]
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ItemFactValue"
+          },
+          "minItems": 0,
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "key",
+        "state",
+        "agreement",
+        "values"
+      ],
+      "additionalProperties": false
+    },
+    "ItemFactsResult": {
+      "title": "ItemFactsResult",
+      "type": "object",
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/ItemsContext"
+        },
+        "artifactId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "itemId": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,9})$"
+        },
+        "policyRevision": {
+          "type": "string",
+          "const": "item-facts-v1"
+        },
+        "labelRevision": {
+          "type": "string",
+          "const": "item-labels-v1"
+        },
+        "sparse": {
+          "type": "string",
+          "enum": [
+            "present",
+            "missing",
+            "unknown"
+          ]
+        },
+        "facts": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ItemFact"
+              },
+              "minItems": 0,
+              "maxItems": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "context",
+        "artifactId",
+        "itemId",
+        "policyRevision",
+        "labelRevision",
+        "sparse",
+        "facts"
+      ],
+      "additionalProperties": false
+    },
+    "ItemLabel": {
+      "title": "ItemLabel",
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,2})$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "ItemLabelLists": {
+      "title": "ItemLabelLists",
+      "type": "object",
+      "properties": {
+        "labelRevision": {
+          "type": "string",
+          "const": "item-labels-v1"
+        },
+        "quality": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ItemLabel"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "inventoryType": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ItemLabel"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "bonding": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ItemLabel"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "trigger": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ItemLabel"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "labelRevision",
+        "quality",
+        "inventoryType",
+        "bonding",
+        "trigger"
       ],
       "additionalProperties": false
     },

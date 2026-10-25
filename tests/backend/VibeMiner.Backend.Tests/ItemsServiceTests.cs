@@ -284,6 +284,7 @@ public sealed class ItemsServiceTests
             Pages++; LastPage = request; PageToken = token;
             return Task.FromResult(new ItemsPage(request.Context, request.ArtifactId, request.Query, request.ExactItemId, [], null));
         }
+        public Task<bool> SparseRowExistsAsync(ItemInspectRequest request, CancellationToken token) => Task.FromResult(false);
         public Task<ItemInspectResult> InspectAsync(ItemInspectRequest request, CancellationToken token)
         {
             Inspects++; LastInspect = request; InspectToken = token;

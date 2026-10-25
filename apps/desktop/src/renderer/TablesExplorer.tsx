@@ -18,7 +18,7 @@ type View = { id: number; snapshot: TableDefinitionSnapshot; field: string | nul
 type Failure = { code: string; message: string; retryable: boolean };
 const title = (entry: TableCatalogEntry) => entry.name ?? `Unnamed table · ${entry.tableId}`;
 const named = (field: TableDefinitionField) => `${field.name}${field.verifiedName ? '' : ' ?'}`;
-export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceRecord, onReturnToItems, onOpenFile }: { snapshot: WorkspaceSnapshot; bridge: DiscoveryBridge; active: boolean; tableLoading?: TableLoading; sourceRecord?:SourceRecordRequest|null; onReturnToItems?:()=>void; onOpenFile?:(target:Omit<FileTarget,'seq'>)=>void }) {
+export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceRecord, onReturnToItems, onOpenFile, tableRequest }: { snapshot: WorkspaceSnapshot; bridge: DiscoveryBridge; active: boolean; tableLoading?: TableLoading; sourceRecord?:SourceRecordRequest|null; onReturnToItems?:()=>void; onOpenFile?:(target:Omit<FileTarget,'seq'>)=>void; tableRequest?:{id:number;tableId:string;name:string}|null }) {
   const container=useRef<HTMLElement>(null),covered=useCoveredSide(),{compact,statusSlot}=useShell();
   // At enlarged text one pane shows at a time (docs/design/desktop-home). Picking or following a table shows Records.
   const [tablePane,setTablePane]=useState<'catalog'|'records'|'inspector'>('catalog'),[filterSlot,setFilterSlot]=useState<HTMLElement|null>(null),[footSlot,setFootSlot]=useState<HTMLElement|null>(null),[inspectorFoot,setInspectorFoot]=useState<HTMLElement|null>(null),[inspectorDetails,setInspectorDetails]=useState<HTMLElement|null>(null),[headingSlot,setHeadingSlot]=useState<HTMLElement|null>(null);
@@ -174,6 +174,13 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
       setDataViews(previous => previous.map(v => v.entry.tableId === tableId ? next : v));
     } catch { /* The definition shown stays until the table is opened again. */ }
   }
+  // Another area (Items while it prepares) can ask for one table by ID: it opens like a catalogue pick, on its Data tab.
+  const tableRouted = useRef(0);
+  useEffect(() => {
+    if (!active || !tableRequest || tableRouted.current === tableRequest.id) return;
+    tableRouted.current = tableRequest.id;
+    void openDefinition({ tableId: tableRequest.tableId, name: tableRequest.name } as TableCatalogEntry);
+  }, [active, tableRequest?.id]);
   const refreshLatest = useRef(refreshDefinition); refreshLatest.current = refreshDefinition;
   useEffect(() => {
     const changed = (event: Event) => {

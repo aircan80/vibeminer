@@ -490,8 +490,30 @@ test('Items pages preserve all name states and literal bounded query shapes', as
     assert.equal(validator('ItemsPage')({...page,...patch}),false);
   validate('ItemsPage',{...page,query:'%_\\ Épée'});
   validate('ItemsPage',{...page,query:'😀'.repeat(128)});
-  for(const method of ['items.data','items.prepare','items.page','items.inspect'])
+  for(const method of ['items.data','items.prepare','items.page','items.inspect','items.facts','items.labels'])
     validate('EngineRequest',{protocolVersion:1,id:method,method,params:{}});
+});
+
+test('Item facts keep exact source cells, closed states and reviewed labels (item-facts-v1)', async () => {
+  const facts=JSON.parse(await readFile(path.join(root,'contracts/examples/item-facts.json'),'utf8'));
+  const labels=JSON.parse(await readFile(path.join(root,'contracts/examples/item-labels.json'),'utf8'));
+  validate('ItemFactsResult',facts); validate('ItemLabelLists',labels);
+  validate('ItemFactsResult',{...facts,facts:null,sparse:'unknown'});
+  // A Sparse-only row outside the Item scope: looked up, present, no facts. Classic flat amounts and separate shapes are on the wire.
+  validate('ItemFactsResult',{...facts,facts:null,sparse:'present'});
+  assert.ok(facts.facts.some(f=>f.key==='statAmount'));
+  const fact=facts.facts.find(f=>f.values.length),value=fact.values[0];
+  validate('ItemFactsResult',{...facts,facts:[{...fact,agreement:'separate'}]});
+  for(const patch of [{policyRevision:'item-facts-v2'},{labelRevision:'item-labels-v2'},{sparse:'absent'},{facts:Array(65).fill(fact)},
+    {facts:[{...fact,key:'finalArmor'}]},{facts:[{...fact,state:'zero'}]},{facts:[{...fact,agreement:'mixed'}]},
+    {facts:[{...fact,values:Array(17).fill(value)}]},{facts:[{...fact,values:[{...value,tableId:'4002a5b1'}]}]},
+    {facts:[{...fact,values:[{...value,recordId:'01'}]}]},{facts:[{...fact,values:[{...value,columnIndex:512}]}]},
+    {facts:[{...fact,values:[{...value,label:''}]}]},{triggerLabels:[]}])
+    assert.equal(validator('ItemFactsResult')({...facts,...patch}),false,JSON.stringify(Object.keys(patch)));
+  assert.equal(labels.quality.at(-1).label,'WoW Token');
+  assert.deepEqual(labels.trigger.map(l=>l.label),['On use','On equip','Chance on hit']);
+  for(const patch of [{labelRevision:'item-labels-v2'},{quality:[{value:'01',label:'Poor'}]},{bonding:[{value:'0',label:''}]},{extra:[]}])
+    assert.equal(validator('ItemLabelLists')({...labels,...patch}),false);
 });
 
 test('Partial source proof cannot masquerade as full content verification', () => {

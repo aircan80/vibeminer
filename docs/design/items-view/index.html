@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeMiner · Items view</title>
+<link rel="icon" type="image/svg+xml" href="../../../branding/vibeminer.svg">
+<style>
+/* Tokens, type scale and chrome copied from ../desktop-home/. Type scale: 11 / 13 / 14 / 19px at 100%. */
+:root{--bg:#f5f3ed;--paper:#fffefa;--ink:#243b3a;--muted:#586a64;--line:#dce2d9;--line-soft:#e9ece5;--teal:#176e66;--mint:#e4f1e9;--hover:#eef4ef;--pill:#b9d5c8;--gold-ink:#7d561b;--gold-line:#e4cfa5;--gold-bg:#fbf5e8;--warn-bg:#fbf3e4;--warn-line:#e7c98f;--err-bg:#fbeeea;--err-line:#e3b5a8;--focus:#e6ad46;--toolbar:#fbfaf6;--status:#eceae2;--side:#f9f8f3;
+  --fs-s:.786rem;--fs-m:.929rem;--fs-l:1.357rem;--pane-head:3.43rem;--thead:2rem;--side-w:clamp(18rem,26.5rem,40%);--icon:40px;
+  /* Item quality ink. Every value is at least 4.5:1 on paper, side, hover and mint, and differs in hue from the link teal and the muted grey.
+     Colour never stands alone: the quality is always written. */
+  --q0:#6b6560;--q1:#243b3a;--q2:#1a7526;--q3:#2350b8;--q4:#7238b0;--q5:#a14f00;--q6:#86661a;--q7:#0072a3;--q8:#0072a3;--qx:#243b3a;
+  font-size:14px}
+:root[data-text="200"]{font-size:28px}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:1rem/1.45 system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.mono{font-family:ui-monospace,monospace}
+.selectable{user-select:text;-webkit-user-select:text;cursor:text}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip{position:absolute;left:.5rem;top:-3rem;z-index:20;background:var(--paper);padding:.3rem .6rem;border-radius:6px}
+.skip:focus{top:.5rem}
+.dim{color:var(--muted)}
+.spacer{flex:1}
+
+/* Window: fixed chrome, only panes scroll. */
+.app{height:100vh;container:window/inline-size;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+
+/* Build header (simplified copy of desktop-home; its popovers live there). */
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.43rem .86rem;padding:.43rem .86rem 0;background:var(--toolbar);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:.6rem;font-weight:700;font-size:1.214rem;letter-spacing:-.01em;white-space:nowrap;flex:none}
+.brand img{width:2rem;height:2rem;display:block;flex:none}
+.brand .word span{color:var(--teal)}
+.divider{width:1px;align-self:stretch;background:var(--line);margin:.15rem 0;flex:none}
+.idfields{display:flex;align-items:center;gap:.4rem 1.15rem;margin:0;min-width:0;flex-wrap:wrap}
+.idf{display:flex;flex-direction:column;min-width:0}
+.idf dt{font-size:var(--fs-s);color:var(--muted);font-weight:600;line-height:1.25;white-space:nowrap}
+.idf dd{margin:0;font-weight:600;line-height:1.35;white-space:nowrap;height:1.4rem;display:flex;align-items:center}
+.idf .pid{font-family:ui-monospace,monospace;font-size:var(--fs-m);color:var(--muted);font-weight:400}
+.hgroup{display:flex;align-items:center;gap:.86rem;margin-left:auto;flex:none;min-height:2.3rem}
+.btn{height:2.15rem;display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .8rem;cursor:pointer;white-space:nowrap;flex:none}
+.btn:hover:not(:disabled){background:var(--hover);border-color:#c5d3cb}
+.btn.primary{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+.btn.primary:hover:not(:disabled){background:#125b54}
+.btn.small{height:1.9rem;font-size:var(--fs-m);padding:0 .65rem}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.55;cursor:default}
+.switch{display:inline-flex;align-items:center;gap:.45rem;border:0;background:none;padding:0 .3rem;margin:0 -.3rem;border-radius:4px;font-weight:600;cursor:pointer;line-height:inherit;white-space:nowrap}
+.switch .track{position:relative;width:1.85rem;height:1.05rem;border-radius:999px;background:#c9d2cc;flex:none}
+.switch .track::after{content:"";position:absolute;top:.15rem;left:.15rem;width:.75rem;height:.75rem;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch[aria-checked="true"] .track{background:var(--teal)}
+.switch[aria-checked="true"] .track::after{left:auto;right:.15rem}
+.activity-chip{display:inline-flex;align-items:center;gap:.5rem;height:2.15rem;padding:0 .75rem;border:1px solid var(--pill);border-radius:6px;background:var(--mint);color:var(--teal);font-weight:600;cursor:pointer;white-space:nowrap;flex:none}
+.chip-short{display:none}
+.activity-chip .count{min-width:1.3rem;height:1.3rem;border-radius:999px;background:var(--teal);color:#fff;font-size:var(--fs-s);display:grid;place-items:center;padding:0 .3rem}
+.activity-chip[aria-expanded="true"]{box-shadow:inset 0 0 0 1px currentColor}
+.pulse{width:.5rem;height:.5rem;border-radius:50%;background:currentColor;animation:pulse 1.6s ease-in-out infinite;flex:none}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+/* Area navigation wraps instead of scrolling; the group separator hides when it would end or start a line (D086). */
+.areas{order:9;flex:1 1 100%;display:flex;flex-wrap:wrap;align-items:stretch;gap:0 .2rem;min-height:2.45rem;margin:0 -.86rem;padding:0 .5rem;border-top:1px solid var(--line)}
+.area-group{display:flex;align-items:stretch;gap:.2rem;flex-wrap:wrap}
+.area-sep{align-self:center;width:1px;height:1.3rem;background:var(--line);margin:0 .45rem;flex:none}
+.area-sep.dangling{display:none}
+.areas button{border:0;background:none;padding:0 .75rem;min-height:2.45rem;font-size:var(--fs-m);font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;box-shadow:inset 0 -3px 0 transparent}
+.areas button:hover{color:var(--ink);background:var(--hover)}
+.areas button[aria-current="page"]{color:var(--teal);font-weight:700;box-shadow:inset 0 -3px 0 var(--teal)}
+.areas button:focus-visible{outline-offset:-3px}
+
+/* Shared pane parts (desktop-home). Scroll containers are positioned so nothing inside them sizes the window. */
+.pane{position:relative;display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--paper);overflow:auto}
+.pane>*{flex:none}
+.pane>.pane-scroll{flex:1 1 auto}
+.pane-scroll{position:relative;overflow:auto;min-height:0}
+.pane-head{display:flex;align-items:center;gap:.6rem;min-height:var(--pane-head);padding:.43rem .86rem;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--bg)}
+.pane-head h1,.pane-head h2{font-size:1rem;margin:0 .3rem 0 0;font-weight:700;white-space:nowrap}
+.label{font-size:var(--fs-s);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.control{height:2.15rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .65rem;min-width:0}
+.control[aria-invalid="true"]{border-color:#c0644a;box-shadow:inset 0 0 0 1px #c0644a}
+.control:disabled{opacity:.55}
+.segmented{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper);flex:none}
+.segmented button{border:0;background:none;height:2.05rem;padding:0 .75rem;cursor:pointer;white-space:nowrap}
+.segmented button+button{border-left:1px solid var(--line)}
+.segmented button[aria-pressed="true"]{background:var(--mint);color:var(--teal);font-weight:600}
+.segmented button:focus-visible{outline-offset:-3px}
+.segmented button:disabled{opacity:.55;cursor:default}
+.pill{display:inline-block;padding:0 .4rem;border-radius:4px;border:1px solid var(--pill);background:var(--paper);color:var(--teal);font-size:var(--fs-s);font-weight:600;line-height:1.5;white-space:nowrap}
+.pill.sample{border:1px dashed var(--muted);background:none;color:var(--muted)}
+.notice{margin:.6rem .86rem 0;padding:.55rem .75rem;border-radius:6px;border:1px solid var(--warn-line);background:var(--warn-bg);font-size:var(--fs-m);display:flex;gap:.8rem;align-items:flex-start}
+.notice.calm{border-color:var(--line);background:var(--bg)}
+.notice .text{flex:1;min-width:0}
+.notice strong{display:block}
+.state-box{border:1px solid #cfe2d6;background:var(--mint);border-radius:6px;padding:.55rem .7rem;font-size:var(--fs-m)}
+.state-box.error{border-color:var(--err-line);background:var(--err-bg)}
+.state-box.plain{border-color:var(--line);background:var(--bg)}
+.state-box strong{display:block}
+.state-box p{margin:.15rem 0 0}
+.state-box .row{display:flex;gap:.4rem;margin-top:.45rem;flex-wrap:wrap}
+.state-box code{font-size:var(--fs-s)}
+.reason{margin:0;font-size:var(--fs-s);color:var(--muted)}
+.pane-foot{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;padding:.5rem .86rem;border-top:1px solid var(--line);background:var(--paper);font-size:var(--fs-s);color:var(--muted)}
+.pane-foot .btn{height:1.75rem;font-size:var(--fs-s);padding:0 .55rem}
+.pane-switch{display:none}
+.loading-line{display:inline-flex;align-items:center;gap:.4rem;color:var(--teal);font-weight:600}
+
+/* ---------- Items: list | item detail ---------- */
+.items{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:1px;background:var(--line);min-height:0}
+.ilist{background:var(--side)}
+.list-head{row-gap:.45rem;padding-bottom:.55rem}
+.search-row{display:flex;align-items:center;gap:.5rem;flex:1 1 100%;margin:0}
+.search-row .control{flex:1 1 9rem;width:100%}
+.search-err{margin:0;padding:.35rem .86rem;font-size:var(--fs-s);color:#8a3b25;background:var(--err-bg);border-bottom:1px solid var(--err-line)}
+.applied{display:flex;align-items:center;gap:.4rem .6rem;flex-wrap:wrap;padding:.35rem .86rem;font-size:var(--fs-s);color:var(--muted);border-bottom:1px solid var(--line-soft);background:var(--paper)}
+.applied b{color:var(--ink);font-weight:600}
+.linkbtn{border:0;background:none;padding:0;color:var(--teal);text-decoration:underline;cursor:pointer;font-size:var(--fs-s)}
+.list-scroll{position:relative;flex:1 1 auto;overflow:auto;min-height:6rem;background:var(--paper);scroll-padding-top:var(--thead)}
+.icols{display:grid;grid-template-columns:var(--icon) minmax(0,1fr) 4.4rem;align-items:center;column-gap:.7rem;padding:0 .86rem}
+.ithead{position:sticky;top:0;z-index:1;height:var(--thead);background:var(--toolbar);border-bottom:1px solid var(--line);font-size:var(--fs-s);font-weight:600;color:var(--muted);white-space:nowrap}
+.ithead>:last-child{text-align:right}
+[role="listbox"]:focus-visible{outline:none}
+.ilist [role="option"]{position:relative;min-height:calc(var(--icon) + .6rem);padding-top:.3rem;padding-bottom:.3rem;border-bottom:1px solid var(--line-soft);cursor:default}
+.ilist [role="option"]:hover{background:var(--hover)}
+.ilist [role="option"][aria-selected="true"]{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+[role="listbox"]:focus-visible [role="option"].active{outline:3px solid var(--focus);outline-offset:-3px}
+.iname{min-width:0}
+.iname b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.iname small{display:block;font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* A row without a readable name keeps its whole reason: it wraps instead of eliding. */
+.iname b.nameless,.iname small.why{white-space:normal;overflow:visible}
+.ilvl{text-align:right;font-variant-numeric:tabular-nums;font-size:var(--fs-m);white-space:nowrap}
+.ilvl .nv{font-size:var(--fs-s)}
+.lvl-inline{display:none}
+.wait{margin:.86rem;display:flex;flex-direction:column;gap:.6rem}
+.prereq{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.2rem .7rem;margin:.45rem 0 0;font-size:var(--fs-m)}
+.prereq dt{font-weight:600}
+.prereq dd{margin:0;color:var(--muted)}
+.empty{margin:1rem .86rem;max-width:30rem}
+
+/* Quality ink: the item name and the icon frame take it; the quality is always written next to it. */
+.q0{--q:var(--q0)}.q1{--q:var(--q1)}.q2{--q:var(--q2)}.q3{--q:var(--q3)}.q4{--q:var(--q4)}.q5{--q:var(--q5)}.q6{--q:var(--q6)}.q7{--q:var(--q7)}.q8{--q:var(--q8)}.qx{--q:var(--qx)}
+.qn{color:var(--q,var(--ink))}
+.qn.nameless{color:var(--muted);font-style:italic;font-weight:600}
+
+/* Icon: reserved 40px box with a quality frame; the image never shifts text. Placeholder glyphs are authored SVG, not game art. */
+.icon{width:var(--icon);height:var(--icon);flex:none;border-radius:6px;display:grid;place-items:center;background:#24323a;box-shadow:inset 0 0 0 2px var(--q,#8c9a95);overflow:hidden;color:#d9e4df}
+.icon svg{width:28px;height:28px;display:block}
+.icon.q1,.icon.qx{box-shadow:inset 0 0 0 2px #8c9a95}
+.icon.none,.icon.pending,.icon.off{background:var(--bg);box-shadow:inset 0 0 0 1px var(--line);color:var(--muted);font-size:var(--fs-s);font-weight:600}
+.icon.none{box-shadow:none;border:1px dashed #b9c4be}
+.icon.pending{color:var(--teal);letter-spacing:.08em}
+
+/* Detail pane: the head holds the identity and the record buttons. */
+.detail{container:detail/inline-size}
+.dhead{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"icon title rec" ". desc desc";column-gap:.8rem;padding:.7rem 1rem .65rem;border-bottom:1px solid var(--line);background:var(--paper)}
+.dhead>.icon{grid-area:icon;margin-top:.1rem}
+.dtitle{grid-area:title;min-width:0}
+.drec{grid-area:rec;display:flex;gap:.4rem;flex-wrap:wrap;justify-content:flex-end;align-self:start}
+.ddesc{grid-area:desc;min-width:0}
+.dtitle h2{margin:0;font-size:var(--fs-l);line-height:1.25;font-weight:700;overflow-wrap:anywhere}
+.dtitle h2:focus-visible{outline-offset:3px}
+.dline{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .55rem;margin-top:.15rem;font-size:var(--fs-m);color:var(--muted)}
+.dline .sep{color:var(--line)}
+.dline .sep.dangling{display:none}
+.dline b{color:var(--ink);font-weight:600}
+.desc{margin:.35rem 0 0;font-size:var(--fs-m);color:var(--ink);overflow-wrap:anywhere}
+.desc q{quotes:"\201C" "\201D"}
+.desc .src{margin-left:.4rem}
+@container detail (max-width:40rem){
+  .dhead{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"icon title" ". rec" ". desc"}
+  .drec{justify-content:flex-start;margin-top:.45rem}
+}
+.dbody{position:relative;flex:1 1 auto;min-height:0;overflow:auto;background:var(--paper)}
+.rove-tip{margin:0;padding:.35rem 1rem;font-size:var(--fs-s);color:var(--muted);border-bottom:1px solid var(--line);background:var(--paper)}
+.dbody{display:flex;flex-direction:column}
+.dbody>.dgrid{flex:1 0 auto}
+.dgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:1px;background:var(--line)}
+.dgrid.two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.dcol{display:flex;flex-direction:column;min-width:0;background:var(--paper)}
+.dsec{background:var(--paper);padding:.6rem 1rem .75rem;min-width:0;border-bottom:1px solid var(--line)}
+.dsec.full{grid-column:1/-1}
+.dsec-head{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem}
+.dsec-head h3{margin:0;font-size:1rem;font-weight:700}
+.dsec-head .scope{margin-left:auto;font-size:var(--fs-s);color:var(--muted)}
+/* One fact: label, then its source links beside it when they fit and under it when they don't; the value below. */
+.fact{padding:.38rem 0;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m)}
+.fact:last-child{border-bottom:0}
+.fhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:0 .9rem}
+.fact .fl{color:var(--muted)}
+.fact .srcs{display:flex;gap:0 .7rem;flex-wrap:wrap;min-width:0}
+.fact .fv{display:block;font-size:1rem;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.fact .fsub{font-weight:400;color:var(--muted);font-size:var(--fs-m)}
+.fact .fnote{display:block;font-size:var(--fs-s);color:var(--muted)}
+/* Source link: the Tables reference-cell style (13px, 600, teal, dotted underline). */
+.src{border:0;background:none;padding:0;color:var(--teal);font:600 var(--fs-m)/1.45 system-ui,sans-serif;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer;overflow-wrap:anywhere;text-align:left}
+.src:hover{text-decoration-style:solid}
+.src:focus-visible{outline-offset:1px}
+.nosrc{font-size:var(--fs-s);color:var(--muted)}
+/* Values that aren't values: always words, never 0 or blank. */
+.nv{color:var(--muted);font-weight:700}
+.ld{color:var(--teal);font-weight:600}
+.conflict{color:var(--gold-ink);font-weight:600}
+.sec-note{margin:.15rem 0 .3rem;font-size:var(--fs-s);color:var(--muted)}
+.sec-state{margin:.35rem 0 .2rem}
+/* Aligned stat allocation and sockets */
+.tbl-scroll{position:relative;overflow-x:auto;margin:.2rem 0 .3rem}
+.tbl-scroll:focus-visible{outline-offset:-3px}
+table.inputs{border-collapse:collapse;width:100%;font-size:var(--fs-m);font-variant-numeric:tabular-nums}
+.inputs th,.inputs td{padding:.3rem .5rem;border-bottom:1px solid var(--line-soft);text-align:right;white-space:nowrap}
+.inputs th:first-child,.inputs td:first-child{text-align:left;padding-left:0}
+.inputs thead th{font-size:var(--fs-s);font-weight:600;color:var(--muted);vertical-align:bottom;white-space:normal}
+.inputs thead th small{display:block;font-weight:400}
+.inputs tbody th{font-weight:600}
+.group-src{display:flex;flex-wrap:wrap;gap:.1rem .7rem;align-items:baseline;font-size:var(--fs-s);color:var(--muted)}
+/* Effects */
+.effect{border:1px solid var(--line);border-radius:6px;padding:.5rem .7rem;margin-top:.5rem;background:var(--paper)}
+.effect .eh{display:flex;align-items:baseline;gap:.2rem .55rem;flex-wrap:wrap}
+.effect .eh b{font-weight:700;overflow-wrap:anywhere}
+.effect .eh .dim{font-size:var(--fs-m)}
+.efacts{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr));gap:.3rem .9rem;margin:.4rem 0 .35rem;font-size:var(--fs-m)}
+.efacts div{min-width:0}
+.efacts dt{color:var(--muted);font-size:var(--fs-s)}
+.efacts dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.efacts dd small{display:block;font-weight:400;color:var(--muted);font-size:var(--fs-s)}
+.esrc{display:flex;flex-wrap:wrap;gap:.1rem .8rem;padding-top:.35rem;border-top:1px solid var(--line-soft)}
+details.more{margin-top:.2rem}
+details.more summary{cursor:pointer;font-size:var(--fs-m);font-weight:600;padding:.25rem 0}
+details.more summary:focus-visible{outline-offset:0}
+.legend-note{margin:.5rem 0 0;font-size:var(--fs-s);color:var(--muted)}
+.placeholder{display:grid;place-items:center;text-align:center;color:var(--muted);padding:2rem;background:var(--paper);flex:1}
+.placeholder div{border:1px dashed var(--line);border-radius:6px;padding:1.2rem 1.6rem;max-width:30rem}
+.placeholder h2{font-size:1rem;color:var(--ink);margin:0 0 .3rem}
+.placeholder p{margin:0;font-size:var(--fs-m)}
+.placeholder .btn{margin-top:.8rem}
+
+/* Activity panel: nonmodal, covers exactly the item detail (whole area when compact; a sheet over everything when the shell scrolls). */
+.activity-panel{position:fixed;right:0;background:var(--paper);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(36,59,58,.08);display:flex;flex-direction:column;z-index:3;white-space:normal;font-weight:400;color:var(--ink);text-align:left}
+.activity-panel header{display:flex;align-items:center;justify-content:space-between;padding:.6rem 1rem;border-bottom:1px solid var(--line)}
+.activity-panel h2{margin:0;font-size:1rem}
+.activity-panel .rows{overflow:auto;padding:.4rem 1rem .8rem;flex:1}
+.activity-panel .label{margin:.6rem 0 .4rem}
+.task{border:1px solid var(--line);border-radius:6px;padding:.6rem .7rem;margin-bottom:.6rem;font-size:var(--fs-m);max-width:40rem}
+.task.failed{border-color:var(--err-line);background:var(--err-bg)}
+.task .t{font-weight:600}
+.task .s{color:var(--muted)}
+.task code{font-size:var(--fs-s)}
+.bar{height:.36rem;background:var(--line-soft);border-radius:999px;margin:.45rem 0 .3rem;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--teal);border-radius:999px}
+.task .row{display:flex;gap:.4rem;margin-top:.45rem;flex-wrap:wrap}
+.task .btn{height:1.9rem;font-size:var(--fs-m)}
+
+/* Status bar: always one line. */
+.statusbar{display:flex;align-items:center;gap:1.1rem;height:1.75rem;padding:0 .86rem;background:var(--status);border-top:1px solid var(--line);font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden}
+.statusbar strong{color:var(--ink);font-weight:600}
+.statusbar .busy{display:inline-flex;align-items:center;gap:.4rem;color:var(--teal);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.statusbar .warn{color:var(--gold-ink);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+
+/* Medium window: the activity entry uses its short label. */
+@container window (max-width:84rem){.chip-long{display:none}.chip-short{display:inline}}
+/* Enlarged text or narrow window (below 70rem): desktop-home's two-row header grid, one pane at a time. */
+@container window (max-width:70rem){
+  .toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"brand ids ids" "areas areas actions";column-gap:.7rem;row-gap:.43rem}
+  .brand{grid-area:brand}
+  .idfields{grid-area:ids;gap:.3rem .9rem}
+  .brand .word,.toolbar .divider{display:none}
+  .idf{flex-direction:row;align-items:center;gap:.35rem}
+  .idf dt{font-size:var(--fs-m)}
+  .idf.named dt{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .idf.moved{display:none}
+  .areas{grid-area:areas;align-self:stretch;min-width:0;margin:0 -.7rem 0 -.86rem}
+  .hgroup{grid-area:actions;align-self:stretch;margin:0 -.86rem 0 0;padding:.3rem .86rem .3rem .7rem;border-top:1px solid var(--line);flex-wrap:wrap;gap:.4rem .6rem;justify-content:flex-end}
+  .items{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  /* The list keeps its rows in view: the switcher names the pane, search and mode share one row, no column header. */
+  .list-head h1,.applied.browse{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);padding:0;border:0}
+  .list-head .spacer{display:none}
+  .list-head{padding:.45rem .86rem;min-height:0}
+  .list-head .search-row{flex:1 1 14rem}
+  .ithead{display:none}
+  .list-scroll{scroll-padding-top:0}
+  .icols{grid-template-columns:var(--icon) minmax(0,1fr)}
+  .icols>.ilvl{display:none}
+  .lvl-inline{display:inline}
+  .pane-switch{display:flex;align-items:center;gap:.6rem;padding:.35rem .86rem;background:var(--bg);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .items>.ilist,.items>.detail{display:none}
+  .items[data-pane="list"]>.ilist,.items[data-pane="detail"]>.detail{display:flex}
+  .statusbar .secondary{display:none}
+  /* The item head scrolls with the facts. */
+  .items>.detail{overflow:auto}
+  .detail>.dbody{flex:none;overflow:visible}
+  .dhead{padding:.6rem .86rem}
+  .dsec{padding:.55rem .86rem .7rem}
+}
+/* Very narrow (600×480 at 200%): logo and identity share row 1, the area bar gets row 2, the actions row 3. */
+@container window (max-width:36rem){
+  .toolbar{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"brand ids" "areas areas" "actions actions"}
+  .areas{margin:0 -.86rem}
+  .hgroup{margin:0 -.86rem}
+  .list-head .search-row{flex-basis:100%}
+}
+/* Window too short for the header and a 10rem area (600×480 at 200%): the shell scrolls as a whole (D086, D092). */
+.app.shell-scroll{height:auto;min-height:100vh;grid-template-rows:auto auto auto}
+body.shell-scroll{overflow-y:auto}
+.app.shell-scroll .items{min-height:10rem}
+.app.shell-scroll .pane{overflow:visible}
+.app.shell-scroll .list-scroll{max-height:calc(100vh - 1.75rem);flex:none}
+.app.shell-scroll .dbody{overflow:visible}
+.app.shell-scroll .statusbar{position:sticky;bottom:0;z-index:2}
+/* Native focus scrolling (Tab) also stops above the sticky status bar. */
+html:has(body.shell-scroll){scroll-padding-bottom:calc(1.75rem + 6px)}
+
+/* Mockup-only state control and hand-off note. Not part of the design. */
+.mock{position:fixed;left:.6rem;bottom:2.3rem;z-index:10;max-width:calc(100vw - 1.2rem);background:#243b3a;color:#fff;border-radius:6px;padding:.35rem .5rem;font:12px/1.6 system-ui,sans-serif;display:flex;flex-wrap:wrap;gap:.2rem;align-items:center;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.mock a{color:#cde7dc;text-decoration:none;padding:0 .35rem;border-radius:4px}
+.mock a[aria-current="true"]{background:#176e66;color:#fff}
+.mock .sep{opacity:.5}
+.mock-note{position:fixed;left:50%;transform:translateX(-50%);top:.6rem;z-index:11;max-width:min(40rem,calc(100vw - 1.2rem));background:#243b3a;color:#fff;border-radius:6px;padding:.5rem .7rem;font:13px/1.5 system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.mock-note a{color:#cde7dc}
+.mock-note button{margin-left:.5rem;font:inherit;background:#176e66;color:#fff;border:0;border-radius:4px;padding:.1rem .5rem;cursor:pointer}
+</style></head>
+<body>
+<a class="skip" href="#area">Skip to content</a>
+<div class="app" id="app">
+  <header class="toolbar" id="toolbar">
+    <div class="brand" id="brand"><img src="../../../branding/vibeminer.svg" alt="VibeMiner"><span class="word" aria-hidden="true">Vibe<span>Miner</span></span></div>
+    <div class="divider"></div>
+    <dl class="idfields" id="idfields" aria-label="Open build"></dl>
+    <div class="hgroup"><span id="activity-slot"></span><button class="btn primary" id="choose">← Choose build</button></div>
+    <nav class="areas" id="areas" aria-label="Build areas"></nav>
+  </header>
+  <main id="area" tabindex="-1" style="display:grid;min-height:0;outline:none"></main>
+  <footer class="statusbar" id="statusbar"></footer>
+</div>
+<nav class="mock" aria-label="Mockup state (not part of the design)" id="mock"></nav>
+
+<script>
+const p=new URLSearchParams(location.search);
+const STATES=['ready','loading','preparing','missing','unknown','encrypted','unsupported','zero','failed'];
+const state=STATES.includes(p.get('state'))?p.get('state'):'ready';
+if(p.get('text')==='200')document.documentElement.dataset.text='200';
+if(p.get('chrome')==='0')document.getElementById('mock').remove();
+let panelOpen=p.get('panel')==='open';
+let mode=p.get('mode')==='id'?'id':'name';   // search mode: Name contains / Exact Item ID
+let applied=p.get('q')||'';                    // the applied search; empty browses
+let draft=applied, inputError='';
+let pane=p.get('pane')==='detail'?'detail':'list';   // compact layout: one pane at a time
+const validId=v=>/^(0|[1-9][0-9]{0,9})$/.test(v)&&+v<=4294967295;
+const ID_ERROR='Enter a whole Item ID from 0 to 4294967295, without signs or leading zeros. The last results stay.';
+// A search from the URL is validated like typed input: a bad ID is shown in the field, marked invalid, and not applied.
+if(mode==='id'&&applied&&!validId(applied)){inputError=ID_ERROR;applied='';}
+
+/* ---------- Environment per fixture state ---------- */
+const env={
+  prep:state==='preparing', prepFailed:state==='failed',
+  optionalLoading:state==='loading',                 // core Items ready; labels, icons and effects still loading
+  downloading:state==='loading'||state==='preparing', // Download all runs underneath
+  sparsePartial:state==='unknown',                   // ItemSparse readable rows · Partial (encrypted sections not loaded)
+  statsUnsupported:state==='unsupported', effectsUnavailable:state==='unsupported'};
+// On 12.1.5.70448 ItemEffect and SpellName are always Partial: some sections are encrypted. ItemXItemEffect is complete.
+const coreReady=!env.prep&&!env.prepFailed;
+
+const n=v=>Number(v).toLocaleString('en-US');
+const esc=v=>String(v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const rand=s=>{let x=(s*2654435761)>>>0;return ()=>{x=(x*1103515245+12345)>>>0;return x>>>16;};};
+const hex=seed=>{let h='',x=(seed*2654435761)>>>0;for(let i=0;i<32;i++){x=(x*1103515245+12345)>>>0;h+='0123456789abcdef'[x>>>28];}return h;};
+// Authored sample: same build, source and locale as desktop-home.
+const build={product:'wow',label:'Retail',version:'12.1.5.70448',source:'US'};
+const counts={itemRows:171392,matched:168904};
+
+/* ---------- Reviewed labels (proposed, app-owned, versioned). The number is the source value; the label follows it. ---------- */
+const QUALITY={0:'Poor',1:'Common',2:'Uncommon',3:'Rare',4:'Epic',5:'Legendary',6:'Artifact',7:'Heirloom',8:'WoW Token'};
+const INVTYPE={0:'Not equippable',1:'Head',2:'Neck',3:'Shoulder',4:'Shirt',5:'Chest',6:'Waist',7:'Legs',8:'Feet',9:'Wrist',10:'Hands',11:'Finger',12:'Trinket',13:'One-hand',14:'Shield',15:'Ranged',16:'Back',17:'Two-hand',18:'Bag',19:'Tabard',20:'Robe',21:'Main hand',22:'Off hand',23:'Held in off-hand',24:'Ammo',25:'Thrown',26:'Ranged right',27:'Quiver',28:'Relic',29:'Profession tool',30:'Profession gear'};
+const BOND={0:'No binding',1:'Binds when picked up',2:'Binds when equipped',3:'Binds when used',4:'Quest item'};   // 7–9 stay unlabelled
+const TRIGGER={0:'On use',1:'On equip',2:'Chance on hit'};                                                        // 3–7 stay unlabelled
+// ItemClass / ItemSubClass text, matching desktop-home's authored ItemClass rows (ClassID 7 has two rows, ClassID 5 has none).
+const CLASS={12:'Authored class A',4:'Authored class B',2:'Authored class C',9:'Authored class D'};
+const CLASS_ROW={12:301,4:302,2:303,9:304};
+const qText=q=>QUALITY[q]??'no reviewed label';
+
+/* ---------- Authored Items page: 50 rows, ascending Item ID. Names and numbers are invented. ---------- */
+const PRE=['Brindlemoss','Corvane','Ottelwick','Tessaly','Pellory','Marrowind','Quillstep','Quessan','Varrow','Ellidane','Hobbenrook','Saffrel','Dunmere','Orrinvale','Tamsk','Wendlecap','Ysolde','Carrowan','Mistlewick','Pennick','Thrumble','Odessane','Brackwold','Lirrel','Sorrowin'];
+const NOUN=['Satchel','Compass','Lantern Coat','Kettle Helm','Pebble','Sash','Boots','Signal Horn','Thimble Ring','Shawl','Gloves','Leaf Charm','Tidecloak','Buckler','Lantern Oil','Hood','Spade','Loop','Mantle','Bracers','Spoon','Lens','Greaves','Cord','Ladle'];
+const GLYPH=[
+  '<path d="M8 22h12M14 6v16M9 10h10" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/>',
+  '<circle cx="14" cy="14" r="8" stroke="currentColor" stroke-width="2.2" fill="none"/><path d="M14 9l2 5-2 5-2-5z" fill="currentColor"/>',
+  '<path d="M9 6h10l2 6-3 10h-8L7 12z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><circle cx="14" cy="14" r="2.4" fill="currentColor"/>',
+  '<path d="M6 16a8 8 0 0 1 16 0v4H6z" stroke="currentColor" stroke-width="2" fill="none"/><path d="M10 12h8" stroke="currentColor" stroke-width="2"/>',
+  '<ellipse cx="14" cy="15" rx="8" ry="6" fill="currentColor" opacity=".8"/>',
+  '<path d="M6 8l16 12M6 20L22 8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
+  '<path d="M8 7v14l6-4 6 4V7z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>',
+  '<path d="M6 18c4-1 6-4 7-10 2 5 5 8 9 9-4 2-12 3-16 1z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>'];
+const ITEMS=Array.from({length:50},(_,i)=>{
+  const g=rand(i+31),id=900001+i;
+  const q=[1,2,3,1,1,2,0,4,3,2,1,2,1,2,1,3,1,2,5,1,3,7,4,1,2][i%25];
+  const it={i,id,name:`${PRE[i%PRE.length]} ${NOUN[(i*7+i%3)%NOUN.length]}`,q,ilvl:q===0?1:10+g()%60,cls:[12,4,12,2,7,5,12,4][i%8],sub:g()%10,invItem:[5,13,16,0,1,10,8,12][g()%8],glyph:i%GLYPH.length,icon:800001+i,sparse:true,iconState:'ready'};
+  it.invSparse=it.invItem;
+  return it;});
+const byId=id=>ITEMS.find(x=>x.id===id);
+// Showcase rows. Their facts hold in every state; the state only changes the environment.
+Object.assign(byId(900003),{name:'Ottelwick Lantern Coat',q:3,ilvl:45,cls:12,sub:2,invItem:5,invSparse:5,glyph:2});
+Object.assign(byId(900005),{name:'Pellory Pebble',q:1,ilvl:1,cls:2,sub:0,invItem:0,invSparse:0,icon:0,iconState:'zero',glyph:4});
+Object.assign(byId(900006),{invItem:13,invSparse:21});                       // Item and ItemSparse disagree
+Object.assign(byId(900008),{name:'Quessan Signal Horn',q:4,ilvl:52,cls:4,sub:6,invItem:12,invSparse:12,iconState:'encrypted',glyph:7});
+Object.assign(byId(900011),{sparse:false,iconState:'missing'});              // Item row, no ItemSparse row (complete scope)
+Object.assign(byId(900014),{name:'Dunmere Tidecloak',q:2,ilvl:38,cls:4,sub:1,invItem:16,invSparse:16,iconState:'unsupported'});
+Object.assign(byId(900019),{q:11});                                           // quality with no reviewed label
+const unknownRow=it=>env.sparsePartial&&[900017,900034,900042].includes(it.id);
+const sparseState=it=>!it.sparse?'missing':unknownRow(it)?'unknown':'ok';
+
+const SHOW={ready:900003,loading:900003,missing:900011,unknown:900017,encrypted:900008,unsupported:900014,zero:900005};
+let selId=+(p.get('item')||SHOW[state]||900003);
+if(!byId(selId))selId=900003;
+
+/* ---------- Search (literal ordinal case-insensitive contains, or exact ID) ---------- */
+function results(){
+  if(!applied)return ITEMS;
+  if(mode==='id')return ITEMS.filter(it=>String(it.id)===applied);
+  const q=applied.toLowerCase();
+  return ITEMS.filter(it=>sparseState(it)==='ok'&&it.name.toLowerCase().includes(q));
+}
+
+/* ---------- Small renderers ---------- */
+const qClass=it=>sparseState(it)!=='ok'?'':QUALITY[it.q]!==undefined?`q${it.q}`:'qx';
+const nameHtml=it=>{const s=sparseState(it);
+  if(s==='missing')return '<b class="qn nameless">Name unavailable · no ItemSparse row</b>';
+  if(s==='unknown')return '<b class="qn nameless">Name unknown · not in readable ItemSparse rows</b>';
+  return `<b class="qn">${esc(it.name)}</b>`;};
+function iconHtml(it,where){
+  const st=env.optionalLoading&&(where==='detail'||it.i>5)?'loading':it.iconState;
+  const label={zero:'No icon from Item.IconFileDataID',missing:'Icon missing',encrypted:'Encrypted icon',unsupported:'Unsupported icon',loading:'Icon loading'}[st];
+  if(st==='ready')return `<span class="icon ${qClass(it)||'q1'}" aria-hidden="true"><svg viewBox="0 0 28 28">${GLYPH[it.glyph]}</svg></span>`;
+  if(st==='loading')return `<span class="icon pending" role="img" aria-label="${label}">…</span>`;
+  if(st==='zero')return `<span class="icon none" role="img" aria-label="${label}"></span>`;
+  return `<span class="icon off" role="img" aria-label="${label}">—</span>`;
+}
+// A source link opens that exact record (and field) in Tables, with ← Return to Items selection. Links rove inside their section.
+const src=(t,id,f,txt)=>`<button class="src" data-src="${t}|${id}|${f||''}" aria-describedby="rove-hint">${txt||`${t}.${f}`}<span class="visually-hidden">, open ${t} record ${id} in Tables</span></button>`;
+// Follow by value: Tables shows the rows of a table whose column equals a value (D072).
+const follow=(t,col,v)=>`<button class="src" data-follow="${t}|${col}|${v}" aria-describedby="rove-hint">Show ${t} rows with ${col} ${v}</button>`;
+const nosrc=t=>`<span class="nosrc">${t}</span>`;
+function fact(label,value,srcs,note){
+  return `<div class="fact"><div class="fhead"><span class="fl">${label}</span>${srcs?`<span class="srcs">${srcs}</span>`:''}</div><span class="fv selectable">${value}</span>${note?`<span class="fnote">${note}</span>`:''}</div>`;}
+const val=(v,sub)=>`${esc(v)}${sub?` <span class="fsub">· ${sub}</span>`:''}`;
+const nv=(word,why)=>`<span class="nv">${word}</span> <span class="fsub">· ${why}</span>`;
+const loadingSub=t=>`<span class="ld">…</span><span class="visually-hidden">${t} text loading</span> <span class="fsub">${t} loading</span>`;
+const copper=c=>{const g=Math.floor(c/10000),s=Math.floor(c%10000/100),k=c%100;return [g?`${g} g`:'',g||s?`${s} s`:'',`${k} c`].filter(Boolean).join(' ');};
+const ms=v=>v===-1?`-1<small>raw value, not a duration</small>`:`${n(v)} ms`;
+const RAW16='<small>raw 32-bit, read as 16-bit</small>';
+
+/* ---------- Item detail fixture ---------- */
+function detailOf(it){
+  const g=rand(it.id),z=it.id===900005;
+  const d={
+    desc:it.id===900003?'Authored text: the lining keeps a small light going in the rain.':z?'':it.id===900008?'Authored text: answered from three valleys away.':(g()%3?'':'Authored flavour line for this sample item.'),
+    reqLevel:z?0:Math.max(0,it.ilvl-5-g()%4),reqSkill:0,reqSkillRank:0,reqAbility:0,minFaction:0,minRep:0,allowClass:-1,allowRaces:[-1,-1],
+    bonding:z?0:it.id===900003?2:[1,2,0,8][g()%4],stack:z?20:1,maxCount:it.id===900008?1:0,slots:0,
+    buy:z?0:it.id===900003?48250:(g()%900)*100+g()%100,sell:0,vendorStack:1,duration:0,
+    squish:0,curve:0,offsetCurve:0,offsetLevel:0,tuning:it.id===900003?0:g()%3?0:g()%900+1,
+    sockets:it.id===900003?[1,0,0]:it.id===900008?[2,2,0]:[0,0,0],socketBonus:it.id===900008?3105:0,gemProps:0,
+    stats:Array.from({length:10},(_,k)=>z?[-1,0,0]:k<(it.id===900003?3:it.id===900008?4:2)?[[7,4,36,32][k],[6200,3800,2500,1800][k],[0,0,0.12,0][k]]:[-1,0,0]),
+    effects:[]};
+  d.sell=z?0:Math.floor(d.buy/5);
+  if(it.id===900003)d.effects=[{row:61001,ord:0,eff:70011,slot:0,trigger:0,charges:0,cd:60000,ccd:-1,cat:0,spell:7100021,spec:0,cond:0,name:'Lantern Warmth'},{row:61002,ord:1,eff:70012,slot:1,trigger:1,charges:0,cd:-1,ccd:-1,cat:0,spell:7100022,spec:0,cond:0,name:'Steady Tread'}];
+  else if(it.id===900008)d.effects=[{row:61107,ord:0,eff:70240,unreadable:true}];
+  else if(it.id===900011)d.effects=[{row:61190,ord:0,eff:70301,slot:0,trigger:0,charges:0,cd:-1,ccd:-1,cat:0,spell:7100031,spec:0,cond:0,name:null}];
+  else if(!z&&g()%3===0)d.effects=[{row:61000+it.i*3,ord:0,eff:70000+it.i,slot:0,trigger:1,charges:0,cd:-1,ccd:-1,cat:0,spell:7100100+it.i,spec:0,cond:0,name:`Authored spell ${it.i}`}];
+  return d;
+}
+
+/* ---------- Header, activity, areas, status ---------- */
+function renderHeader(){
+  const on=env.downloading;
+  document.getElementById('idfields').innerHTML=`
+    <div class="idf named"><dt>Product</dt><dd>${build.label}&nbsp;<span class="pid">${build.product}</span></dd></div>
+    <div class="idf named"><dt>Build</dt><dd class="selectable">${build.version}</dd></div>
+    <div class="idf moved"><dt>Source</dt><dd>${build.source}</dd></div>
+    <div class="idf moved"><dt>Locale</dt><dd>English · enUS</dd></div>
+    <div class="idf"><dt>Status</dt><dd>Partial</dd></div>
+    <div class="idf"><dt id="mode-label">Download mode</dt><dd><button class="switch" role="switch" aria-checked="${on}" aria-labelledby="mode-label mode-value"><span class="track" aria-hidden="true"></span><span id="mode-value">${on?'Download all':'On demand'}</span></button></dd></div>`;
+}
+const tasks=[];
+if(env.prep)tasks.push('items');
+if(env.optionalLoading)tasks.push('effects');
+if(env.prepFailed)tasks.push('failed');
+if(env.downloading)tasks.push('download');
+function taskHtml(t){
+  if(t==='items')return `<div class="task"><div class="t">Items · ItemSparse table data · enUS</div><div class="s"><span aria-hidden="true">[2/4] </span>Downloading encoded object · ${build.source}<span class="visually-hidden">Stage 2 of 4.</span></div><div class="bar" aria-hidden="true"><i style="width:32%"></i></div><div class="s">3.1 of 9.8 MiB · 32% of current stage</div><div class="s">Needed by Items. Goes ahead of Download all.</div><div class="row"><button class="btn">Stop preparing Items</button><button class="btn" data-close>View</button></div></div>`;
+  if(t==='effects')return `<div class="task"><div class="t">Item 900003 effects · ItemEffect table data · enUS</div><div class="s"><span aria-hidden="true">[2/4] </span>Downloading encoded object · ${build.source}<span class="visually-hidden">Stage 2 of 4.</span></div><div class="bar" aria-hidden="true"><i style="width:61%"></i></div><div class="s">812 of 1,330 KiB · 61% of current stage</div><div class="s">Then SpellName text for 2 linked effects. Goes ahead of Download all.</div><div class="row"><button class="btn">Stop loading effects</button><button class="btn" data-close>View</button></div></div>`;
+  if(t==='failed')return `<div class="task failed"><div class="t">Items · ItemSparse table data · enUS</div><div class="s">Failed at [2/4] Downloading encoded object · ${build.source}</div><div class="s">CDN returned 404 for 1 archive <code>(ARCHIVE_NOT_FOUND)</code></div><div class="s">Item table data is kept. Retry is a deliberate new request, from Items.</div><div class="row"><button class="btn" data-close>View</button><button class="btn">Dismiss outcome</button></div></div>`;
+  return `<div class="task"><div class="t">${build.version} · Download all</div><div class="s"><span aria-hidden="true">[2/3] </span>Downloading encoded content · ${build.source}<span class="visually-hidden">Stage 2 of 3.</span></div><div class="bar" aria-hidden="true"><i style="width:25%"></i></div><div class="s">28.6 of 114.2 GiB · 25% of current stage</div><div class="s">Uses what research requests leave free.</div><div class="row"><button class="btn">Pause build download</button><button class="btn">On demand</button></div></div>`;
+}
+function renderActivity(){
+  const slot=document.getElementById('activity-slot');
+  if(!tasks.length){slot.innerHTML='';return;}
+  const research=tasks.filter(t=>t==='items'||t==='effects'),attention=tasks.includes('failed');
+  const badge=tasks.length;
+  slot.innerHTML=`<button class="activity-chip" id="chip" aria-expanded="${panelOpen}" aria-controls="activity">${env.downloading||research.length?'<span class="pulse" aria-hidden="true"></span>':''}<span class="chip-long">${attention?'Needs attention':'Downloads &amp; activity'}</span><span class="chip-short">${attention?'Attention':'Activity'}</span><span class="count" aria-label="${badge} ${badge===1?'item':'items'}">${badge}</span></button>${panelOpen?`<section class="activity-panel" id="activity" aria-labelledby="act-title"><header><h2 id="act-title" tabindex="-1">Downloads &amp; activity</h2><button class="btn small" id="activity-close">Close</button></header><div class="rows">${research.length?`<div class="label">Needed by your research</div>${research.map(taskHtml).join('')}`:''}${attention?`<div class="label">Needs attention</div>${taskHtml('failed')}`:''}${env.downloading?`<div class="label">Build downloads</div>${taskHtml('download')}`:''}</div></section>`:''}`;
+  document.getElementById('chip').onclick=()=>{panelOpen=!panelOpen;renderActivity();place();if(panelOpen)document.getElementById('act-title').focus();};
+  const close=()=>{panelOpen=false;renderActivity();place();document.getElementById('chip').focus();};
+  const c=document.getElementById('activity-close');if(c)c.onclick=close;
+  slot.querySelectorAll('[data-close]').forEach(b=>b.onclick=close);
+}
+function renderAreas(){
+  const btn=([id,l])=>`<button data-area="${id}"${id==='items'?' aria-current="page"':''}>${l}</button>`;
+  document.getElementById('areas').innerHTML=btn(['home','Home'])+`<span class="area-group" role="group" aria-label="Source data">${btn(['tables','Tables'])}${btn(['files','Files'])}</span><span class="area-sep" aria-hidden="true"></span><span class="area-group" role="group" aria-label="Game data">${btn(['items','Items'])}${btn(['creatures','Creatures'])}</span>`;
+  document.querySelectorAll('#areas [data-area]').forEach(b=>b.onclick=()=>{if(b.dataset.area==='items'){document.getElementById('items-title')?.focus();return;}location.href=`../desktop-home/index.html?area=${b.dataset.area}${p.get('text')==='200'?'&text=200':''}`;});
+}
+function renderStatus(){
+  const busy=panelOpen?'':env.prep?'<span class="busy"><span class="pulse" aria-hidden="true"></span>Items · Preparing ItemSparse · [2/4]</span>'
+    :env.optionalLoading?'<span class="busy"><span class="pulse" aria-hidden="true"></span>Item 900003 effects · [2/4] · Download all 25% of current stage</span>'
+    :env.prepFailed?'<span class="warn">1 needs attention · Items preparation failed</span>':'';
+  const scope=!coreReady?'<span class="secondary">Items not prepared</span>'
+    :`<span class="secondary">Items · <strong>${n(counts.itemRows)}</strong> Item rows · ${n(counts.matched)} with ItemSparse${env.sparsePartial?' · ItemSparse Partial':''}</span>`;
+  document.getElementById('statusbar').innerHTML=`<span><strong>${build.product} ${build.version}</strong> · ${build.source} · enUS</span>${scope}<span class="secondary"><span class="pill sample">Sample data</span></span><span class="spacer"></span>${busy}`;
+}
+const sheet=()=>document.getElementById('app').classList.contains('shell-scroll');
+// The panel covers exactly the item detail. In the compact layout it covers the whole area; while the shell scrolls it is a sheet over everything (D086).
+function place(){
+  const panel=document.getElementById('activity'),area=document.getElementById('area'),detail=document.querySelector('.items>.detail');
+  const covered=[area,detail,document.getElementById('brand'),document.getElementById('idfields'),document.getElementById('choose'),document.getElementById('areas'),document.getElementById('chip')];
+  covered.forEach(el=>{if(el)el.inert=false;});
+  if(!panel)return;
+  const bottom=document.getElementById('statusbar').offsetHeight;
+  panel.style.bottom=bottom+'px';
+  if(sheet()){panel.style.top='0';panel.style.left='0';covered.forEach(el=>{if(el)el.inert=true;});return;}
+  panel.style.top=document.getElementById('toolbar').getBoundingClientRect().bottom+'px';
+  if(compact()||!detail){panel.style.left='0';area.inert=true;return;}
+  panel.style.left=detail.getBoundingClientRect().left+'px';detail.inert=true;
+}
+// Hide a separator (the area-group one, or one in the item head's line) when it would end or start a line.
+function fixSep(){
+  const seps=[...document.querySelectorAll('.area-sep,.dline .sep')];
+  seps.forEach(s=>s.classList.remove('dangling'));
+  const r=e=>e.getBoundingClientRect(),same=(a,b)=>r(a).top<r(b).bottom&&r(b).top<r(a).bottom;
+  for(const sep of seps){const a=sep.previousElementSibling,b=sep.nextElementSibling;
+    if(!r(sep).width&&!r(sep).height)continue;
+    if(!a||!b||!same(sep,a)||!same(sep,b))sep.classList.add('dangling');}
+}
+// The shell scrolls as a whole only when the header and a 10rem area don't both fit.
+function fitShell(){
+  const app=document.getElementById('app'),rem=parseFloat(getComputedStyle(document.documentElement).fontSize);
+  fixSep();
+  app.classList.remove('shell-scroll');document.body.classList.remove('shell-scroll');
+  const need=document.getElementById('toolbar').offsetHeight+document.getElementById('statusbar').offsetHeight+10*rem;
+  if(need>innerHeight){app.classList.add('shell-scroll');document.body.classList.add('shell-scroll');}
+}
+// Compact: below 70rem of window width, as the container queries.
+const compact=()=>innerWidth/parseFloat(getComputedStyle(document.documentElement).fontSize)<70;
+
+/* ---------- Items list pane ---------- */
+function listHtml(){
+  const rows=coreReady?results():[];
+  const disabled=!coreReady;
+  const modeSeg=`<div class="segmented" role="group" aria-label="Search by"><button data-mode="name" aria-pressed="${mode==='name'}"${disabled?' disabled':''}>Name</button><button data-mode="id" aria-pressed="${mode==='id'}"${disabled?' disabled':''}>Item ID</button></div>`;
+  const head=`<div class="pane-head list-head"><h1 id="items-title" tabindex="-1">Items</h1><span class="spacer"></span>${modeSeg}
+    <form class="search-row" id="search-form" role="search" aria-label="Search Items"><input class="control" id="item-search" type="search" value="${esc(draft)}" placeholder="${mode==='id'?'Exact Item ID, e.g. 900003':'Name contains…'}" aria-label="${mode==='id'?'Exact Item ID':'Name contains'}" aria-keyshortcuts="Control+F"${mode==='id'?' inputmode="numeric"':''}${inputError?' aria-invalid="true" aria-describedby="search-err"':''}${disabled?' disabled aria-describedby="search-reason"':''}><button class="btn small" type="submit"${disabled?' disabled':''}>Search</button></form></div>
+    ${inputError?`<p class="search-err" id="search-err" role="alert">${inputError}</p>`:''}`;
+  if(env.prep)return head+`<div class="pane-scroll"><div class="wait"><div class="state-box" role="status"><strong>Preparing Items…</strong><p><span aria-hidden="true">[2/4] </span><span class="visually-hidden">Stage 2 of 4. </span>Downloading ItemSparse table data · ${build.source}</p>
+      <dl class="prereq"><dt>Item</dt><dd>Ready · ${n(counts.itemRows)} rows</dd><dt>ItemSparse</dt><dd>Downloading · needed by Items, ahead of Download all</dd></dl>
+      <div class="row"><button class="btn small">Stop preparing Items</button><button class="btn small" data-open-panel>View task</button></div></div>
+      <p class="reason" id="search-reason">Search and the list work once Item and ItemSparse are both ready. Item rows are already in Tables.</p></div></div>`;
+  if(env.prepFailed)return head+`<div class="pane-scroll"><div class="wait"><div class="state-box error" role="alert"><strong>Items need attention</strong><p><code>ARCHIVE_NOT_FOUND</code> ItemSparse couldn't be downloaded: the CDN returned 404 for 1 archive. Item table data is kept.</p><div class="row"><button class="btn small">Retry Items preparation</button><button class="btn small" data-open-panel>View task</button></div></div><p class="reason" id="search-reason">Search and the list work once Item and ItemSparse are both ready.</p></div></div>`;
+  const scopeNote=env.sparsePartial?`<div class="notice calm"><div class="text"><strong>ItemSparse readable rows · Partial</strong>2 encrypted sections aren't loaded. An item whose ItemSparse row isn't readable shows <b>Unknown</b>; nothing is inferred about it.</div></div>`:'';
+  const sel=byId(selId),hidden=!rows.some(r=>r.id===selId);
+  const appliedLine=applied?`<div class="applied" role="status"><span>${mode==='id'?`Exact Item ID <b class="mono">${esc(applied)}</b>`:`Name contains <b>“${esc(applied)}”</b>`} · ${rows.length} on this page</span><span class="spacer"></span><button class="linkbtn" id="clear-search">Clear search</button></div>`
+    :`<div class="applied browse" role="status"><span>All admitted Items · ascending Item ID</span></div>`;
+  const hiddenNote=hidden&&sel?`<div class="notice calm" style="margin-bottom:.6rem"><div class="text">Selected item ${sel.id} is outside these results. Its details stay open.</div></div>`:'';
+  const listbox=rows.length?`<div class="list-scroll" id="item-list"><div class="ithead icols" aria-hidden="true"><span></span><span>Item</span><span>Level</span></div>
+    <div role="listbox" id="items-lb" tabindex="0" aria-label="Items on this page"${rows.some(r=>r.id===selId)?` aria-activedescendant="iopt-${selId}"`:''}>${rows.map(it=>{const s=sparseState(it),on=it.id===selId;
+      const lvl=s==='ok'?n(it.ilvl):`<span class="nv">${s==='missing'?'Missing':'Unknown'}</span>`;
+      const line=s==='ok'?`<small>${it.id} · ${QUALITY[it.q]??`${it.q} · no reviewed label`}<span class="lvl-inline"> · level ${it.ilvl}</span></small>`:`<small class="why">${it.id} · ${s==='missing'?'Item row only':'not in readable ItemSparse rows'}</small>`;
+      return `<div role="option" id="iopt-${it.id}" class="icols ${qClass(it)}${on?' active':''}" aria-selected="${on}" data-id="${it.id}">${iconHtml(it,'list')}<span class="iname">${nameHtml(it)}${line}</span><span class="ilvl">${lvl}</span></div>`;}).join('')}</div></div>`
+    :`<div class="pane-scroll"><div class="empty"><div class="state-box plain"><strong>No match</strong><p>${mode==='id'?`No Item row in this build's ${env.sparsePartial?'readable':'admitted'} Items has ID ${esc(applied)}.`:`No admitted item name contains “${esc(applied)}”. Items without a readable name don't match a name search.`}</p><div class="row"><button class="btn small" id="clear-search">Clear search</button></div></div></div></div>`;
+  const foot=`<div class="pane-foot" role="group" aria-label="Items pages"><span class="count">${rows.length?`${applied?'Results':'Items'} 1–${rows.length}${applied?'':' · more after'}`:'No results'}</span><span class="spacer"></span><button class="btn" aria-disabled="true" aria-label="First page of Items">First</button><button class="btn" aria-disabled="true" aria-label="Previous page of Items">Previous</button><button class="btn"${applied||!rows.length?' aria-disabled="true"':''} aria-label="Next page of Items">Next</button></div>`;
+  return head+scopeNote+appliedLine+hiddenNote+listbox+foot;
+}
+
+/* ---------- Item detail pane ---------- */
+function detailHtml(){
+  if(!coreReady)return `<div class="placeholder"><div><h2 id="detail-title" tabindex="-1">No item selected</h2><p>Item details appear when Items are ready. Raw Item rows can be read in Tables now.</p><button class="btn small" data-src="Item|900001|">Open Item in Tables</button></div></div>`;
+  const it=byId(selId),d=detailOf(it),s=sparseState(it),S=s==='ok';
+  const sp=(f,txt)=>S?src('ItemSparse',it.id,f,txt):nosrc(s==='missing'?'no record':'not readable');
+  const it_=(f,txt)=>src('Item',it.id,f,txt);
+  const sparseVal=()=>s==='missing'?nv('Missing','no ItemSparse row'):nv('Unknown','not in readable ItemSparse rows');
+  /* Head: identity, record buttons, description and icon source */
+  const qualityLine=S?`<span class="qn ${qClass(it)}" style="font-weight:600">${QUALITY[it.q]??`${it.q} · no reviewed label`}</span><span class="sep" aria-hidden="true">|</span><span>Item level <b>${it.ilvl}</b></span><span class="sep" aria-hidden="true">|</span><span>${INVTYPE[it.invSparse]??`Inventory type ${it.invSparse}`}</span><span class="sep" aria-hidden="true">|</span><span>${BOND[d.bonding]??`Bonding ${d.bonding}`}</span>`
+    :`<span>${s==='missing'?'Item row only: no ItemSparse row, so no name, quality or level':'ItemSparse row not readable: name, quality and level unknown'}</span>`;
+  const desc=!S?'':d.desc?`<p class="desc selectable"><q>${esc(d.desc)}</q>${src('ItemSparse',it.id,'Description_lang','Description_lang')}</p>`:`<p class="desc dim">Empty description · the source text is an empty string ${src('ItemSparse',it.id,'Description_lang','Description_lang')}</p>`;
+  const ist=env.optionalLoading?'loading':it.iconState;
+  const iconNote={ready:`Icon · FileDataID ${it.icon}`,loading:`Icon loading · FileDataID ${it.icon}`,zero:'Item.IconFileDataID is 0. An icon from the item\'s appearance isn\'t looked up here.',missing:`Icon missing · FileDataID ${it.icon} has no ROOT entry in this build`,encrypted:`Encrypted icon · TACT key ${hex(77).slice(0,16).toUpperCase()} isn't available`,unsupported:'Unsupported icon · this BLP encoding isn\'t supported'}[ist];
+  const rec=`<div class="drec">${src('Item',it.id,'','Item #'+it.id).replace('class="src"','class="btn small"').replace(' aria-describedby="rove-hint"','')}${S?src('ItemSparse',it.id,'','ItemSparse #'+it.id).replace('class="src"','class="btn small"').replace(' aria-describedby="rove-hint"',''):''}</div>`;
+  const head=`<div class="dhead ${qClass(it)}">${iconHtml(it,'detail')}<div class="dtitle"><h2 id="detail-title" tabindex="-1" class="selectable">${S?`<span class="qn">${esc(it.name)}</span>`:`<span class="qn nameless">${s==='missing'?'Name unavailable':'Name unknown'}</span>`}</h2>
+    <div class="dline"><span class="mono selectable">Item ${it.id}</span><span class="sep" aria-hidden="true">|</span>${qualityLine}</div></div>${rec}
+    <div class="ddesc" data-rove role="group" aria-label="Description and icon sources">${desc}<p class="desc dim">${iconNote} ${src('Item',it.id,'IconFileDataID','Item.IconFileDataID')}</p></div></div>`;
+
+  /* Item: classification and level */
+  const clsText=env.optionalLoading?loadingSub('ItemClass'):CLASS[it.cls]?`<span class="fsub">· ${CLASS[it.cls]}</span>`:it.cls===7?'<span class="fsub">· 2 ItemClass rows have ClassID 7; none is picked</span>':'<span class="fsub">· no ItemClass row has ClassID '+it.cls+'</span>';
+  const subLabel=CLASS[it.cls]&&!env.optionalLoading;
+  const subText=env.optionalLoading?loadingSub('ItemSubClass'):subLabel?`<span class="fsub">· Authored subclass ${'ABCD'[[12,4,2,9].indexOf(it.cls)]}${it.sub}</span>`:'<span class="fsub">· no label without a single class</span>';
+  const clsSrc=it_('ClassID','Item.ClassID')+(CLASS_ROW[it.cls]&&!env.optionalLoading?src('ItemClass',CLASS_ROW[it.cls],'ClassName_lang','ItemClass.ClassName_lang'):'');
+  const subSrc=it_('SubclassID','Item.SubclassID')+(subLabel?src('ItemSubClass',4000+it.cls*10+it.sub,'DisplayName_lang','ItemSubClass.DisplayName_lang'):'');
+  const same=it.invItem===it.invSparse||!S;
+  const invFacts=same?fact('Inventory type',`${esc(it.invItem)} <span class="fsub">· ${INVTYPE[it.invItem]??'no reviewed label'}</span>`,it_('InventoryType','Item.InventoryType')+(S?sp('InventoryType','ItemSparse.InventoryType'):''),S?'':'From Item only.')
+    :fact('Inventory type · Item',`${it.invItem} <span class="fsub">· ${INVTYPE[it.invItem]??'no reviewed label'}</span>`,it_('InventoryType','Item.InventoryType'))+fact('Inventory type · ItemSparse',`${it.invSparse} <span class="fsub">· ${INVTYPE[it.invSparse]??'no reviewed label'}</span>`,sp('InventoryType','ItemSparse.InventoryType'),'<span class="conflict">Item and ItemSparse disagree.</span> Both values are kept; neither is picked.');
+  const levelInputs=`<details class="more"><summary>Item level inputs · raw</summary><p class="sec-note">Inputs a level calculation would need. Nothing is calculated from them here.</p>
+    ${fact('ItemSquishEraID',val(d.squish),it_('ItemSquishEraID','Item.ItemSquishEraID'))}${fact('ContentTuningID',val(d.tuning),it_('ContentTuningID','Item.ContentTuningID'))}${S?fact('PlayerLevelToItemLevelCurveID',val(d.curve),sp('PlayerLevelToItemLevelCurveID'))+fact('ItemLevelOffsetCurveID',val(d.offsetCurve),sp('ItemLevelOffsetCurveID'))+fact('ItemLevelOffsetItemLevel',val(d.offsetLevel),sp('ItemLevelOffsetItemLevel')):''}</details>`;
+  const secItem=`<section class="dsec" aria-labelledby="h-item" data-rove><div class="dsec-head"><h3 id="h-item">Item</h3><span class="scope">Classification</span></div>
+    ${fact('Quality',S?`${it.q} <span class="fsub">· ${qText(it.q)}</span>`:sparseVal(),sp('OverallQualityID','ItemSparse.OverallQualityID'))}
+    ${fact('Item level',S?val(it.ilvl,'base, before bonus lists and scaling'):sparseVal(),sp('ItemLevel','ItemSparse.ItemLevel'))}
+    ${levelInputs}
+    ${fact('Class',`${it.cls} ${clsText}`,clsSrc)}
+    ${fact('Subclass',`${it.sub} ${subText}`,subSrc)}
+    ${invFacts}
+    <p class="legend-note">The number is the source value. Text after · is ItemClass or ItemSubClass text, or VibeMiner's reviewed label list.</p></section>`;
+
+  /* Requirements and Inventory: all ItemSparse */
+  const sparseSection=(id,title,scope,rows,extra='')=>`<section class="dsec" aria-labelledby="${id}" data-rove><div class="dsec-head"><h3 id="${id}">${title}</h3><span class="scope">${scope}</span></div>${S?rows:`<div class="state-box plain sec-state"><strong>${s==='missing'?'Missing':'Unknown'}</strong><p>${s==='missing'?`These values come from ItemSparse, which has no row ${it.id} in its complete sections.`:`Row ${it.id} isn't in the readable ItemSparse sections. It may be in an encrypted section; nothing is inferred.`}</p></div>`}${extra}</section>`;
+  const secReq=sparseSection('h-req','Requirements','ItemSparse',
+    fact('Required level',val(d.reqLevel),sp('RequiredLevel'))+
+    fact('Required skill',`${d.reqSkill} <span class="fsub">· rank ${d.reqSkillRank}</span>`,sp('RequiredSkill')+sp('RequiredSkillRank'))+
+    fact('Required ability',val(d.reqAbility),sp('RequiredAbility'))+
+    fact('Faction and reputation',`${d.minFaction} <span class="fsub">· minimum reputation ${d.minRep}</span>`,sp('MinFactionID')+sp('MinReputation'))+
+    fact('Classes',val(d.allowClass,'raw mask'),sp('AllowableClass'))+
+    fact('Races',`[${d.allowRaces.join(', ')}] <span class="fsub">· two raw masks</span>`,sp('AllowableRaces[0]')+sp('AllowableRaces[1]')));
+  const secInv=sparseSection('h-inv','Inventory and price','ItemSparse',
+    fact('Binding',`${d.bonding} <span class="fsub">· ${BOND[d.bonding]??'no reviewed label'}</span>`,sp('Bonding'))+
+    fact('Stack size',val(d.stack),sp('Stackable'))+
+    fact('Max count',val(d.maxCount),sp('MaxCount'))+
+    fact('Container slots',val(d.slots),sp('ContainerSlots'))+
+    fact('Buy price',`${copper(d.buy)} <span class="fsub">· ${n(d.buy)} copper</span>`,sp('BuyPrice'),'Source value, not a vendor quote.')+
+    fact('Sell price',`${copper(d.sell)} <span class="fsub">· ${n(d.sell)} copper</span>`,sp('SellPrice'))+
+    fact('Vendor stack',val(d.vendorStack),sp('VendorStackCount'))+
+    fact('Duration in inventory',val(d.duration),sp('DurationInInventory')));
+
+  /* Stat allocation and sockets */
+  let stats,sockets;
+  if(!S){stats=sparseSection('h-stats','Stat allocation, not final stats','ItemSparse','');sockets='';}
+  else if(env.statsUnsupported){
+    stats=`<section class="dsec" aria-labelledby="h-stats" data-rove><div class="dsec-head"><h3 id="h-stats">Stat allocation, not final stats</h3><span class="scope">ItemSparse</span></div>
+      <div class="state-box plain sec-state"><strong>Not decoded for this layout</strong><p>ItemSparse layout <span class="mono">7E21C0A4</span> isn't reviewed for stat and socket inputs. The fields are below as raw inputs. <code>ITEM_STATS_UNSUPPORTED</code></p></div>
+      ${fact('Raw input · StatModifier_bonusStat[0]','7',sp('StatModifier_bonusStat[0]'))}${fact('Raw input · StatPercentEditor[0]','6200',sp('StatPercentEditor[0]'))}${fact('Raw input · SocketType[0]','0',sp('SocketType[0]'))}
+      <p class="legend-note">All raw ItemSparse fields are under Other source inputs.</p></section>`;
+    sockets='';}
+  else{
+    stats=`<section class="dsec" aria-labelledby="h-stats" data-rove><div class="dsec-head"><h3 id="h-stats">Stat allocation, not final stats</h3><span class="scope">ItemSparse</span></div>
+      <p class="sec-note">Final +N depends on item level, slot and bonuses. These are the ten aligned allocation inputs, as read.</p>
+      <div class="tbl-scroll" role="region" aria-label="Stat allocation, 10 slots"><table class="inputs"><thead><tr><th>Slot</th><th>Stat type<small>bonusStat</small></th><th>Percent editor<small>PercentEditor</small></th><th>Socket share<small>PercentageOfSocket</small></th></tr></thead>
+      <tbody>${d.stats.map((r,k)=>`<tr><th scope="row">${k}</th><td>${r[0]}</td><td>${n(r[1])}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table></div>
+      <div class="group-src"><span>Sources:</span>${src('ItemSparse',it.id,'StatModifier_bonusStat[0]','StatModifier_bonusStat[0–9]')}${src('ItemSparse',it.id,'StatPercentEditor[0]','StatPercentEditor[0–9]')}${src('ItemSparse',it.id,'StatPercentageOfSocket[0]','StatPercentageOfSocket[0–9]')}</div>
+      <p class="legend-note">All ten slots are kept as read, zeros and −1 included.</p></section>`;
+    sockets=`<section class="dsec" aria-labelledby="h-sock" data-rove><div class="dsec-head"><h3 id="h-sock">Sockets</h3><span class="scope">ItemSparse</span></div>
+      <div class="tbl-scroll" role="region" aria-label="Sockets"><table class="inputs"><thead><tr><th>Socket</th><th>Socket type<small>SocketType</small></th></tr></thead><tbody>${d.sockets.map((v,k)=>`<tr><th scope="row">${k}</th><td>${v}</td></tr>`).join('')}</tbody></table></div>
+      <div class="group-src"><span>Source:</span>${src('ItemSparse',it.id,'SocketType[0]','SocketType[0–2]')}</div>
+      ${fact('Socket bonus enchantment',val(d.socketBonus),sp('Socket_match_enchantment_ID'))}${fact('Gem properties',val(d.gemProps),sp('Gem_properties'))}</section>`;}
+
+  /* Effects: Item → ItemXItemEffect → ItemEffect → SpellName */
+  let effects;
+  const effHead=`<div class="dsec-head"><h3 id="h-eff" tabindex="-1">Effects</h3><span class="scope">ItemXItemEffect → ItemEffect → SpellName</span></div>`;
+  const scopeNote='ItemXItemEffect complete · ItemEffect and SpellName readable rows · Partial (encrypted sections not loaded).';
+  if(env.effectsUnavailable)effects=`<section class="dsec" aria-labelledby="h-eff" data-rove>${effHead}<div class="state-box plain sec-state"><strong>Effects aren't available from this engine</strong><p>It doesn't provide the item effects capability. Effect rows can still be read in Tables. <code>ITEM_EFFECTS_UNAVAILABLE</code></p></div><div class="group-src">${follow('ItemXItemEffect','ItemID',it.id)}</div></section>`;
+  else if(env.optionalLoading)effects=`<section class="dsec" aria-labelledby="h-eff" data-rove>${effHead}<div class="state-box sec-state" role="status"><strong><span class="loading-line"><span class="pulse" aria-hidden="true"></span>Loading effects…</span></strong><p><span aria-hidden="true">[2/4] </span><span class="visually-hidden">Stage 2 of 4. </span>Downloading ItemEffect table data, then SpellName text. ${d.effects.length} linked ${d.effects.length===1?'effect':'effects'} found in ItemXItemEffect.</p><div class="row"><button class="btn small">Stop loading effects</button><button class="btn small" data-open-panel>View task</button></div></div>
+      ${d.effects.map(e=>`<article class="effect" aria-label="Linked effect ${e.ord}"><div class="eh"><b class="ld">…</b><span class="visually-hidden">Spell name loading.</span><span class="dim">ItemEffect ${e.eff}</span></div><dl class="efacts"><div><dt>Trigger</dt><dd class="ld">Loading</dd></div><div><dt>Spell</dt><dd class="ld">Loading</dd></div></dl><div class="esrc">${src('ItemXItemEffect',e.row,'ItemEffectID',`ItemXItemEffect row ${e.row}`)}${nosrc('ItemEffect loading')}</div></article>`).join('')}</section>`;
+  else if(!d.effects.length)effects=`<section class="dsec" aria-labelledby="h-eff" data-rove>${effHead}<div class="state-box plain sec-state"><strong>No linked effects</strong><p>0 ItemXItemEffect rows have ItemID ${it.id} in the complete source.</p></div><div class="group-src">${follow('ItemXItemEffect','ItemID',it.id)}</div></section>`;
+  else effects=`<section class="dsec" aria-labelledby="h-eff" data-rove>${effHead}<p class="sec-note">${d.effects.length} linked ${d.effects.length===1?'effect':'effects'}. ${scopeNote} Raw client inputs; no proc, charge or cooldown behaviour is inferred.</p>
+    ${d.effects.map(e=>{
+      if(e.unreadable)return `<article class="effect" aria-label="Linked effect ${e.ord}"><div class="eh"><span class="nv">Unknown</span><span class="dim">· ItemEffect ${e.eff} isn't in the readable rows</span></div><p class="sec-note" style="margin:.35rem 0">It may be in an encrypted ItemEffect section, so trigger, spell and cooldowns aren't known. Nothing is inferred.</p><div class="esrc">${src('ItemXItemEffect',e.row,'ItemEffectID',`ItemXItemEffect row ${e.row}`)}${nosrc('ItemEffect not readable')}</div></article>`;
+      const nm=e.name===null?`<span class="nv">Unknown</span> <span class="dim">· SpellName ${e.spell} isn't in the readable rows</span>`:`<b>${esc(e.name)}</b><span class="dim">Spell ${e.spell}</span>`;
+      return `<article class="effect" aria-label="Linked effect ${e.ord}"><div class="eh">${nm}</div><dl class="efacts"><div><dt>Trigger</dt><dd>${e.trigger}<small>${TRIGGER[e.trigger]??'no reviewed label'}</small></dd></div><div><dt>Charges</dt><dd>${e.charges}${RAW16}</dd></div><div><dt>Cooldown</dt><dd>${ms(e.cd)}</dd></div><div><dt>Category cooldown</dt><dd>${ms(e.ccd)}</dd></div><div><dt>Spell category</dt><dd>${e.cat}${RAW16}</dd></div><div><dt>Specialization</dt><dd>${e.spec}${RAW16}</dd></div><div><dt>Player condition</dt><dd>${e.cond}<small>unverified candidate</small></dd></div><div><dt>Legacy slot</dt><dd>${e.slot}</dd></div></dl><div class="esrc">${src('ItemXItemEffect',e.row,'ItemEffectID',`ItemXItemEffect row ${e.row}`)}${src('ItemEffect',e.eff,'SpellID',`ItemEffect #${e.eff}`)}${e.name===null?nosrc('SpellName not readable'):src('SpellName',e.spell,'Name_lang',`SpellName #${e.spell}`)}</div></article>`;}).join('')}</section>`;
+
+  /* Other raw inputs */
+  const other=S?`<section class="dsec full" aria-labelledby="h-other" data-rove><details class="more"><summary id="h-other">Other source inputs · raw</summary>
+    <p class="sec-note">Supported fields without a reviewed meaning. They are shown as read and never used as filters.</p>
+    ${fact('DamageType','0',sp('DamageType'))}${fact('ItemDelay','0',sp('ItemDelay'))}${fact('DmgVariance','1',sp('DmgVariance'))}${fact('ItemRange','0',sp('ItemRange'))}${fact('Flags[0–4]','[8192, 0, 0, 0, 0]',sp('Flags[0]','ItemSparse.Flags[0–4]'))}${fact('ZoneBound[0–1]','[0, 0]',sp('ZoneBound[0]','ItemSparse.ZoneBound[0–1]'))}${fact('InstanceBound','0',sp('InstanceBound'))}${fact('RequiredHoliday','0',sp('RequiredHoliday'))}${fact('PriceVariance','1',sp('PriceVariance'))}${fact('PriceRandomValue','0',sp('PriceRandomValue'))}${fact('Display1_lang','<span class="fsub">Empty string</span>',sp('Display1_lang'))}</details></section>`:'';
+
+  // Wide: two columns in reading order. Compact (one pane): one column with Effects first, so its actions are near the top.
+  const body=compact()?`<div class="dgrid">${effects}${secItem}${secReq}${secInv}${stats}${sockets}${other}</div>`
+    :`<div class="dgrid two"><div class="dcol">${secItem}${secReq}${secInv}</div><div class="dcol">${effects}${stats}${sockets}</div>${other}</div>`;
+  const tip=`<p class="rove-tip" id="rove-hint">Tab moves between sections; arrow keys move between a section's links.</p>`;
+  return head+`<div class="dbody" id="dbody">${tip}${body}</div>`;
+}
+
+/* ---------- Area ---------- */
+let wasCompact=null;
+function renderArea(keep){
+  const el=document.getElementById('area');
+  const sc=document.getElementById('item-list')?.scrollTop||0,ds=document.getElementById('dbody')?.scrollTop||0;
+  const sel=byId(selId);wasCompact=compact();
+  const sw=`<div class="pane-switch"><div class="segmented" role="group" aria-label="Show pane"><button data-pane="list" aria-pressed="${pane==='list'}">Items list</button><button data-pane="detail" aria-pressed="${pane==='detail'}">Selected item</button></div>${coreReady&&sel?`<span class="reason">${esc(sparseState(sel)==='ok'?sel.name:'Item '+sel.id)}</span>`:''}</div>`;
+  el.innerHTML=`<section class="items" data-pane="${pane}" aria-label="Items">${sw}<section class="pane ilist" aria-labelledby="items-title">${listHtml()}</section><section class="pane detail" aria-labelledby="detail-title">${detailHtml()}</section></section>`;
+  if(keep){const l=document.getElementById('item-list');if(l)l.scrollTop=sc;const b=document.getElementById('dbody');if(b)b.scrollTop=keep==='list'?0:ds;}
+  wire();rove();tables();fixSep();place();
+}
+// Each section is one Tab stop: its first source link (or the last one used) takes Tab, arrows move between its links.
+// Links inside a closed disclosure are skipped: Chromium still reports boxes for them, but they can't take focus.
+const reachable=g=>[...g.querySelectorAll('.src')].filter(l=>!l.closest('details:not([open])')&&l.getClientRects().length);
+function rove(){
+  document.querySelectorAll('[data-rove]').forEach(g=>{
+    g.querySelectorAll('.src').forEach(l=>l.tabIndex=-1);
+    const vis=reachable(g);
+    (vis.find(l=>l.dataset.cur)||vis[0])?.setAttribute('tabindex','0');});
+}
+// A table region is a Tab stop only when it actually scrolls sideways.
+function tables(){document.querySelectorAll('.tbl-scroll').forEach(t=>{if(t.scrollWidth>t.clientWidth+1)t.tabIndex=0;else t.removeAttribute('tabindex');});}
+// Keep a row in view by scrolling the list's own scroller only, never the window.
+function inList(id){
+  const l=document.getElementById('item-list'),o=document.getElementById('iopt-'+id);if(!l||!o)return;
+  const head=l.querySelector('.ithead')?.offsetHeight||0,top=o.offsetTop-head,bottom=o.offsetTop+o.offsetHeight-l.clientHeight;
+  if(l.scrollTop>top)l.scrollTop=top;else if(l.scrollTop<bottom)l.scrollTop=bottom;
+}
+function select(id,how){
+  selId=id;renderArea('list');
+  const lb=document.getElementById('items-lb');
+  if(how==='open'&&compact()){pane='detail';renderArea('list');document.getElementById('detail-title').focus({preventScroll:true});return;}
+  if(lb){lb.focus({preventScroll:true});inList(id);aboveStatus(id);}
+}
+// While the shell scrolls as a whole, a deliberate move keeps the row and its focus ring clear of the sticky status bar and the window top.
+function aboveStatus(id){
+  const o=document.getElementById('iopt-'+id);if(!o||!sheet())return;
+  const pad=6,r=o.getBoundingClientRect(),limit=innerHeight-document.getElementById('statusbar').offsetHeight-pad;
+  if(r.bottom>limit)scrollBy(0,r.bottom-limit);else if(r.top<pad)scrollBy(0,r.top-pad);
+}
+function wire(){
+  const el=document.getElementById('area');
+  el.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;draft='';inputError='';renderArea();el.querySelector(`[data-mode="${mode}"]`).focus();});
+  const f=document.getElementById('search-form');
+  if(f)f.onsubmit=e=>{e.preventDefault();const v=document.getElementById('item-search').value;
+    if(mode==='id'&&v&&!validId(v)){inputError=ID_ERROR;draft=v;renderArea();document.getElementById('item-search').focus();return;}
+    if([...v].length>128){inputError='Use at most 128 characters. The last results stay.';draft=v;renderArea();document.getElementById('item-search').focus();return;}
+    inputError='';applied=v;draft=v;renderArea();document.getElementById('item-search').focus();};
+  const s=document.getElementById('item-search');if(s)s.oninput=()=>{draft=s.value;};
+  el.querySelectorAll('#clear-search').forEach(b=>b.onclick=()=>{applied='';draft='';inputError='';renderArea();document.getElementById('item-search').focus();});
+  const lb=document.getElementById('items-lb');
+  if(lb){const ids=[...lb.querySelectorAll('[role=option]')].map(o=>+o.dataset.id);
+    lb.querySelectorAll('[role=option]').forEach(o=>o.onclick=()=>select(+o.dataset.id,'open'));
+    lb.onkeydown=e=>{let i=ids.indexOf(selId);
+      const t={ArrowDown:i+1,ArrowUp:i-1,Home:0,End:ids.length-1,PageDown:i+10,PageUp:i-10}[e.key];
+      if(t!==undefined){e.preventDefault();select(ids[Math.max(0,Math.min(ids.length-1,t))]);}
+      else if(e.key==='Enter'&&i>=0){e.preventDefault();select(selId,'open');}};}
+  el.querySelectorAll('.pane-switch [data-pane]').forEach(b=>b.onclick=()=>{const to=b.dataset.pane;pane=to;renderArea();
+    if(to==='list'&&document.getElementById('items-lb')){document.getElementById('items-lb').focus({preventScroll:true});inList(selId);}
+    else el.querySelector(`.pane-switch [data-pane="${to}"]`).focus();});
+  el.querySelectorAll('[data-src],[data-follow]').forEach(b=>b.onclick=()=>handoff(b));
+  el.querySelectorAll('[data-open-panel]').forEach(b=>b.onclick=()=>document.getElementById('chip')?.click());
+  el.querySelectorAll('details').forEach(d=>d.ontoggle=rove);
+}
+// Arrow keys between the source links of one section (roving tabindex).
+document.addEventListener('keydown',e=>{
+  const l=e.target.closest?.('.src');const g=l?.closest('[data-rove]');
+  if(!g||!['ArrowRight','ArrowDown','ArrowLeft','ArrowUp','Home','End'].includes(e.key))return;
+  const vis=reachable(g),i=vis.indexOf(l);
+  const j={ArrowRight:i+1,ArrowDown:i+1,ArrowLeft:i-1,ArrowUp:i-1,Home:0,End:vis.length-1}[e.key];
+  const next=vis[Math.max(0,Math.min(vis.length-1,j))];if(!next||next===l)return;
+  e.preventDefault();g.querySelectorAll('.src').forEach(x=>{x.tabIndex=-1;delete x.dataset.cur;});next.tabIndex=0;next.dataset.cur='1';next.focus();
+});
+// Mockup only: the hand-off itself is drawn by the Tables reference.
+function handoff(b){
+  document.querySelector('.mock-note')?.remove();
+  let what,t;
+  if(b.dataset.follow){const [ft,col,v]=b.dataset.follow.split('|');t=ft;what=`Tables showing <b>${ft}</b> rows where <b>${col} = ${v}</b> (follow by value)`;}
+  else{const [st,id,f]=b.dataset.src.split('|');t=st;what=`Tables at <b>${st}</b> record <b>${id}</b>${f?`, field <b>${f}</b> selected`:''}`;}
+  const drawn={Item:1,ItemClass:1}[t];
+  const note=document.createElement('div');note.className='mock-note';note.setAttribute('role','status');
+  note.innerHTML=`Mockup: opens ${what}, same build, source and locale, with <b>← Return to Items selection</b>. Return puts focus back on this link. ${drawn?`<a href="../desktop-home/index.html?area=tables&table=${t}&from=items${p.get('text')==='200'?'&text=200':''}">See the Tables reference</a>`:'The Tables reference draws Item and ItemClass.'}<button type="button">OK</button>`;
+  document.body.append(note);
+  note.querySelector('button').onclick=()=>{note.remove();b.focus();};
+}
+
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'){const note=document.querySelector('.mock-note');if(note){note.querySelector('button').click();return;}if(panelOpen){document.getElementById('activity-close')?.click();}}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'){e.preventDefault();if(compact()&&pane!=='list'){pane='list';renderArea();}document.getElementById('item-search')?.focus();}
+});
+addEventListener('resize',()=>{if(compact()!==wasCompact)renderArea('keep');fitShell();tables();place();});
+
+/* ---------- Mockup control ---------- */
+function renderMock(){
+  const mock=document.getElementById('mock');if(!mock)return;
+  const cur=new URLSearchParams(location.search);
+  const link=(k,v,label,def,reset=[])=>{const q=new URLSearchParams(cur);q.set(k,v);for(const r of reset)q.delete(r);const on=(cur.get(k)||def)===v;return `<a href="?${q}" aria-current="${on}">${label}</a>`;};
+  const sep='<span class="sep">|</span>';
+  mock.innerHTML='<strong style="margin-right:.2rem">Mockup</strong>'
+    +[['ready','Ready'],['loading','Loading while downloading'],['preparing','Preparing'],['failed','Failed']].map(([v,l])=>link('state',v,l,'ready',['item','panel'])).join('')+sep
+    +[['missing','Missing'],['unknown','Unknown'],['encrypted','Encrypted'],['unsupported','Unsupported'],['zero','Known zero']].map(([v,l])=>link('state',v,l,'ready',['item','panel'])).join('')+sep
+    +link('item','900006','Sources disagree','')+link('item','900013','Two class rows','')+link('item','900019','Unlabelled quality','')+sep
+    +link('q','zz','No match','')+`<a href="?${(()=>{const q=new URLSearchParams(cur);q.set('mode','id');q.set('q','12a');return q;})()}" aria-current="${cur.get('q')==='12a'}">Bad ID</a>`+sep
+    +link('text','100','100%','100')+link('text','200','200%','100')+(tasks.length?sep+link('panel','open','Panel open',''):'');
+}
+
+renderHeader();renderActivity();renderAreas();fitShell();renderArea();renderStatus();renderMock();fitShell();place();
+inList(selId);
+</script>
+</body></html>

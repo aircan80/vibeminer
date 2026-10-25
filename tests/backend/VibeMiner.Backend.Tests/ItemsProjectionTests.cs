@@ -39,6 +39,10 @@ public sealed class ItemsProjectionTests(ITestOutputHelper output)
         Assert.Single(detail.Detail.SparseRow.TextIssues!);
         Assert.Null((await session.InspectAsync(new(Context, artifact.ContentKey, "3"), default)).Detail);
         Assert.Equal(4, session.LastPayloadReads - 1); // Browse four, then one inspected payload.
+        // item-facts-v1: an ID outside the Item scope looks its ItemSparse row up (3 is Sparse-only; 4294967295 and 9 have none).
+        Assert.True(await session.SparseRowExistsAsync(new(Context, artifact.ContentKey, "3"), default));
+        Assert.False(await session.SparseRowExistsAsync(new(Context, artifact.ContentKey, "4294967295"), default));
+        Assert.False(await session.SparseRowExistsAsync(new(Context, artifact.ContentKey, "9"), default));
     }
 
     [Fact]

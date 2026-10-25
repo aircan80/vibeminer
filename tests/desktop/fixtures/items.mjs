@@ -16,3 +16,34 @@ export function itemsDefinition(snapshot,tableId,buildVersion){
  for(const column of source.columns){const match=/^(.*)\[(\d+)\]$/.exec(column.name),name=match?match[1]:column.name;if(match&&match[2]!=='0')continue;const arrayLength=match?source.columns.filter(c=>c.name.startsWith(`${name}[`)).length:1;fields.push({name,family:column.family==='integer'?'int':column.family,integerBits:column.family==='integer'?column.interpretation?.candidateBits??32:null,unsigned:column.family==='integer'?column.interpretation?.candidateUnsigned??false:null,arrayLength,isId:column.isId,nonInline:false,relationStorage:false,verifiedName:!column.interpretation,comment:null,reference:column.reference});}
  return {productId:source.productId,buildIdentity:source.buildIdentity,sourceRegion:source.sourceRegion,buildVersion,provider:{name:'WoWDBDefs contributors',revision:source.providerRevision,manifestSha256:'f7b752a991d6a0321d07ecb7f06e62cd94694c1594d2fe5ce0cb7b243c71559a',license:'CC-BY-SA-4.0',sourceUrl:`https://github.com/wowdev/WoWDBDefs/blob/${source.providerRevision}/manifest.json`},entry:{tableId,name:tableId==='50238ec2'?'Item':'ItemSparse',db2FileDataId:source.association.fileDataId,definitionState:'bundled',sourceState:'notChecked',rowsState:'notPrepared'},definition:{sha256:source.definitionSha256,sourceUrl:'https://fixture.invalid/definition',columns:fields,candidates:[{layoutHash:source.layoutHash,fields}]},problem:null};
 }
+// item-facts-v1 for the authored rows: the same key table, state and label rules as the C# ItemFacts projector.
+const names=(...list)=>list.map((label,value)=>({value:String(value),label}));
+export const itemLabelLists={labelRevision:'item-labels-v1',
+ quality:names('Poor','Common','Uncommon','Rare','Epic','Legendary','Artifact','Heirloom','WoW Token'),
+ inventoryType:names('Not equippable','Head','Neck','Shoulder','Shirt','Chest','Waist','Legs','Feet','Wrist','Hands','Finger','Trinket','One-hand','Shield','Ranged','Back','Two-hand','Bag','Tabard','Robe','Main hand','Off hand','Held in off-hand','Ammo','Thrown','Ranged right','Quiver','Relic','Profession tool','Profession gear'),
+ bonding:names('No binding','Binds when picked up','Binds when equipped','Binds when used','Quest item'),
+ trigger:names('On use','On equip','Chance on hit')};
+export const itemFactKeys=[['description',['Description_lang']],['display1',['Display1_lang']],['display2',['Display2_lang']],['display3',['Display3_lang']],['icon',['IconFileDataID']],
+ ['quality',['OverallQualityID']],['itemLevel',['ItemLevel']],['itemSquishEra',['ItemSquishEraID']],['contentTuning',['ContentTuningID']],['playerLevelCurve',['PlayerLevelToItemLevelCurveID']],['itemLevelOffsetCurve',['ItemLevelOffsetCurveID']],['itemLevelOffset',['ItemLevelOffsetItemLevel']],
+ ['class',['ClassID']],['subclass',['SubclassID']],['inventoryType',['InventoryType']],
+ ['requiredLevel',['RequiredLevel']],['requiredSkill',['RequiredSkill']],['requiredSkillRank',['RequiredSkillRank']],['requiredAbility',['RequiredAbility']],['minFaction',['MinFactionID']],['minReputation',['MinReputation']],['allowableClass',['AllowableClass']],['allowableRaces',['AllowableRaces','AllowableRace']],
+ ['bonding',['Bonding']],['stackable',['Stackable']],['maxCount',['MaxCount']],['containerSlots',['ContainerSlots']],['buyPrice',['BuyPrice']],['sellPrice',['SellPrice']],['vendorStackCount',['VendorStackCount']],['durationInInventory',['DurationInInventory']],
+ ['statType',['StatModifier_bonusStat']],['statAmount',['StatModifier_bonusAmount']],['statPercentEditor',['StatPercentEditor']],['statSocketShare',['StatPercentageOfSocket']],['socketType',['SocketType']],['socketBonus',['Socket_match_enchantment_ID','Socket_match_enchantment_id']],['gemProperties',['Gem_properties','GemProperties']],
+ ['damageType',['DamageType']],['itemDelay',['ItemDelay']],['dmgVariance',['DmgVariance']],['itemRange',['ItemRange']],['flags',['Flags']],['zoneBound',['ZoneBound']],['instanceBound',['InstanceBound']],['requiredHoliday',['RequiredHoliday']],['priceVariance',['PriceVariance']],['priceRandomValue',['PriceRandomValue']]];
+const labelMaps={quality:itemLabelLists.quality,inventoryType:itemLabelLists.inventoryType,bonding:itemLabelLists.bonding};
+export function itemFacts(snapshot,params,withIcons=false){
+ const rows=itemRows(snapshot,params.itemId,withIcons),complete=snapshot.sparseSource.coverage.scope==='complete';
+ const base={context:snapshot.context,artifactId:snapshot.artifactId,itemId:params.itemId,policyRevision:'item-facts-v1',labelRevision:'item-labels-v1'};
+ // Outside the authored Item scope there is no ItemSparse row either: the lookup finds none.
+ if(!rows)return {...base,sparse:complete?'missing':'unknown',facts:null};
+ const {itemRow,sparseRow}=rows,sparse=sparseRow?'present':complete?'missing':'unknown';
+ const columns=(source,fields)=>source.columns.flatMap((c,i)=>fields.includes(c.name.split('[')[0])?[i]:[]);
+ const cells=(source,row,table,fields,key)=>columns(source,fields).map(i=>{const invalid=!!row.textIssues?.some(t=>t.columnIndex===i),value=invalid?'':row.values[i];return {tableId:source.tableId,table,column:source.columns[i].name,columnIndex:i,recordId:row.id,value,label:invalid?null:labelMaps[key]?.find(l=>l.value===value)?.label??null};});
+ const facts=itemFactKeys.map(([key,fields])=>{
+  const item=cells(snapshot.itemSource,itemRow,'Item',fields,key),sparseColumns=columns(snapshot.sparseSource,fields),sparseCells=sparseRow?cells(snapshot.sparseSource,sparseRow,'ItemSparse',fields,key):[];
+  const invalid=[[itemRow,item],[sparseRow,sparseCells]].some(([row,list])=>row?.textIssues?.some(t=>list.some(c=>c.columnIndex===t.columnIndex)));
+  const state=!item.length&&!sparseColumns.length?'unsupported':!item.length&&!sparseRow?sparse:invalid?'invalidText':'value';
+  const agreement=!item.length||!sparseCells.length?'single':item.length!==sparseCells.length?'separate':item.every((c,i)=>c.value===sparseCells[i].value)?'agree':'disagree';
+  return {key,state,agreement,values:state==='missing'||state==='unknown'?[]:[...item,...sparseCells]};});
+ return {...base,sparse,facts};
+}

@@ -1,0 +1,772 @@
+{
+  "context": {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "researchLocale": "enUS"
+  },
+  "artifactId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "itemId": "6",
+  "policyRevision": "item-facts-v1",
+  "labelRevision": "item-labels-v1",
+  "sparse": "present",
+  "facts": [
+    {
+      "key": "description",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "Description_lang",
+          "columnIndex": 2,
+          "recordId": "6",
+          "value": "Authored source description 6",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "display1",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "display2",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "display3",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "icon",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "50238ec2",
+          "table": "Item",
+          "column": "IconFileDataID",
+          "columnIndex": 7,
+          "recordId": "6",
+          "value": "206",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "quality",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "OverallQualityID",
+          "columnIndex": 3,
+          "recordId": "6",
+          "value": "3",
+          "label": "Rare"
+        }
+      ]
+    },
+    {
+      "key": "itemLevel",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "ItemLevel",
+          "columnIndex": 4,
+          "recordId": "6",
+          "value": "4",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "itemSquishEra",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "50238ec2",
+          "table": "Item",
+          "column": "ItemSquishEraID",
+          "columnIndex": 13,
+          "recordId": "6",
+          "value": "2",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "contentTuning",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "50238ec2",
+          "table": "Item",
+          "column": "ContentTuningID",
+          "columnIndex": 9,
+          "recordId": "6",
+          "value": "9",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "playerLevelCurve",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "itemLevelOffsetCurve",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "itemLevelOffset",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "class",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "50238ec2",
+          "table": "Item",
+          "column": "ClassID",
+          "columnIndex": 1,
+          "recordId": "6",
+          "value": "1",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "subclass",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "50238ec2",
+          "table": "Item",
+          "column": "SubclassID",
+          "columnIndex": 2,
+          "recordId": "6",
+          "value": "2",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "inventoryType",
+      "state": "value",
+      "agreement": "disagree",
+      "values": [
+        {
+          "tableId": "50238ec2",
+          "table": "Item",
+          "column": "InventoryType",
+          "columnIndex": 4,
+          "recordId": "6",
+          "value": "4",
+          "label": "Shirt"
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "InventoryType",
+          "columnIndex": 5,
+          "recordId": "6",
+          "value": "5",
+          "label": "Chest"
+        }
+      ]
+    },
+    {
+      "key": "requiredLevel",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "RequiredLevel",
+          "columnIndex": 6,
+          "recordId": "6",
+          "value": "6",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "requiredSkill",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "requiredSkillRank",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "requiredAbility",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "minFaction",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "minReputation",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "allowableClass",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "AllowableClass[0]",
+          "columnIndex": 11,
+          "recordId": "6",
+          "value": "0",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "AllowableClass[1]",
+          "columnIndex": 12,
+          "recordId": "6",
+          "value": "1",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "allowableRaces",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "bonding",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "Bonding",
+          "columnIndex": 10,
+          "recordId": "6",
+          "value": "10",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "stackable",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "Stackable",
+          "columnIndex": 9,
+          "recordId": "6",
+          "value": "9",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "maxCount",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "containerSlots",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "buyPrice",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "BuyPrice",
+          "columnIndex": 7,
+          "recordId": "6",
+          "value": "7",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "sellPrice",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "SellPrice",
+          "columnIndex": 8,
+          "recordId": "6",
+          "value": "8",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "vendorStackCount",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "durationInInventory",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "statType",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatModifier_bonusStat[0]",
+          "columnIndex": 13,
+          "recordId": "6",
+          "value": "2",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatModifier_bonusStat[1]",
+          "columnIndex": 14,
+          "recordId": "6",
+          "value": "3",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatModifier_bonusStat[2]",
+          "columnIndex": 15,
+          "recordId": "6",
+          "value": "4",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatModifier_bonusStat[3]",
+          "columnIndex": 16,
+          "recordId": "6",
+          "value": "5",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatModifier_bonusStat[4]",
+          "columnIndex": 17,
+          "recordId": "6",
+          "value": "6",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatModifier_bonusStat[5]",
+          "columnIndex": 18,
+          "recordId": "6",
+          "value": "7",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatModifier_bonusStat[6]",
+          "columnIndex": 19,
+          "recordId": "6",
+          "value": "8",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatModifier_bonusStat[7]",
+          "columnIndex": 20,
+          "recordId": "6",
+          "value": "9",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatModifier_bonusStat[8]",
+          "columnIndex": 21,
+          "recordId": "6",
+          "value": "10",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatModifier_bonusStat[9]",
+          "columnIndex": 22,
+          "recordId": "6",
+          "value": "0",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "statAmount",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "statPercentEditor",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentEditor[0]",
+          "columnIndex": 23,
+          "recordId": "6",
+          "value": "1",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentEditor[1]",
+          "columnIndex": 24,
+          "recordId": "6",
+          "value": "2",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentEditor[2]",
+          "columnIndex": 25,
+          "recordId": "6",
+          "value": "3",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentEditor[3]",
+          "columnIndex": 26,
+          "recordId": "6",
+          "value": "4",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentEditor[4]",
+          "columnIndex": 27,
+          "recordId": "6",
+          "value": "5",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentEditor[5]",
+          "columnIndex": 28,
+          "recordId": "6",
+          "value": "6",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentEditor[6]",
+          "columnIndex": 29,
+          "recordId": "6",
+          "value": "7",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentEditor[7]",
+          "columnIndex": 30,
+          "recordId": "6",
+          "value": "8",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentEditor[8]",
+          "columnIndex": 31,
+          "recordId": "6",
+          "value": "9",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentEditor[9]",
+          "columnIndex": 32,
+          "recordId": "6",
+          "value": "10",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "statSocketShare",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentageOfSocket[0]",
+          "columnIndex": 33,
+          "recordId": "6",
+          "value": "1.25",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentageOfSocket[1]",
+          "columnIndex": 34,
+          "recordId": "6",
+          "value": "1.25",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentageOfSocket[2]",
+          "columnIndex": 35,
+          "recordId": "6",
+          "value": "1.25",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentageOfSocket[3]",
+          "columnIndex": 36,
+          "recordId": "6",
+          "value": "1.25",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentageOfSocket[4]",
+          "columnIndex": 37,
+          "recordId": "6",
+          "value": "1.25",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentageOfSocket[5]",
+          "columnIndex": 38,
+          "recordId": "6",
+          "value": "1.25",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentageOfSocket[6]",
+          "columnIndex": 39,
+          "recordId": "6",
+          "value": "1.25",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentageOfSocket[7]",
+          "columnIndex": 40,
+          "recordId": "6",
+          "value": "1.25",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentageOfSocket[8]",
+          "columnIndex": 41,
+          "recordId": "6",
+          "value": "1.25",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "StatPercentageOfSocket[9]",
+          "columnIndex": 42,
+          "recordId": "6",
+          "value": "1.25",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "socketType",
+      "state": "value",
+      "agreement": "single",
+      "values": [
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "SocketType[0]",
+          "columnIndex": 43,
+          "recordId": "6",
+          "value": "10",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "SocketType[1]",
+          "columnIndex": 44,
+          "recordId": "6",
+          "value": "0",
+          "label": null
+        },
+        {
+          "tableId": "919be54e",
+          "table": "ItemSparse",
+          "column": "SocketType[2]",
+          "columnIndex": 45,
+          "recordId": "6",
+          "value": "1",
+          "label": null
+        }
+      ]
+    },
+    {
+      "key": "socketBonus",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "gemProperties",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "damageType",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "itemDelay",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "dmgVariance",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "itemRange",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "flags",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "zoneBound",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "instanceBound",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "requiredHoliday",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "priceVariance",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    },
+    {
+      "key": "priceRandomValue",
+      "state": "unsupported",
+      "agreement": "single",
+      "values": []
+    }
+  ]
+}

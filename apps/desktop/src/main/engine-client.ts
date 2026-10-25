@@ -9,8 +9,8 @@ import type {CreaturesContext,CreaturesSnapshot,CreaturesReadiness,CreaturesPage
 import {validClassifications,classificationsMatch,type ClassificationParams} from '../shared/classifications';
 import {validIconBatch,validIconOpen,validIconClose,iconBatchMatches,iconLeaseMatches,type IconBatchParams,type IconOpenParams} from '../shared/item-icons';
 import type {ItemIconBatch,ItemIconLeaseDescriptor} from '../../../../contracts/generated/discovery';
-import { validItemsContext, validItemsPage, validItemInspect, itemsSnapshotMatches, itemsReadinessMatches, itemsPageMatches, itemInspectMatches, type ItemsPageParams, type ItemInspectParams } from '../shared/items';
-import type { ItemsContext, ItemsSnapshot, ItemsReadiness, ItemsPage, ItemInspectResult } from '../../../../contracts/generated/discovery';
+import { validItemsContext, validItemsPage, validItemInspect, validItemLabelsParams, itemsSnapshotMatches, itemsReadinessMatches, itemsPageMatches, itemInspectMatches, itemFactsMatches, itemLabelListsMatches, type ItemsPageParams, type ItemInspectParams } from '../shared/items';
+import type { ItemsContext, ItemsSnapshot, ItemsReadiness, ItemsPage, ItemInspectResult, ItemFactsResult, ItemLabelLists } from '../../../../contracts/generated/discovery';
 import { validRetentionTarget, validRetentionSet, retentionMatches, retentionSetMatches, retentionListMatches, type RetentionSet } from '../shared/retention';
 import { validSettingsSet, validEmpty, settingsSnapshotMatches, settingsSetMatches, storageMeasurementMatches, validPreparedDataFree, preparedDataListMatches, preparedDataFreedMatches, type SettingsSnapshot, type SettingsSetParams, type StorageMeasurement, type PreparedDataList, type PreparedDataFreed, type PreparedDataFreeParams } from '../shared/settings';
 import type { RetentionTarget, RetentionSnapshot, RetentionList, HelloResult } from '../../../../contracts/generated/discovery';
@@ -118,7 +118,8 @@ export class EngineClient extends EventEmitter {
     if (method.startsWith('inventory.catalog') && !this.capabilities.includes('file-catalog-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not prepare file catalogs.'));
     if (method === 'workspace.open' && !validOpen(params)) return Promise.reject(new EngineFailure('INVALID_REQUEST', 'Choose an exact saved build and source region.'));
     if (method === 'discovery.readAll' && !validReadAll(params) || method === 'discovery.refreshAll' && Object.keys(params).length !== 0) return Promise.reject(new EngineFailure('INVALID_REQUEST', 'Invalid cross-product discovery request.'));
-    if ((method === 'items.data' || method === 'items.prepare') && !validItemsContext(params) || method === 'items.page' && !validItemsPage(params) || method === 'items.inspect' && !validItemInspect(params)) return Promise.reject(new EngineFailure('INVALID_REQUEST', 'Invalid exact Items context or bounded query.'));
+    if ((method === 'items.data' || method === 'items.prepare') && !validItemsContext(params) || method === 'items.page' && !validItemsPage(params) || (method === 'items.inspect' || method === 'items.facts') && !validItemInspect(params) || method === 'items.labels' && !validItemLabelsParams(params)) return Promise.reject(new EngineFailure('INVALID_REQUEST', 'Invalid exact Items context or bounded query.'));
+    if ((method === 'items.facts' || method === 'items.labels') && !this.capabilities.includes('item-facts-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not provide reviewed item facts.'));
     if(effectsMethod(method)){
       const valid=method==='items.effects.data'||method==='items.effects.prepare'?validItemEffectsSelection(params):method==='items.effects.page'?validItemEffectsPage(params):method==='items.effects.details'||method==='items.effects.details.prepare'?validItemEffectDetails(params):validItemEffectNames(params);
       if(!valid)return Promise.reject(new EngineFailure('INVALID_REQUEST','Invalid exact effects selection or bounded ordered edge keys.'));
@@ -230,6 +231,8 @@ export class EngineClient extends EventEmitter {
     if (method === 'items.data') return !!check('ItemsReadiness',result) && !!expectedItems && itemsReadinessMatches(result as ItemsReadiness,expectedItems);
     if (method === 'items.page') return !!check('ItemsPage',result) && !!expectedItems && itemsPageMatches(result as ItemsPage,expectedItems as ItemsPageParams);
     if (method === 'items.inspect') return !!check('ItemInspectResult',result) && !!expectedItems && itemInspectMatches(result as ItemInspectResult,expectedItems as ItemInspectParams);
+    if (method === 'items.facts') return !!check('ItemFactsResult',result) && !!expectedItems && itemFactsMatches(result as ItemFactsResult,expectedItems as ItemInspectParams);
+    if (method === 'items.labels') return !!check('ItemLabelLists',result) && itemLabelListsMatches(result as ItemLabelLists);
     if (method === 'retention.read') return !!check('RetentionSnapshot', result) && !!expectedRetention && retentionMatches(result as RetentionSnapshot, expectedRetention);
     if (method === 'retention.set') return !!check('RetentionSnapshot', result) && !!expectedRetention && retentionSetMatches(result as RetentionSnapshot, expectedRetention as RetentionSet);
     if (method === 'retention.list') return !!check('RetentionList', result) && retentionListMatches(result as RetentionList);

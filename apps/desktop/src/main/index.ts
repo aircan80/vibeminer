@@ -12,7 +12,7 @@ import {validClassifications} from '../shared/classifications';
 import {IconsController,retireIconsAndEngine} from './icons-controller';
 import {authorizedIconImage} from './icon-provenance';
 import {validIconBatch,validIconView} from '../shared/item-icons';
-import { validItemsContext, validItemsPage, validItemInspect } from '../shared/items';
+import { validItemsContext, validItemsPage, validItemInspect, validItemLabelsParams } from '../shared/items';
 import { validRetentionTarget, validRetentionSet } from '../shared/retention';
 import { validSettingsSet, validEmpty, validPreparedDataFree } from '../shared/settings';
 import { validTableData, validTableRows } from '../shared/table-data';
@@ -107,7 +107,8 @@ function registerBridge(): void {
       else if(method==='items.classifications'){if(!validClassifications(params)||!validRequestId(requestId))throw new EngineFailure('INVALID_REQUEST','Choose at most fifty exact Item IDs for source labels.');}
       else if (method === 'items.data' || method === 'items.prepare') { if (!validItemsContext(params) || method === 'items.prepare' && !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact Items context and research locale enUS.'); }
       else if (method === 'items.page') { if (!validItemsPage(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded Items query.'); }
-      else if (method === 'items.inspect') { if (!validItemInspect(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact admitted Item ID.'); }
+      else if (method === 'items.inspect' || method === 'items.facts') { if (!validItemInspect(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact admitted Item ID.'); }
+      else if (method === 'items.labels') { if (!validItemLabelsParams(params)) throw new EngineFailure('INVALID_REQUEST', 'Item labels take no parameters.'); }
       else if (method === 'retention.read') { if (!validRetentionTarget(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid retention target.'); }
       else if (method === 'retention.set') { if (!validRetentionSet(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid retention command.'); }
       else if (method === 'discovery.read') { if (!validRead(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery query.'); }

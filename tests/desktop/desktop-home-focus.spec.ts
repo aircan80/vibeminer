@@ -30,14 +30,16 @@ test('Items and Creatures restore their own pane scroll after a source return an
     const { page, data } = session, nav = page.getByRole('navigation', { name: 'Build areas' });
     await writeFile(path.join(data, 'cached-items'), 'cached'); await writeFile(path.join(data, 'cached-creatures'), 'cached');
     await nav.getByRole('button', { name: 'Items', exact: true }).click();
-    const row = page.getByRole('button', { name: /^Inspect Item 40:/ }); await row.scrollIntoViewIfNeeded(); await row.click();
-    const source = page.getByRole('button', { name: 'View Item source record', exact: true }); await source.scrollIntoViewIfNeeded();
-    const before = await paneTop(page); expect(before).toBeGreaterThan(0);
+    // Items keeps two scrollers of its own (docs/design/items-view): the list and the item detail.
+    const row = page.locator('#iv-opt-40'); await row.scrollIntoViewIfNeeded(); await row.click();
+    const source = page.getByRole('region', { name: 'Inventory and price', exact: true }).getByRole('button', { name: /^ItemSparse\.SellPrice/ }); await source.scrollIntoViewIfNeeded();
+    const tops = () => page.evaluate(() => [document.querySelector('.iv-list-scroll')!.scrollTop, document.querySelector('.iv-dbody')!.scrollTop]);
+    const before = await tops(); expect(before[0]).toBeGreaterThan(0); expect(before[1]).toBeGreaterThan(0);
     await source.focus(); await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { name: 'Table data', exact: true })).toBeFocused();
+    await expect(page.getByRole('heading', { name: 'Record #40' })).toBeVisible();
     await page.getByRole('button', { name: /Return to Items selection/ }).click();
     await expect(source).toBeFocused();
-    expect(Math.abs(await paneTop(page) - before)).toBeLessThan(2);
+    const after = await tops(); expect(Math.abs(after[0] - before[0])).toBeLessThan(2); expect(Math.abs(after[1] - before[1])).toBeLessThan(2);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
     await nav.getByRole('button', { name: 'Creatures', exact: true }).click();
     await expect(page.locator('.creatures-browser tbody tr')).toHaveCount(50);
@@ -92,9 +94,11 @@ test('at 200% an Items source record keeps the records head, notices and Return 
   try {
     const { page, data } = session, nav = page.getByRole('navigation', { name: 'Build areas' });
     await writeFile(path.join(data, 'cached-items'), 'cached'); await nav.getByRole('button', { name: 'Items', exact: true }).click();
-    await page.getByRole('button', { name: /^Inspect Item 9:/ }).click();
+    await page.locator('#iv-opt-9').click();
     await text(page, 2);
-    const source = page.getByRole('button', { name: 'View Item source record', exact: true }); await source.focus(); await page.keyboard.press('Enter');
+    // One pane at a time at 200%: show the selected item, then open its whole Item record from the head.
+    await page.getByRole('button', { name: 'Selected item', exact: true }).click();
+    const source = page.getByRole('button', { name: /^Item #9/ }); await source.focus(); await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Table data', exact: true })).toBeFocused();
     await expect(page.locator('.dh-records .dh-return-link')).toBeVisible();
     const layout = await page.evaluate(() => { const records = document.querySelector<HTMLElement>('.dh-records')!, foot = records.querySelector(':scope>.dh-pane-foot')!.getBoundingClientRect(), head = records.querySelector(':scope>.dh-pane-head')!.getBoundingClientRect(), ret = records.querySelector('.dh-return-link')!.getBoundingClientRect(), notices = [...records.querySelectorAll('.dh-data:not([hidden])>.dh-notice')].map(n => n.getBoundingClientRect()); return { scroll: records.scrollTop, headTop: Math.round(head.top - records.getBoundingClientRect().top), retPinned: ret.top >= head.bottom - 1 && ret.bottom <= foot.top, noticesClear: notices.every(n => n.bottom <= foot.top + 1) }; });

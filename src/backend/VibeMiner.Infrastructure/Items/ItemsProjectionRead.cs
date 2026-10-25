@@ -287,6 +287,19 @@ internal sealed partial class ItemsProjection
             finally { gate.Release(); }
         }
 
+        // item-facts-v1: one ItemSparse row page by emitted ID, for an ID outside the Item-anchored scope.
+        internal async Task<bool> SparseRowExistsAsync(ItemInspectRequest request, CancellationToken token)
+        {
+            ItemsService.Validate(request); await gate.WaitAsync(token);
+            try
+            {
+                Check(request.Context, request.ArtifactId); var id = uint.Parse(request.ItemId, CultureInfo.InvariantCulture);
+                var sparse = await sparseRows.ReadPageAsync(artifact.Binding.SparseRows, 0, 50, id, token);
+                if (sparse.Rows.Count > 1) throw Error("ITEMS_SOURCE_INVALID", "The ItemSparse source has more than one row for one emitted ID.");
+                return sparse.Rows.Count == 1;
+            }
+            finally { gate.Release(); }
+        }
         internal async Task<ItemInspectResult> InspectAsync(ItemInspectRequest request, CancellationToken token)
         {
             ItemsService.Validate(request); await gate.WaitAsync(token);

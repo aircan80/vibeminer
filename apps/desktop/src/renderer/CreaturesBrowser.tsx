@@ -18,7 +18,7 @@ import {exactCount} from '../shared/inventory';
 import {creaturesContext,CreaturesLoadBanner,type CreaturesLoading} from './useCreaturesLoading';
 import {emptyCreatureView,type CreatureView} from './creature-view';
 import type {TableFailure} from './useTableLoading';
-import './items.css';
+import './browser-base.css';
 import './creatures.css';
 export const creatureName=(s:CreatureSummary)=>s.name.state==='valid'?s.name.value!:s.name.state==='empty'?'Empty source name':'Name unavailable · invalid source text';
 export function CreaturesBrowser({workspace,bridge,active,flow,focusRequest=0,onSource,displays,displayAvailable=false,geometry}:{workspace:WorkspaceSnapshot;bridge:DiscoveryBridge;active:boolean;flow:CreaturesLoading;focusRequest?:number;onSource?:(source:TableDataSnapshot,recordId:string)=>void;displays?:CreatureDisplays;displayAvailable?:boolean;geometry?:GeometryFlow}){

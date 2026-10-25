@@ -267,6 +267,8 @@ export interface DiscoveryContract {
   itemsReadiness: ItemsReadiness;
   itemsPage: ItemsPage;
   itemInspectResult: ItemInspectResult;
+  itemFactsResult?: ItemFactsResult;
+  itemLabelLists?: ItemLabelLists;
   itemIconImage?: ItemIconImage;
   itemIconProblem?: ItemIconProblem;
   itemIconOutcome?: ItemIconOutcome;
@@ -545,6 +547,8 @@ export interface EngineRequest1 {
     | 'items.prepare'
     | 'items.page'
     | 'items.inspect'
+    | 'items.facts'
+    | 'items.labels'
     | 'items.icons'
     | 'items.icon.open'
     | 'items.icon.close'
@@ -1791,6 +1795,243 @@ export interface ItemDetail {
   summary: ItemSummary;
   itemRow: TableDataRow;
   sparseRow: TableDataRow | null;
+}
+export interface ItemFactsResult {
+  context: ItemsContext;
+  artifactId: string;
+  itemId: string;
+  policyRevision: 'item-facts-v1';
+  labelRevision: 'item-labels-v1';
+  sparse: 'present' | 'missing' | 'unknown';
+  facts: ItemFact[] | null;
+}
+export interface ItemFact {
+  key:
+    | 'description'
+    | 'display1'
+    | 'display2'
+    | 'display3'
+    | 'icon'
+    | 'quality'
+    | 'itemLevel'
+    | 'itemSquishEra'
+    | 'contentTuning'
+    | 'playerLevelCurve'
+    | 'itemLevelOffsetCurve'
+    | 'itemLevelOffset'
+    | 'class'
+    | 'subclass'
+    | 'inventoryType'
+    | 'requiredLevel'
+    | 'requiredSkill'
+    | 'requiredSkillRank'
+    | 'requiredAbility'
+    | 'minFaction'
+    | 'minReputation'
+    | 'allowableClass'
+    | 'allowableRaces'
+    | 'bonding'
+    | 'stackable'
+    | 'maxCount'
+    | 'containerSlots'
+    | 'buyPrice'
+    | 'sellPrice'
+    | 'vendorStackCount'
+    | 'durationInInventory'
+    | 'statType'
+    | 'statAmount'
+    | 'statPercentEditor'
+    | 'statSocketShare'
+    | 'socketType'
+    | 'socketBonus'
+    | 'gemProperties'
+    | 'damageType'
+    | 'itemDelay'
+    | 'dmgVariance'
+    | 'itemRange'
+    | 'flags'
+    | 'zoneBound'
+    | 'instanceBound'
+    | 'requiredHoliday'
+    | 'priceVariance'
+    | 'priceRandomValue';
+  state: 'value' | 'missing' | 'unknown' | 'unsupported' | 'invalidText';
+  agreement: 'single' | 'agree' | 'disagree' | 'separate';
+  /**
+   * @minItems 0
+   * @maxItems 16
+   */
+  values:
+    | []
+    | [ItemFactValue]
+    | [ItemFactValue, ItemFactValue]
+    | [ItemFactValue, ItemFactValue, ItemFactValue]
+    | [ItemFactValue, ItemFactValue, ItemFactValue, ItemFactValue]
+    | [ItemFactValue, ItemFactValue, ItemFactValue, ItemFactValue, ItemFactValue]
+    | [ItemFactValue, ItemFactValue, ItemFactValue, ItemFactValue, ItemFactValue, ItemFactValue]
+    | [ItemFactValue, ItemFactValue, ItemFactValue, ItemFactValue, ItemFactValue, ItemFactValue, ItemFactValue]
+    | [
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue
+      ]
+    | [
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue
+      ]
+    | [
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue
+      ]
+    | [
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue
+      ]
+    | [
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue
+      ]
+    | [
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue
+      ]
+    | [
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue
+      ]
+    | [
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue
+      ]
+    | [
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue,
+        ItemFactValue
+      ];
+}
+export interface ItemFactValue {
+  tableId: '50238ec2' | '919be54e';
+  table: 'Item' | 'ItemSparse';
+  column: string;
+  columnIndex: number;
+  recordId: string;
+  value: string;
+  label: string | null;
+}
+export interface ItemLabelLists {
+  labelRevision: 'item-labels-v1';
+  /**
+   * @minItems 0
+   * @maxItems 64
+   */
+  quality: ItemLabel[];
+  /**
+   * @minItems 0
+   * @maxItems 64
+   */
+  inventoryType: ItemLabel[];
+  /**
+   * @minItems 0
+   * @maxItems 64
+   */
+  bonding: ItemLabel[];
+  /**
+   * @minItems 0
+   * @maxItems 64
+   */
+  trigger: ItemLabel[];
+}
+export interface ItemLabel {
+  value: string;
+  label: string;
 }
 export interface ItemIconImage {
   artifactId: string;

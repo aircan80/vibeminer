@@ -1,0 +1,203 @@
+{
+  "labelRevision": "item-labels-v1",
+  "quality": [
+    {
+      "value": "0",
+      "label": "Poor"
+    },
+    {
+      "value": "1",
+      "label": "Common"
+    },
+    {
+      "value": "2",
+      "label": "Uncommon"
+    },
+    {
+      "value": "3",
+      "label": "Rare"
+    },
+    {
+      "value": "4",
+      "label": "Epic"
+    },
+    {
+      "value": "5",
+      "label": "Legendary"
+    },
+    {
+      "value": "6",
+      "label": "Artifact"
+    },
+    {
+      "value": "7",
+      "label": "Heirloom"
+    },
+    {
+      "value": "8",
+      "label": "WoW Token"
+    }
+  ],
+  "inventoryType": [
+    {
+      "value": "0",
+      "label": "Not equippable"
+    },
+    {
+      "value": "1",
+      "label": "Head"
+    },
+    {
+      "value": "2",
+      "label": "Neck"
+    },
+    {
+      "value": "3",
+      "label": "Shoulder"
+    },
+    {
+      "value": "4",
+      "label": "Shirt"
+    },
+    {
+      "value": "5",
+      "label": "Chest"
+    },
+    {
+      "value": "6",
+      "label": "Waist"
+    },
+    {
+      "value": "7",
+      "label": "Legs"
+    },
+    {
+      "value": "8",
+      "label": "Feet"
+    },
+    {
+      "value": "9",
+      "label": "Wrist"
+    },
+    {
+      "value": "10",
+      "label": "Hands"
+    },
+    {
+      "value": "11",
+      "label": "Finger"
+    },
+    {
+      "value": "12",
+      "label": "Trinket"
+    },
+    {
+      "value": "13",
+      "label": "One-hand"
+    },
+    {
+      "value": "14",
+      "label": "Shield"
+    },
+    {
+      "value": "15",
+      "label": "Ranged"
+    },
+    {
+      "value": "16",
+      "label": "Back"
+    },
+    {
+      "value": "17",
+      "label": "Two-hand"
+    },
+    {
+      "value": "18",
+      "label": "Bag"
+    },
+    {
+      "value": "19",
+      "label": "Tabard"
+    },
+    {
+      "value": "20",
+      "label": "Robe"
+    },
+    {
+      "value": "21",
+      "label": "Main hand"
+    },
+    {
+      "value": "22",
+      "label": "Off hand"
+    },
+    {
+      "value": "23",
+      "label": "Held in off-hand"
+    },
+    {
+      "value": "24",
+      "label": "Ammo"
+    },
+    {
+      "value": "25",
+      "label": "Thrown"
+    },
+    {
+      "value": "26",
+      "label": "Ranged right"
+    },
+    {
+      "value": "27",
+      "label": "Quiver"
+    },
+    {
+      "value": "28",
+      "label": "Relic"
+    },
+    {
+      "value": "29",
+      "label": "Profession tool"
+    },
+    {
+      "value": "30",
+      "label": "Profession gear"
+    }
+  ],
+  "bonding": [
+    {
+      "value": "0",
+      "label": "No binding"
+    },
+    {
+      "value": "1",
+      "label": "Binds when picked up"
+    },
+    {
+      "value": "2",
+      "label": "Binds when equipped"
+    },
+    {
+      "value": "3",
+      "label": "Binds when used"
+    },
+    {
+      "value": "4",
+      "label": "Quest item"
+    }
+  ],
+  "trigger": [
+    {
+      "value": "0",
+      "label": "On use"
+    },
+    {
+      "value": "1",
+      "label": "On equip"
+    },
+    {
+      "value": "2",
+      "label": "Chance on hit"
+    }
+  ]
+}

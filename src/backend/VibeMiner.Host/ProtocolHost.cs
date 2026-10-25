@@ -173,7 +173,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     if (preparedData is not null) capabilities.Add("prepared-data-v1");
                     if (downloadSummaries is not null) capabilities.Add("download-summary-v1");
                     if (downloads is not null) capabilities.Add("download-check-v1");
-                    if (items is not null) capabilities.Add("items-v1");
+                    if (items is not null) { capabilities.Add("items-v1"); capabilities.Add("item-facts-v1"); }
                     if (itemIcons is not null && iconLeases is not null) capabilities.Add("item-icons-v1");
                     if (itemClassifications is not null) capabilities.Add("item-classifications-v1");
                     if (itemClassifications?.SupportsSubclassLabels == true) capabilities.Add("item-subclass-labels-v1");
@@ -630,6 +630,17 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     if (items is null) throw new DiscoveryException("ITEMS_UNAVAILABLE", "Items browsing is unavailable.");
                     result = ItemsWire.Inspect(await items.InspectAsync(new(ItemsContextOf(parameters), RequiredString(parameters, "artifactId"),
                         RequiredString(parameters, "itemId")), request.Cancellation.Token));
+                    break;
+                case "items.facts":
+                    RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "researchLocale", "artifactId", "itemId");
+                    if (items is null) throw new DiscoveryException("ITEMS_UNAVAILABLE", "Items browsing is unavailable.");
+                    result = ItemsWire.Facts(await items.FactsAsync(new(ItemsContextOf(parameters), RequiredString(parameters, "artifactId"),
+                        RequiredString(parameters, "itemId")), request.Cancellation.Token));
+                    break;
+                case "items.labels":
+                    RequireOnly(parameters);
+                    if (items is null) throw new DiscoveryException("ITEMS_UNAVAILABLE", "Items browsing is unavailable.");
+                    result = ItemsWire.Labels(items.Labels());
                     break;
                 case "retention.list":
                     RequireOnly(parameters);

@@ -1,1 +1,215 @@
-.items-browser{font: .933333333rem/1.5 system-ui,sans-serif;color:#243b3a;container-type:inline-size}.items-heading{display:flex;gap:1rem;align-items:start;justify-content:space-between;margin:0 0 1.3rem}.items-heading h1{font-size:1.933333333rem;letter-spacing:-.046666667rem;margin:0 0 .45rem}.items-heading p{color:#697b72;margin:.3rem 0}.items-browser button,.items-browser input{font:inherit}.items-browser button{color:#243b3a;background:#fffefa;border:1px solid #dce2d9;border-radius:.4rem;padding:.5rem .75rem}.items-browser button[aria-disabled=true]{opacity:.55;cursor:default}.items-browser button:focus-visible,.items-browser input:focus-visible,.items-browser summary:focus-visible,.items-browser [tabindex]:focus{outline:3px solid #dda33a;outline-offset:3px}.items-browser input{background:#fffefa;border:1px solid #dce2d9;border-radius:.4rem;padding:.6rem .75rem;min-width:0;max-width:100%;color:#243b3a}.items-scope{background:#edf5ee;border:1px solid #d4e6d7;border-radius:.6rem;padding:1rem 1.2rem;margin:1rem 0}.items-scope p{margin:.4rem 0;font-size:.8rem;color:#697b72}.items-notice{padding:.8rem 1rem;border:1px solid #e4d8b5;background:#fff4dd;color:#805d25;border-radius:.4rem;margin:.8rem 0;overflow-wrap:anywhere}.items-notice h2{font-size:1.1rem;margin:.2rem 0}.items-error{padding:1rem;border:1px solid #e2c6b7;background:#fcf0e9;border-radius:.4rem;margin:.8rem 0;overflow-wrap:anywhere}.items-error button{margin:.4rem .5rem .2rem 0}.items-search{display:flex;gap:.8rem;align-items:end;flex-wrap:wrap;padding:1rem 0 1.2rem}.items-search fieldset{display:flex;gap:.8rem;border:0;padding:0;margin:0}.items-search legend{font-size:.8rem;color:#697b72;margin-bottom:.4rem}.items-search fieldset label{display:flex;gap:.35rem;align-items:center;white-space:nowrap}.items-search>label{display:grid;gap:.35rem;flex:1 1 18rem}.items-search>p{flex-basis:100%;font-size:.8rem;margin:.2rem 0;color:#697b72}.items-search button{white-space:nowrap}.items-workbench{display:grid;grid-template-columns:minmax(0,1fr)22.666666667rem;background:#fffefa;border:1px solid #dce2d9;border-radius:.8rem;overflow:hidden}.items-results{min-width:0;padding:1.3rem}.items-results>h2{font-size:1.466666667rem;margin:.1rem 0 .6rem}.items-applied{font-size:.8rem;color:#697b72;overflow-wrap:anywhere}.items-list-scroll{overflow:auto;max-width:100%}.items-list{border-collapse:collapse;width:100%;font-size:.8rem}.items-list th,.items-list td{padding:.8rem .7rem;border-bottom:1px solid #edf0e7;text-align:left;vertical-align:top}.items-list thead th{background:#f4f6ef;font-size:.733333333rem;color:#697b72;font-weight:650}.items-list tbody th{font-weight:400;min-width:12rem}.items-list td{font-variant-numeric:tabular-nums;white-space:nowrap}.items-list tbody tr.selected{background:#e6f1e8}.items-list th button{border:0;background:transparent;text-align:left;padding:0;width:100%;display:grid;gap:.3rem}.items-list .item-name{font-weight:650;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.items-list small{font-size:.733333333rem;color:#697b72}.items-list .unavailable{color:#805d25}.items-pages{display:flex;flex-wrap:wrap;gap:.5rem;margin:1rem 0}.items-pages button{font-size:.8rem;white-space:nowrap}.items-inspector{min-width:0;border-left:1px solid #dce2d9;padding:1.3rem;background:#fcfcf7;overflow-wrap:anywhere}.items-inspector>h2{font-size:1.266666667rem;white-space:pre-wrap;line-height:1.35;margin:.1rem 0 .65rem}.items-inspector>p,.items-input-note{font-size:.8rem;color:#697b72}.item-property-group,.item-source{border-top:1px solid #dce2d9;margin-top:1.3rem;padding-top:1rem}.item-property-group h3,.item-source h3{font-size:1rem;margin:.1rem 0 .7rem}.item-property-group p,.item-source p{font-size:.8rem;color:#697b72}.item-fact{padding:.7rem 0;border-bottom:1px solid #e6e9df}.item-fact label{display:block;font-size:.733333333rem;color:#697b72;margin-bottom:.3rem}.item-fact b{display:block;font-size:.8rem;font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere}.item-fact p{font-size:.8rem}.items-inspector details{margin:.8rem 0}.items-inspector summary{cursor:pointer;font-size:.8rem;color:#176e66}.items-inspector pre{max-height:18rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.733333333rem;background:#f4f6ef;border:1px solid #dce2d9;border-radius:.3rem;padding:.8rem}.items-inspector .text-unavailable{color:#805d25}.items-stat-scroll{overflow:auto}.items-stat-scroll table{border-collapse:collapse;font-size:.733333333rem;width:100%}.items-stat-scroll th,.items-stat-scroll td{padding:.5rem;border-bottom:1px solid #e6e9df;text-align:left;white-space:nowrap}.items-jump,.items-return{display:none}@container(max-width:62rem){.items-workbench{grid-template-columns:1fr}.items-inspector{border-left:0;border-top:1px solid #dce2d9}.items-jump,.items-return{display:inline-block}.items-heading{flex-wrap:wrap}.items-inspector>h2{font-size:1.466666667rem}}
+/* Items view (docs/design/items-view). Inside the Home shell, so it uses the desktop-home tokens; mockup rem values are scaled by 14/15
+   for the app's 15px root. Quality ink is presentation only and is never the only carrier: the quality is always written. */
+.desktop-home .dh-items-area:not([hidden]){display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;min-width:0}
+.desktop-home .iv:not([hidden]){display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);min-height:0;min-width:0;
+  --q0:#6b6560;--q1:var(--ink);--q2:#1a7526;--q3:#2350b8;--q4:#7238b0;--q5:#a14f00;--q6:#86661a;--q7:#0072a3;--q8:#0072a3;--qx:var(--ink);--icon:40px}
+.desktop-home[data-area="items"]{--panel-w:calc(100vw - var(--side-w) - 1px)}
+/* The panes always take the 1fr row, also while the switcher above them is hidden in the two-pane layout. */
+.desktop-home .iv>.iv-switch{grid-row:1}
+.desktop-home .iv-panes{grid-row:2;display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:1px;background:var(--line);min-height:0;min-width:0}
+.desktop-home .iv-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.desktop-home .iv-selectable{user-select:text;-webkit-user-select:text}
+.desktop-home .iv-mono{font-family:ui-monospace,monospace}
+.desktop-home .iv-dim{color:var(--muted)}
+.desktop-home .iv :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.desktop-home .iv .dh-pane{position:relative}
+
+/* List pane */
+.desktop-home .iv-list{background:var(--side)}
+.desktop-home .iv-list-head{row-gap:.42rem;padding-bottom:.513333rem}
+.desktop-home .iv-list-head h1{font-size:.933333rem;margin:0 .28rem 0 0;font-weight:700;white-space:nowrap}
+.desktop-home .iv-search{display:flex;align-items:center;gap:.466667rem;flex:1 1 100%;margin:0}
+.desktop-home .iv-search .dh-control{flex:1 1 8.4rem;width:100%}
+.desktop-home .iv-search .dh-control[aria-invalid="true"]{border-color:#c0644a;box-shadow:inset 0 0 0 1px #c0644a}
+.desktop-home .iv-search :disabled,.desktop-home .iv-list-head .dh-segmented button:disabled{opacity:.55;cursor:default}
+.desktop-home .iv-search-err{margin:0;padding:.326667rem .802667rem;font-size:var(--fs-s);color:#8a3b25;background:var(--err-bg);border-bottom:1px solid var(--err-line)}
+.desktop-home .iv-applied{display:flex;align-items:center;gap:.373333rem .56rem;flex-wrap:wrap;padding:.326667rem .802667rem;font-size:var(--fs-s);color:var(--muted);border-bottom:1px solid var(--line-soft);background:var(--paper)}
+.desktop-home .iv-applied b{color:var(--ink);font-weight:600}
+.desktop-home .iv-draft{margin:0;padding:.28rem .802667rem;font-size:var(--fs-s);color:var(--muted);background:var(--paper)}
+.desktop-home .iv-list-scroll{position:relative;flex:1 1 auto;overflow:auto;min-height:5.6rem;background:var(--paper);scroll-padding-top:var(--thead)}
+.desktop-home .iv-cols{display:grid;grid-template-columns:var(--icon) minmax(0,1fr) 4.106667rem;align-items:center;column-gap:.653333rem;padding:0 .802667rem}
+.desktop-home .iv-thead{position:sticky;top:0;z-index:1;height:var(--thead);background:var(--toolbar);border-bottom:1px solid var(--line);font-size:var(--fs-s);font-weight:600;color:var(--muted);white-space:nowrap}
+.desktop-home .iv-thead>:last-child{text-align:right}
+.desktop-home .iv-listbox:focus-visible{outline:none}
+.desktop-home .iv-option{position:relative;min-height:calc(var(--icon) + .56rem);padding-top:.28rem;padding-bottom:.28rem;border-bottom:1px solid var(--line-soft);cursor:default}
+.desktop-home .iv-option:hover{background:var(--hover)}
+.desktop-home .iv-option[aria-selected="true"]{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+.desktop-home .iv-listbox:focus-visible .iv-option.iv-active{outline:3px solid var(--focus);outline-offset:-3px}
+.desktop-home .iv-name{min-width:0}
+.desktop-home .iv-name b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.desktop-home .iv-name small{display:block;font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* A row without a readable name keeps its whole reason: it wraps instead of eliding. */
+.desktop-home .iv-name b.iv-nameless,.desktop-home .iv-name small.iv-why{white-space:normal;overflow:visible}
+.desktop-home .iv-level{text-align:right;font-variant-numeric:tabular-nums;font-size:var(--fs-m);white-space:nowrap}
+.desktop-home .iv-level .iv-nv{font-size:var(--fs-s)}
+.desktop-home .iv-lvl-inline{display:none}
+.desktop-home .iv-wait{margin:.802667rem;display:flex;flex-direction:column;gap:.56rem}
+.desktop-home .iv-prereq{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.186667rem .653333rem;margin:.42rem 0 0;font-size:var(--fs-m)}
+.desktop-home .iv-prereq dt{font-weight:600}
+.desktop-home .iv-prereq dd{margin:0;color:var(--muted)}
+.desktop-home .iv-empty{margin:.933333rem .802667rem;max-width:28rem}
+.desktop-home .iv-optional{padding:.42rem .802667rem;border-top:1px solid var(--line-soft);background:var(--paper);font-size:var(--fs-s)}
+.desktop-home .iv-optional p{margin:.186667rem 0}
+.desktop-home .iv-optional button{height:1.633333rem;font-size:var(--fs-s);padding:0 .513333rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);margin:.186667rem .373333rem .186667rem 0}
+.desktop-home .iv-optional .classification-controls,.desktop-home .iv-optional .item-icon-controls{border:0;padding:0}
+/* Under the list the reused icon and label controls take one compact block: their status line and the actions in one wrapping row,
+   so the list keeps its rows (the fixed two-row action grid is for the old full-width Items page). */
+.desktop-home .iv-optional .item-icon-controls>p,.desktop-home .iv-optional .classification-controls>p:first-child{display:none}
+.desktop-home .iv-optional .unified-icon-controls .item-icon-actions,.desktop-home .iv-optional .item-icon-actions{display:flex;flex-wrap:wrap;grid-template-rows:none;gap:0 .373333rem;align-items:center}
+.desktop-home .iv-optional .item-icon-control-surface{display:flex;flex-wrap:wrap;align-items:center;gap:0 .56rem}
+.desktop-home .iv-optional .classification-local-status,.desktop-home .iv-optional .item-icon-local-activity,.desktop-home .iv-optional .compact-icon-activity,.desktop-home .iv-optional .compact-classification-activity{min-block-size:0}
+.desktop-home .iv .dh-state-box.iv-error,.desktop-home .iv .dh-notice.iv-error{border-color:var(--err-line);background:var(--err-bg)}
+.desktop-home .iv-error code,.desktop-home .iv .dh-state-box code{font-size:var(--fs-s)}
+
+/* Quality ink */
+.desktop-home .iv-q0{--q:var(--q0)}.desktop-home .iv-q1{--q:var(--q1)}.desktop-home .iv-q2{--q:var(--q2)}.desktop-home .iv-q3{--q:var(--q3)}.desktop-home .iv-q4{--q:var(--q4)}.desktop-home .iv-q5{--q:var(--q5)}.desktop-home .iv-q6{--q:var(--q6)}.desktop-home .iv-q7{--q:var(--q7)}.desktop-home .iv-q8{--q:var(--q8)}.desktop-home .iv-qx{--q:var(--qx)}
+.desktop-home .iv-qn{color:var(--q,var(--ink))}
+.desktop-home .iv-qn.iv-nameless,.desktop-home .iv-option .iv-nameless{color:var(--muted);font-style:italic;font-weight:600}
+.desktop-home .iv-strong{font-weight:600}
+
+/* Icon: reserved 40px box with a quality frame; the image never shifts text. */
+.desktop-home .iv-icon-cell{width:var(--icon);height:var(--icon);flex:none;display:grid;place-items:center;border-radius:6px;overflow:hidden;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line);color:var(--muted);font-size:var(--fs-s);font-weight:600}
+.desktop-home .iv-icon-cell .item-icon-box{width:var(--icon);height:var(--icon);color:var(--muted)}
+.desktop-home .iv-icon-cell .item-icon-box img{border-radius:4px}
+/* Icon states (design decision 16): a ready image sits on the dark tile with the quality ring; loading, missing, encrypted and
+   unsupported keep the 1px line ring without quality colour; IconFileDataID 0 is a dashed box. */
+.desktop-home .iv-icon-cell:has(img){background:#24323a;box-shadow:inset 0 0 0 2px var(--q,#8c9a95)}
+.desktop-home :is(.iv-q1,.iv-qx) .iv-icon-cell:has(img){box-shadow:inset 0 0 0 2px #8c9a95}
+.desktop-home .iv-icon-cell.iv-icon-none{box-shadow:none;border:1px dashed #b9c4be}
+/* The dashed box for IconFileDataID 0 is empty; a loading icon shows a teal ellipsis, as in the reference. */
+.desktop-home .iv-icon-cell.iv-icon-none .item-icon-box>span{visibility:hidden}
+.desktop-home .iv-icon-cell .item-icon-box[aria-label="Icon loading"]{color:var(--teal);letter-spacing:.08em}
+.desktop-home .iv-placeholder .iv-open-table{margin-top:.746667rem}
+
+/* Detail pane */
+.desktop-home .iv-detail{container:iv-detail/inline-size;background:var(--paper)}
+.desktop-home .iv-dhead{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"icon title rec" ". desc desc";column-gap:.746667rem;padding:.653333rem .933333rem .606667rem;border-bottom:1px solid var(--line);background:var(--paper);flex:none}
+.desktop-home .iv-dhead>.iv-icon-cell{grid-area:icon;margin-top:.093333rem}
+.desktop-home .iv-dtitle{grid-area:title;min-width:0}
+.desktop-home .iv-drec{grid-area:rec;display:flex;gap:.373333rem;flex-wrap:wrap;justify-content:flex-end;align-self:start}
+.desktop-home .iv-ddesc{grid-area:desc;min-width:0}
+.desktop-home .iv-dtitle h2{margin:0;font-size:var(--fs-l);line-height:1.25;font-weight:700;overflow-wrap:anywhere}
+.desktop-home .iv-dline{display:flex;flex-wrap:wrap;align-items:center;gap:.14rem .513333rem;margin-top:.14rem;font-size:var(--fs-m);color:var(--muted)}
+.desktop-home .iv-dline b{color:var(--ink);font-weight:600}
+.desktop-home .iv-sep{color:var(--line)}
+.desktop-home .iv-sep.iv-dangling{display:none}
+.desktop-home .iv-desc{margin:.326667rem 0 0;font-size:var(--fs-m);color:var(--ink);overflow-wrap:anywhere}
+.desktop-home .iv-desc.iv-dim{color:var(--muted)}
+.desktop-home .iv-desc q{quotes:"\201C" "\201D"}
+@container iv-detail (max-width:37.333333rem){
+  .desktop-home .iv-dhead{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"icon title" ". rec" ". desc"}
+  .desktop-home .iv-drec{justify-content:flex-start;margin-top:.42rem}
+}
+.desktop-home .iv-dbody{position:relative;flex:1 1 auto;min-height:0;overflow:auto;background:var(--paper);display:flex;flex-direction:column}
+.desktop-home .iv-rove-tip{margin:0;padding:.326667rem .933333rem;font-size:var(--fs-s);color:var(--muted);border-bottom:1px solid var(--line);background:var(--paper);flex:none}
+.desktop-home .iv-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:1px;background:var(--line);flex:1 0 auto}
+.desktop-home .iv-grid.iv-two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.desktop-home .iv-col{display:flex;flex-direction:column;min-width:0;background:var(--paper)}
+.desktop-home .iv-sec{background:var(--paper);padding:.56rem .933333rem .7rem;min-width:0;border-bottom:1px solid var(--line)}
+.desktop-home .iv-full{grid-column:1/-1}
+.desktop-home .iv-sec-head{display:flex;align-items:baseline;gap:.466667rem;flex-wrap:wrap;margin-bottom:.233333rem}
+.desktop-home .iv-sec-head h3{margin:0;font-size:.933333rem;font-weight:700}
+.desktop-home .iv-scope{margin-left:auto;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .iv-pad{margin:.933333rem}
+/* One fact: label, then its source links beside it when they fit and under it when they don't; the value below. */
+.desktop-home .iv-fact{padding:.354667rem 0;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m)}
+.desktop-home .iv-fact:last-child{border-bottom:0}
+.desktop-home .iv-fhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:0 .84rem}
+.desktop-home .iv-fl{color:var(--muted)}
+.desktop-home .iv-srcs{display:flex;gap:0 .653333rem;flex-wrap:wrap;min-width:0}
+.desktop-home .iv-fv{display:block;font-size:.933333rem;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.desktop-home .iv-fsub{font-weight:400;color:var(--muted);font-size:var(--fs-m)}
+.desktop-home .iv-fnote{display:block;font-size:var(--fs-s);color:var(--muted)}
+/* Source link: the Tables reference-cell style (13px, 600, teal, dotted underline). */
+.desktop-home .iv-src{border:0;background:none;padding:0;color:var(--teal);font:600 var(--fs-m)/1.45 system-ui,sans-serif;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer;overflow-wrap:anywhere;text-align:left}
+.desktop-home .iv-src:hover{text-decoration-style:solid}
+.desktop-home .iv-src:focus-visible{outline-offset:1px}
+.desktop-home .iv-nosrc{font-size:var(--fs-s);color:var(--muted)}
+/* Values that aren't values: always words, never 0 or blank. */
+.desktop-home .iv-nv{color:var(--muted);font-weight:700}
+.desktop-home .iv-ld{color:var(--teal);font-weight:600}
+.desktop-home .iv-conflict{color:var(--gold-ink);font-weight:600}
+.desktop-home .iv-sec-note{margin:.14rem 0 .28rem;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .iv-sec-state{margin:.326667rem 0 .186667rem}
+.desktop-home .iv-legend{margin:.466667rem 0 0;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .iv-more{margin-top:.186667rem}
+.desktop-home .iv-more summary{cursor:pointer;font-size:var(--fs-m);font-weight:600;padding:.233333rem 0}
+.desktop-home .iv-tbl{position:relative;overflow-x:auto;margin:.186667rem 0 .28rem}
+.desktop-home table.iv-inputs{border-collapse:collapse;width:100%;font-size:var(--fs-m);font-variant-numeric:tabular-nums}
+.desktop-home .iv-inputs th,.desktop-home .iv-inputs td{padding:.28rem .466667rem;border-bottom:1px solid var(--line-soft);text-align:right;white-space:nowrap}
+.desktop-home .iv-inputs th:first-child,.desktop-home .iv-inputs td:first-child{text-align:left;padding-left:0}
+.desktop-home .iv-inputs thead th{font-size:var(--fs-s);font-weight:600;color:var(--muted);vertical-align:bottom;white-space:normal}
+.desktop-home .iv-inputs thead th small{display:block;font-weight:400}
+.desktop-home .iv-inputs tbody th{font-weight:600}
+.desktop-home .iv-group-src{display:flex;flex-wrap:wrap;gap:.093333rem .653333rem;align-items:baseline;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .iv-placeholder{display:grid;place-items:center;text-align:center;color:var(--muted);padding:1.866667rem;background:var(--paper);flex:1}
+.desktop-home .iv-placeholder>div{border:1px dashed var(--line);border-radius:6px;padding:1.12rem 1.493333rem;max-width:28rem}
+.desktop-home .iv-placeholder h2{font-size:.933333rem;color:var(--ink);margin:0 0 .28rem}
+.desktop-home .iv-placeholder p{margin:0;font-size:var(--fs-m)}
+
+/* Effects: the effects panel inside its section */
+.desktop-home .iv .item-effects{border:0;padding:0;margin:0}
+.desktop-home .iv .item-effects h3{margin:0;font-size:.933333rem}
+.desktop-home .iv .effect-activity{block-size:auto;min-block-size:0;display:flex;flex-wrap:wrap;align-items:center;gap:.28rem .56rem;padding:.42rem .56rem;margin:.326667rem 0 .186667rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);font-size:var(--fs-m)}
+.desktop-home .iv .effect-activity>div:first-child{flex:1 1 12rem;min-width:0}
+.desktop-home .iv .effect-activity p{margin:0}
+.desktop-home .iv .effect-phase-action button,.desktop-home .iv .effect-pages button,.desktop-home .iv .effect-activity .activity-task-link{height:1.773333rem;padding:0 .606667rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);font-size:var(--fs-m);white-space:nowrap}
+.desktop-home .iv .effect-pages{display:flex;gap:.373333rem;flex-wrap:wrap;margin:.326667rem 0}
+.desktop-home .iv .effect-phase-details{margin:.28rem 0;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .iv .effect-phase-details summary{cursor:pointer}
+/* Once ready the status line is only kept for focus hand-off and announcements; it takes no space. */
+.desktop-home .iv .effect-activity.iv-idle{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);padding:0;margin:0;border:0}
+.desktop-home .iv .effect-receipt{margin:.373333rem 0;font-size:var(--fs-s)}
+.desktop-home .iv .effect-receipt h5{margin:0 0 .14rem;font-size:var(--fs-s);font-weight:600;color:var(--ink)}
+.desktop-home .iv .effect-receipt p{margin:0 0 .14rem}
+/* Text inside the sources disclosure matches its 11px headings (browser-base.css sets .item-property-group p for Creatures). */
+.desktop-home .iv .item-effects .effect-phase-details p{font-size:var(--fs-s)}
+.desktop-home .iv .effect-receipt pre{max-block-size:12rem;overflow:auto;font-size:var(--fs-s);white-space:pre-wrap;overflow-wrap:anywhere}
+.desktop-home .iv-effect{border:1px solid var(--line);border-radius:6px;padding:.466667rem .653333rem;margin-top:.466667rem;background:var(--paper)}
+/* The card heading reserves and keeps two lines: a long spell name is clipped there (its full text is under Raw evidence), so a late
+   name never moves the cards below it. */
+.desktop-home .iv-eh{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;min-block-size:2lh;overflow-wrap:anywhere}
+.desktop-home .iv-eh>*{display:inline}
+.desktop-home .iv-eh>*+*{margin-left:.513333rem}
+.desktop-home .iv-eh b{font-weight:700}
+.desktop-home .iv-eh .iv-dim{font-size:var(--fs-m)}
+.desktop-home .iv-efacts{display:grid;grid-template-columns:repeat(auto-fill,minmax(8.866667rem,1fr));gap:.28rem .84rem;margin:.373333rem 0 .326667rem;font-size:var(--fs-m)}
+.desktop-home .iv-efacts div{min-width:0}
+.desktop-home .iv-efacts dt{color:var(--muted);font-size:var(--fs-s)}
+.desktop-home .iv-efacts dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.desktop-home .iv-efacts dd small{display:block;font-weight:400;color:var(--muted);font-size:var(--fs-s)}
+.desktop-home .iv-esrc{display:flex;flex-wrap:wrap;gap:.093333rem .746667rem;padding-top:.326667rem;border-top:1px solid var(--line-soft)}
+.desktop-home .iv .effect-evidence{margin-top:.28rem;font-size:var(--fs-s)}
+.desktop-home .iv .effect-evidence summary{cursor:pointer;color:var(--muted)}
+/* A fixed reading block: late names or inputs never move the card or the reader's scroll. */
+.desktop-home .iv .effect-evidence[open]>.effect-evidence-body{block-size:min(18rem,60vh);overflow:auto;overflow-anchor:none;scrollbar-gutter:stable;padding:.466667rem;border:1px solid var(--line-soft)}
+
+/* One pane at a time: below 65.33rem of window width (200% text at 1280px), as Tables and Files. */
+.desktop-home.dh-compact .iv-panes{grid-template-columns:minmax(0,1fr)}
+.desktop-home.dh-compact .iv-panes>.dh-pane{display:none}
+.desktop-home.dh-compact .iv-panes[data-pane="list"]>.iv-list,.desktop-home.dh-compact .iv-panes[data-pane="detail"]>.iv-detail{display:flex}
+.desktop-home.dh-compact .iv-switch-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The list keeps its rows in view: the switcher names the pane, search and mode share one row, no column header. */
+.desktop-home.dh-compact .iv-list-head h1,.desktop-home.dh-compact .iv-applied.iv-browse{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);padding:0;border:0}
+.desktop-home.dh-compact .iv-list-head .dh-spacer{display:none}
+.desktop-home.dh-compact .iv-list-head{padding:.42rem .802667rem;min-height:0}
+.desktop-home.dh-compact .iv-search{flex:1 1 13.066667rem}
+.desktop-home.dh-compact .iv-thead{display:none}
+.desktop-home.dh-compact .iv-list-scroll{scroll-padding-top:0}
+.desktop-home.dh-compact .iv-cols{grid-template-columns:var(--icon) minmax(0,1fr)}
+.desktop-home.dh-compact .iv-cols>.iv-level{display:none}
+.desktop-home.dh-compact .iv-lvl-inline{display:inline}
+/* The item head scrolls with the facts. */
+.desktop-home.dh-compact .iv-detail{overflow:auto}
+.desktop-home.dh-compact .iv-detail>.iv-dbody{flex:none;overflow:visible}
+.desktop-home.dh-compact .iv-dhead{padding:.56rem .802667rem}
+.desktop-home.dh-compact .iv-sec{padding:.513333rem .802667rem .653333rem}
+.desktop-home.dh-compact .iv-rove-tip{padding:.326667rem .802667rem}
+.desktop-home.dh-narrow .iv-search{flex-basis:100%}
+
+/* Window too short for the header and a 10rem area (600×480 at 200%): the shell scrolls as a whole (D086, D092). */
+.desktop-home.dh-shell-scroll[data-area="items"] .dh-app{display:block}
+.desktop-home.dh-shell-scroll[data-area="items"] .dh-area{grid-template-rows:auto;min-height:10rem}
+.desktop-home.dh-shell-scroll .iv-panes{grid-template-rows:auto}
+.desktop-home.dh-shell-scroll .iv .dh-pane,.desktop-home.dh-shell-scroll .iv-detail>.iv-dbody{overflow:visible}
+.desktop-home.dh-shell-scroll .iv-list-scroll{flex:none;min-height:0;max-height:calc(100vh - 2.7rem - 1px)}
