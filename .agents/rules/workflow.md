@@ -24,7 +24,7 @@ How an issue moves from idea to closed. Read this before touching issues, branch
 7. The developer runs `git merge --ff-only issue-N`.
    - If `main` moved, rebase the single commit and flip back to `ready-for-qa`. QA retests.
    - If conflict fixes changed code, the reviewer reviews again first.
-8. The owner approves `git push origin main`. CI (`.github/workflows/ci.yml`) then runs on Linux as a clean-machine safety net. Windows and macOS are parked and get tested again when they're un-parked.
+8. Push to `main` once QA passes; no owner OK needed. CI (`.github/workflows/ci.yml`) then runs on Linux as a clean-machine safety net. Windows and macOS are parked and get tested again when they're un-parked.
 9. Once the commit is on `origin/main`, QA ticks the acceptance criteria and review lines, posts one line ("Passed: <sha>."), removes the status label and closes the issue. Only QA closes issues.
 
 ## Bugs

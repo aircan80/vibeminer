@@ -49,7 +49,7 @@ QA, the reviewer and the three experts must not review work written in the same 
 - A bug found while its feature issue is open goes in a comment on that issue, which flips back to `in-progress`. Only bugs in closed features or existing code get their own `bug` issue.
 - Always pass `--title` and `--body` to `gh issue create`.
 - Commit identity: `aircan80 <329744803+aircan80@users.noreply.github.com>`. Don't change git config.
-- `git push` to `main`, releases and repo settings need the owner's explicit OK. Never force-push.
+- Merging and pushing a QA-passed commit to `main` needs no further OK. Releases and repo settings need the owner's explicit OK. Never force-push.
 - No candidate pushes. QA's local run on the exact sha is the gate; GitHub CI runs on `main` after each push, and a failing run there becomes a `bug` issue right away. See [workflow](.agents/rules/workflow.md).
 
 ## Engineering rules
