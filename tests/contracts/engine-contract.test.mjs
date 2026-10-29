@@ -131,6 +131,34 @@ test('Files pages and the file inspector stay bounded and keep unknown sizes and
   assert.equal(validator('InventoryFileDetail')({ ...detail, memberships: [{ ...detail.memberships[1], encodedBytes: '0'.repeat(2) }] }), false);
   // Unresolved memberships keep EKey and sizes null instead of a zero or a guess.
   assert.equal(detail.memberships[1].encodingKey, null); assert.equal(detail.memberships[1].encodedBytes, null);
+  // A community name sits beside the identity and never replaces it (D105); a ready source names its release.
+  assert.equal(page.entries[0].name, null); assert.equal(typeof page.entries[0].communityName, 'string');
+  for (const invalid of [{ communityNames: undefined }, { communityNames: { ...page.communityNames, state: 'guessed' } }, { communityNames: { ...page.communityNames, tag: 'a b' } },
+    { entries: [{ ...page.entries[0], communityName: '' }] }, { entries: [{ ...page.entries[0], communityName: 'x'.repeat(1025) }] }, { entries: [{ ...page.entries[0], communityName: undefined }] }])
+    assert.equal(validator('InventoryFilesPage')(JSON.parse(JSON.stringify({ ...page, ...invalid }))), false, JSON.stringify(invalid).slice(0, 80));
+  assert.equal(validator('InventoryFileDetail')({ ...detail, communityNames: undefined }), false);
+});
+
+test('e2e runs point the engine\'s listfile requests at a loopback port, never GitHub (D105)', async () => {
+  const config = await readFile(path.join(root, 'tests/desktop/playwright.config.ts'), 'utf8');
+  assert.match(config, /^process\.env\.VIBEMINER_LISTFILE_ORIGIN = 'http:\/\/127\.0\.0\.1:9\/';$/m);
+  const program = await readFile(path.join(root, 'src/backend/VibeMiner.Host/Program.cs'), 'utf8');
+  assert.match(program, /GetEnvironmentVariable\("VIBEMINER_LISTFILE_ORIGIN"\)/);
+});
+
+test('The community listfile status keeps exact byte counts and only its fixed source (D105)', async () => {
+  const statuses = JSON.parse(await readFile(path.join(root, 'contracts/examples/community-listfile-status.json'), 'utf8'));
+  assert.deepEqual(statuses.map(status => status.activity), ['idle', 'downloading', 'importing', 'idle', 'idle', 'idle']);
+  for (const status of statuses) validate('CommunityListfileStatus', status);
+  const [ready, downloading] = statuses;
+  for (const invalid of [{ activity: 'paused' }, { completed: 1 }, { total: '-1' }, { release: { ...ready.release, sourceUrl: 'https://example.com/listfile.csv' } },
+    { release: { ...ready.release, sha256: 'AB'.repeat(32) } }, { release: { ...ready.release, nameCount: 7 } }, { pendingTag: '../x' }, { path: '/tmp' }])
+    assert.equal(validator('CommunityListfileStatus')({ ...downloading, ...invalid }), false, JSON.stringify(invalid).slice(0, 80));
+  const request = (method, params) => ({ protocolVersion: 1, id: method, method, params });
+  validate('EngineRequest', request('settings.listfile.read', {}));
+  validate('EngineRequest', request('settings.listfile.check', {}));
+  validate('EngineRequest', request('settings.set', { name: 'communityListfile', value: false }));
+  assert.equal(validator('EngineRequest')(request('settings.listfile.check', { tag: '202601010000' })), false);
 });
 
 // Reads `export type RequestMethod = ...;` as a union of string literals. Comments are skipped,
@@ -425,7 +453,8 @@ test('Settings keep unreadable values apart from saved ones and take only a know
     { communityBuildHistory: { ...community, source: 'guessed' } }, { communityBuildHistory: { ...community, defaultValue: true } },
     { communityBuildHistory: { ...community, value: 'false' } }, { storage: { dataDirectory: '' } }, { storage: { dataDirectory: '/x', size: '1' } },
     { downloadLimits: { ...snapshot.downloadLimits, bandwidthCapBytesPerSecond: 1024 } }, { downloadLimits: { ...snapshot.downloadLimits, parallelDownloads: 0 } }, { extra: true },
-    { fetchTableDefinitions: undefined }, { fetchTableDefinitions: { ...snapshot.fetchTableDefinitions, defaultValue: false } }])
+    { fetchTableDefinitions: undefined }, { fetchTableDefinitions: { ...snapshot.fetchTableDefinitions, defaultValue: false } },
+    { communityListfile: undefined }, { communityListfile: { ...snapshot.communityListfile, defaultValue: false } }])
     assert.equal(validator('SettingsSnapshot')(JSON.parse(JSON.stringify({ ...snapshot, ...patch }))), false, JSON.stringify(patch));
   const measurement = { bytes: '51749982208', files: '1204', skipped: '0', startedAt: '2026-10-20T13:12:00.1234567+00:00', measuredAt: '2026-10-20T13:12:04Z' };
   validate('StorageMeasurement', measurement);

@@ -24,12 +24,12 @@ export type CreatureGeometryStage =
 export type CreatureGeometryDependency = 'metadata' | 'model' | 'skin' | 'artifact' | 'texture';
 export type EngineRequest = EngineRequest1;
 export type WorkspaceSnapshot = WorkspaceSnapshot1;
+export type SettingsTimestamp = string;
 /**
  * inventory.catalog reply (D071). pending carries its stage (and written memberships while writing); ready carries the sealed catalog Files reads; failed (after three attempts) and unsupported carry the cause, and the next Open retries both. removed: freed from Settings (D085); the next Open or resume prepares it again.
  */
 export type FileCatalogStatus = FileCatalogStatus1;
 export type TableDefinitionSnapshot = TableDefinitionSnapshot1;
-export type SettingsTimestamp = string;
 export type ContentReceipt = ContentReceipt1;
 /**
  * Opaque engine-run epoch and change count (D077). Compare for equality only.
@@ -353,6 +353,7 @@ export interface DiscoveryContract {
   settingsSnapshot?: SettingsSnapshot;
   settingsSetParams?: SettingsSetParams;
   storageMeasurement?: StorageMeasurement;
+  communityListfileStatus?: CommunityListfileStatus;
   preparedDataList?: PreparedDataList;
   preparedDataFreeParams?: PreparedDataFreeParams;
   preparedDataFreed?: PreparedDataFreed;
@@ -584,6 +585,8 @@ export interface EngineRequest1 {
     | 'creatures.geometry.close'
     | 'settings.read'
     | 'settings.set'
+    | 'settings.listfile.read'
+    | 'settings.listfile.check'
     | 'settings.storage.measure'
     | 'settings.storage.builds'
     | 'settings.storage.free';
@@ -770,6 +773,7 @@ export interface InventoryFilesPage {
    * The engine stopped at its per-request examination bound before filling the page; nextCursor continues the search.
    */
   scanLimited: boolean;
+  communityNames: CommunityNamesSource;
 }
 /**
  * One ROOT FileDataID or one exact install name with every membership summarized. Sizes are encoded bytes of resolved memberships; unresolved ones are counted, never sized.
@@ -790,6 +794,19 @@ export interface InventoryFile {
   unresolvedCount: number;
   localeFlags: string | null;
   storedCount: number;
+  /**
+   * A community name from wow-listfile for a ROOT FileDataID (D105); null for install files and FileDataIDs it doesn't name. Never the file's identity.
+   */
+  communityName: string | null;
+}
+/**
+ * Where a Files page's community names came from (D105): off (the switch reads as off, or the engine has no listfile), notReady (on, no verified copy yet and a download on its way), failed (on, no verified copy, the last attempt failed and nothing runs now), unreadable (on, but the names couldn't be read from the storage folder for this page) or ready, with the release tag, GitHub's publish time and when VibeMiner fetched it. Names are labels only.
+ */
+export interface CommunityNamesSource {
+  state: 'off' | 'notReady' | 'failed' | 'unreadable' | 'ready';
+  tag: string | null;
+  publishedAt: SettingsTimestamp | null;
+  fetchedAt: SettingsTimestamp | null;
 }
 /**
  * inventory.file: every membership of one Files row, in membership order, marked against the same filters.
@@ -837,6 +854,11 @@ export interface InventoryFileDetail {
    */
   memberships: InventoryFileMembership[];
   nextCursor: string | null;
+  /**
+   * A community name from wow-listfile for a ROOT FileDataID (D105); null for install files and FileDataIDs it doesn't name. Never the file's identity.
+   */
+  communityName: string | null;
+  communityNames: CommunityNamesSource;
 }
 export interface InventoryFileMembership {
   id: string;
@@ -3795,6 +3817,15 @@ export interface SettingsSnapshot {
     source: 'default' | 'saved' | 'unreadable';
     problem: SettingsProblem | null;
   };
+  /**
+   * Community file names from wow-listfile in Files (D105). On by default; an unreadable value, or an unreadable or newer file, reads as off.
+   */
+  communityListfile: {
+    value: boolean;
+    defaultValue: true;
+    source: 'default' | 'saved' | 'unreadable';
+    problem: SettingsProblem | null;
+  };
   storage: {
     dataDirectory: string;
   };
@@ -3811,7 +3842,7 @@ export interface SettingsProblem {
   retryable: boolean;
 }
 export interface SettingsSetParams {
-  name: 'communityBuildHistory' | 'fetchTableDefinitions';
+  name: 'communityBuildHistory' | 'fetchTableDefinitions' | 'communityListfile';
   value: boolean;
 }
 export interface StorageMeasurement {
@@ -3820,6 +3851,53 @@ export interface StorageMeasurement {
   skipped: string;
   startedAt: SettingsTimestamp;
   measuredAt: SettingsTimestamp;
+}
+/**
+ * The community listfile download (settings.listfile.read and settings.listfile.check, capability community-listfile-v1, D105).
+ */
+export interface CommunityListfileStatus {
+  /**
+   * The switch reads as on.
+   */
+  enabled: boolean;
+  /**
+   * Something asked for names in this engine run, or a copy or a partial download was kept from earlier. False means nothing has been fetched yet: the first download starts when Files lists files, the switch is turned on or Settings asks for it.
+   */
+  started: boolean;
+  activity: 'idle' | 'verifying' | 'checking' | 'downloading' | 'importing';
+  /**
+   * The verified copy names come from while enabled; null when there is none yet.
+   */
+  release: CommunityListfileRelease | null;
+  /**
+   * The release being downloaded or imported.
+   */
+  pendingTag: string | null;
+  /**
+   * Bytes downloaded, or bytes read while importing.
+   */
+  completed: string | null;
+  total: string | null;
+  /**
+   * When GitHub last confirmed the release in use.
+   */
+  checkedAt: SettingsTimestamp | null;
+  /**
+   * The last attempt's failure. A release in use stays in use.
+   */
+  problem: SettingsProblem | null;
+}
+/**
+ * One verified wow-listfile release kept in the data folder: GitHub's tag and publish time, when VibeMiner fetched it, the CSV's SHA-256 and length as GitHub published them, the names read from it and its download address.
+ */
+export interface CommunityListfileRelease {
+  tag: string;
+  publishedAt: SettingsTimestamp;
+  fetchedAt: SettingsTimestamp;
+  sha256: string;
+  byteLength: string;
+  nameCount: string;
+  sourceUrl: string;
 }
 /**
  * settings.storage.builds: every opened build, most recently opened first, at most 256; truncated when more were opened.

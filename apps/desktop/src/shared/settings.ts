@@ -1,7 +1,7 @@
-import type { SettingsSnapshot, SettingsSetParams, StorageMeasurement, PreparedDataList, PreparedBuild, PreparedDataFreed, PreparedDataFreeParams, PreparedFileCatalog } from '../../../../contracts/generated/discovery';
-export type { SettingsSnapshot, SettingsSetParams, StorageMeasurement, PreparedDataList, PreparedBuild, PreparedDataFreed, PreparedDataFreeParams, PreparedFileCatalog };
+import type { SettingsSnapshot, SettingsSetParams, StorageMeasurement, PreparedDataList, PreparedBuild, PreparedDataFreed, PreparedDataFreeParams, PreparedFileCatalog, CommunityListfileStatus } from '../../../../contracts/generated/discovery';
+export type { SettingsSnapshot, SettingsSetParams, StorageMeasurement, PreparedDataList, PreparedBuild, PreparedDataFreed, PreparedDataFreeParams, PreparedFileCatalog, CommunityListfileStatus };
 /** The switches this version knows. */
-export const SETTING_SWITCHES = ['communityBuildHistory', 'fetchTableDefinitions'] as const;
+export const SETTING_SWITCHES = ['communityBuildHistory', 'fetchTableDefinitions', 'communityListfile'] as const;
 export type SettingSwitch = typeof SETTING_SWITCHES[number];
 const decimal = (x: unknown): x is string => typeof x === 'string' && /^(0|[1-9][0-9]{0,18})$/.test(x) && BigInt(x) <= 9223372036854775807n;
 const instant = (x: unknown) => typeof x === 'string' && !Number.isNaN(Date.parse(x));
@@ -28,6 +28,17 @@ export function settingsSnapshotMatches(s: SettingsSnapshot): boolean {
 }
 /** A committed change returns the value that was asked for, saved in a readable file. */
 export const settingsSetMatches = (s: SettingsSnapshot, p: SettingsSetParams) => settingsSnapshotMatches(s) && s.file === 'read' && s[p.name].source === 'saved' && s[p.name].value === p.value;
+/** The listfile status says one consistent thing (D105): progress only while it works, a pending tag only while it
+ * downloads or imports, done never past the total, and the release's source is its own tag's fixed asset. */
+export function listfileStatusMatches(s: CommunityListfileStatus): boolean {
+  const working = s.activity === 'downloading' || s.activity === 'importing';
+  if (working !== (s.pendingTag !== null) || working !== (s.completed !== null) || working !== (s.total !== null)) return false;
+  if (working && BigInt(s.completed!) > BigInt(s.total!)) return false;
+  if (s.checkedAt !== null && !instant(s.checkedAt)) return false;
+  const r = s.release;
+  return !r || r.sourceUrl === `https://github.com/wowdev/wow-listfile/releases/download/${r.tag}/community-listfile-withcapitals.csv`
+    && instant(r.publishedAt) && instant(r.fetchedAt) && BigInt(r.nameCount) > 0n && BigInt(r.byteLength) > 0n;
+}
 export function storageMeasurementMatches(m: StorageMeasurement): boolean {
   return [m.bytes, m.files, m.skipped].every(decimal) && instant(m.startedAt) && instant(m.measuredAt) && Date.parse(m.measuredAt) >= Date.parse(m.startedAt);
 }

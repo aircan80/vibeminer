@@ -17,7 +17,7 @@ public sealed record DownloadLimitSettings(int ParallelDownloads, int Background
 /// <summary>One read of the settings, for every product and build.</summary>
 public sealed record SettingsSnapshot(int FormatVersion, SettingsFileState File, SettingsProblem? Problem,
     DateTimeOffset? LastChangedAt, BooleanSetting CommunityBuildHistory, string DataDirectory, DownloadLimitSettings DownloadLimits,
-    BooleanSetting FetchTableDefinitions);
+    BooleanSetting FetchTableDefinitions, BooleanSetting CommunityListfile);
 
 /// <summary>
 /// The parsed settings file. A null value means the file has no value for that setting.
@@ -37,6 +37,9 @@ public sealed record SettingsDocument(SettingsFileState File, SettingsProblem? P
     /// <summary>Fetch newer table definitions from WoWDBDefs (#55). Null when the file has no value for it.</summary>
     public bool? FetchTableDefinitions { get; init; }
     public SettingsProblem? FetchTableDefinitionsProblem { get; init; }
+    /// <summary>Community file names from wow-listfile (#21, D105). Null when the file has no value for it.</summary>
+    public bool? CommunityListfile { get; init; }
+    public SettingsProblem? CommunityListfileProblem { get; init; }
     /// <summary>Known settings whose saved value VibeMiner doesn't understand, as raw JSON. Changing another setting
     /// keeps them as written; only switching that setting replaces its value.</summary>
     public IReadOnlyList<KeyValuePair<string, string>> UnreadableValues { get; init; } = [];

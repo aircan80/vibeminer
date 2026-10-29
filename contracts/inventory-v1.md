@@ -32,6 +32,8 @@ Home shows catalog memberships, unique content/download-object counts and exact 
 
 A Files row is one ROOT FileDataID (`root:<FileDataID>`) or one exact install name (`install:<first membership ID>`). ROOT rows come first in FileDataID order, then install rows in manifest order. Download and size manifest memberships are encoded objects, not files, and are not listed. ROOT has no names, so `name` is null for ROOT rows; install rows carry the actual install name.
 
+Community names ([D105](../docs/DECISIONS.md)): every row has `communityName`, a name from wow-listfile for a ROOT FileDataID while the `communityListfile` setting is on and a verified copy is kept, otherwise null; install rows always have null. It is a label beside the key and FileDataID, never a filter, cursor or identity. Each page and `inventory.file` reply has `communityNames`: `{state:"off"|"notReady"|"failed"|"unreadable"|"ready", tag, publishedAt, fetchedAt}`, the release only when `ready`. `off` also stands for an engine without a listfile. `notReady`: on, no verified copy yet and a download on its way. `failed`: on, no verified copy, the last attempt failed and nothing runs now. `unreadable`: on, but the kept names couldn't be read for this page; the page has no names and never fails for it. A page read again after the switch changes has the same rows with or without names; the first page read with the switch on and no copy starts the download (`notReady`).
+
 Filters are optional flat fields. Each one tests a single membership, and a row is listed when at least one of its memberships passes all of them:
 
 - `fileDataId`: exact ROOT FileDataID, 0..4294967295.

@@ -19,6 +19,7 @@ These are the engine's current bounds. Code is the source of truth: [Acquisition
 | --- | --- |
 | HTTP permits | 4 total, at most 2 background |
 | WoWDBDefs definition fetches (D081) | Own HTTP client, not the CDN permits; 2 at once, one per table; 1 MiB file, 256 KiB commit answer, 30 s per fetch; a covering cache refreshes after 24 h, a non-covering one at most every 15 min; Tables and feature prerequisites (D101), one ask per table preparation; cancelled with the preparation that asked |
+| Community listfile (D105) | Own HTTP client, not the CDN permits, at most 6 new connections per attempt; one background loop, one download at a time; 1 MiB release answer and 30 s for it, 512 MiB asset with 30 s idle per read, resumed by HTTP range; checked whole against GitHub's SHA-256 before it is read; parsed in 1 MiB pieces (8 million names, 1,024-byte names); about 36 KiB of index in memory; first download only when Files asks for names, Settings asks, or the switch is turned on (a real engine that opens Files does download; e2e runs point `VIBEMINER_LISTFILE_ORIGIN` at a dead loopback port); one Downloads & activity task while it runs or failed; then a check at most weekly, 15 min apart after a failure; the switch turned off cancels it and keeps its bytes; shutdown cancels it |
 | CPU permits | 2 total, at most 1 background |
 | Staging (temporary disk) | 2 GiB total, at most 512 MiB background |
 | Shared physical producers | 128 total; at most 32 pending background; 32 admissions reserved for interactive work |

@@ -394,6 +394,9 @@
     "storageMeasurement": {
       "$ref": "#/definitions/StorageMeasurement"
     },
+    "communityListfileStatus": {
+      "$ref": "#/definitions/CommunityListfileStatus"
+    },
     "preparedDataList": {
       "$ref": "#/definitions/PreparedDataList"
     },
@@ -1182,6 +1185,8 @@
             "creatures.geometry.close",
             "settings.read",
             "settings.set",
+            "settings.listfile.read",
+            "settings.listfile.check",
             "settings.storage.measure",
             "settings.storage.builds",
             "settings.storage.free"
@@ -1628,6 +1633,38 @@
             "properties": {
               "params": {
                 "$ref": "#/definitions/SettingsSetParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "settings.listfile.read"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/SettingsEmptyParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "settings.listfile.check"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/SettingsEmptyParams"
               }
             }
           }
@@ -2787,6 +2824,19 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4096
+        },
+        "communityName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A community name from wow-listfile for a ROOT FileDataID (D105); null for install files and FileDataIDs it doesn't name. Never the file's identity."
         }
       },
       "required": [
@@ -2801,7 +2851,8 @@
         "encodedBytesMax",
         "unresolvedCount",
         "localeFlags",
-        "storedCount"
+        "storedCount",
+        "communityName"
       ],
       "additionalProperties": false
     },
@@ -2856,6 +2907,9 @@
         "scanLimited": {
           "type": "boolean",
           "description": "The engine stopped at its per-request examination bound before filling the page; nextCursor continues the search."
+        },
+        "communityNames": {
+          "$ref": "#/definitions/CommunityNamesSource"
         }
       },
       "required": [
@@ -2866,7 +2920,8 @@
         "entries",
         "totalCount",
         "nextCursor",
-        "scanLimited"
+        "scanLimited",
+        "communityNames"
       ],
       "additionalProperties": false
     },
@@ -3129,6 +3184,22 @@
               "type": "null"
             }
           ]
+        },
+        "communityName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A community name from wow-listfile for a ROOT FileDataID (D105); null for install files and FileDataIDs it doesn't name. Never the file's identity."
+        },
+        "communityNames": {
+          "$ref": "#/definitions/CommunityNamesSource"
         }
       },
       "required": [
@@ -3143,7 +3214,9 @@
         "membershipCount",
         "matchingCount",
         "memberships",
-        "nextCursor"
+        "nextCursor",
+        "communityName",
+        "communityNames"
       ],
       "additionalProperties": false
     },
@@ -18174,6 +18247,42 @@
           "additionalProperties": false,
           "description": "Fetch newer table definitions from WoWDBDefs for Tables and the feature views, exact build first (D081, D101). On by default; an unreadable value reads as off."
         },
+        "communityListfile": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean"
+            },
+            "defaultValue": {
+              "const": true
+            },
+            "source": {
+              "enum": [
+                "default",
+                "saved",
+                "unreadable"
+              ]
+            },
+            "problem": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SettingsProblem"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "defaultValue",
+            "source",
+            "problem"
+          ],
+          "additionalProperties": false,
+          "description": "Community file names from wow-listfile in Files (D105). On by default; an unreadable value, or an unreadable or newer file, reads as off."
+        },
         "storage": {
           "type": "object",
           "properties": {
@@ -18232,6 +18341,7 @@
         "lastChangedAt",
         "communityBuildHistory",
         "fetchTableDefinitions",
+        "communityListfile",
         "storage",
         "downloadLimits"
       ],
@@ -18276,7 +18386,8 @@
         "name": {
           "enum": [
             "communityBuildHistory",
-            "fetchTableDefinitions"
+            "fetchTableDefinitions",
+            "communityListfile"
           ]
         },
         "value": {
@@ -18525,6 +18636,208 @@
         "freedBytes",
         "freedFiles",
         "fileCatalog"
+      ],
+      "additionalProperties": false
+    },
+    "CommunityNamesSource": {
+      "title": "CommunityNamesSource",
+      "description": "Where a Files page's community names came from (D105): off (the switch reads as off, or the engine has no listfile), notReady (on, no verified copy yet and a download on its way), failed (on, no verified copy, the last attempt failed and nothing runs now), unreadable (on, but the names couldn't be read from the storage folder for this page) or ready, with the release tag, GitHub's publish time and when VibeMiner fetched it. Names are labels only.",
+      "type": "object",
+      "properties": {
+        "state": {
+          "enum": [
+            "off",
+            "notReady",
+            "failed",
+            "unreadable",
+            "ready"
+          ]
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publishedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SettingsTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fetchedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SettingsTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "tag",
+        "publishedAt",
+        "fetchedAt"
+      ],
+      "additionalProperties": false
+    },
+    "CommunityListfileRelease": {
+      "title": "CommunityListfileRelease",
+      "description": "One verified wow-listfile release kept in the data folder: GitHub's tag and publish time, when VibeMiner fetched it, the CSV's SHA-256 and length as GitHub published them, the names read from it and its download address.",
+      "type": "object",
+      "properties": {
+        "tag": {
+          "type": "string",
+          "pattern": "^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$"
+        },
+        "publishedAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        },
+        "fetchedAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "byteLength": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "nameCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "sourceUrl": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^https://github\\.com/wowdev/wow-listfile/releases/download/[0-9A-Za-z][0-9A-Za-z._-]{0,63}/community-listfile-withcapitals\\.csv$"
+        }
+      },
+      "required": [
+        "tag",
+        "publishedAt",
+        "fetchedAt",
+        "sha256",
+        "byteLength",
+        "nameCount",
+        "sourceUrl"
+      ],
+      "additionalProperties": false
+    },
+    "CommunityListfileStatus": {
+      "title": "CommunityListfileStatus",
+      "description": "The community listfile download (settings.listfile.read and settings.listfile.check, capability community-listfile-v1, D105).",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "The switch reads as on."
+        },
+        "started": {
+          "type": "boolean",
+          "description": "Something asked for names in this engine run, or a copy or a partial download was kept from earlier. False means nothing has been fetched yet: the first download starts when Files lists files, the switch is turned on or Settings asks for it."
+        },
+        "activity": {
+          "enum": [
+            "idle",
+            "verifying",
+            "checking",
+            "downloading",
+            "importing"
+          ]
+        },
+        "release": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CommunityListfileRelease"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The verified copy names come from while enabled; null when there is none yet."
+        },
+        "pendingTag": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The release being downloaded or imported."
+        },
+        "completed": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Bytes downloaded, or bytes read while importing."
+        },
+        "total": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SettingsTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When GitHub last confirmed the release in use."
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SettingsProblem"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The last attempt's failure. A release in use stays in use."
+        }
+      },
+      "required": [
+        "enabled",
+        "started",
+        "activity",
+        "release",
+        "pendingTag",
+        "completed",
+        "total",
+        "checkedAt",
+        "problem"
       ],
       "additionalProperties": false
     }

@@ -1,4 +1,4 @@
-import type { FileCatalogList, FileCatalogSetParams, FileCatalogStatus, InventoryFileDetail, InventoryFileParams, InventoryFilesPage, InventoryFilesParams, InventoryPage, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
+import type { CommunityNamesSource, FileCatalogList, FileCatalogSetParams, FileCatalogStatus, InventoryFileDetail, InventoryFileParams, InventoryFilesPage, InventoryFilesParams, InventoryPage, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { OpenParams } from './bridge';
 export type InventoryReadParams = OpenParams & { generation: string; limit: number; after?: string };
 const unsigned = /^(0|[1-9][0-9]{0,18})$/;
@@ -76,9 +76,14 @@ export function validInventoryFile(value: unknown): value is InventoryFileParams
 export function filePosition(key: string): [number, bigint] { const install = key.startsWith('install:'); return [install ? 1 : 0, BigInt(key.slice(install ? 8 : 5))]; }
 const after = (a: [number, bigint], b: [number, bigint]) => a[0] !== b[0] ? a[0] > b[0] : a[1] > b[1];
 const narrows = (p: FileFilters) => p.fileDataId !== undefined || p.contentKey !== undefined || p.localeFlags !== undefined || p.contentFlags !== undefined || !!p.storedOnly;
+/** A ready source names its release; off and not ready name nothing. */
+const communitySourceMatches = (c: CommunityNamesSource) => c.state === 'ready'
+  ? c.tag !== null && c.publishedAt !== null && c.fetchedAt !== null && !Number.isNaN(Date.parse(c.publishedAt)) && !Number.isNaN(Date.parse(c.fetchedAt))
+  : c.tag === null && c.publishedAt === null && c.fetchedAt === null;
 export function inventoryFilesPageMatches(page: InventoryFilesPage, params: InventoryFilesParams): boolean {
   if (page.productId !== params.productId || page.buildIdentity !== params.buildIdentity || page.sourceRegion !== params.sourceRegion || page.generation !== params.generation || page.entries.length > params.limit) return false;
   if (narrows(params) ? page.totalCount !== null : page.totalCount === null) return false;
+  if (!communitySourceMatches(page.communityNames)) return false;
   let previous: [number, bigint] | null = params.after === undefined ? null : filePosition(params.after);
   for (const file of page.entries) {
     const position = filePosition(file.key), root = position[0] === 0;
@@ -86,6 +91,8 @@ export function inventoryFilesPageMatches(page: InventoryFilesPage, params: Inve
     if (params.family && file.family !== params.family || file.family !== (root ? 'root' : 'install')) return false;
     // ROOT has no names; install rows carry their actual name and no ROOT locale flags.
     if (root ? file.fileDataId !== String(position[1]) || file.name !== null || file.localeFlags === null : file.fileDataId !== null || file.name === null || file.localeFlags !== null) return false;
+    // A community name labels a ROOT row only, and only from a ready source (D105).
+    if (file.communityName !== null && (!root || page.communityNames.state !== 'ready')) return false;
     if (file.matchingCount < 1 || file.matchingCount > file.membershipCount || file.storedCount > file.membershipCount || file.unresolvedCount > file.membershipCount || file.contentKeyCount > file.membershipCount) return false;
     if ((file.unresolvedCount === file.membershipCount) !== (file.encodedBytesMin === null) || (file.encodedBytesMin === null) !== (file.encodedBytesMax === null) || file.encodedBytesMin !== null && BigInt(file.encodedBytesMin) > BigInt(file.encodedBytesMax!)) return false;
     previous = position;
@@ -99,6 +106,7 @@ export function inventoryFileDetailMatches(detail: InventoryFileDetail, params: 
   if (detail.productId !== params.productId || detail.buildIdentity !== params.buildIdentity || detail.sourceRegion !== params.sourceRegion || detail.generation !== params.generation || detail.file !== params.file || detail.memberships.length > params.limit) return false;
   const [section, value] = filePosition(params.file), root = section === 0;
   if (detail.family !== (root ? 'root' : 'install') || (root ? detail.fileDataId !== String(value) || detail.name !== null : detail.fileDataId !== null || detail.name === null) || detail.matchingCount > detail.membershipCount) return false;
+  if (!communitySourceMatches(detail.communityNames) || detail.communityName !== null && (!root || detail.communityNames.state !== 'ready')) return false;
   let cursor = BigInt(params.after ?? '0');
   for (const m of detail.memberships) {
     if (BigInt(m.id) <= cursor || m.family !== detail.family || (m.encodingKey === null) !== (m.encodedBytes === null)) return false;

@@ -1,0 +1,88 @@
+[
+  {
+    "enabled": true,
+    "started": true,
+    "activity": "idle",
+    "release": {
+      "tag": "202601010000",
+      "publishedAt": "2026-01-01T00:00:00+00:00",
+      "fetchedAt": "2026-10-23T12:00:00+00:00",
+      "sha256": "abababababababababababababababababababababababababababababababab",
+      "byteLength": "153793438",
+      "nameCount": "2275783",
+      "sourceUrl": "https://github.com/wowdev/wow-listfile/releases/download/202601010000/community-listfile-withcapitals.csv"
+    },
+    "pendingTag": null,
+    "completed": null,
+    "total": null,
+    "checkedAt": "2026-10-23T12:00:00+00:00",
+    "problem": null
+  },
+  {
+    "enabled": true,
+    "started": true,
+    "activity": "downloading",
+    "release": null,
+    "pendingTag": "202601010000",
+    "completed": "52428800",
+    "total": "153793438",
+    "checkedAt": null,
+    "problem": null
+  },
+  {
+    "enabled": true,
+    "started": true,
+    "activity": "importing",
+    "release": {
+      "tag": "202601010000",
+      "publishedAt": "2026-01-01T00:00:00+00:00",
+      "fetchedAt": "2026-10-23T12:00:00+00:00",
+      "sha256": "abababababababababababababababababababababababababababababababab",
+      "byteLength": "153793438",
+      "nameCount": "2275783",
+      "sourceUrl": "https://github.com/wowdev/wow-listfile/releases/download/202601010000/community-listfile-withcapitals.csv"
+    },
+    "pendingTag": "202601080000",
+    "completed": "1048576",
+    "total": "153793438",
+    "checkedAt": "2026-10-23T12:00:00+00:00",
+    "problem": null
+  },
+  {
+    "enabled": true,
+    "started": true,
+    "activity": "idle",
+    "release": null,
+    "pendingTag": null,
+    "completed": null,
+    "total": null,
+    "checkedAt": null,
+    "problem": {
+      "code": "LISTFILE_FETCH_OFFLINE",
+      "message": "VibeMiner couldn’t reach GitHub to get the wow-listfile community file names.",
+      "retryable": true
+    }
+  },
+  {
+    "enabled": false,
+    "started": false,
+    "activity": "idle",
+    "release": null,
+    "pendingTag": null,
+    "completed": null,
+    "total": null,
+    "checkedAt": null,
+    "problem": null
+  },
+  {
+    "enabled": true,
+    "started": false,
+    "activity": "idle",
+    "release": null,
+    "pendingTag": null,
+    "completed": null,
+    "total": null,
+    "checkedAt": null,
+    "problem": null
+  }
+]

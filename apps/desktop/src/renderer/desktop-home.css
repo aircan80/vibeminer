@@ -64,6 +64,7 @@
 .desktop-home .dh-segmented button[aria-pressed="true"]{background:var(--mint);color:var(--teal);font-weight:600}
 .desktop-home .dh-pill{display:inline-block;padding:0 .373333rem;border-radius:4px;border:1px solid var(--pill);background:var(--paper);color:var(--teal);font-size:var(--fs-s);font-weight:600;line-height:1.5;white-space:nowrap}
 .desktop-home .dh-pill.dh-gold{border-color:var(--gold-line);background:var(--gold-bg);color:var(--gold-ink)}
+.desktop-home .dh-pill.dh-community{border-color:#c9cfdc;background:#f3f4f8;color:#4a5670;margin-left:.4rem}
 .desktop-home .dh-notice{margin:.56rem .802667rem 0;padding:.513333rem .7rem;border-radius:6px;border:1px solid var(--warn-line);background:var(--warn-bg);font-size:var(--fs-m);display:flex;gap:.746667rem;align-items:flex-start}
 .desktop-home .dh-notice.dh-error{border-color:var(--err-line);background:var(--err-bg)}
 .desktop-home .dh-notice.dh-calm{border-color:var(--line);background:var(--bg)}

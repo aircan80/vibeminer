@@ -9,7 +9,8 @@ import { DownloadActivity } from '../src/renderer/DownloadActivity';
 import { SettingsProvider, SettingsView, type SettingsOrigin } from '../src/renderer/Settings';
 import type { ActivityTask } from '../src/renderer/download-activity-state';
 import { EngineClient, type EngineProcess } from '../src/main/engine-client';
-import { settingsSetMatches, settingsSnapshotMatches, storageMeasurementMatches, validSettingsSet } from '../src/shared/settings';
+import { listfileStatusMatches, settingsSetMatches, settingsSnapshotMatches, storageMeasurementMatches, validSettingsSet, type CommunityListfileStatus } from '../src/shared/settings';
+import listfileStatuses from '../../../contracts/examples/community-listfile-status.json';
 import type { BridgeReply, DiscoveryBridge } from '../src/shared/bridge';
 import type { DiscoveryPage, SettingsSnapshot, StorageMeasurement, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
 import fixture from '../../../contracts/examples/discovery-page.json';
@@ -21,7 +22,7 @@ const success = <T,>(value: T): BridgeReply<T> => ({ ok: true, value });
 const refused = (code: string, message: string, retryable = true) => ({ ok: false as const, error: { code, message, retryable } });
 const unavailable = async () => refused('NOT_TESTED', 'Outside this test.', false);
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
-const fresh: SettingsSnapshot = { formatVersion: 1, file: 'absent', problem: null, lastChangedAt: null, communityBuildHistory: { value: false, defaultValue: false, source: 'default', problem: null }, fetchTableDefinitions: { value: true, defaultValue: true, source: 'default', problem: null }, storage: { dataDirectory: '/authored/profile/engine-v1' }, downloadLimits: { parallelDownloads: 4, backgroundDownloads: 2, bandwidthCapBytesPerSecond: null, adjustable: false } };
+const fresh: SettingsSnapshot = { formatVersion: 1, file: 'absent', problem: null, lastChangedAt: null, communityBuildHistory: { value: false, defaultValue: false, source: 'default', problem: null }, fetchTableDefinitions: { value: true, defaultValue: true, source: 'default', problem: null }, communityListfile: { value: true, defaultValue: true, source: 'default', problem: null }, storage: { dataDirectory: '/authored/profile/engine-v1' }, downloadLimits: { parallelDownloads: 4, backgroundDownloads: 2, bandwidthCapBytesPerSecond: null, adjustable: false } };
 const saved = (value: boolean, at = '2026-10-20T13:14:00.0000000+00:00'): SettingsSnapshot => ({ ...fresh, file: 'read', lastChangedAt: at, communityBuildHistory: { value, defaultValue: false, source: 'saved', problem: null } });
 const communityNote = () => within(document.getElementById('settings-row-community')!).getByRole('note');
 const measured: StorageMeasurement = { bytes: '51749982208', files: '1204', skipped: '0', startedAt: '2026-10-20T13:12:00.0000000+00:00', measuredAt: '2026-10-20T13:12:04.0000000+00:00' };
@@ -101,6 +102,18 @@ describe('engine client settings methods', () => {
     await expect(client.request('settings.storage.measure', { root: '/' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
     expect(child.requests).toHaveLength(1);
   });
+  it('needs the listfile capability and checks the status it is sent (D105)', async () => {
+    const statuses = listfileStatuses as CommunityListfileStatus[];
+    for (const status of statuses) expect(listfileStatusMatches(status)).toBe(true);
+    const without = await connected(['settings-v1']);
+    await expect(without.client.request('settings.listfile.read', {})).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    const { child, client } = await connected(['settings-v1', 'community-listfile-v1']);
+    await expect(client.request('settings.listfile.check', { tag: 'x' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    const read = client.request('settings.listfile.read', {}, 'read'); child.reply('read', statuses[0]); await expect(read).resolves.toEqual(statuses[0]);
+    for (const [id, bad] of [['done', { ...statuses[1], completed: '999999999999' }], ['idleProgress', { ...statuses[0], completed: '1' }], ['source', { ...statuses[0], release: { ...statuses[0].release!, sourceUrl: 'https://github.com/wowdev/wow-listfile/releases/download/other/community-listfile-withcapitals.csv' } }]] as const) {
+      const work = expect(client.request('settings.listfile.check', {}, id)).rejects.toMatchObject({ code: 'PROTOCOL_ERROR' }); child.reply(id, bad); await work;
+    }
+  });
   it('accepts the committed value and treats a different committed value as a protocol failure', async () => {
     const { child, client } = await connected(['settings-v1']);
     const read = client.request('settings.read', {}, 'read'); child.reply('read', fresh); await expect(read).resolves.toEqual(fresh);
@@ -143,7 +156,7 @@ describe('Settings view', () => {
     const reading = deferred<BridgeReply<SettingsSnapshot>>();
     await openFromDiscovery(bridgeMock({ settingsRead: vi.fn(() => reading.promise) }));
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Reading saved value…')).toHaveLength(2);
+    expect(screen.getAllByText('Reading saved value…')).toHaveLength(3);
     expect(screen.getByText('Reading settings…')).toBeVisible();
     expect(screen.getByText('Not read yet')).toBeVisible();
     await act(async () => { reading.resolve(success(fresh)); });
@@ -212,6 +225,68 @@ describe('Settings view', () => {
     expect(within(document.getElementById('settings-fetch-save')!).getByText('Saved')).toBeVisible();
     expect(document.getElementById('settings-community-save')).toHaveTextContent('');
     expect(screen.getByRole('switch', { name: /Community build history/ })).toHaveAttribute('aria-checked', 'false');
+  });
+  it('shows Community file names on by default under Files with the copy in use, and saves the switch on its own (D105)', async () => {
+    const [ready] = listfileStatuses as CommunityListfileStatus[];
+    const settingsSet = vi.fn(async (params: { name: 'communityBuildHistory' | 'fetchTableDefinitions' | 'communityListfile'; value: boolean }) =>
+      success({ ...fresh, file: 'read' as const, lastChangedAt: '2026-10-23T12:00:00.0000000+00:00', communityListfile: { value: params.value, defaultValue: true as const, source: 'saved' as const, problem: null } }));
+    let on = true;
+    const listfileRead = vi.fn(async () => success({ ...ready, enabled: on }));
+    settingsSet.mockImplementation(async params => { on = params.value; return success({ ...fresh, file: 'read' as const, lastChangedAt: '2026-10-23T12:00:00.0000000+00:00', communityListfile: { value: params.value, defaultValue: true as const, source: 'saved' as const, problem: null } }); });
+    const { bridge } = await openFromDiscovery(bridgeMock({ settingsSet, listfileRead, listfileCheck: vi.fn(async () => success(ready)) }));
+    const toggle = await screen.findByRole('switch', { name: 'Community file names from wow-listfile' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('heading', { level: 2, name: 'Files' })).toBeVisible();
+    const row = document.getElementById('settings-row-listfile')!;
+    expect(within(row).getByText('Default: On')).toBeVisible();
+    expect(row).toHaveTextContent('all data still comes from Blizzard’s CDN');
+    expect(row).toHaveTextContent('It has no licence, so VibeMiner never ships it.');
+    expect(within(row).getByText('Community')).toHaveClass('st-pill', 'community');
+    await waitFor(() => expect(row).toHaveTextContent(/Copy in useRelease 202601010000 · published .* · fetched .* · 2,275,783 names/));
+    expect(within(row).getByRole('button', { name: 'Check for a newer release' })).toBeVisible();
+    toggle.focus(); fireEvent.click(toggle);
+    expect(bridge.settingsSet).toHaveBeenCalledWith({ name: 'communityListfile', value: false });
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
+    expect(toggle).toHaveFocus();
+    // The download state is read again for the new value: off says so and keeps the copy, unused.
+    await within(row).findByText('Off. Nothing is downloaded.');
+    expect(row).toHaveTextContent('kept, not used while off');
+    expect(within(row).queryByRole('button', { name: 'Check for a newer release' })).toBeNull();
+  });
+  it('calls importing Processing with bytes, says a failed refresh keeps the copy and when it retries, and puts the switch first (D105)', async () => {
+    const [ready, , importing] = listfileStatuses as CommunityListfileStatus[];
+    const failedRefresh = { ...ready, problem: { code: 'LISTFILE_FETCH_OFFLINE', message: 'VibeMiner couldn’t reach GitHub to get the wow-listfile community file names.', retryable: true } };
+    const listfileRead = vi.fn(async () => success(importing));
+    await openFromDiscovery(bridgeMock({ listfileRead, listfileCheck: vi.fn(async () => success(importing)) }));
+    const row = document.getElementById('settings-row-listfile')!;
+    await within(row).findByText('Processing release 202601080000 · 0% · 1.00 MiB of 146.66 MiB');
+    // The switch comes before the download state and its button in the document, so in tab order and in the one-column layout.
+    const toggle = within(row).getByRole('switch', { name: 'Community file names from wow-listfile' }), button = within(row).getByRole('button', { name: 'Check for a newer release' });
+    expect(toggle.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(toggle.compareDocumentPosition(document.getElementById('settings-listfile-state')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    listfileRead.mockResolvedValue(success(failedRefresh));
+    await within(row).findByText('Release 202601010000 is still in use. The last check for a newer one failed; VibeMiner tries again after 15 minutes.', {}, { timeout: 3000 });
+    expect(row).not.toHaveTextContent('Up to date as of');
+    expect(within(row).getByRole('alert')).toHaveTextContent('Couldn’t get a newer release. Release 202601010000 is still in use.');
+  });
+  it('shows the listfile download as it runs, a failure with its code, and asks for a download only when told to', async () => {
+    const [, downloading, , offline, , notStarted] = listfileStatuses as CommunityListfileStatus[];
+    const listfileRead = vi.fn(async () => success(notStarted));
+    const listfileCheck = vi.fn(async () => success(downloading));
+    await openFromDiscovery(bridgeMock({ listfileRead, listfileCheck }));
+    const row = document.getElementById('settings-row-listfile')!;
+    await within(row).findByText('Not downloaded yet. It downloads the first time Files lists a build’s files.');
+    expect(listfileCheck).not.toHaveBeenCalled();
+    listfileRead.mockResolvedValue(success(downloading));
+    const download = within(row).getByRole('button', { name: 'Download now' }); download.focus(); fireEvent.click(download);
+    await within(row).findByText('Downloading release 202601010000 · 50.00 MiB of 146.66 MiB');
+    expect(listfileCheck).toHaveBeenCalledTimes(1);
+    expect(within(row).getByRole('button', { name: 'Download now' })).toHaveAttribute('aria-disabled', 'true');
+    expect(within(row).getByRole('button', { name: 'Download now' })).toHaveFocus();
+    listfileRead.mockResolvedValue(success(offline));
+    await within(row).findByText('Couldn’t get the community file names. Files says Name not known.', {}, { timeout: 3000 });
+    expect(within(row).getByRole('alert')).toHaveTextContent('(LISTFILE_FETCH_OFFLINE)');
+    expect(within(row).getByRole('button', { name: 'Try again now' })).toBeVisible();
   });
   it('says a failed fetch-switch save left it on and retries only that switch', async () => {
     const settingsSet = vi.fn().mockResolvedValueOnce(refused('SETTINGS_WRITE_FAILED', 'The engine couldn’t write the settings file. Nothing else changed.'));

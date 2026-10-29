@@ -1,3 +1,4 @@
+import type { CommunityListfileStatus } from '../src/shared/settings';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,8 +12,8 @@ import definitionsFixture from '../../../tests/desktop/fixtures/table-definition
 import downloadFixture from '../../../tests/desktop/fixtures/download-workspace.json';
 import configurationFixture from '../../../contracts/examples/workspace-snapshot.json';
 import inventoryPageFixture from '../../../contracts/examples/inventory-page.json';
-import filesFixture from '../../../contracts/examples/inventory-files-page.json';
-import detailFixture from '../../../contracts/examples/inventory-file-detail.json';
+import filesExample from '../../../contracts/examples/inventory-files-page.json';
+import detailExample from '../../../contracts/examples/inventory-file-detail.json';
 import { catalog } from './catalog-page';
 const success = <T,>(value: T): BridgeReply<T> => ({ ok: true, value });
 const failure = (code = 'CANCELED', retryable = true): BridgeReply<WorkspaceSnapshot> => ({ ok: false, error: { code, message: `Authored ${code} outcome.`, retryable } });
@@ -31,6 +32,10 @@ function snapshot(build = routed(), region = 'us'): WorkspaceSnapshot {
 }
 const context = { productId: 'wow', buildIdentity: base.id, sourceRegion: 'us', generation: '1', limit: 50 };
 // The authored Files page for this exact build, unfiltered (exact total, no cursor) unless a test patches it.
+// The examples carry a community name (D105); these tests read Files with community names off unless they say so.
+const namesOff = { state: 'off' as const, tag: null, publishedAt: null, fetchedAt: null };
+const filesFixture = { ...filesExample, communityNames: namesOff, entries: filesExample.entries.map(entry => ({ ...entry, communityName: null })) };
+const detailFixture = { ...detailExample, communityNames: namesOff, communityName: null };
 const filesPage = (patch: Partial<InventoryFilesPage> = {}): InventoryFilesPage => ({ ...(filesFixture as InventoryFilesPage), buildIdentity: base.id, totalCount: '2', nextCursor: null, ...patch });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 function setup(builds: Build[] = [routed()], extra: Partial<DiscoveryBridge> = {}) {
@@ -233,6 +238,125 @@ describe('verified inventory opening and preserved discovery', () => {
     const inspector = await screen.findByRole('complementary', { name: 'FileDataID 12345' }); await within(inspector).findByText(detailFixture.memberships[0].encodingKey!);
     expect(bridge.inventoryFile).toHaveBeenCalledWith({ ...context, limit: 100, file: 'root:12345' });
     expect(screen.getByRole('searchbox', { name: 'Search by FileDataID or content key' })).toBeVisible(); expect(screen.queryByRole('button', { name: 'Download all', hidden: true })).not.toBeInTheDocument(); expect(bridge.refreshAll).not.toHaveBeenCalled();
+  });
+  it('shows a community name with its badge beside the FileDataID, says where it came from and follows the switch (D105)', async () => {
+    const ready = filesExample.communityNames as InventoryFilesPage['communityNames'];
+    const named = filesPage({ communityNames: ready, entries: filesExample.entries as InventoryFilesPage['entries'] });
+    const { bridge } = setup(); vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(named)).mockResolvedValue(success(filesPage()));
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' }));
+    const list = await screen.findByRole('listbox'); await within(list).findByText('authored/example/file_12345.blp');
+    const row = within(list).getAllByRole('option')[0];
+    expect(within(row).getByText('12345')).toBeVisible(); expect(within(row).getByText('Community')).toHaveClass('dh-pill', 'dh-community');
+    // The install row keeps its own name and gets no badge.
+    expect(within(within(list).getAllByRole('option')[1]).queryByText('Community')).toBeNull();
+    const inspector = await screen.findByRole('complementary', { name: 'FileDataID 12345' });
+    expect(within(inspector).getByRole('heading', { name: 'FileDataID 12345' })).toBeVisible();
+    expect(within(inspector).getByText(/From the wow-listfile community listfile, release/)).toHaveTextContent(/release 202601010000 \(fetched .*2026\)\. Not from Blizzard: ROOT has no names, and a name never changes what is downloaded or verified\./);
+    // Turning the switch off reads the same page again in place: the selection stays and the name goes.
+    const calls = vi.mocked(bridge.inventoryFiles).mock.calls.length;
+    await act(async () => { window.dispatchEvent(new CustomEvent('vibeminer-settings-changed', { detail: { name: 'communityListfile' } })); });
+    await waitFor(() => expect(within(list).queryByText('authored/example/file_12345.blp')).toBeNull());
+    expect(vi.mocked(bridge.inventoryFiles).mock.calls.length).toBe(calls + 1);
+    expect(vi.mocked(bridge.inventoryFiles).mock.calls.at(-1)![0]).toEqual(context);
+    expect(within(list).getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
+    expect(within(inspector).getByText(/Name not known\. ROOT has no names; a name hash is not a filename\./)).toBeVisible();
+  });
+  it('says when community names are still downloading or the release has no name, and refuses names it may not show', async () => {
+    const notReady = { state: 'notReady' as const, tag: null, publishedAt: null, fetchedAt: null };
+    const { bridge } = setup(); vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ communityNames: notReady })));
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' }));
+    const inspector = await screen.findByRole('complementary', { name: 'FileDataID 12345' });
+    expect(within(inspector).getByText(/Community names are being downloaded and show here once they’re ready/)).toBeVisible();
+    expect(screen.getByText('Name not known')).toBeVisible();
+  });
+  it('reads the page again in place when the names download fails while the page is open (#21 QA)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const notReady = { state: 'notReady' as const, tag: null, publishedAt: null, fetchedAt: null }, failed = { ...notReady, state: 'failed' as const };
+      const downloading: CommunityListfileStatus = { enabled: true, started: true, activity: 'downloading', release: null, pendingTag: '202601010000', completed: '1', total: '10', checkedAt: null, problem: null };
+      const offline: CommunityListfileStatus = { ...downloading, activity: 'idle', pendingTag: null, completed: null, total: null, problem: { code: 'LISTFILE_FETCH_OFFLINE', message: 'Authored offline.', retryable: true } };
+      const listfileRead = vi.fn(async (): Promise<BridgeReply<CommunityListfileStatus>> => success(downloading));
+      const { bridge } = setup(undefined, { listfileRead });
+      vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ communityNames: notReady }))).mockResolvedValue(success(filesPage({ communityNames: failed })));
+      await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+      fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' }));
+      const list = await screen.findByRole('listbox'), inspector = await screen.findByRole('complementary', { name: 'FileDataID 12345' });
+      await within(inspector).findByText(/Community names are being downloaded/);
+      // Still downloading: nothing changes and the page isn't read again.
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(bridge.inventoryFiles).toHaveBeenCalledTimes(1);
+      listfileRead.mockResolvedValue(success(offline));
+      list.focus(); expect(list).toHaveFocus();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      await within(inspector).findByText(/Downloading the community names failed;/);
+      expect(bridge.inventoryFiles).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(bridge.inventoryFiles).mock.calls[1][0]).toEqual(context);
+      expect(within(list).getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
+      expect(list).toHaveFocus();
+    } finally { vi.useRealTimers(); }
+  });
+  it('keeps polling after a re-read that fails or comes back unchanged, so a later change still reads the page (#21 review)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const notReady = { state: 'notReady' as const, tag: null, publishedAt: null, fetchedAt: null }, failed = { ...notReady, state: 'failed' as const };
+      const offline: CommunityListfileStatus = { enabled: true, started: true, activity: 'idle', release: null, pendingTag: null, completed: null, total: null, checkedAt: null, problem: { code: 'LISTFILE_FETCH_OFFLINE', message: 'Authored offline.', retryable: true } };
+      const listfileRead = vi.fn(async (): Promise<BridgeReply<CommunityListfileStatus>> => success(offline));
+      const { bridge } = setup(undefined, { listfileRead });
+      vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ communityNames: notReady })))
+        .mockResolvedValueOnce({ ok: false, error: { code: 'BUSY', message: 'Authored busy.', retryable: true } })
+        .mockResolvedValueOnce(success(filesPage({ communityNames: notReady })))
+        .mockResolvedValue(success(filesPage({ communityNames: failed })));
+      await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+      fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' }));
+      const inspector = await screen.findByRole('complementary', { name: 'FileDataID 12345' });
+      await within(inspector).findByText(/Community names are being downloaded/);
+      // First change: the re-read fails. Second: it comes back still notReady. Third: it reads failed.
+      for (const calls of [2, 3, 4]) { await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); expect(bridge.inventoryFiles).toHaveBeenCalledTimes(calls); }
+      await within(inspector).findByText(/Downloading the community names failed;/);
+    } finally { vi.useRealTimers(); }
+  });
+  it('never lets a names re-read override a page the reader asked for at the same moment', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const notReady = { state: 'notReady' as const, tag: null, publishedAt: null, fetchedAt: null };
+      const offline: CommunityListfileStatus = { enabled: true, started: true, activity: 'idle', release: null, pendingTag: null, completed: null, total: null, checkedAt: null, problem: { code: 'LISTFILE_FETCH_OFFLINE', message: 'Authored offline.', retryable: true } };
+      const status = deferred<BridgeReply<CommunityListfileStatus>>(), next = deferred<BridgeReply<InventoryFilesPage>>();
+      const listfileRead = vi.fn((): Promise<BridgeReply<CommunityListfileStatus>> => status.promise);
+      const { bridge } = setup(undefined, { listfileRead });
+      vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ communityNames: notReady, nextCursor: 'root:12345', entries: [filesFixture.entries[0]] as InventoryFilesPage['entries'] }))).mockReturnValueOnce(next.promise);
+      await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+      fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' }));
+      await within(await screen.findByRole('listbox')).findByText('12345');
+      // The status read is in flight when the reader moves on; its answer then would change the page, but the reader's page wins.
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(listfileRead).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+      await act(async () => { status.resolve(success(offline)); await vi.advanceTimersByTimeAsync(0); });
+      expect(bridge.inventoryFiles).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(bridge.inventoryFiles).mock.calls[1][0]).toEqual({ ...context, after: 'root:12345' });
+      await act(async () => { next.resolve(success(filesPage({ communityNames: notReady, entries: [filesFixture.entries[1]] as InventoryFilesPage['entries'] }))); });
+      await within(screen.getByRole('listbox')).findByText('authored/install-a.bin');
+    } finally { vi.useRealTimers(); }
+  });
+  it('says when the kept names couldn’t be read for a page instead of claiming a download', async () => {
+    const unreadable = { state: 'unreadable' as const, tag: null, publishedAt: null, fetchedAt: null };
+    const { bridge } = setup(); vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ communityNames: unreadable })));
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' }));
+    const inspector = await screen.findByRole('complementary', { name: 'FileDataID 12345' });
+    expect(within(inspector).getByText(/The kept community names couldn’t be read from the storage folder just now/)).toBeVisible();
+    expect(within(inspector).queryByText(/being downloaded/)).toBeNull();
+  });
+  it('tells a failed names download apart from one still running and points to Try again now', async () => {
+    const failed = { state: 'failed' as const, tag: null, publishedAt: null, fetchedAt: null };
+    const { bridge } = setup(); vi.mocked(bridge.inventoryFiles).mockResolvedValueOnce(success(filesPage({ communityNames: failed })));
+    await begin(); await screen.findByRole('heading', { name: 'Build overview' });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' }));
+    const inspector = await screen.findByRole('complementary', { name: 'FileDataID 12345' });
+    expect(within(inspector).getByText(/Downloading the community names failed;/)).toHaveTextContent('Try again now is in Settings and in Downloads & activity.');
+    expect(within(inspector).queryByText(/being downloaded/)).toBeNull();
   });
   it('keeps page controls focused and current rows readable during paged local reads', async () => {
     const { bridge } = setup(); const later = deferred<BridgeReply<InventoryFilesPage>>();

@@ -159,3 +159,5 @@
 .settings-screen .st-confirm-text{font-size:var(--fs-m)}
 .settings-screen.st-compact .st-build{grid-template-columns:minmax(0,1fr)}
 .settings-screen.st-compact .st-build .st-ctl{margin-top:.42rem}
+.settings-screen .st-listfile{grid-column:1/-1;max-width:42.933333rem;margin-top:.746667rem;display:grid;gap:.42rem}
+.settings-screen .st-listfile .st-pulse{margin-right:.373333rem;vertical-align:middle}

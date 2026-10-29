@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
-import type { InventoryFile, InventoryFileDetail, InventoryFileMembership, InventoryFilesPage, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
+import type { CommunityNamesSource, InventoryFile, InventoryFileDetail, InventoryFileMembership, InventoryFilesPage, InventorySummary, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
+import type { CommunityListfileStatus } from '../shared/settings';
 import { exactBytes, exactCount, filePosition, hex, inventoryFileDetailMatches, inventoryFilesPageMatches, localeBits, localeNames, readableBytes, type FileFilters, type InventoryFilesParams } from '../shared/inventory';
 import { useCoveredSide, useShell } from './HomeShell';
 import type { FileTarget } from './table-follow-view';
@@ -35,6 +36,7 @@ export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileT
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [history, setHistory] = useState<(string | undefined)[]>([]);
   const heading = useRef<HTMLHeadingElement>(null), searchInput = useRef<HTMLInputElement>(null), filtersButton = useRef<HTMLButtonElement>(null), retryButton = useRef<HTMLButtonElement>(null);
+  const pageReading = useRef(false);
   const alive = useRef(true), request = useRef(0), focusAfterRead = useRef<HTMLElement | null>(null);
   const lastAttempt = useRef<{ after: string | undefined; movement: Movement }>({ after: undefined, movement: 'initial' });
   const latestCursor = useRef(cursor); latestCursor.current = cursor;
@@ -67,9 +69,38 @@ export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileT
     const key = (event: globalThis.KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') { event.preventDefault(); list.setPane('list'); requestAnimationFrame(() => { searchInput.current?.focus(); searchInput.current?.select(); }); } };
     document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key);
   }, [active]);
+  // Community names (D105) follow the Settings switch and the listfile download: the page on screen is read again in
+  // place, so rows, selection, focus and scroll stay and only the names change.
+  const namesState = page?.communityNames.state;
+  useEffect(() => {
+    const changed = (event: Event) => { if ((event as CustomEvent<{ name?: string }>).detail?.name === 'communityListfile' && shown && !stale) void read(latestCursor.current, 'retry'); };
+    window.addEventListener('vibeminer-settings-changed', changed);
+    return () => window.removeEventListener('vibeminer-settings-changed', changed);
+  });
+  // While names are on their way or failed, the download state is read every few seconds, and any change in what the
+  // page would say (notReady → failed, failed → notReady after Try again, or a copy becoming ready) reads it again.
+  useEffect(() => {
+    if (namesState !== 'notReady' && namesState !== 'failed' || !bridge.listfileRead || !active) return;
+    // One tick at a time. A re-read that fails or comes back unchanged leaves the poll running, so a later change still
+    // re-reads. A page read the reader started (Next page, filters) is never overridden: the tick skips while one is in
+    // flight or when one started during the status read.
+    let disposed = false, ticking = false;
+    const timer = window.setInterval(() => { void (async () => {
+      if (ticking || pageReading.current) return;
+      ticking = true;
+      try {
+        const before = request.current;
+        const reply = await bridge.listfileRead!();
+        if (!disposed && reply.ok && expectedNames(reply.value) !== namesState && request.current === before && !pageReading.current) await read(latestCursor.current, 'retry');
+      } catch { /* The next tick asks again. */ }
+      finally { ticking = false; }
+    })(); }, NAMES_POLL_MS);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [namesState, active, filterKey]);
   async function read(after: string | undefined, movement: Movement) {
     if (movement !== 'retry') lastAttempt.current = { after, movement };
     const generation = ++request.current;
+    pageReading.current = true;
     setBusy(true);
     const params: InventoryFilesParams = { ...context, ...filters, ...(after === undefined ? {} : { after }) };
     try {
@@ -83,7 +114,7 @@ export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileT
       if (movement === 'previous') setHistory(previous => previous.slice(0, -1));
       if (movement === 'first' || movement === 'initial') setHistory([]);
     } catch { if (alive.current && generation === request.current) setError({ code: 'ENGINE_UNAVAILABLE', message: 'The local catalog could not be read. Previous rows are preserved.', retryable: true }); }
-    finally { if (alive.current && generation === request.current) setBusy(false); }
+    finally { if (generation === request.current) pageReading.current = false; if (alive.current && generation === request.current) setBusy(false); }
   }
   function applySearch() {
     const parsed = parseFileSearch(draft);
@@ -123,7 +154,7 @@ export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileT
   const rows = page && page.entries.length > 0 ? <div className="dh-list-scroll" aria-busy={busy}><div className="dh-fcols dh-fthead" aria-hidden="true"><span>FileDataID</span><span>Name</span><span>Memberships</span><span>Encoded size</span><span>Locales</span><span>Local</span></div>
     <div {...list.props} aria-label="Files, one row per FileDataID">{page.entries.map((file, index) => { const option = list.option(index); return <div key={file.key} {...option} className={`dh-fcols${option.className}`}>
       <span className="dh-fid">{file.fileDataId ?? <span className="dh-dim">Install</span>}</span>
-      <span className="dh-fname-cell">{file.name !== null ? <span className="dh-mono">{file.name}</span> : <span className="dh-dim">Name not known</span>}</span>
+      <span className="dh-fname-cell">{file.name !== null ? <span className="dh-mono">{file.name}</span> : file.communityName !== null ? <><span className="dh-mono">{file.communityName}</span><span className="dh-pill dh-community">Community</span></> : <span className="dh-dim">Name not known</span>}</span>
       <span>{file.membershipCount}{file.contentKeyCount > 1 && <span className="dh-dim"> · {file.contentKeyCount} CKeys</span>}</span>
       <span><SizeSummary file={file}/></span>
       <span>{file.localeFlags === null ? <span className="dh-dim">No ROOT flags</span> : localeNames(file.localeFlags).join(', ') || <span className="dh-dim">No known bit</span>}</span>
@@ -135,7 +166,7 @@ export function FilesCatalog({ source, bridge, active, onReopen, onReturn, fileT
   const selected = list.selected;
   return <FilesFrame fileTarget={fileTarget} onReturnToTable={onReturnToTable} active={active} pane={list.pane} onPane={list.setPane} headingRef={heading} head={head} covered={covered} selectedLabel="Selected file" notices={notices} list={rows}
     foot={<>{onReturn && <ReturnHome onReturn={onReturn}/>}<span role="status" aria-live="polite">{count}</span><span className="dh-spacer"/><CatalogPageControls busy={busy} canFirst={cursor !== undefined && !stale} canPrevious={history.length > 0 && !stale} canNext={!!page?.nextCursor && !stale} onFirst={() => { void read(undefined, 'first'); }} onPrevious={() => { void read(history.at(-1), 'previous'); }} onNext={() => { if (page?.nextCursor) void read(page.nextCursor, 'next'); }}/></>}
-    inspector={selected ? <FileInspector key={`${selected.entry.key}|${shown?.key ?? filterKey}`} file={selected.entry} onPage={selected.onPage} filters={shownFilters} narrowed={shownNarrowed} source={source} bridge={bridge}/>
+    inspector={selected ? <FileInspector key={`${selected.entry.key}|${shown?.key ?? filterKey}`} file={selected.entry} names={page?.communityNames ?? null} onPage={selected.onPage} filters={shownFilters} narrowed={shownNarrowed} source={source} bridge={bridge}/>
       : <><div className="dh-insp-head"><div className="dh-label">File inspector</div><h2 id="files-inspector-heading">No file selected</h2></div><div className="dh-insp-body"><p className="dh-reason" style={{ fontSize: 'var(--fs-m)' }}>{page && !page.entries.length ? 'Nothing matches these filters.' : 'Choose a row.'}</p><p className="dh-tiny">ROOT maps FileDataIDs to content keys per locale and content variant. It has no file names.</p></div></>}/>;
 }
 function SizeSummary({ file }: { file: InventoryFile }) {
@@ -149,7 +180,23 @@ function LocalSummary({ file }: { file: InventoryFile }) {
   return <span className="dh-dim">Not stored</span>;
 }
 // Every membership of the selected file, read in pages of 100; with filters on, the ones that passed them are marked.
-function FileInspector({ file, onPage, filters, narrowed, source, bridge }: { file: InventoryFile; onPage: boolean; filters: FileFilters; narrowed: boolean; source: FilesSource; bridge: DiscoveryBridge }) {
+/** How often Files reads the listfile download while its names are on their way or failed. */
+export const NAMES_POLL_MS = 5000;
+/** The names state a Files page read now would have, from the download state (D105). */
+export const expectedNames = (s: CommunityListfileStatus): CommunityNamesSource['state'] =>
+  !s.enabled ? 'off' : s.release ? 'ready' : s.problem && s.activity === 'idle' ? 'failed' : 'notReady';
+const fetchedOn = (value: string) => new Date(value).toLocaleDateString(undefined, { dateStyle: 'medium' });
+// The Name fact: a ROOT file's community name with its source, or why there is none (D105). Never the file's identity.
+function RootName({ file, names }: { file: InventoryFile; names: CommunityNamesSource | null }) {
+  if (file.communityName !== null && names?.state === 'ready') return <><span className="dh-mono dh-selectable">{file.communityName}</span><span className="dh-pill dh-community">Community</span><br/>
+    <span className="dh-dim">From the wow-listfile community listfile, release <span className="dh-mono">{names.tag}</span> (fetched {fetchedOn(names.fetchedAt!)}). Not from Blizzard: ROOT has no names, and a name never changes what is downloaded or verified.</span></>;
+  if (names?.state === 'ready') return <>Name not known. <span className="dh-dim">ROOT has no names, and wow-listfile release <span className="dh-mono">{names.tag}</span> doesn’t name this FileDataID.</span></>;
+  if (names?.state === 'unreadable') return <>Name not known. <span className="dh-dim">ROOT has no names. The kept community names couldn’t be read from the storage folder just now, so this page has none; the next page tries again.</span></>;
+  if (names?.state === 'failed') return <>Name not known. <span className="dh-dim">ROOT has no names. Downloading the community names failed; <strong>Try again now</strong> is in Settings and in Downloads &amp; activity.</span></>;
+  if (names?.state === 'notReady') return <>Name not known. <span className="dh-dim">ROOT has no names. Community names are being downloaded and show here once they’re ready; Settings shows how far along they are.</span></>;
+  return <>Name not known. ROOT has no names; a name hash is not a filename.</>;
+}
+function FileInspector({ file, names, onPage, filters, narrowed, source, bridge }: { file: InventoryFile; names: CommunityNamesSource | null; onPage: boolean; filters: FileFilters; narrowed: boolean; source: FilesSource; bridge: DiscoveryBridge }) {
   const [detail, setDetail] = useState<InventoryFileDetail | null>(null);
   const [members, setMembers] = useState<InventoryFileMembership[]>([]);
   const [error, setError] = useState<Failure | null>(null);
@@ -177,7 +224,7 @@ function FileInspector({ file, onPage, filters, narrowed, source, bridge }: { fi
   return <><div className="dh-insp-head"><div className="dh-label">File inspector</div><h2 id="files-inspector-heading" className={`dh-selectable${root ? '' : ' dh-mono'}`}>{title}</h2><p>{familyName} · {total} membership{total === 1 ? '' : 's'}{onPage ? '' : outside ? ' · outside these results' : ' · outside the current page'}</p></div>
     <div className="dh-insp-body" aria-busy={busy}>{outside && <div className="dh-state-box dh-plain" role="status" style={{ marginBottom: '.56rem' }}><strong>Selected file is outside these results</strong><p>None of its memberships match the current filters. Choose a row to inspect a file that does.</p></div>}<dl className="dh-facts">
       {root && <><dt>FileDataID</dt><dd className="dh-selectable">{file.fileDataId}</dd></>}
-      <dt>Name</dt><dd>{root ? 'Name not known. ROOT has no names; a name hash is not a filename.' : <><span className="dh-mono dh-selectable">{file.name}</span><br/><span className="dh-dim">The install manifest's own name.</span></>}</dd>
+      <dt>Name</dt><dd>{root ? <RootName file={file} names={names}/> : <><span className="dh-mono dh-selectable">{file.name}</span><br/><span className="dh-dim">The install manifest's own name.</span></>}</dd>
       <dt>Memberships</dt><dd>{total} in {familyName}{file.contentKeyCount > 1 ? ` · ${file.contentKeyCount} different content keys` : ''}{narrowed ? ` · ${matching} ${matching === 1 ? 'matches' : 'match'} the filters` : ''}</dd>
     </dl>
       {error && <div className="dh-notice dh-error" role="alert" style={{ margin: '.56rem 0 0' }}><div className="dh-text"><strong>{error.code}</strong>{error.message}{error.retryable && <div className="dh-row"><button className="dh-btn dh-small" onClick={() => { void load(members.length ? members.at(-1)!.id : undefined); }}>Retry memberships</button></div>}</div></div>}

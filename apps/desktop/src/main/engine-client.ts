@@ -12,7 +12,7 @@ import type {ItemIconBatch,ItemIconLeaseDescriptor} from '../../../../contracts/
 import { validItemsContext, validItemsPage, validItemInspect, validItemLabelsParams, itemsSnapshotMatches, itemsReadinessMatches, itemsPageMatches, itemInspectMatches, itemFactsMatches, itemLabelListsMatches, type ItemsPageParams, type ItemInspectParams } from '../shared/items';
 import type { ItemsContext, ItemsSnapshot, ItemsReadiness, ItemsPage, ItemInspectResult, ItemFactsResult, ItemLabelLists } from '../../../../contracts/generated/discovery';
 import { validRetentionTarget, validRetentionSet, retentionMatches, retentionSetMatches, retentionListMatches, type RetentionSet } from '../shared/retention';
-import { validSettingsSet, validEmpty, settingsSnapshotMatches, settingsSetMatches, storageMeasurementMatches, validPreparedDataFree, preparedDataListMatches, preparedDataFreedMatches, type SettingsSnapshot, type SettingsSetParams, type StorageMeasurement, type PreparedDataList, type PreparedDataFreed, type PreparedDataFreeParams } from '../shared/settings';
+import { validSettingsSet, validEmpty, settingsSnapshotMatches, settingsSetMatches, storageMeasurementMatches, listfileStatusMatches, type CommunityListfileStatus, validPreparedDataFree, preparedDataListMatches, preparedDataFreedMatches, type SettingsSnapshot, type SettingsSetParams, type StorageMeasurement, type PreparedDataList, type PreparedDataFreed, type PreparedDataFreeParams } from '../shared/settings';
 import type { RetentionTarget, RetentionSnapshot, RetentionList, HelloResult } from '../../../../contracts/generated/discovery';
 import { validTableData, validTableRows, tableDataMatches, tableRowsMatch, type TableDataParams, type TableRowsParams } from '../shared/table-data';
 import type { TableDataSnapshot, TableDataReadiness, TableDataPage, TableReferenceTextPage } from '../../../../contracts/generated/discovery';
@@ -145,6 +145,7 @@ export class EngineClient extends EventEmitter {
     if (method.startsWith('retention.') && !this.capabilities.includes('retention-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not support build retention.'));
     if (method === 'retention.read' && !validRetentionTarget(params) || method === 'retention.set' && !validRetentionSet(params) || method === 'retention.list' && Object.keys(params).length !== 0) return Promise.reject(new EngineFailure('INVALID_REQUEST', 'Invalid exact retention target or command.'));
     if (method.startsWith('settings.') && !this.capabilities.includes('settings-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not support settings.'));
+    if (method.startsWith('settings.listfile.') && !this.capabilities.includes('community-listfile-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not support community file names.'));
     if ((method === 'settings.storage.builds' || method === 'settings.storage.free') && !this.capabilities.includes('prepared-data-v1')) return Promise.reject(new EngineFailure('UNSUPPORTED', 'This engine does not report prepared data per build.'));
     if (method === 'settings.storage.free' ? !validPreparedDataFree(params) : method === 'settings.set' ? !validSettingsSet(params) : method.startsWith('settings.') && !validEmpty(params)) return Promise.reject(new EngineFailure('INVALID_REQUEST', 'Choose one known setting value or one exact opened build.'));
     const data = Buffer.from(JSON.stringify({ protocolVersion: 1, id, method, params }) + '\n');
@@ -239,6 +240,7 @@ export class EngineClient extends EventEmitter {
     if (method === 'retention.list') return !!check('RetentionList', result) && retentionListMatches(result as RetentionList);
     if (method === 'settings.read') return !!check('SettingsSnapshot', result) && settingsSnapshotMatches(result as SettingsSnapshot);
     if (method === 'settings.set') return !!check('SettingsSnapshot', result) && !!expectedSettings && settingsSetMatches(result as SettingsSnapshot, expectedSettings);
+    if (method === 'settings.listfile.read' || method === 'settings.listfile.check') return !!check('CommunityListfileStatus', result) && listfileStatusMatches(result as CommunityListfileStatus);
     if (method === 'settings.storage.measure') return !!check('StorageMeasurement', result) && storageMeasurementMatches(result as StorageMeasurement);
     if (method === 'settings.storage.builds') return !!check('PreparedDataList', result) && preparedDataListMatches(result as PreparedDataList);
     if (method === 'settings.storage.free') return !!check('PreparedDataFreed', result) && !!expectedFree && preparedDataFreedMatches(result as PreparedDataFreed, expectedFree);

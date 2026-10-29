@@ -268,7 +268,7 @@ describe('bounded local engine transport', () => {
       const page = client.request('inventory.files', { ...scope, localeFlags: '2' }, 'files'); child.reply('files', filesPage); await expect(page).resolves.toEqual(filesPage);
       const file = client.request('inventory.file', { ...scope, limit: 100, file: 'root:12345', localeFlags: '2' }, 'file'); child.reply('file', fileDetail); await expect(file).resolves.toEqual(fileDetail);
     });
-    it.each(['context', 'order', 'family', 'rootName', 'installName', 'total', 'limitedWithoutCursor', 'cursorBehind', 'matching', 'sizes', 'platform'])('rejects an inconsistent Files page %s', async variant => {
+    it.each(['context', 'order', 'family', 'rootName', 'installName', 'total', 'limitedWithoutCursor', 'cursorBehind', 'matching', 'sizes', 'platform', 'installCommunityName', 'nameWhileOff', 'readyWithoutTag', 'offWithTag'])('rejects an inconsistent Files page %s', async variant => {
       const { child, client } = await filesSetup(); const value = structuredClone(filesPage) as any; const params: Record<string, unknown> = { ...scope, localeFlags: '2' };
       if (variant === 'context') value.generation = '2';
       if (variant === 'order') value.entries.reverse();
@@ -281,9 +281,14 @@ describe('bounded local engine transport', () => {
       if (variant === 'matching') value.entries[0].matchingCount = 0;
       if (variant === 'sizes') value.entries[0].encodedBytesMin = null;
       if (variant === 'platform') value.entries[0].platform = 'Windows';
+      // D105: a community name labels ROOT rows only, from a ready source that names its release.
+      if (variant === 'installCommunityName') value.entries[1].communityName = 'authored/other.bin';
+      if (variant === 'nameWhileOff') value.communityNames = { state: 'off', tag: null, publishedAt: null, fetchedAt: null };
+      if (variant === 'readyWithoutTag') value.communityNames.tag = null;
+      if (variant === 'offWithTag') { value.entries[0].communityName = null; value.communityNames = { ...value.communityNames, state: 'off' }; }
       const page = expect(client.request('inventory.files', params, 'files')).rejects.toMatchObject({ code: 'PROTOCOL_ERROR' }); child.reply('files', value); await page;
     });
-    it.each(['file', 'order', 'rawFlags', 'unresolved', 'installFlags', 'cursor'])('rejects an inconsistent file inspector reply %s', async variant => {
+    it.each(['file', 'order', 'rawFlags', 'unresolved', 'installFlags', 'cursor', 'nameWhileNotReady'])('rejects an inconsistent file inspector reply %s', async variant => {
       const { child, client } = await filesSetup(); const value = structuredClone(fileDetail) as any;
       if (variant === 'file') value.file = 'root:12346';
       if (variant === 'order') value.memberships.reverse();
@@ -291,6 +296,7 @@ describe('bounded local engine transport', () => {
       if (variant === 'unresolved') value.memberships[1].encodedBytes = '100';
       if (variant === 'installFlags') { value.memberships[0].family = 'install'; }
       if (variant === 'cursor') value.nextCursor = '1';
+      if (variant === 'nameWhileNotReady') value.communityNames = { state: 'notReady', tag: null, publishedAt: null, fetchedAt: null };
       const work = expect(client.request('inventory.file', { ...scope, limit: 100, file: 'root:12345' }, 'file')).rejects.toMatchObject({ code: 'PROTOCOL_ERROR' }); child.reply('file', value); await work;
     });
     it.each([

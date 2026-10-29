@@ -25,5 +25,5 @@ paths:
   - Staging rows are never queryable as ready.
   - A database commit and a filesystem move are never one atomic transaction.
 - C# owns all catalog migrations and object publication.
-- Use official CDN sources and app-owned storage only. Never read game installs, Battle.net directories or game caches.
+- Use official CDN sources and app-owned storage only. Never read game installs, Battle.net directories or game caches. Exceptions: WoWDBDefs definitions (D081) and wow-listfile names (D105), each behind a Settings switch.
 - New behaviour gets a meaningful test, and every fix gets a regression test. Async test pitfalls are in [TESTING](../../docs/TESTING.md).

@@ -30,6 +30,15 @@ try
         AutomaticDecompression = System.Net.DecompressionMethods.None };
     using var definitionClient = new HttpClient(definitionHandler) { Timeout = Timeout.InfiniteTimeSpan };
     var definitionSources = new TableDefinitionSources(new WoWDBDefsDefinitions(dataDirectory, definitionClient), settings);
+    // Community file names from wow-listfile's GitHub releases (D105): their own client, one background loop.
+    var listfileConnections = new ListfileConnectionBudget();
+    using var listfileHandler = CommunityListfile.CreateHandler(listfileConnections);
+    using var listfileClient = new HttpClient(listfileHandler) { Timeout = Timeout.InfiniteTimeSpan };
+    // Test runs point every listfile request at a loopback origin, so they never reach GitHub; anything else is ignored.
+    var listfileOrigin = Environment.GetEnvironmentVariable("VIBEMINER_LISTFILE_ORIGIN") is { Length: > 0 } text
+        && Uri.TryCreate(text, UriKind.Absolute, out var parsed) && CommunityListfile.LoopbackOrigin(parsed) ? parsed : null;
+    await using var listfile = new CommunityListfile(dataDirectory, listfileClient, settings, testOrigin: listfileOrigin, connections: listfileConnections);
+    settings.Changed += (name, value) => { if (name == SettingsService.CommunityListfile) listfile.SettingChanged(value); };
     await using var tableStore = new TableDataStore(catalog, objects, client, acquisition, resources, definitionSources);
     await using var tableData = new TableDataService(tableStore);
     await using var creaturesStore = new CreaturesStore(catalog, objects, tableData, resources, definitionSources);
@@ -66,13 +75,13 @@ try
     try
     {
         await retention.RestoreAsync();
-        storedCoverage.Start(); rootScopes.Start(); fileCatalogs.Start(); appearanceCleanup.Start();
-        var host = new ProtocolHost(new DiscoveryService(source, catalog), workspace, new InventoryService(catalog),
+        storedCoverage.Start(); rootScopes.Start(); fileCatalogs.Start(); appearanceCleanup.Start(); listfile.StartIfKept();
+        var host = new ProtocolHost(new DiscoveryService(source, catalog), workspace, new InventoryService(catalog, listfile),
             new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog, definitionSources)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects,
             creatureGeometry: creatureGeometry, geometryLeases: geometryLeases, settings: settings,
             downloadSummaries: new DownloadSummaryService(catalog),
             referenceText: new TableReferenceTextService(tableStore), follow: new TableFollowService(tableStore),
-            preparedData: new PreparedDataService(catalog));
+            preparedData: new PreparedDataService(catalog), listfile: listfile);
         await host.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
     }
     finally { await retention.ShutdownAsync(); }

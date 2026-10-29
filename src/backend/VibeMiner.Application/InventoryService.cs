@@ -57,7 +57,7 @@ public sealed record InventoryFileQuery(long? FileDataId, string? ContentKey, ui
         return MatchesVariant(locale ?? 0, flags ?? 0);
     }
 }
-public sealed class InventoryService(IInventoryCatalog catalog)
+public sealed class InventoryService(IInventoryCatalog catalog, IFileNameSource? names = null)
 {
     public const int MaxFilesPage = 100;
     public const int MaxMembershipsPage = 100;
@@ -65,17 +65,42 @@ public sealed class InventoryService(IInventoryCatalog catalog)
     {
         Validate(request); return catalog.ReadInventoryAsync(request, token);
     }
-    public Task<InventoryFilesPage> ReadFilesAsync(InventoryFilesRequest request, CancellationToken token = default)
+    public async Task<InventoryFilesPage> ReadFilesAsync(InventoryFilesRequest request, CancellationToken token = default)
     {
-        Validate(request); return catalog.ReadInventoryFilesAsync(request, token);
+        Validate(request);
+        var page = await catalog.ReadInventoryFilesAsync(request, token);
+        if (names is null) return page;
+        // Community names label ROOT rows only (D105); the row's key, FileDataID and install name are never replaced.
+        var ids = page.Entries.Where(entry => entry.Family == "root" && entry.FileDataId is not null)
+            .Select(entry => long.Parse(entry.FileDataId!, CultureInfo.InvariantCulture)).ToArray();
+        var lookup = await Names(ids, token);
+        return page with
+        {
+            Entries = [.. page.Entries.Select(entry => entry.Family == "root" && entry.FileDataId is { } id
+                && lookup.Names.TryGetValue(long.Parse(id, CultureInfo.InvariantCulture), out var name) ? entry with { CommunityName = name } : entry)],
+            CommunityNames = lookup.Source,
+        };
     }
-    public Task<InventoryFileDetail> ReadFileAsync(InventoryFileRequest request, CancellationToken token = default)
+    public async Task<InventoryFileDetail> ReadFileAsync(InventoryFileRequest request, CancellationToken token = default)
     {
-        Validate(request); return catalog.ReadInventoryFileAsync(request, token);
+        Validate(request);
+        var detail = await catalog.ReadInventoryFileAsync(request, token);
+        if (names is null) return detail;
+        if (detail.Family != "root" || detail.FileDataId is null) return detail with { CommunityNames = (await Names([], token)).Source };
+        var id = long.Parse(detail.FileDataId, CultureInfo.InvariantCulture);
+        var lookup = await Names([id], token);
+        return detail with { CommunityName = lookup.Names.GetValueOrDefault(id), CommunityNames = lookup.Source };
     }
     public Task<FileCatalogStatus> ReadCatalogAsync(FileCatalogRequest request, CancellationToken token = default)
     {
         Validate(request); return catalog.ReadFileCatalogAsync(request, token);
+    }
+    // Names are labels: a name source that can't be read never breaks the Files page; it has no names (D105).
+    private async Task<FileNameLookup> Names(IReadOnlyList<long> ids, CancellationToken token)
+    {
+        try { return await names!.LookupAsync(ids, token); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        { return new(CommunityNamesSource.Unreadable, new Dictionary<long, string>()); }
     }
     public Task<FileCatalogList> ListCatalogsAsync(CancellationToken token = default) => catalog.ListFileCatalogsAsync(token);
     public Task<FileCatalogStatus> SetCatalogAsync(FileCatalogSetRequest request, CancellationToken token = default)

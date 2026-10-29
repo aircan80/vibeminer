@@ -91,7 +91,7 @@ function registerBridge(): void {
         if (await shell.openPath(folder)) throw new EngineFailure('STORAGE_FOLDER_UNAVAILABLE', 'The storage folder could not be opened in the file manager.', true);
         return { ok: true, value: { shown: true } };
       }
-      if (method === 'settings.read') { if (!validEmpty(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid settings query.'); }
+      if (method === 'settings.read' || method === 'settings.listfile.read' || method === 'settings.listfile.check') { if (!validEmpty(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid settings query.'); }
       else if (method === 'settings.set') { if (!validSettingsSet(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one known setting value.'); }
       else if (method === 'settings.storage.measure' || method === 'settings.storage.builds') { if (!validEmpty(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Invalid storage measurement request.'); }
       else if (method === 'settings.storage.free') { if (!validPreparedDataFree(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact opened build.'); }

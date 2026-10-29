@@ -9,7 +9,7 @@ import {randomBytes} from 'node:crypto';
 import {itemsSnapshot,itemRows,itemsPage,itemDetail,itemsDefinition,itemFacts,itemLabelLists} from './items.mjs';
 // Authored Electron boundary fixture. No network, game parser, or production fallback.
 import { createInterface } from 'node:readline';
-import { readFileSync, existsSync, writeFileSync, appendFileSync, watch, unlinkSync, mkdirSync, renameSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, appendFileSync, watch, unlinkSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // Like VerifiedObjectStore: never rewrite a published object in place. Main may be verifying it for another open.
@@ -172,6 +172,31 @@ const FETCHED = { revision: 'a50ca6ffbcfe17d604327c9078993675f7ae831f', fetchedA
 // D101: a feature's table read with that authored fetched definition, as the engine reports it.
 const fetchedSource = (source, because) => Object.assign(source, { definitionSha256: FETCHED_SHA, providerRevision: FETCHED.revision, fetchedDefinition: FETCHED, fetchedBecause: because, bundledFallback: true });
 const fetchEnabled = () => settingsSnapshot().fetchTableDefinitions.value;
+// D105: an authored community listfile, only with VIBEMINER_FIXTURE_LISTFILE=1. Control files: listfile-downloading,
+// listfile-importing, listfile-offline, listfile-refresh-failed and listfile-not-started. The tag, digest and names are samples, not from wow-listfile.
+const listfileEnabled = process.env.VIBEMINER_FIXTURE_LISTFILE === '1', LISTFILE_TAG = '202601010000';
+const listfileRelease = { tag: LISTFILE_TAG, publishedAt: '2026-01-01T00:00:00+00:00', fetchedAt: '2026-10-23T12:00:00+00:00', sha256: 'cd'.repeat(32), byteLength: '153793438', nameCount: '2275783',
+  sourceUrl: `https://github.com/wowdev/wow-listfile/releases/download/${LISTFILE_TAG}/community-listfile-withcapitals.csv` };
+function listfileStatus() {
+  const enabled = settingsSnapshot().communityListfile.value, at = name => existsSync(path.join(directory, name));
+  const base = { enabled, started: true, activity: 'idle', release: listfileRelease, pendingTag: null, completed: null, total: null, checkedAt: '2026-10-23T12:00:00+00:00', problem: null };
+  if (!enabled) return { ...base, release: null, checkedAt: null };
+  if (at('listfile-not-started')) return { ...base, started: false, release: null, checkedAt: null };
+  if (at('listfile-downloading')) return { ...base, activity: 'downloading', release: null, pendingTag: LISTFILE_TAG, completed: '52428800', total: '153793438', checkedAt: null };
+  if (at('listfile-importing')) return { ...base, activity: 'importing', release: null, pendingTag: LISTFILE_TAG, completed: '76896719', total: '153793438', checkedAt: null };
+  if (at('listfile-refresh-failed')) return { ...base, problem: { code: 'LISTFILE_FETCH_OFFLINE', message: 'VibeMiner couldn’t reach GitHub to get the wow-listfile community file names.', retryable: true } };
+  if (at('listfile-offline')) return { ...base, release: null, checkedAt: null, problem: { code: 'LISTFILE_FETCH_OFFLINE', message: 'VibeMiner couldn’t reach GitHub to get the wow-listfile community file names.', retryable: true } };
+  return base;
+}
+function communityNames() {
+  if (!listfileEnabled || !settingsSnapshot().communityListfile.value) return { state: 'off', tag: null, publishedAt: null, fetchedAt: null };
+  const status = listfileStatus();
+  if (status.release) return { state: 'ready', tag: LISTFILE_TAG, publishedAt: listfileRelease.publishedAt, fetchedAt: listfileRelease.fetchedAt };
+  return { state: status.problem && status.activity === 'idle' ? 'failed' : 'notReady', tag: null, publishedAt: null, fetchedAt: null };
+}
+// Every fourth authored FileDataID has no community name; one name is long, to check wrapping.
+const communityName = (file, names) => names.state !== 'ready' || !file.startsWith('root:') || Number(file.slice(5)) % 4 === 2 ? null
+  : Number(file.slice(5)) === 800003 ? 'authored/listfile/a_much_longer_directory_name/with_nested_folders/and_a_long_authored_file_name_800003.m2' : `authored/listfile/file_${file.slice(5)}.blp`;
 // One row of the measured ledger, the leading long-ordinals run included, without listing that run.
 function ledgerAt(rows, run, index) {
   if (index >= run) return rows[index - run];
@@ -183,13 +208,13 @@ function settingsSnapshot() {
   const saved = name => stored?.values?.[name] ?? (name === 'communityBuildHistory' ? stored?.value : undefined);
   const value = (name, defaultValue) => ({ value: saved(name) ?? defaultValue, defaultValue, source: saved(name) === undefined ? 'default' : 'saved', problem: null });
   return { formatVersion: 1, file: stored ? 'read' : 'absent', problem: null, lastChangedAt: stored?.changedAt ?? null,
-    communityBuildHistory: value('communityBuildHistory', false), fetchTableDefinitions: value('fetchTableDefinitions', true),
+    communityBuildHistory: value('communityBuildHistory', false), fetchTableDefinitions: value('fetchTableDefinitions', true), communityListfile: value('communityListfile', true),
     storage: { dataDirectory: path.join(directory, 'catalog') }, downloadLimits: { parallelDownloads: 4, backgroundDownloads: 2, bandwidthCapBytesPerSecond: null, adjustable: false } };
 }
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', 'download-summary-v1', 'download-check-v1', 'inventory-files-v1',...(fileCatalogEnabled?['file-catalog-v1']:[]),...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1',...(process.env.VIBEMINER_FIXTURE_FACTS==='0'?[]:['item-facts-v1'])]:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(geometryEnabled?['creature-source-geometry-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', ...(listfileEnabled ? ['community-listfile-v1'] : []), 'download-summary-v1', 'download-check-v1', 'inventory-files-v1',...(fileCatalogEnabled?['file-catalog-v1']:[]),...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1',...(process.env.VIBEMINER_FIXTURE_FACTS==='0'?[]:['item-facts-v1'])]:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(geometryEnabled?['creature-source-geometry-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
   if(geometryEnabled&&method==='creatures.geometry.close'){geometryLeases.delete(params.leaseId);return reply(id,{closed:true});}
   if(creaturesEnabled&&method.startsWith('creatures.')){
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
@@ -266,6 +291,12 @@ async function dispatch(request) {
     const values = { ...(before.value === undefined ? {} : { communityBuildHistory: before.value }), ...before.values, [params.name]: params.value };
     writeFileSync(file, JSON.stringify({ values, changedAt: new Date().toISOString() }));
     return reply(id, settingsSnapshot());
+  }
+  if (method === 'settings.listfile.read') return reply(id, listfileStatus());
+  if (method === 'settings.listfile.check') {
+    if (!settingsSnapshot().communityListfile.value) return fail(id, 'LISTFILE_OFF', 'Community file names are off. Turn them on in Settings first.');
+    rmSync(path.join(directory, 'listfile-not-started'), { force: true }); writeFileSync(path.join(directory, 'listfile-downloading'), '1');
+    return reply(id, listfileStatus());
   }
   if (method === 'settings.storage.measure') { const now = new Date().toISOString(); return reply(id, { bytes: '51749982208', files: '1204', skipped: '0', startedAt: now, measuredAt: now }); }
   if (method === 'products.list') return reply(id, { products: fixtureProducts });
@@ -572,7 +603,9 @@ async function dispatch(request) {
     if (!members.length) return fail(id, 'INVENTORY_FILE_NOT_FOUND', 'This prepared inventory has no such file.');
     const after = BigInt(params.after || '0'), page = members.filter(m => BigInt(m.id) > after).slice(0, params.limit);
     const more = members.filter(m => BigInt(m.id) > after).length > page.length;
+    const names = communityNames();
     return reply(id, { productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion, generation: params.generation, file: params.file,
+      communityName: communityName(params.file, names), communityNames: names,
       family: members[0].family, fileDataId: members[0].family === 'root' ? params.file.slice(5) : null, name: members[0].name, membershipCount: members.length,
       matchingCount: members.filter(m => fileMatches(m, params)).length, memberships: page.map(m => ({ ...wireMember(m), matches: fileMatches(m, params) })), nextCursor: more ? page.at(-1).id : null });
   }
@@ -693,10 +726,11 @@ function filesPage(p) {
   const matching = files.filter(group => later(group[0].file) && group.some(m => fileMatches(m, p)));
   const page = matching.slice(0, p.limit), narrowed = p.fileDataId || p.contentKey || p.localeFlags || p.contentFlags || p.storedOnly;
   const total = files.filter(group => !p.family || group[0].family === p.family).length;
-  return { productId: p.productId, buildIdentity: p.buildIdentity, sourceRegion: p.sourceRegion, generation: p.generation, scanLimited: false,
+  const names = communityNames();
+  return { productId: p.productId, buildIdentity: p.buildIdentity, sourceRegion: p.sourceRegion, generation: p.generation, scanLimited: false, communityNames: names,
     totalCount: narrowed ? null : String(total), nextCursor: matching.length > page.length ? page.at(-1)[0].file : null,
     entries: page.map(group => { const sizes = group.filter(m => m.encodedBytes !== null).map(m => BigInt(m.encodedBytes)); const locale = group.reduce((a, m) => a | BigInt(m.localeFlags ?? 0), 0n);
-      return { key: group[0].file, family: group[0].family, fileDataId: group[0].family === 'root' ? group[0].file.slice(5) : null, name: group[0].name, membershipCount: group.length,
+      return { key: group[0].file, family: group[0].family, fileDataId: group[0].family === 'root' ? group[0].file.slice(5) : null, name: group[0].name, communityName: communityName(group[0].file, names), membershipCount: group.length,
         matchingCount: group.filter(m => fileMatches(m, p)).length, contentKeyCount: new Set(group.map(m => m.contentKey)).size,
         encodedBytesMin: sizes.length ? String(sizes.reduce((a, b) => a < b ? a : b)) : null, encodedBytesMax: sizes.length ? String(sizes.reduce((a, b) => a > b ? a : b)) : null,
         unresolvedCount: group.length - sizes.length, localeFlags: group[0].family === 'root' ? String(locale) : null, storedCount: group.filter(m => m.stored).length }; }) };

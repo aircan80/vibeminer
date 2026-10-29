@@ -17,9 +17,17 @@ public sealed record InventoryPage(string ProductId, string BuildIdentity, strin
 /// <summary>One Files row: every ROOT membership of one FileDataID, or every install membership with one exact name.</summary>
 public sealed record InventoryFile(string Key, string Family, string? FileDataId, string? Name,
     int MembershipCount, int MatchingCount, int ContentKeyCount, string? EncodedBytesMin, string? EncodedBytesMax,
-    int UnresolvedCount, string? LocaleFlags, int StoredCount);
+    int UnresolvedCount, string? LocaleFlags, int StoredCount)
+{
+    /// <summary>A community name for a ROOT FileDataID (D105), never the file's identity. Null for install files.</summary>
+    public string? CommunityName { get; init; }
+}
 public sealed record InventoryFilesPage(string ProductId, string BuildIdentity, string SourceRegion,
-    string Generation, IReadOnlyList<InventoryFile> Entries, string? TotalCount, string? NextCursor, bool ScanLimited);
+    string Generation, IReadOnlyList<InventoryFile> Entries, string? TotalCount, string? NextCursor, bool ScanLimited)
+{
+    /// <summary>Where this page's community names came from, or why there are none.</summary>
+    public CommunityNamesSource CommunityNames { get; init; } = CommunityNamesSource.Off;
+}
 public sealed record InventoryRawContentFlags(string First, string Second, int Third);
 public sealed record InventoryFileMembership(string Id, string Family, int? BlockOrdinal, int? EntryOrdinal,
     int? InstallOrdinal, string? LocaleFlags, string? ContentFlags, InventoryRawContentFlags? RawContentFlags,
@@ -27,7 +35,11 @@ public sealed record InventoryFileMembership(string Id, string Family, int? Bloc
     bool Stored, bool Matches);
 public sealed record InventoryFileDetail(string ProductId, string BuildIdentity, string SourceRegion,
     string Generation, string File, string Family, string? FileDataId, string? Name, int MembershipCount,
-    int MatchingCount, IReadOnlyList<InventoryFileMembership> Memberships, string? NextCursor);
+    int MatchingCount, IReadOnlyList<InventoryFileMembership> Memberships, string? NextCursor)
+{
+    public string? CommunityName { get; init; }
+    public CommunityNamesSource CommunityNames { get; init; } = CommunityNamesSource.Off;
+}
 
 /// <summary>The sealed ROOT/install file catalog of one build (D071): file and membership counts, all exact.</summary>
 public sealed record FileCatalogSummary(string Generation, string PreparedAt, string RootFileCount, string InstallFileCount,

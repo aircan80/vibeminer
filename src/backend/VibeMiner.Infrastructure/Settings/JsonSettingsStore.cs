@@ -6,7 +6,7 @@ using VibeMiner.Domain;
 namespace VibeMiner.Infrastructure;
 
 /// <summary>
-/// settings-v1.json in the engine data folder: {"version":1,"changedAt":"…","values":{"communityBuildHistory":false,"fetchTableDefinitions":true}}.
+/// settings-v1.json in the engine data folder: {"version":1,"changedAt":"…","values":{"communityBuildHistory":false,"fetchTableDefinitions":true,"communityListfile":true}}.
 /// Reads are bounded and never throw for bad content. Writes go to a temporary file, are flushed, then replace the file.
 /// </summary>
 public sealed class JsonSettingsStore(string dataDirectory) : ISettingsStore
@@ -85,31 +85,39 @@ public sealed class JsonSettingsStore(string dataDirectory) : ISettingsStore
             var changedAt = ChangedAt(root);
             if (!root.TryGetProperty("values", out var values)) return new(SettingsFileState.Read, null, changedAt, null, null, []) { UnknownFields = fields };
             if (values.ValueKind != JsonValueKind.Object) return Unreadable("The settings file has no readable values.");
-            bool? community = null, fetch = null;
-            SettingsProblem? communityProblem = null, fetchProblem = null;
+            bool? community = null, fetch = null, listfile = null;
+            SettingsProblem? communityProblem = null, fetchProblem = null, listfileProblem = null;
             var unknown = new List<KeyValuePair<string, string>>();
             var unreadable = new List<KeyValuePair<string, string>>();
             var valueNames = new HashSet<string>(StringComparer.Ordinal);
             foreach (var property in values.EnumerateObject())
             {
                 if (!valueNames.Add(property.Name)) return Unreadable("The settings file repeats a setting.");
-                if (property.Name is SettingsService.CommunityBuildHistory or SettingsService.FetchTableDefinitions)
+                if (property.Name is SettingsService.CommunityBuildHistory or SettingsService.FetchTableDefinitions or SettingsService.CommunityListfile)
                 {
                     bool? value = property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False ? property.Value.GetBoolean() : null;
                     SettingsProblem? problem = null;
                     if (value is null)
                     {
-                        problem = new("SETTING_UNREADABLE", $"The saved value for {(property.Name == SettingsService.CommunityBuildHistory ? "Community build history" : "Fetch newer table definitions")} isn’t one VibeMiner understands.", false);
+                        var title = property.Name switch
+                        {
+                            SettingsService.CommunityBuildHistory => "Community build history",
+                            SettingsService.FetchTableDefinitions => "Fetch newer table definitions",
+                            _ => "Community file names",
+                        };
+                        problem = new("SETTING_UNREADABLE", $"The saved value for {title} isn’t one VibeMiner understands.", false);
                         unreadable.Add(new(property.Name, property.Value.GetRawText()));
                     }
                     if (property.Name == SettingsService.CommunityBuildHistory) { community = value; communityProblem = problem; }
-                    else { fetch = value; fetchProblem = problem; }
+                    else if (property.Name == SettingsService.FetchTableDefinitions) { fetch = value; fetchProblem = problem; }
+                    else { listfile = value; listfileProblem = problem; }
                 }
                 // Every value this version doesn't know is kept; the 64 KiB file bound is the only limit.
                 else unknown.Add(new(property.Name, property.Value.GetRawText()));
             }
             return new(SettingsFileState.Read, null, changedAt, community, communityProblem, unknown)
-                { UnknownFields = fields, FetchTableDefinitions = fetch, FetchTableDefinitionsProblem = fetchProblem, UnreadableValues = unreadable };
+                { UnknownFields = fields, FetchTableDefinitions = fetch, FetchTableDefinitionsProblem = fetchProblem,
+                  CommunityListfile = listfile, CommunityListfileProblem = listfileProblem, UnreadableValues = unreadable };
         }
         catch (JsonException) { return Unreadable("The settings file isn’t valid JSON."); }
         // Invalid UTF-8 or a lone surrogate escape in a name or string surfaces only when it is decoded.

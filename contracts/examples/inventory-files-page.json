@@ -16,7 +16,8 @@
       "encodedBytesMax": "100",
       "unresolvedCount": 1,
       "localeFlags": "514",
-      "storedCount": 1
+      "storedCount": 1,
+      "communityName": "authored/example/file_12345.blp"
     },
     {
       "key": "install:7",
@@ -30,10 +31,17 @@
       "encodedBytesMax": "64",
       "unresolvedCount": 0,
       "localeFlags": null,
-      "storedCount": 0
+      "storedCount": 0,
+      "communityName": null
     }
   ],
   "totalCount": null,
   "nextCursor": "install:7",
-  "scanLimited": false
+  "scanLimited": false,
+  "communityNames": {
+    "state": "ready",
+    "tag": "202601010000",
+    "publishedAt": "2026-01-01T00:00:00+00:00",
+    "fetchedAt": "2026-10-23T12:00:00+00:00"
+  }
 }

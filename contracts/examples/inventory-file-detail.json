@@ -18,7 +18,11 @@
       "installOrdinal": null,
       "localeFlags": "2",
       "contentFlags": "268435456",
-      "rawContentFlags": { "first": "0", "second": "268435456", "third": 0 },
+      "rawContentFlags": {
+        "first": "0",
+        "second": "268435456",
+        "third": 0
+      },
       "nameHash": null,
       "contentKey": "11111111111111111111111111111111",
       "encodingKey": "44444444444444444444444444444444",
@@ -35,7 +39,11 @@
       "installOrdinal": null,
       "localeFlags": "512",
       "contentFlags": "134217728",
-      "rawContentFlags": { "first": "134217728", "second": "0", "third": 0 },
+      "rawContentFlags": {
+        "first": "134217728",
+        "second": "0",
+        "third": 0
+      },
       "nameHash": "18446744073709551615",
       "contentKey": "22222222222222222222222222222222",
       "encodingKey": null,
@@ -45,5 +53,12 @@
       "matches": false
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "communityName": "authored/example/file_12345.blp",
+  "communityNames": {
+    "state": "ready",
+    "tag": "202601010000",
+    "publishedAt": "2026-01-01T00:00:00+00:00",
+    "fetchedAt": "2026-10-23T12:00:00+00:00"
+  }
 }

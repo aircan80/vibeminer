@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { BridgeReply, DiscoveryBridge } from '../shared/bridge';
-import { SETTING_SWITCHES, type SettingSwitch, type SettingsSnapshot, type StorageMeasurement } from '../shared/settings';
+import { SETTING_SWITCHES, type CommunityListfileStatus, type SettingSwitch, type SettingsSnapshot, type StorageMeasurement } from '../shared/settings';
 import { exactBytes, exactCount, readableBytes } from '../shared/inventory';
 import { ActivityTrigger, useDownloadActivity } from './DownloadActivity';
 import { summaryLine } from './download-activity-state';
 import { PreparedDataSetting } from './PreparedData';
+import { listfileMeasurement, listfileStage } from './useCommunityListfile';
 import brand from '../../../../branding/vibeminer.svg';
 import './settings.css';
 
@@ -39,11 +40,12 @@ type Change = { phase: 'idle'; savedAt: string | null } | { phase: 'saving'; tar
 type Measure = { phase: 'measuring'; asked: boolean } | { phase: 'measured'; value: StorageMeasurement; asked: boolean } | { phase: 'failed'; error: Problem } | { phase: 'unavailable' };
 const failure = <T,>(reply: BridgeReply<T>): Problem | null => reply.ok ? null : { code: reply.error.code, message: reply.error.message, retryable: reply.error.retryable };
 const thrown = { code: 'ENGINE_UNAVAILABLE', message: 'The local engine is unavailable. Restart VibeMiner to reconnect.', retryable: true };
-const unchanged = (): Record<SettingSwitch, Change> => ({ communityBuildHistory: { phase: 'idle', savedAt: null }, fetchTableDefinitions: { phase: 'idle', savedAt: null } });
+const unchanged = (): Record<SettingSwitch, Change> => ({ communityBuildHistory: { phase: 'idle', savedAt: null }, fetchTableDefinitions: { phase: 'idle', savedAt: null }, communityListfile: { phase: 'idle', savedAt: null } });
 // Each switch's id stem, visible name and what its default means when a saved value can't be used.
 const SWITCH: Record<SettingSwitch, { key: string; title: string; byDefault: string }> = {
   communityBuildHistory: { key: 'community', title: 'Community build history', byDefault: 'nothing is fetched from the community source' },
   fetchTableDefinitions: { key: 'fetch', title: 'Fetch newer table definitions', byDefault: 'no table definitions are fetched from WoWDBDefs' },
+  communityListfile: { key: 'listfile', title: 'Community file names', byDefault: 'Files shows no community names and nothing is downloaded from wow-listfile' },
 };
 
 export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedDataChanged }: { bridge: DiscoveryBridge; origin: SettingsOrigin; fixtureLabel?: string | null; onBack: () => void; onPreparedDataChanged?: () => void }) {
@@ -57,7 +59,7 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
   const refocus = useRef<SettingSwitch | null>(null), alive = useRef(true), readGeneration = useRef(0), measuring = useRef<string | null>(null), measureGeneration = useRef(0);
   // Saves can overlap across switches; only the newest committed snapshot is shown.
   const saveGeneration = useRef(0), shownSave = useRef(0);
-  const toggles = useRef<Record<SettingSwitch, HTMLButtonElement | null>>({ communityBuildHistory: null, fetchTableDefinitions: null });
+  const toggles = useRef<Record<SettingSwitch, HTMLButtonElement | null>>({ communityBuildHistory: null, fetchTableDefinitions: null, communityListfile: null });
   const host = useRef<HTMLDivElement>(null), heading = useRef<HTMLHeadingElement>(null), copy = useRef<HTMLButtonElement>(null), toolbar = useRef<HTMLElement>(null), statusBar = useRef<HTMLElement>(null);
   async function read() {
     const generation = ++readGeneration.current;
@@ -85,6 +87,8 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
     // Leaving Settings stops the walk; a late reply is dropped by the generation check.
     return () => { alive.current = false; const id = measuring.current; measuring.current = null; if (id) void bridge.cancel(id).catch(() => { /* The engine retires it on its own. */ }); };
   }, [bridge]);
+  // The switch turned off from Downloads & activity: read the settings again so the row shows it.
+  useEffect(() => { const changed = (event: Event) => { if ((event as CustomEvent<{ from?: string }>).detail?.from === 'activity') void read(); }; window.addEventListener('vibeminer-settings-changed', changed); return () => window.removeEventListener('vibeminer-settings-changed', changed); }, [bridge]);
   // Read again keeps focus on the page: the heading while reading, then the switch whose row asked once it exists.
   function readAgain(name: SettingSwitch) { heading.current?.focus({ preventScroll: true }); refocus.current = name; void read(); }
   useLayoutEffect(() => { const name = refocus.current; if (!name || reading.phase === 'reading') return; refocus.current = null; (toggles.current[name] ?? heading.current)?.focus({ preventScroll: true }); }, [reading.phase]);
@@ -165,13 +169,13 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
       </div>;
       else if (c.source === 'unreadable' && p && noted) note = <div className="st-state warn" role="note" id={`settings-${key}-note`}>
         <strong>{newer ? `Saved by a newer VibeMiner. ${inUse(c)}` : notRead ? `Settings file not read. ${inUse(c)}` : `Saved value couldn’t be read. ${inUse(c)}`}</strong>
-        <p>{newer ? `${p.message} This version uses the default and doesn’t change the file. Change this setting in the newer VibeMiner.` : notRead ? p.retryable ? `${p.message} The file wasn’t changed, and the switches can’t be used until the file is read.` : `${p.message} This version of VibeMiner can’t read settings-v1.json in the storage folder, so it wasn’t changed. Fix or remove that file, then open Settings again.` : fileWide ? `${p.message} Every setting uses a safe value, so ${SWITCH.communityBuildHistory.byDefault} and ${SWITCH.fetchTableDefinitions.byDefault}. Switching saves a new value.` : `The settings file has a value for this setting that VibeMiner doesn’t understand, so it is ignored and ${byDefault}. Switching saves a new value.`} <code>({p.code})</code></p>
+        <p>{newer ? `${p.message} This version uses the default and doesn’t change the file. Change this setting in the newer VibeMiner.` : notRead ? p.retryable ? `${p.message} The file wasn’t changed, and the switches can’t be used until the file is read.` : `${p.message} This version of VibeMiner can’t read settings-v1.json in the storage folder, so it wasn’t changed. Fix or remove that file, then open Settings again.` : fileWide ? `${p.message} Every setting uses a safe value, so ${SWITCH.communityBuildHistory.byDefault}, ${SWITCH.fetchTableDefinitions.byDefault}, and ${SWITCH.communityListfile.byDefault}. Switching saves a new value.` : `The settings file has a value for this setting that VibeMiner doesn’t understand, so it is ignored and ${byDefault}. Switching saves a new value.`} <code>({p.code})</code></p>
         {notRead && p.retryable && <button className="st-btn st-note-action" onClick={() => readAgain(name)}>Read again</button>}
       </div>;
     }
     return { control: <div className="st-ctl">{control}<span className="st-save-line" id={`settings-${key}-save`} role="status">{saveLine}</span></div>, extra, note };
   }
-  const community = switchParts('communityBuildHistory', true), fetch = switchParts('fetchTableDefinitions', false);
+  const community = switchParts('communityBuildHistory', true), fetch = switchParts('fetchTableDefinitions', false), listfile = switchParts('communityListfile', false);
   const limits = snapshot?.downloadLimits;
   const sizeFact = measure.phase === 'measuring' ? <span className="st-loading"><span className="st-pulse" aria-hidden="true"/>Measuring…</span>
     : measure.phase === 'measured' ? <>{readableBytes(measure.value.bytes)} <span className="st-dim st-mono">· {exactBytes(measure.value.bytes)}</span>{measure.value.skipped !== '0' && <span className="st-skipped">{exactCount(measure.value.skipped)} {measure.value.skipped === '1' ? 'item' : 'items'} couldn’t be read and {measure.value.skipped === '1' ? 'isn’t' : 'aren’t'} counted.</span>}</>
@@ -231,6 +235,23 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
               {fetch.control}{fetch.extra}{fetch.note}
             </div>
           </section>
+          <section aria-labelledby="settings-group-files"><h2 className="st-label st-group-h" id="settings-group-files">Files</h2>
+            <div className="st-setting" id="settings-row-listfile">
+              <div className="st-text">
+                <h3 id="settings-listfile-name">Community file names from wow-listfile</h3>
+                <p id="settings-listfile-desc">ROOT gives files no names, so Files says <strong>Name not known</strong>. This adds names from wow-listfile, a community-kept list of FileDataIDs and their paths.</p>
+                <dl className="st-effects">
+                  <dt>When on</dt><dd>The first time Files lists a build’s files, VibeMiner downloads the newest wow-listfile release from GitHub, about 150 MB, checks it against the SHA-256 GitHub publishes and keeps a copy in the storage folder. Files then shows names with a <span className="st-pill community">Community</span> badge. It checks for a newer release once a week. Names are labels only: the FileDataID stays the file’s identity, and all data still comes from Blizzard’s CDN.</dd>
+                  <dt>When off</dt><dd>Files shows <strong>Name not known</strong> for ROOT files, and VibeMiner doesn’t contact GitHub for names. A download in progress stops. What it had is kept, and so is a downloaded copy, so turning it back on doesn’t start over.</dd>
+                  <dt>Takes effect</dt><dd>At once. The download runs in the background and resumes where it stopped after VibeMiner closes.</dd>
+                  <dt>Source</dt><dd>wow-listfile contributors, <span className="st-mono">github.com/wowdev/wow-listfile</span>, downloaded from its releases. It has no licence, so VibeMiner never ships it.</dd>
+                </dl>
+              </div>
+              {listfile.control}{listfile.extra}{listfile.note}
+              {/* After the switch in layout and tab order, at every size (#21 UI review). */}
+              <ListfileState bridge={bridge} enabled={known && !!snapshot?.communityListfile.value} known={known}/>
+            </div>
+          </section>
           <section aria-labelledby="settings-group-storage"><h2 className="st-label st-group-h" id="settings-group-storage">Storage</h2>
             <div className="st-setting" id="settings-row-storage">
               <div className="st-text">
@@ -263,7 +284,7 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
           <div className="st-panel-head"><h2 id="settings-about">About settings</h2></div>
           <div className="st-side-body">{aboutBox}
             <dl className="st-facts"><dt>Saved by</dt><dd>The VibeMiner engine</dd><dt>Applies to</dt><dd>Every product and build</dd><dt>Saved in</dt><dd>The storage folder, settings version {snapshot?.formatVersion ?? 1}</dd><dt>Last change</dt><dd>{lastChange}</dd></dl>
-            <p className="st-tiny">Changing a setting never deletes builds or downloaded files, and never pauses or cancels work in Downloads &amp; activity.</p>
+            <p className="st-tiny">Changing a setting never deletes builds or downloaded files. The only work in Downloads &amp; activity a setting stops is the community file names download, when you turn them off; what it has is kept.</p>
             <p className="st-tiny">Escape or <strong>← {origin.backLabel}</strong> returns to {origin.returnsTo} as you left it.</p>
           </div>
         </aside>
@@ -276,5 +297,48 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
         {summary && <span className={ui!.attention ? 'st-warn' : 'st-busy'} aria-live="off">{!ui!.attention && ui!.active && <span className="st-pulse" aria-hidden="true"/>}{summaryLine(summary)}</span>}
       </footer>
     </div>
+  </div>;
+}
+
+// The wow-listfile download (D105): the copy in use, what the engine is doing now, and the last failure. It polls once
+// a second while work runs, and reads again when the switch changes.
+function ListfileState({ bridge, enabled, known }: { bridge: DiscoveryBridge; enabled: boolean; known: boolean }) {
+  const [status, setStatus] = useState<CommunityListfileStatus | null>(null);
+  const [error, setError] = useState<Problem | null>(null);
+  const alive = useRef(true), generation = useRef(0);
+  async function load(check = false) {
+    const call = check ? bridge.listfileCheck : bridge.listfileRead;
+    if (!call) return;
+    const mine = ++generation.current;
+    let reply: BridgeReply<CommunityListfileStatus>;
+    try { reply = await call(); } catch { reply = { ok: false, error: thrown }; }
+    if (!alive.current || mine !== generation.current) return;
+    if (reply.ok) { setStatus(reply.value); setError(null); if (check) window.dispatchEvent(new CustomEvent('vibeminer-listfile-asked')); } else setError(failure(reply));
+  }
+  useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [bridge, enabled]);
+  // Downloads & activity also shows this download, so a Try again or a stop there shows here too.
+  useEffect(() => { const changed = () => { void load(); }; window.addEventListener('vibeminer-listfile-changed', changed); return () => window.removeEventListener('vibeminer-listfile-changed', changed); }, [bridge]);
+  const working = !!status && (status.activity !== 'idle' || status.enabled && status.started && !status.release && !status.problem);
+  useEffect(() => {
+    if (!working) return;
+    const timer = window.setInterval(() => { void load(); }, 1000);
+    return () => window.clearInterval(timer);
+  }, [working]);
+  if (!bridge.listfileRead) return <p className="st-tiny">This VibeMiner engine can’t download community file names.</p>;
+  if (!known || !status) return error ? <p className="st-tiny">Download state not read. {error.message} <code>({error.code})</code></p> : null;
+  const r = status.release, p = status.problem, stage = listfileStage(status), measured = listfileMeasurement(status);
+  const now = !status.enabled ? 'Off. Nothing is downloaded.'
+    : stage ? `${stage}${measured ? ` · ${measured.label}` : '…'}`
+    : r && p ? `Release ${r.tag} is still in use. The last check for a newer one failed; VibeMiner tries again after 15 minutes.`
+    : r ? `Up to date as of ${stamp(status.checkedAt ?? r.fetchedAt)}. Checked again in a week.`
+    : p ? 'Not downloaded. The last attempt failed; VibeMiner tries again after 15 minutes, or use Try again now.' : status.started ? 'Starting…' : 'Not downloaded yet. It downloads the first time Files lists a build’s files.';
+  const busy = status.activity !== 'idle';
+  return <div className="st-listfile" id="settings-listfile-state" aria-label="Community file names download" role="group">
+    <dl className="st-facts">
+      <dt>Copy in use</dt><dd>{r && status.enabled ? <>Release <span className="st-mono">{r.tag}</span> · published {stamp(r.publishedAt)} · fetched {stamp(r.fetchedAt)} · {exactCount(r.nameCount)} names</> : r ? <>Release <span className="st-mono">{r.tag}</span>, kept, not used while off</> : <span className="st-dim">None yet</span>}</dd>
+      <dt>Now</dt><dd role="status">{busy && <span className="st-pulse" aria-hidden="true"/>}{now}</dd>
+    </dl>
+    {status.enabled && p && <div className="st-notice error" role="alert"><div className="st-text"><strong>{r ? `Couldn’t get a newer release. Release ${r.tag} is still in use.` : 'Couldn’t get the community file names. Files says Name not known.'}</strong>{p.message} <code>({p.code})</code></div></div>}
+    {status.enabled && bridge.listfileCheck && <div className="st-ctl-row"><button className="st-btn small" aria-disabled={busy} onClick={() => { if (!busy) void load(true); }}>{p ? 'Try again now' : r ? 'Check for a newer release' : 'Download now'}</button></div>}
   </div>;
 }

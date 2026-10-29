@@ -15,7 +15,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
     CreatureGeometryService? creatureGeometry = null, CreatureGeometryLeases? geometryLeases = null,
     SettingsService? settings = null,
     DownloadSummaryService? downloadSummaries = null, TableReferenceTextService? referenceText = null, TableFollowService? follow = null,
-    PreparedDataService? preparedData = null)
+    PreparedDataService? preparedData = null, ICommunityListfileControl? listfile = null)
 {
     public const int MaxFrameBytes = 1024 * 1024;
     public const int MaxClassificationFrameBytes = 512 * 1024;
@@ -170,6 +170,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     if (tableData is not null && follow is not null) capabilities.Add("tables-follow-v1");
                     if (retention is not null) capabilities.Add("retention-v1");
                     if (settings is not null) capabilities.Add("settings-v1");
+                    if (settings is not null && listfile is not null) capabilities.Add("community-listfile-v1");
                     if (preparedData is not null) capabilities.Add("prepared-data-v1");
                     if (downloadSummaries is not null) capabilities.Add("download-summary-v1");
                     if (downloads is not null) capabilities.Add("download-check-v1");
@@ -672,6 +673,13 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     if (!parameters.TryGetProperty("value", out var settingValue) || settingValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                         throw new DiscoveryException("INVALID_REQUEST", "A setting value must be true or false.");
                     result = SettingsWire.Snapshot(await settings.SetAsync(settingName, settingValue.GetBoolean(), request.Cancellation.Token));
+                    break;
+                case "settings.listfile.read":
+                case "settings.listfile.check":
+                    RequireOnly(parameters);
+                    if (settings is null || listfile is null) throw new DiscoveryException("LISTFILE_UNAVAILABLE", "Community file names are unavailable in this engine.");
+                    result = SettingsWire.Listfile(method == "settings.listfile.read"
+                        ? await listfile.StatusAsync(request.Cancellation.Token) : await listfile.CheckAsync(request.Cancellation.Token));
                     break;
                 case "settings.storage.measure":
                     RequireOnly(parameters);

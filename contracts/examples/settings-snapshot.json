@@ -19,6 +19,12 @@
     "source": "saved",
     "problem": null
   },
+  "communityListfile": {
+    "value": true,
+    "defaultValue": true,
+    "source": "default",
+    "problem": null
+  },
   "storage": {
     "dataDirectory": "/home/example/.config/VibeMiner/engine-v1"
   },

@@ -7,17 +7,20 @@ namespace VibeMiner.Application;
 /// Storage measurement runs one walk at a time inside a time budget.
 /// </summary>
 public sealed class SettingsService(ISettingsStore store, IStorageMeasurer storage, DownloadLimitSettings limits,
-    TimeProvider? clock = null, TimeSpan? measurementBudget = null) : ITableDefinitionFetchPolicy
+    TimeProvider? clock = null, TimeSpan? measurementBudget = null) : ITableDefinitionFetchPolicy, ICommunityListfilePolicy
 {
     public const int FormatVersion = 1;
     public const string CommunityBuildHistory = "communityBuildHistory";
     public const string FetchTableDefinitions = "fetchTableDefinitions";
+    public const string CommunityListfile = "communityListfile";
     /// <summary>The switches this version knows, in the order they are written.</summary>
-    public static readonly IReadOnlyList<string> Switches = [CommunityBuildHistory, FetchTableDefinitions];
+    public static readonly IReadOnlyList<string> Switches = [CommunityBuildHistory, FetchTableDefinitions, CommunityListfile];
     public static readonly TimeSpan DefaultMeasurementBudget = TimeSpan.FromMinutes(5);
     private const bool CommunityBuildHistoryDefault = false;
     // Owner decision on #55: fetching newer definitions is on until the user turns it off.
     private const bool FetchTableDefinitionsDefault = true;
+    // Owner decision on #21: community file names are on until the user turns them off.
+    private const bool CommunityListfileDefault = true;
     private readonly TimeProvider time = clock ?? TimeProvider.System;
     private readonly TimeSpan budget = measurementBudget ?? DefaultMeasurementBudget;
     private readonly SemaphoreSlim mutations = new(1, 1);
@@ -33,6 +36,26 @@ public sealed class SettingsService(ISettingsStore store, IStorageMeasurer stora
     // file from a newer VibeMiner counts as off, so a user who turned it off is never overridden (D081).
     public async Task<bool> FetchEnabledAsync(CancellationToken token) =>
         (await ReadAsync(token)).FetchTableDefinitions is { Source: not SettingSource.Unreadable, Value: true };
+
+    // The same fail-closed reading for the community listfile (D105).
+    public async Task<bool> CommunityListfileEnabledAsync(CancellationToken token) =>
+        (await ReadAsync(token)).CommunityListfile is { Source: not SettingSource.Unreadable, Value: true };
+
+    /// <summary>Raised with the switch's name and committed value after a change. Handlers must not block or throw.</summary>
+    public event Action<string, bool>? Changed;
+
+    private static bool? Saved(SettingsDocument document, string name) => name switch
+    {
+        CommunityBuildHistory => document.CommunityBuildHistory,
+        FetchTableDefinitions => document.FetchTableDefinitions,
+        _ => document.CommunityListfile,
+    };
+    private static BooleanSetting Shown(SettingsSnapshot snapshot, string name) => name switch
+    {
+        CommunityBuildHistory => snapshot.CommunityBuildHistory,
+        FetchTableDefinitions => snapshot.FetchTableDefinitions,
+        _ => snapshot.CommunityListfile,
+    };
 
     public async Task<SettingsSnapshot> SetAsync(string name, bool value, CancellationToken token = default)
     {
@@ -55,19 +78,20 @@ public sealed class SettingsService(ISettingsStore store, IStorageMeasurer stora
             var shown = current.File == SettingsFileState.Unreadable ? Project(current) : null;
             foreach (var known in Switches)
             {
-                var saved = known == CommunityBuildHistory ? current.CommunityBuildHistory : current.FetchTableDefinitions;
+                var saved = Saved(current, known);
                 if (known == name) values.Add(new(known, Json(value)));
                 else if (readable && saved is { } kept) values.Add(new(known, Json(kept)));
                 else if (readable && current.UnreadableValues.FirstOrDefault(pair => pair.Key == known) is { Key: not null } raw) values.Add(raw);
-                else if (shown is not null) values.Add(new(known, Json((known == CommunityBuildHistory ? shown.CommunityBuildHistory : shown.FetchTableDefinitions).Value)));
+                else if (shown is not null) values.Add(new(known, Json(Shown(shown, known).Value)));
             }
             if (readable) values.AddRange(current.UnknownValues);
             await store.WriteAsync(values, time.GetUtcNow(), readable ? current.UnknownFields : [], token);
             // The write is committed; request cancellation no longer withdraws it.
             var committed = Project(await store.ReadAsync(CancellationToken.None));
-            var setting = name == CommunityBuildHistory ? committed.CommunityBuildHistory : committed.FetchTableDefinitions;
+            var setting = Shown(committed, name);
             if (setting.Source != SettingSource.Saved || setting.Value != value)
                 throw new DiscoveryException("SETTINGS_WRITE_FAILED", "The engine couldn’t confirm the saved settings file. Read the settings again.", true);
+            Changed?.Invoke(name, value);
             return committed;
         }
         finally { mutations.Release(); }
@@ -95,9 +119,10 @@ public sealed class SettingsService(ISettingsStore store, IStorageMeasurer stora
         new(FormatVersion, document.File, document.Problem, document.ChangedAt,
             Switch(document, document.CommunityBuildHistory, document.CommunityBuildHistoryProblem, CommunityBuildHistoryDefault, false),
             storage.Location, limits,
-            Switch(document, document.FetchTableDefinitions, document.FetchTableDefinitionsProblem, FetchTableDefinitionsDefault, false));
+            Switch(document, document.FetchTableDefinitions, document.FetchTableDefinitionsProblem, FetchTableDefinitionsDefault, false),
+            Switch(document, document.CommunityListfile, document.CommunityListfileProblem, CommunityListfileDefault, false));
 
-    // An unreadable value is never used. It reads as the safe value, Off for both switches: nothing is fetched.
+    // An unreadable value is never used. It reads as the safe value, Off for every switch: nothing is fetched.
     private static BooleanSetting Switch(SettingsDocument document, bool? saved, SettingsProblem? problem, bool defaultValue, bool safeValue) => document.File switch
     {
         SettingsFileState.Unreadable or SettingsFileState.Newer => new(safeValue, defaultValue, SettingSource.Unreadable, document.Problem),

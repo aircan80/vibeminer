@@ -1,6 +1,7 @@
 import {DownloadActivity,ActivityTrigger,useDownloadActivity} from './DownloadActivity';
 import {stageMeasurement,summaryLine,retentionActivity,type ActivityTask,type ActivityIdentity} from './download-activity-state';
 import {useFileCatalogTasks} from './useFileCatalog';
+import {useListfileTask} from './useCommunityListfile';
 import {catalogTaskStage} from './DownloadObjects';
 import {retentionKey} from '../shared/retention';
 import {useItemEffects} from './useItemEffects';
@@ -113,6 +114,8 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
   // The Files view (file list or download objects) each build was last switched to, for this session (D093).
   const filesViews = useRef(new Map<string, 'catalog' | 'objects'>()).current;
   const fileCatalogTasks = useFileCatalogTasks(bridge, retention.features.includes('file-catalog-v1'), flow.operation?.result ? `${flow.operation.result.build.id}:${flow.operation.result.openedAt}` : '');
+  // The community listfile download (D105) is background work like any other: one task while it runs or after it failed.
+  const listfile = useListfileTask(bridge, retention.features.includes('community-listfile-v1'));
   const [activityNavigation,setActivityNavigation]=useState<{area:'tables'|'items'|'creatures'|'files';sequence:number}|null>(null);
   const navigateActivity=(area:'tables'|'items'|'creatures'|'files')=>setActivityNavigation(old=>({area,sequence:(old?.sequence??0)+1}));
   const tasks:ActivityTask[]=[],taskActions=new Map<string,Map<string,()=>void>>();
@@ -147,6 +150,7 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
     const set=(action:'stop'|'resume')=>{void fileCatalogTasks.act({productId:c.productId,buildIdentity:c.buildIdentity,action});};
     taskActions.set(key,new Map([['stop',()=>set('stop')],['resume',()=>set('resume')],['view',()=>{if(currentWorkspace()&&matches(c))navigateActivity('files');}]]));
   }
+  if(listfile.task){tasks.push(listfile.task);taskActions.set(listfile.task.key,new Map([['stop',()=>{void listfile.act('stop');}],['retry',()=>{void listfile.act('retry');}],['dismiss',()=>{void listfile.act('dismiss');}]]));}
   if(retention.error)tasks.push({key:'retention:status',kind:'buildRetention',title:'Build download status',identity:{productId:'',buildIdentity:'',sourceRegion:''},status:'blocked',stage:'Status unconfirmed',measurement:null,problem:{code:'RETENTION_STATUS_UNCONFIRMED',message:retention.error},actions:[{id:'refresh',label:'Refresh download status'}]});
   if(retention.error)taskActions.set('retention:status',new Map([['refresh',()=>retention.refresh()]]));
   // Saved intents changing (Download all, pause, resume, a pass ending) re-reads the stored figures.
