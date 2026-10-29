@@ -98,9 +98,11 @@ public sealed partial class DiscoveryCatalog
         return new(new(artifact, at), item, sparse, configurations);
     }
 
-    internal Task<StoredTableAdmission?> ReadItemEffectsSourceAsync(CapturedOpeningContext opening, ItemEffectsSourceRole role, CancellationToken token)
+    // table: the link's table for this role (#86: a Classic bridge reads ItemEffect); only a reviewed table for the role.
+    internal Task<StoredTableAdmission?> ReadItemEffectsSourceAsync(CapturedOpeningContext opening, ItemEffectsSourceRole role, CancellationToken token, string? table=null)
     {
-        var table=EffectsTable(role);
+        table??=EffectsTable(role);
+        if(!ItemEffectsLinks.All.Any(link=>ItemEffectsLinks.Profile(link,role).TableId==table))throw new DiscoveryException("INVALID_REQUEST","Choose one exact effects source role.");
         return Schedule(() =>
         {
             using var transaction=Db.BeginTransaction();EffectsOpening(opening,transaction);var budget=EffectsSourceBytes;
@@ -195,10 +197,11 @@ public sealed partial class DiscoveryCatalog
             using var transaction=Db.BeginTransaction();var authority=EffectsRequireItems(ownedItems,transaction,token);
             var budget=EffectsSourceBytes;var savedRaw=EffectsBridgeDescriptorRaw(owned.ContentKey,transaction,ref budget)??throw EffectsIndexInvalid();
             var configurationRaw=EffectsConfigurationsRaw(ownedItems.Opening,transaction,ref budget);
-            var sourceRaw=EffectsSourceRaw(ownedItems.Opening,ItemEffectsBridgePolicy.Table,transaction,ref budget)??throw EffectsBridgeStale();
+            var bridgeTable=owned.Binding.Source.TableId;
+            var sourceRaw=EffectsSourceRaw(ownedItems.Opening,bridgeTable,transaction,ref budget)??throw EffectsBridgeStale();
             var previous=EffectsBridgeCompact(ownedItems.Opening,transaction,ref budget);
             var configurations=EffectsConfigurations(ownedItems.Opening,configurationRaw);
-            var saved=EffectsBridgeDecode(savedRaw,owned.ContentKey);var source=EffectsSource(sourceRaw,ItemEffectsBridgePolicy.Table);
+            var saved=EffectsBridgeDecode(savedRaw,owned.ContentKey);var source=EffectsSource(sourceRaw,bridgeTable);
             // Re-registration may carry a newer source observation, but immutable first provenance is canonical.
             if(saved.Sha256!=owned.Sha256||saved.ByteLength!=owned.ByteLength||
                 !ItemEffectsBridgePolicy.SameCurrentSource(saved.Binding.Source,owned.Binding.Source)||
@@ -312,11 +315,14 @@ public sealed partial class DiscoveryCatalog
         IReadOnlyList<ConfigurationReceipt> configurations,SqliteTransaction transaction)
     {
         var budget=EffectsSourceBytes;var configurationRaw=EffectsConfigurationsRaw(opening,transaction,ref budget);
-        var raw=EffectsSourceRaw(opening,ItemEffectsBridgePolicy.Table,transaction,ref budget)??throw EffectsBridgeStale();
+        // The proof's own bridge table: ItemXItemEffect, or ItemEffect on a ParentItemID build (#86). An unsupported layout is
+        // still an authority proof of that table.
+        var bridgeTable=ItemEffectsLinks.All.Any(link=>link.Bridge.TableId==proof.Snapshot.TableId)?proof.Snapshot.TableId:throw EffectsBridgeStale();
+        var raw=EffectsSourceRaw(opening,bridgeTable,transaction,ref budget)??throw EffectsBridgeStale();
         (string Key,byte[] PreparedAt)? compact=proof.Index is null?null:EffectsBridgeCompact(opening,transaction,ref budget)??throw EffectsBridgeStale();
         var descriptor=compact is null?null:EffectsBridgeDescriptorRaw(compact.Value.Key,transaction,ref budget)??throw EffectsBridgeStale();
         _=EffectsConfigurations(opening,configurationRaw);
-        var current=EffectsSource(raw,ItemEffectsBridgePolicy.Table);EffectsSnapshot(proof.Snapshot,proof.Admission,opening);
+        var current=EffectsSource(raw,bridgeTable);EffectsSnapshot(proof.Snapshot,proof.Admission,opening);
         if(current.PreparedAt!=proof.Admission.PreparedAt||!EffectsAuthority(current.Artifact,proof.Admission.Artifact)||
             !EffectsAuthority(current.Source,proof.Admission.Source)||!EffectsAuthority(current.Association,proof.Admission.Association))throw EffectsBridgeStale();
         if(proof.Index is null)return;

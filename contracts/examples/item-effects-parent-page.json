@@ -1,0 +1,264 @@
+{
+  "selection": {
+    "context": {
+      "productId": "wow",
+      "buildIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sourceRegion": "us",
+      "researchLocale": "enUS"
+    },
+    "itemsArtifactId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "itemId": "0"
+  },
+  "bridgeIndexArtifactId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "orderPolicy": "signed-item-unsigned-bridge-source-ordinal-v1",
+  "bridgeSource": {
+    "productId": "wow",
+    "buildIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sourceRegion": "us",
+    "tableId": "4002a5b1",
+    "researchLocale": "enUS",
+    "artifactId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "preparedAt": "2026-10-19T12:00:00Z",
+    "layoutHash": "1BF9CF3A",
+    "definitionSha256": "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c",
+    "providerRevision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+    "decoderRevision": "wdc5-values-v7+table-admission-projection-v4",
+    "source": {
+      "contentKey": "66666666666666666666666666666666",
+      "encodingKey": "77777777777777777777777777777777",
+      "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+      "encodedBytes": "402",
+      "decodedBytes": "2048",
+      "sourceUrl": "https://fixture.invalid/authored-table",
+      "retrievedAt": "2026-10-19T11:00:00Z",
+      "verifiedAt": "2026-10-19T12:00:00Z",
+      "verifierRevision": "content-blte-projection-v1",
+      "location": {
+        "kind": "archive",
+        "offset": "100",
+        "sourceBytes": "402",
+        "archiveKey": "99999999999999999999999999999999"
+      },
+      "projection": {
+        "policy": "blte-clear-chunks-v1",
+        "identitySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "readableRanges": [
+          {
+            "offset": "0",
+            "byteLength": "1024",
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        ],
+        "unavailableRanges": [
+          {
+            "offset": "1024",
+            "byteLength": "1024",
+            "chunkOrdinal": 1,
+            "keyName": "1234567890ABCDEF"
+          }
+        ]
+      }
+    },
+    "association": {
+      "fileDataId": "969941",
+      "researchLocale": "enUS",
+      "variantPolicy": "All matching enUS memberships",
+      "encodingSource": {
+        "role": "encoding",
+        "contentKey": "11111111111111111111111111111111",
+        "encodingKey": "22222222222222222222222222222222",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "encodedBytes": "50",
+        "decodedBytes": "100",
+        "sourceUrl": "https://fixture.invalid/data/download",
+        "retrievedAt": "2026-10-18T12:00:01Z",
+        "verifiedAt": "2026-10-18T12:00:01Z",
+        "parserRevision": "download-v1"
+      },
+      "rootSource": {
+        "role": "root",
+        "contentKey": "33333333333333333333333333333333",
+        "encodingKey": "44444444444444444444444444444444",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "encodedBytes": "50",
+        "decodedBytes": "100",
+        "sourceUrl": "https://fixture.invalid/data/download",
+        "retrievedAt": "2026-10-18T12:00:01Z",
+        "verifiedAt": "2026-10-18T12:00:01Z",
+        "parserRevision": "download-v1"
+      },
+      "memberships": [
+        {
+          "blockOrdinal": "0",
+          "entryOrdinal": "0",
+          "contentKey": "66666666666666666666666666666666",
+          "localeFlags": "2",
+          "contentFlags": "0",
+          "rawFirst": "0",
+          "rawSecond": "0",
+          "rawThird": "0",
+          "nameHash": null
+        }
+      ]
+    },
+    "columns": [
+      {
+        "name": "ID",
+        "family": "integer",
+        "isId": true,
+        "reference": null,
+        "interpretation": null
+      },
+      {
+        "name": "LegacySlotIndex",
+        "family": "integer",
+        "isId": false,
+        "reference": null,
+        "interpretation": null
+      },
+      {
+        "name": "TriggerType",
+        "family": "integer",
+        "isId": false,
+        "reference": null,
+        "interpretation": null
+      },
+      {
+        "name": "Charges",
+        "family": "integer",
+        "isId": false,
+        "reference": null,
+        "interpretation": null
+      },
+      {
+        "name": "CoolDownMSec",
+        "family": "integer",
+        "isId": false,
+        "reference": null,
+        "interpretation": null
+      },
+      {
+        "name": "CategoryCoolDownMSec",
+        "family": "integer",
+        "isId": false,
+        "reference": null,
+        "interpretation": null
+      },
+      {
+        "name": "SpellCategoryID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "SpellCategory",
+          "column": "ID"
+        },
+        "interpretation": null
+      },
+      {
+        "name": "SpellID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "Spell",
+          "column": "ID"
+        },
+        "interpretation": null
+      },
+      {
+        "name": "ChrSpecializationID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "ChrSpecialization",
+          "column": "ID"
+        },
+        "interpretation": null
+      },
+      {
+        "name": "PlayerConditionID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "PlayerCondition",
+          "column": "ID"
+        },
+        "interpretation": null
+      },
+      {
+        "name": "ParentItemID",
+        "family": "integer",
+        "isId": false,
+        "reference": {
+          "table": "Item",
+          "column": "ID"
+        },
+        "interpretation": null
+      }
+    ],
+    "coverage": {
+      "scope": "unencryptedSections",
+      "declaredRecords": "2",
+      "physicalRows": "1",
+      "copyRows": "1",
+      "excludedKeyedSections": "1",
+      "excludedDeclaredRecords": "1",
+      "declaredCopyRecords": "1",
+      "excludedPhysicalRecords": "1",
+      "excludedCopyRecords": "0"
+    },
+    "rowCount": "2",
+    "textIssueCount": "0"
+  },
+  "observedAssociations": "2",
+  "edges": [
+    {
+      "key": {
+        "indexOrdinal": "0"
+      },
+      "bridge": {
+        "tableId": "4002a5b1",
+        "artifactId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "rowId": "0",
+        "isCopy": true,
+        "copySourceId": "1",
+        "sourceOrdinal": "1",
+        "columnIndex": null
+      },
+      "parentItemId": {
+        "tableId": "4002a5b1",
+        "columnIndex": 10,
+        "value": "0"
+      },
+      "itemEffectId": {
+        "tableId": "4002a5b1",
+        "columnIndex": 0,
+        "value": "0"
+      }
+    },
+    {
+      "key": {
+        "indexOrdinal": "1"
+      },
+      "bridge": {
+        "tableId": "4002a5b1",
+        "artifactId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "rowId": "1",
+        "isCopy": false,
+        "copySourceId": null,
+        "sourceOrdinal": "0",
+        "columnIndex": null
+      },
+      "parentItemId": {
+        "tableId": "4002a5b1",
+        "columnIndex": 10,
+        "value": "0"
+      },
+      "itemEffectId": {
+        "tableId": "4002a5b1",
+        "columnIndex": 0,
+        "value": "1"
+      }
+    }
+  ],
+  "nextCursor": null
+}

@@ -984,6 +984,42 @@ test('a not-in-build effects source carries only its fixed non-retryable problem
  const unavailable={code:'ITEM_EFFECTS_SOURCE_UNAVAILABLE',message:'The selected source is unavailable.',retryable:true};
  assert.equal(validator('ItemEffectsReadiness')({...v,source:{...v.source,problem:unavailable},problem:unavailable}),false,'notInBuild must refuse the unavailable problem');
 });
+// #86: Classic builds link through ItemEffect.ParentItemID (layout 1BF9CF3A); the ItemEffect admission is the bridge too.
+// #86: real Host wire output (ItemEffectsHostTests writes and compares it) must satisfy the schema, so a field the Host
+// drops or the contract newly requires fails here and not only against a live engine.
+test('the real Host effects wire output satisfies the wire schema for every link kind',async()=>{
+ const wire=JSON.parse(await readFile(path.join(root,'contracts/examples/item-effects-host-wire.json'),'utf8'));
+ const types={readinessItemXItemEffect:'ItemEffectsReadiness',readinessParentItemId:'ItemEffectsReadiness',readinessParentItemIdUnsupported:'ItemEffectsReadiness',readinessUndecided:'ItemEffectsReadiness',pageParentItemId:'ItemEffectsPage',detailsParentItemId:'ItemEffectDetailsResult',namesParentItemId:'ItemEffectNamesResult'};
+ assert.deepEqual(Object.keys(wire).sort(),Object.keys(types).sort());
+ for(const[name,type]of Object.entries(types))validate(type,wire[name]);
+ const missing=structuredClone(wire.readinessParentItemId);delete missing.link;assert.equal(validator('ItemEffectsReadiness')(missing),false,'a reply without link is refused');
+ // The link follows the Bridge snapshot's table, and is null with no source.
+ assert.equal(validator('ItemEffectsReadiness')({...wire.readinessParentItemId,link:'itemXItemEffect'}),false);
+ assert.equal(validator('ItemEffectsReadiness')({...wire.readinessItemXItemEffect,link:'parentItemId'}),false);
+ const none={...wire.readinessUndecided,state:'notPrepared',source:null,link:'parentItemId'};assert.equal(validator('ItemEffectsReadiness')(none),false);
+ validate('ItemEffectsReadiness',{...none,link:null});
+});
+test('ParentItemID effects pin the Classic ItemEffect profile and its own link columns',async()=>{
+ const load=async n=>JSON.parse(await readFile(path.join(root,`contracts/examples/${n}.json`),'utf8'));
+ const readiness=await load('item-effects-parent-readiness'),page=await load('item-effects-parent-page'),details=await load('item-effect-parent-details'),names=await load('item-effect-parent-names');
+ for(const[type,value]of[['ItemEffectsReadiness',readiness],['ItemEffectsPage',page],['ItemEffectDetailsResult',details],['ItemEffectNamesResult',names]])validate(type,value);
+ const bad=(type,value,change,why)=>{const v=structuredClone(value);change(v);assert.equal(validator(type)(v),false,why);};
+ bad('ItemEffectsPage',page,v=>v.edges[0].itemEffectId.columnIndex=1,'an ItemEffect link keys by its own ID column');
+ bad('ItemEffectsPage',page,v=>v.edges[0].parentItemId.columnIndex=2,'an ItemEffect link reads ParentItemID, column 10');
+ bad('ItemEffectsPage',page,v=>v.edges[0].bridge.sourceOrdinal=null,'a link reference keeps its source ordinal');
+ bad('ItemEffectsPage',page,v=>v.bridgeSource.layoutHash='EB717848','only the reviewed Classic layout links');
+ bad('ItemEffectsReadiness',readiness,v=>v.snapshot.fields.itemId.columnIndex=2,'link fields belong to one profile');
+ bad('ItemEffectsReadiness',readiness,v=>v.snapshot.bridgeSource.columns.pop(),'the Classic bridge keeps all eleven columns');
+ bad('ItemEffectDetailsResult',details,v=>v.outcomes[0].fields[5].value='65536','Classic SpellCategoryID is u16');
+ bad('ItemEffectDetailsResult',details,v=>v.outcomes[0].target.sourceOrdinal='0','a target reference carries no source ordinal');
+ // Classic ItemEffect revisions pair with their definition: v4 bundled, v3 fetched (D101).
+ const v3=s=>{s.decoderRevision=s.decoderRevision.replace('-v4','-v3');},fetched=s=>Object.assign(s,{definitionSha256:'e'.repeat(64),providerRevision:'a'.repeat(40),fetchedDefinition:{revision:'a'.repeat(40),fetchedAt:'2026-10-25T00:00:00Z'},fetchedBecause:'layoutMatch',schemaMatch:'layoutOnly',bundledFallback:false});
+ bad('ItemEffectsPage',page,v=>v3(v.bridgeSource),'bundled Classic rows carry v4');
+ bad('ItemEffectsPage',page,v=>fetched(v.bridgeSource),'fetched Classic rows carry v3');
+ const fetchedPage=structuredClone(page);fetched(fetchedPage.bridgeSource);v3(fetchedPage.bridgeSource);validate('ItemEffectsPage',fetchedPage);
+ bad('ItemEffectsReadiness',readiness,v=>v.link='retail','readiness names one of the two links');
+ validate('ItemEffectsReadiness',{...readiness,state:'unsupported',snapshot:null,observedAssociations:null,source:{role:'bridge',state:'unsupported',snapshot:null,historicalArtifactId:null,problem:{code:'ITEM_EFFECTS_SOURCE_UNSUPPORTED',message:'The selected source profile is unsupported.',retryable:false}},problem:{code:'ITEM_EFFECTS_SOURCE_UNSUPPORTED',message:'The selected source profile is unsupported.',retryable:false}});
+});
 test('all seven effects requests have exact flat authority and bounded decimal edge keys',()=>{
  const common={productId:'wow',buildIdentity:'a'.repeat(64),sourceRegion:'us',researchLocale:'enUS',itemsArtifactId:'b'.repeat(64),itemId:'0'};
  const methods=['items.effects.data','items.effects.prepare','items.effects.page','items.effects.details','items.effects.details.prepare','items.effects.names','items.effects.names.prepare'];

@@ -11052,153 +11052,526 @@
                     "$ref": "#/definitions/TableDataSnapshot"
                   },
                   {
-                    "properties": {
-                      "tableId": {
-                        "const": "00cb674f"
-                      },
-                      "layoutHash": {
-                        "const": "96F083AD"
-                      },
-                      "association": {
-                        "properties": {
-                          "fileDataId": {
-                            "const": "3177687"
-                          }
-                        }
-                      },
-                      "decoderRevision": {
-                        "enum": [
-                          "wdc5-values-v7+table-admission-v3",
-                          "wdc5-values-v7+table-admission-projection-v3"
-                        ]
-                      },
-                      "columns": {
-                        "type": "array",
-                        "items": [
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "ID"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": true
-                              },
-                              "reference": {
-                                "const": null
-                              },
-                              "interpretation": {
-                                "type": "null"
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "ItemEffectID"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": {
-                                  "table": "ItemEffect",
-                                  "column": "ID"
-                                }
-                              },
-                              "interpretation": {
-                                "type": "null"
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "ItemID"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": {
-                                  "table": "Item",
-                                  "column": "ID"
-                                }
-                              },
-                              "interpretation": {
-                                "type": "null"
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          }
-                        ],
-                        "minItems": 3,
-                        "maxItems": 3
-                      },
-                      "rowCount": {
-                        "type": "string",
-                        "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
-                        "maxLength": 5
-                      }
-                    },
                     "anyOf": [
                       {
-                        "description": "Read with the reviewed bundled definition.",
-                        "not": {
-                          "required": [
-                            "fetchedDefinition"
-                          ]
-                        },
                         "properties": {
-                          "definitionSha256": {
-                            "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
+                          "tableId": {
+                            "const": "00cb674f"
                           },
-                          "providerRevision": {
-                            "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
-                          }
-                        }
-                      },
-                      {
-                        "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
-                        "required": [
-                          "fetchedDefinition"
-                        ],
-                        "properties": {
-                          "providerRevision": {
+                          "layoutHash": {
+                            "const": "96F083AD"
+                          },
+                          "association": {
+                            "properties": {
+                              "fileDataId": {
+                                "const": "3177687"
+                              }
+                            }
+                          },
+                          "decoderRevision": {
+                            "enum": [
+                              "wdc5-values-v7+table-admission-v3",
+                              "wdc5-values-v7+table-admission-projection-v3"
+                            ]
+                          },
+                          "columns": {
+                            "type": "array",
+                            "items": [
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": true
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ItemEffectID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "ItemEffect",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ItemID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "Item",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              }
+                            ],
+                            "minItems": 3,
+                            "maxItems": 3
+                          },
+                          "rowCount": {
                             "type": "string",
+                            "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
+                            "maxLength": 5
+                          }
+                        },
+                        "anyOf": [
+                          {
+                            "description": "Read with the reviewed bundled definition.",
                             "not": {
-                              "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                              "required": [
+                                "fetchedDefinition"
+                              ]
+                            },
+                            "properties": {
+                              "definitionSha256": {
+                                "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
+                              },
+                              "providerRevision": {
+                                "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                              }
+                            }
+                          },
+                          {
+                            "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
+                            "required": [
+                              "fetchedDefinition"
+                            ],
+                            "properties": {
+                              "providerRevision": {
+                                "type": "string",
+                                "not": {
+                                  "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                                }
+                              }
                             }
                           }
-                        }
+                        ]
+                      },
+                      {
+                        "properties": {
+                          "tableId": {
+                            "const": "4002a5b1"
+                          },
+                          "layoutHash": {
+                            "const": "1BF9CF3A"
+                          },
+                          "association": {
+                            "properties": {
+                              "fileDataId": {
+                                "const": "969941"
+                              }
+                            }
+                          },
+                          "decoderRevision": {
+                            "enum": [
+                              "wdc5-values-v7+table-admission-v3",
+                              "wdc5-values-v7+table-admission-projection-v3",
+                              "wdc5-values-v7+table-admission-v4",
+                              "wdc5-values-v7+table-admission-projection-v4"
+                            ]
+                          },
+                          "columns": {
+                            "type": "array",
+                            "items": [
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": true
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "LegacySlotIndex"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "TriggerType"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "Charges"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "CoolDownMSec"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "CategoryCoolDownMSec"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "SpellCategoryID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "SpellCategory",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "SpellID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "Spell",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ChrSpecializationID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "ChrSpecialization",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "PlayerConditionID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "PlayerCondition",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ParentItemID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "Item",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              }
+                            ],
+                            "minItems": 11,
+                            "maxItems": 11
+                          },
+                          "rowCount": {
+                            "type": "string",
+                            "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
+                            "maxLength": 5
+                          }
+                        },
+                        "allOf": [
+                          {
+                            "if": {
+                              "properties": {
+                                "fetchedDefinition": {
+                                  "type": "null"
+                                }
+                              }
+                            },
+                            "then": {
+                              "properties": {
+                                "decoderRevision": {
+                                  "enum": [
+                                    "wdc5-values-v7+table-admission-v4",
+                                    "wdc5-values-v7+table-admission-projection-v4"
+                                  ]
+                                }
+                              }
+                            },
+                            "else": {
+                              "properties": {
+                                "decoderRevision": {
+                                  "enum": [
+                                    "wdc5-values-v7+table-admission-v3",
+                                    "wdc5-values-v7+table-admission-projection-v3"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ]
                       }
                     ]
                   }
@@ -11226,404 +11599,777 @@
                     "$ref": "#/definitions/TableDataSnapshot"
                   },
                   {
-                    "properties": {
-                      "tableId": {
-                        "const": "4002a5b1"
-                      },
-                      "layoutHash": {
-                        "const": "4CA77678"
-                      },
-                      "association": {
-                        "properties": {
-                          "fileDataId": {
-                            "const": "969941"
-                          }
-                        }
-                      },
-                      "decoderRevision": {
-                        "enum": [
-                          "wdc5-values-v7+table-admission-v4",
-                          "wdc5-values-v7+table-admission-projection-v4"
-                        ]
-                      },
-                      "columns": {
-                        "type": "array",
-                        "items": [
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "ID"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": true
-                              },
-                              "reference": {
-                                "const": null
-                              },
-                              "interpretation": {
-                                "type": "null"
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "LegacySlotIndex"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": null
-                              },
-                              "interpretation": {
-                                "type": "null"
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "TriggerType"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": null
-                              },
-                              "interpretation": {
-                                "type": "null"
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "Charges"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": null
-                              },
-                              "interpretation": {
-                                "allOf": [
-                                  {
-                                    "$ref": "#/definitions/TableColumnInterpretation"
-                                  },
-                                  {
-                                    "properties": {
-                                      "policy": {
-                                        "const": "raw-physical-integer-v1"
-                                      },
-                                      "physicalBits": {
-                                        "const": 32
-                                      },
-                                      "physicalSigned": {
-                                        "const": false
-                                      },
-                                      "candidateBits": {
-                                        "const": 16
-                                      },
-                                      "candidateUnsigned": {
-                                        "const": false
-                                      }
-                                    }
-                                  }
-                                ]
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "CoolDownMSec"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": null
-                              },
-                              "interpretation": {
-                                "type": "null"
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "CategoryCoolDownMSec"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": null
-                              },
-                              "interpretation": {
-                                "type": "null"
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "SpellCategoryID"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": null
-                              },
-                              "interpretation": {
-                                "allOf": [
-                                  {
-                                    "$ref": "#/definitions/TableColumnInterpretation"
-                                  },
-                                  {
-                                    "properties": {
-                                      "policy": {
-                                        "const": "raw-physical-integer-v1"
-                                      },
-                                      "physicalBits": {
-                                        "const": 32
-                                      },
-                                      "physicalSigned": {
-                                        "const": false
-                                      },
-                                      "candidateBits": {
-                                        "const": 16
-                                      },
-                                      "candidateUnsigned": {
-                                        "const": true
-                                      }
-                                    }
-                                  }
-                                ]
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "SpellID"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": {
-                                  "table": "Spell",
-                                  "column": "ID"
-                                }
-                              },
-                              "interpretation": {
-                                "type": "null"
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "ChrSpecializationID"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": null
-                              },
-                              "interpretation": {
-                                "allOf": [
-                                  {
-                                    "$ref": "#/definitions/TableColumnInterpretation"
-                                  },
-                                  {
-                                    "properties": {
-                                      "policy": {
-                                        "const": "raw-physical-integer-v1"
-                                      },
-                                      "physicalBits": {
-                                        "const": 32
-                                      },
-                                      "physicalSigned": {
-                                        "const": false
-                                      },
-                                      "candidateBits": {
-                                        "const": 16
-                                      },
-                                      "candidateUnsigned": {
-                                        "const": true
-                                      }
-                                    }
-                                  }
-                                ]
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "name": {
-                                "const": "PlayerConditionID"
-                              },
-                              "family": {
-                                "const": "integer"
-                              },
-                              "isId": {
-                                "const": false
-                              },
-                              "reference": {
-                                "const": {
-                                  "table": "PlayerCondition",
-                                  "column": "ID"
-                                }
-                              },
-                              "interpretation": {
-                                "type": "null"
-                              }
-                            },
-                            "required": [
-                              "name",
-                              "family",
-                              "isId",
-                              "reference",
-                              "interpretation"
-                            ]
-                          }
-                        ],
-                        "minItems": 10,
-                        "maxItems": 10
-                      },
-                      "rowCount": {
-                        "type": "string",
-                        "pattern": "^(0|[1-9][0-9]{0,5}|1000000)$",
-                        "maxLength": 7
-                      }
-                    },
                     "anyOf": [
                       {
-                        "description": "Read with the reviewed bundled definition.",
-                        "not": {
-                          "required": [
-                            "fetchedDefinition"
-                          ]
-                        },
                         "properties": {
-                          "definitionSha256": {
-                            "const": "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c"
+                          "tableId": {
+                            "const": "4002a5b1"
                           },
-                          "providerRevision": {
-                            "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
-                          }
-                        }
-                      },
-                      {
-                        "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
-                        "required": [
-                          "fetchedDefinition"
-                        ],
-                        "properties": {
-                          "providerRevision": {
+                          "layoutHash": {
+                            "const": "4CA77678"
+                          },
+                          "association": {
+                            "properties": {
+                              "fileDataId": {
+                                "const": "969941"
+                              }
+                            }
+                          },
+                          "decoderRevision": {
+                            "enum": [
+                              "wdc5-values-v7+table-admission-v4",
+                              "wdc5-values-v7+table-admission-projection-v4"
+                            ]
+                          },
+                          "columns": {
+                            "type": "array",
+                            "items": [
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": true
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "LegacySlotIndex"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "TriggerType"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "Charges"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "allOf": [
+                                      {
+                                        "$ref": "#/definitions/TableColumnInterpretation"
+                                      },
+                                      {
+                                        "properties": {
+                                          "policy": {
+                                            "const": "raw-physical-integer-v1"
+                                          },
+                                          "physicalBits": {
+                                            "const": 32
+                                          },
+                                          "physicalSigned": {
+                                            "const": false
+                                          },
+                                          "candidateBits": {
+                                            "const": 16
+                                          },
+                                          "candidateUnsigned": {
+                                            "const": false
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "CoolDownMSec"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "CategoryCoolDownMSec"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "SpellCategoryID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "allOf": [
+                                      {
+                                        "$ref": "#/definitions/TableColumnInterpretation"
+                                      },
+                                      {
+                                        "properties": {
+                                          "policy": {
+                                            "const": "raw-physical-integer-v1"
+                                          },
+                                          "physicalBits": {
+                                            "const": 32
+                                          },
+                                          "physicalSigned": {
+                                            "const": false
+                                          },
+                                          "candidateBits": {
+                                            "const": 16
+                                          },
+                                          "candidateUnsigned": {
+                                            "const": true
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "SpellID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "Spell",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ChrSpecializationID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "allOf": [
+                                      {
+                                        "$ref": "#/definitions/TableColumnInterpretation"
+                                      },
+                                      {
+                                        "properties": {
+                                          "policy": {
+                                            "const": "raw-physical-integer-v1"
+                                          },
+                                          "physicalBits": {
+                                            "const": 32
+                                          },
+                                          "physicalSigned": {
+                                            "const": false
+                                          },
+                                          "candidateBits": {
+                                            "const": 16
+                                          },
+                                          "candidateUnsigned": {
+                                            "const": true
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "PlayerConditionID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "PlayerCondition",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              }
+                            ],
+                            "minItems": 10,
+                            "maxItems": 10
+                          },
+                          "rowCount": {
                             "type": "string",
+                            "pattern": "^(0|[1-9][0-9]{0,5}|1000000)$",
+                            "maxLength": 7
+                          }
+                        },
+                        "anyOf": [
+                          {
+                            "description": "Read with the reviewed bundled definition.",
                             "not": {
-                              "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                              "required": [
+                                "fetchedDefinition"
+                              ]
+                            },
+                            "properties": {
+                              "definitionSha256": {
+                                "const": "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c"
+                              },
+                              "providerRevision": {
+                                "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                              }
+                            }
+                          },
+                          {
+                            "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
+                            "required": [
+                              "fetchedDefinition"
+                            ],
+                            "properties": {
+                              "providerRevision": {
+                                "type": "string",
+                                "not": {
+                                  "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                                }
+                              }
                             }
                           }
-                        }
+                        ]
+                      },
+                      {
+                        "properties": {
+                          "tableId": {
+                            "const": "4002a5b1"
+                          },
+                          "layoutHash": {
+                            "const": "1BF9CF3A"
+                          },
+                          "association": {
+                            "properties": {
+                              "fileDataId": {
+                                "const": "969941"
+                              }
+                            }
+                          },
+                          "decoderRevision": {
+                            "enum": [
+                              "wdc5-values-v7+table-admission-v3",
+                              "wdc5-values-v7+table-admission-projection-v3",
+                              "wdc5-values-v7+table-admission-v4",
+                              "wdc5-values-v7+table-admission-projection-v4"
+                            ]
+                          },
+                          "columns": {
+                            "type": "array",
+                            "items": [
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": true
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "LegacySlotIndex"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "TriggerType"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "Charges"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "CoolDownMSec"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "CategoryCoolDownMSec"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": null
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "SpellCategoryID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "SpellCategory",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "SpellID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "Spell",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ChrSpecializationID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "ChrSpecialization",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "PlayerConditionID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "PlayerCondition",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              },
+                              {
+                                "properties": {
+                                  "name": {
+                                    "const": "ParentItemID"
+                                  },
+                                  "family": {
+                                    "const": "integer"
+                                  },
+                                  "isId": {
+                                    "const": false
+                                  },
+                                  "reference": {
+                                    "const": {
+                                      "table": "Item",
+                                      "column": "ID"
+                                    }
+                                  },
+                                  "interpretation": {
+                                    "type": "null"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "family",
+                                  "isId",
+                                  "reference",
+                                  "interpretation"
+                                ]
+                              }
+                            ],
+                            "minItems": 11,
+                            "maxItems": 11
+                          },
+                          "rowCount": {
+                            "type": "string",
+                            "pattern": "^(0|[1-9][0-9]{0,5}|1000000)$",
+                            "maxLength": 7
+                          }
+                        },
+                        "allOf": [
+                          {
+                            "if": {
+                              "properties": {
+                                "fetchedDefinition": {
+                                  "type": "null"
+                                }
+                              }
+                            },
+                            "then": {
+                              "properties": {
+                                "decoderRevision": {
+                                  "enum": [
+                                    "wdc5-values-v7+table-admission-v4",
+                                    "wdc5-values-v7+table-admission-projection-v4"
+                                  ]
+                                }
+                              }
+                            },
+                            "else": {
+                              "properties": {
+                                "decoderRevision": {
+                                  "enum": [
+                                    "wdc5-values-v7+table-admission-v3",
+                                    "wdc5-values-v7+table-admission-projection-v3"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ]
                       }
                     ]
                   }
@@ -12068,7 +12814,10 @@
       "type": "object",
       "properties": {
         "tableId": {
-          "const": "00cb674f"
+          "enum": [
+            "00cb674f",
+            "4002a5b1"
+          ]
         },
         "columnIndex": {
           "type": "integer",
@@ -12087,46 +12836,13 @@
       "type": "object",
       "properties": {
         "rowId": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ItemEffectsFieldReference"
-            },
-            {
-              "properties": {
-                "columnIndex": {
-                  "const": 0
-                }
-              }
-            }
-          ]
+          "$ref": "#/definitions/ItemEffectsFieldReference"
         },
         "itemEffectId": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ItemEffectsFieldReference"
-            },
-            {
-              "properties": {
-                "columnIndex": {
-                  "const": 1
-                }
-              }
-            }
-          ]
+          "$ref": "#/definitions/ItemEffectsFieldReference"
         },
         "itemId": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ItemEffectsFieldReference"
-            },
-            {
-              "properties": {
-                "columnIndex": {
-                  "const": 2
-                }
-              }
-            }
-          ]
+          "$ref": "#/definitions/ItemEffectsFieldReference"
         }
       },
       "required": [
@@ -12134,7 +12850,77 @@
         "itemEffectId",
         "itemId"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "rowId": {
+              "properties": {
+                "tableId": {
+                  "const": "00cb674f"
+                },
+                "columnIndex": {
+                  "const": 0
+                }
+              }
+            },
+            "itemEffectId": {
+              "properties": {
+                "tableId": {
+                  "const": "00cb674f"
+                },
+                "columnIndex": {
+                  "const": 1
+                }
+              }
+            },
+            "itemId": {
+              "properties": {
+                "tableId": {
+                  "const": "00cb674f"
+                },
+                "columnIndex": {
+                  "const": 2
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "rowId": {
+              "properties": {
+                "tableId": {
+                  "const": "4002a5b1"
+                },
+                "columnIndex": {
+                  "const": 0
+                }
+              }
+            },
+            "itemEffectId": {
+              "properties": {
+                "tableId": {
+                  "const": "4002a5b1"
+                },
+                "columnIndex": {
+                  "const": 0
+                }
+              }
+            },
+            "itemId": {
+              "properties": {
+                "tableId": {
+                  "const": "4002a5b1"
+                },
+                "columnIndex": {
+                  "const": 10
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "ItemEffectsIndexSnapshot": {
       "title": "ItemEffectsIndexSnapshot",
@@ -12163,153 +12949,526 @@
               "$ref": "#/definitions/TableDataSnapshot"
             },
             {
-              "properties": {
-                "tableId": {
-                  "const": "00cb674f"
-                },
-                "layoutHash": {
-                  "const": "96F083AD"
-                },
-                "association": {
-                  "properties": {
-                    "fileDataId": {
-                      "const": "3177687"
-                    }
-                  }
-                },
-                "decoderRevision": {
-                  "enum": [
-                    "wdc5-values-v7+table-admission-v3",
-                    "wdc5-values-v7+table-admission-projection-v3"
-                  ]
-                },
-                "columns": {
-                  "type": "array",
-                  "items": [
-                    {
-                      "properties": {
-                        "name": {
-                          "const": "ID"
-                        },
-                        "family": {
-                          "const": "integer"
-                        },
-                        "isId": {
-                          "const": true
-                        },
-                        "reference": {
-                          "const": null
-                        },
-                        "interpretation": {
-                          "type": "null"
-                        }
-                      },
-                      "required": [
-                        "name",
-                        "family",
-                        "isId",
-                        "reference",
-                        "interpretation"
-                      ]
-                    },
-                    {
-                      "properties": {
-                        "name": {
-                          "const": "ItemEffectID"
-                        },
-                        "family": {
-                          "const": "integer"
-                        },
-                        "isId": {
-                          "const": false
-                        },
-                        "reference": {
-                          "const": {
-                            "table": "ItemEffect",
-                            "column": "ID"
-                          }
-                        },
-                        "interpretation": {
-                          "type": "null"
-                        }
-                      },
-                      "required": [
-                        "name",
-                        "family",
-                        "isId",
-                        "reference",
-                        "interpretation"
-                      ]
-                    },
-                    {
-                      "properties": {
-                        "name": {
-                          "const": "ItemID"
-                        },
-                        "family": {
-                          "const": "integer"
-                        },
-                        "isId": {
-                          "const": false
-                        },
-                        "reference": {
-                          "const": {
-                            "table": "Item",
-                            "column": "ID"
-                          }
-                        },
-                        "interpretation": {
-                          "type": "null"
-                        }
-                      },
-                      "required": [
-                        "name",
-                        "family",
-                        "isId",
-                        "reference",
-                        "interpretation"
-                      ]
-                    }
-                  ],
-                  "minItems": 3,
-                  "maxItems": 3
-                },
-                "rowCount": {
-                  "type": "string",
-                  "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
-                  "maxLength": 5
-                }
-              },
               "anyOf": [
                 {
-                  "description": "Read with the reviewed bundled definition.",
-                  "not": {
-                    "required": [
-                      "fetchedDefinition"
-                    ]
-                  },
                   "properties": {
-                    "definitionSha256": {
-                      "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
+                    "tableId": {
+                      "const": "00cb674f"
                     },
-                    "providerRevision": {
-                      "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
-                    }
-                  }
-                },
-                {
-                  "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
-                  "required": [
-                    "fetchedDefinition"
-                  ],
-                  "properties": {
-                    "providerRevision": {
+                    "layoutHash": {
+                      "const": "96F083AD"
+                    },
+                    "association": {
+                      "properties": {
+                        "fileDataId": {
+                          "const": "3177687"
+                        }
+                      }
+                    },
+                    "decoderRevision": {
+                      "enum": [
+                        "wdc5-values-v7+table-admission-v3",
+                        "wdc5-values-v7+table-admission-projection-v3"
+                      ]
+                    },
+                    "columns": {
+                      "type": "array",
+                      "items": [
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": true
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ItemEffectID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "ItemEffect",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ItemID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "Item",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        }
+                      ],
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "rowCount": {
                       "type": "string",
+                      "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
+                      "maxLength": 5
+                    }
+                  },
+                  "anyOf": [
+                    {
+                      "description": "Read with the reviewed bundled definition.",
                       "not": {
-                        "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                        "required": [
+                          "fetchedDefinition"
+                        ]
+                      },
+                      "properties": {
+                        "definitionSha256": {
+                          "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
+                        },
+                        "providerRevision": {
+                          "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                        }
+                      }
+                    },
+                    {
+                      "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
+                      "required": [
+                        "fetchedDefinition"
+                      ],
+                      "properties": {
+                        "providerRevision": {
+                          "type": "string",
+                          "not": {
+                            "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                          }
+                        }
                       }
                     }
-                  }
+                  ]
+                },
+                {
+                  "properties": {
+                    "tableId": {
+                      "const": "4002a5b1"
+                    },
+                    "layoutHash": {
+                      "const": "1BF9CF3A"
+                    },
+                    "association": {
+                      "properties": {
+                        "fileDataId": {
+                          "const": "969941"
+                        }
+                      }
+                    },
+                    "decoderRevision": {
+                      "enum": [
+                        "wdc5-values-v7+table-admission-v3",
+                        "wdc5-values-v7+table-admission-projection-v3",
+                        "wdc5-values-v7+table-admission-v4",
+                        "wdc5-values-v7+table-admission-projection-v4"
+                      ]
+                    },
+                    "columns": {
+                      "type": "array",
+                      "items": [
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": true
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "LegacySlotIndex"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "TriggerType"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "Charges"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "CoolDownMSec"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "CategoryCoolDownMSec"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "SpellCategoryID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "SpellCategory",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "SpellID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "Spell",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ChrSpecializationID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "ChrSpecialization",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "PlayerConditionID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "PlayerCondition",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ParentItemID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "Item",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        }
+                      ],
+                      "minItems": 11,
+                      "maxItems": 11
+                    },
+                    "rowCount": {
+                      "type": "string",
+                      "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
+                      "maxLength": 5
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "fetchedDefinition": {
+                            "type": "null"
+                          }
+                        }
+                      },
+                      "then": {
+                        "properties": {
+                          "decoderRevision": {
+                            "enum": [
+                              "wdc5-values-v7+table-admission-v4",
+                              "wdc5-values-v7+table-admission-projection-v4"
+                            ]
+                          }
+                        }
+                      },
+                      "else": {
+                        "properties": {
+                          "decoderRevision": {
+                            "enum": [
+                              "wdc5-values-v7+table-admission-v3",
+                              "wdc5-values-v7+table-admission-projection-v3"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
                 }
               ]
             }
@@ -12401,6 +13560,19 @@
               "type": "null"
             }
           ]
+        },
+        "link": {
+          "anyOf": [
+            {
+              "enum": [
+                "itemXItemEffect",
+                "parentItemId"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -12410,7 +13582,8 @@
         "snapshot",
         "observedAssociations",
         "source",
-        "problem"
+        "problem",
+        "link"
       ],
       "additionalProperties": false,
       "allOf": [
@@ -12888,6 +14061,95 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "type": "object",
+                "required": [
+                  "snapshot"
+                ],
+                "properties": {
+                  "snapshot": {
+                    "type": "object",
+                    "required": [
+                      "tableId"
+                    ],
+                    "properties": {
+                      "tableId": {
+                        "const": "00cb674f"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "then": {
+            "properties": {
+              "link": {
+                "const": "itemXItemEffect"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "type": "object",
+                "required": [
+                  "snapshot"
+                ],
+                "properties": {
+                  "snapshot": {
+                    "type": "object",
+                    "required": [
+                      "tableId"
+                    ],
+                    "properties": {
+                      "tableId": {
+                        "const": "4002a5b1"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "then": {
+            "properties": {
+              "link": {
+                "const": "parentItemId"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "then": {
+            "properties": {
+              "link": {
+                "type": "null"
+              }
+            }
+          }
         }
       ]
     },
@@ -12940,7 +14202,11 @@
           "else": {
             "properties": {
               "columnIndex": {
-                "const": 7
+                "enum": [
+                  0,
+                  7,
+                  10
+                ]
               }
             }
           }
@@ -13036,34 +14302,6 @@
               }
             }
           }
-        },
-        {
-          "if": {
-            "properties": {
-              "tableId": {
-                "const": "00cb674f"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "sourceOrdinal": {
-                "type": "string",
-                "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-4]|65535)$",
-                "maxLength": 5
-              },
-              "columnIndex": {
-                "type": "null"
-              }
-            }
-          },
-          "else": {
-            "properties": {
-              "sourceOrdinal": {
-                "type": "null"
-              }
-            }
-          }
         }
       ]
     },
@@ -13082,7 +14320,18 @@
             {
               "properties": {
                 "tableId": {
-                  "const": "00cb674f"
+                  "enum": [
+                    "00cb674f",
+                    "4002a5b1"
+                  ]
+                },
+                "sourceOrdinal": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-4]|65535)$",
+                  "maxLength": 5
+                },
+                "columnIndex": {
+                  "type": "null"
                 }
               }
             }
@@ -13096,10 +14345,16 @@
             {
               "properties": {
                 "tableId": {
-                  "const": "00cb674f"
+                  "enum": [
+                    "00cb674f",
+                    "4002a5b1"
+                  ]
                 },
                 "columnIndex": {
-                  "const": 2
+                  "enum": [
+                    2,
+                    10
+                  ]
                 }
               }
             }
@@ -13113,10 +14368,16 @@
             {
               "properties": {
                 "tableId": {
-                  "const": "00cb674f"
+                  "enum": [
+                    "00cb674f",
+                    "4002a5b1"
+                  ]
                 },
                 "columnIndex": {
-                  "const": 1
+                  "enum": [
+                    0,
+                    1
+                  ]
                 }
               }
             }
@@ -13129,7 +14390,70 @@
         "parentItemId",
         "itemEffectId"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "bridge": {
+                "properties": {
+                  "tableId": {
+                    "const": "00cb674f"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parentItemId": {
+                "properties": {
+                  "tableId": {
+                    "const": "00cb674f"
+                  },
+                  "columnIndex": {
+                    "const": 2
+                  }
+                }
+              },
+              "itemEffectId": {
+                "properties": {
+                  "tableId": {
+                    "const": "00cb674f"
+                  },
+                  "columnIndex": {
+                    "const": 1
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "parentItemId": {
+                "properties": {
+                  "tableId": {
+                    "const": "4002a5b1"
+                  },
+                  "columnIndex": {
+                    "const": 10
+                  }
+                }
+              },
+              "itemEffectId": {
+                "properties": {
+                  "tableId": {
+                    "const": "4002a5b1"
+                  },
+                  "columnIndex": {
+                    "const": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "ItemEffectsPage": {
       "title": "ItemEffectsPage",
@@ -13151,153 +14475,526 @@
               "$ref": "#/definitions/TableDataSnapshot"
             },
             {
-              "properties": {
-                "tableId": {
-                  "const": "00cb674f"
-                },
-                "layoutHash": {
-                  "const": "96F083AD"
-                },
-                "association": {
-                  "properties": {
-                    "fileDataId": {
-                      "const": "3177687"
-                    }
-                  }
-                },
-                "decoderRevision": {
-                  "enum": [
-                    "wdc5-values-v7+table-admission-v3",
-                    "wdc5-values-v7+table-admission-projection-v3"
-                  ]
-                },
-                "columns": {
-                  "type": "array",
-                  "items": [
-                    {
-                      "properties": {
-                        "name": {
-                          "const": "ID"
-                        },
-                        "family": {
-                          "const": "integer"
-                        },
-                        "isId": {
-                          "const": true
-                        },
-                        "reference": {
-                          "const": null
-                        },
-                        "interpretation": {
-                          "type": "null"
-                        }
-                      },
-                      "required": [
-                        "name",
-                        "family",
-                        "isId",
-                        "reference",
-                        "interpretation"
-                      ]
-                    },
-                    {
-                      "properties": {
-                        "name": {
-                          "const": "ItemEffectID"
-                        },
-                        "family": {
-                          "const": "integer"
-                        },
-                        "isId": {
-                          "const": false
-                        },
-                        "reference": {
-                          "const": {
-                            "table": "ItemEffect",
-                            "column": "ID"
-                          }
-                        },
-                        "interpretation": {
-                          "type": "null"
-                        }
-                      },
-                      "required": [
-                        "name",
-                        "family",
-                        "isId",
-                        "reference",
-                        "interpretation"
-                      ]
-                    },
-                    {
-                      "properties": {
-                        "name": {
-                          "const": "ItemID"
-                        },
-                        "family": {
-                          "const": "integer"
-                        },
-                        "isId": {
-                          "const": false
-                        },
-                        "reference": {
-                          "const": {
-                            "table": "Item",
-                            "column": "ID"
-                          }
-                        },
-                        "interpretation": {
-                          "type": "null"
-                        }
-                      },
-                      "required": [
-                        "name",
-                        "family",
-                        "isId",
-                        "reference",
-                        "interpretation"
-                      ]
-                    }
-                  ],
-                  "minItems": 3,
-                  "maxItems": 3
-                },
-                "rowCount": {
-                  "type": "string",
-                  "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
-                  "maxLength": 5
-                }
-              },
               "anyOf": [
                 {
-                  "description": "Read with the reviewed bundled definition.",
-                  "not": {
-                    "required": [
-                      "fetchedDefinition"
-                    ]
-                  },
                   "properties": {
-                    "definitionSha256": {
-                      "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
+                    "tableId": {
+                      "const": "00cb674f"
                     },
-                    "providerRevision": {
-                      "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
-                    }
-                  }
-                },
-                {
-                  "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
-                  "required": [
-                    "fetchedDefinition"
-                  ],
-                  "properties": {
-                    "providerRevision": {
+                    "layoutHash": {
+                      "const": "96F083AD"
+                    },
+                    "association": {
+                      "properties": {
+                        "fileDataId": {
+                          "const": "3177687"
+                        }
+                      }
+                    },
+                    "decoderRevision": {
+                      "enum": [
+                        "wdc5-values-v7+table-admission-v3",
+                        "wdc5-values-v7+table-admission-projection-v3"
+                      ]
+                    },
+                    "columns": {
+                      "type": "array",
+                      "items": [
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": true
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ItemEffectID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "ItemEffect",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ItemID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "Item",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        }
+                      ],
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "rowCount": {
                       "type": "string",
+                      "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
+                      "maxLength": 5
+                    }
+                  },
+                  "anyOf": [
+                    {
+                      "description": "Read with the reviewed bundled definition.",
                       "not": {
-                        "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                        "required": [
+                          "fetchedDefinition"
+                        ]
+                      },
+                      "properties": {
+                        "definitionSha256": {
+                          "const": "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"
+                        },
+                        "providerRevision": {
+                          "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                        }
+                      }
+                    },
+                    {
+                      "description": "Read with a definition fetched from WoWDBDefs (D101): providerRevision is its own commit, never the bundled one.",
+                      "required": [
+                        "fetchedDefinition"
+                      ],
+                      "properties": {
+                        "providerRevision": {
+                          "type": "string",
+                          "not": {
+                            "const": "b9a63096cdd99b26967f17f9515377ae62cadfd7"
+                          }
+                        }
                       }
                     }
-                  }
+                  ]
+                },
+                {
+                  "properties": {
+                    "tableId": {
+                      "const": "4002a5b1"
+                    },
+                    "layoutHash": {
+                      "const": "1BF9CF3A"
+                    },
+                    "association": {
+                      "properties": {
+                        "fileDataId": {
+                          "const": "969941"
+                        }
+                      }
+                    },
+                    "decoderRevision": {
+                      "enum": [
+                        "wdc5-values-v7+table-admission-v3",
+                        "wdc5-values-v7+table-admission-projection-v3",
+                        "wdc5-values-v7+table-admission-v4",
+                        "wdc5-values-v7+table-admission-projection-v4"
+                      ]
+                    },
+                    "columns": {
+                      "type": "array",
+                      "items": [
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": true
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "LegacySlotIndex"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "TriggerType"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "Charges"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "CoolDownMSec"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "CategoryCoolDownMSec"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": null
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "SpellCategoryID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "SpellCategory",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "SpellID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "Spell",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ChrSpecializationID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "ChrSpecialization",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "PlayerConditionID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "PlayerCondition",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "const": "ParentItemID"
+                            },
+                            "family": {
+                              "const": "integer"
+                            },
+                            "isId": {
+                              "const": false
+                            },
+                            "reference": {
+                              "const": {
+                                "table": "Item",
+                                "column": "ID"
+                              }
+                            },
+                            "interpretation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "family",
+                            "isId",
+                            "reference",
+                            "interpretation"
+                          ]
+                        }
+                      ],
+                      "minItems": 11,
+                      "maxItems": 11
+                    },
+                    "rowCount": {
+                      "type": "string",
+                      "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]{1}|6553[0-5]|65536)$",
+                      "maxLength": 5
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "fetchedDefinition": {
+                            "type": "null"
+                          }
+                        }
+                      },
+                      "then": {
+                        "properties": {
+                          "decoderRevision": {
+                            "enum": [
+                              "wdc5-values-v7+table-admission-v4",
+                              "wdc5-values-v7+table-admission-projection-v4"
+                            ]
+                          }
+                        }
+                      },
+                      "else": {
+                        "properties": {
+                          "decoderRevision": {
+                            "enum": [
+                              "wdc5-values-v7+table-admission-v3",
+                              "wdc5-values-v7+table-admission-projection-v3"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
                 }
               ]
             }
@@ -13475,46 +15172,71 @@
             }
           },
           "then": {
-            "properties": {
-              "columnIndex": {
-                "const": 3
-              },
-              "evidence": {
-                "const": "rawPhysicalInteger"
-              },
-              "value": {
-                "$ref": "#/definitions/CreatureId"
-              },
-              "candidateReference": {
-                "const": null
-              },
-              "interpretation": {
-                "allOf": [
-                  {
-                    "$ref": "#/definitions/TableColumnInterpretation"
+            "anyOf": [
+              {
+                "properties": {
+                  "columnIndex": {
+                    "const": 3
                   },
-                  {
-                    "properties": {
-                      "policy": {
-                        "const": "raw-physical-integer-v1"
+                  "evidence": {
+                    "const": "rawPhysicalInteger"
+                  },
+                  "value": {
+                    "$ref": "#/definitions/CreatureId"
+                  },
+                  "candidateReference": {
+                    "const": null
+                  },
+                  "interpretation": {
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/TableColumnInterpretation"
                       },
-                      "physicalBits": {
-                        "const": 32
-                      },
-                      "physicalSigned": {
-                        "const": false
-                      },
-                      "candidateBits": {
-                        "const": 16
-                      },
-                      "candidateUnsigned": {
-                        "const": false
+                      {
+                        "properties": {
+                          "policy": {
+                            "const": "raw-physical-integer-v1"
+                          },
+                          "physicalBits": {
+                            "const": 32
+                          },
+                          "physicalSigned": {
+                            "const": false
+                          },
+                          "candidateBits": {
+                            "const": 16
+                          },
+                          "candidateUnsigned": {
+                            "const": false
+                          }
+                        }
                       }
-                    }
+                    ]
                   }
-                ]
+                }
+              },
+              {
+                "properties": {
+                  "columnIndex": {
+                    "const": 3
+                  },
+                  "evidence": {
+                    "const": "strictNumeric"
+                  },
+                  "value": {
+                    "type": "string",
+                    "pattern": "^(0|-?([1-9][0-9]{0,3}|[12][0-9]{4}|3[01][0-9]{3}|32[0-6][0-9]{2}|327[0-5][0-9]|3276[0-7])|-32768)$",
+                    "maxLength": 6
+                  },
+                  "candidateReference": {
+                    "const": null
+                  },
+                  "interpretation": {
+                    "type": "null"
+                  }
+                }
               }
-            }
+            ]
           }
         },
         {
@@ -13586,49 +15308,77 @@
             }
           },
           "then": {
-            "properties": {
-              "columnIndex": {
-                "const": 6
-              },
-              "evidence": {
-                "const": "rawPhysicalInteger"
-              },
-              "value": {
-                "$ref": "#/definitions/CreatureId"
-              },
-              "candidateReference": {
-                "const": {
-                  "table": "SpellCategory",
-                  "column": "ID"
+            "anyOf": [
+              {
+                "properties": {
+                  "columnIndex": {
+                    "const": 6
+                  },
+                  "evidence": {
+                    "const": "rawPhysicalInteger"
+                  },
+                  "value": {
+                    "$ref": "#/definitions/CreatureId"
+                  },
+                  "candidateReference": {
+                    "const": {
+                      "table": "SpellCategory",
+                      "column": "ID"
+                    }
+                  },
+                  "interpretation": {
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/TableColumnInterpretation"
+                      },
+                      {
+                        "properties": {
+                          "policy": {
+                            "const": "raw-physical-integer-v1"
+                          },
+                          "physicalBits": {
+                            "const": 32
+                          },
+                          "physicalSigned": {
+                            "const": false
+                          },
+                          "candidateBits": {
+                            "const": 16
+                          },
+                          "candidateUnsigned": {
+                            "const": true
+                          }
+                        }
+                      }
+                    ]
+                  }
                 }
               },
-              "interpretation": {
-                "allOf": [
-                  {
-                    "$ref": "#/definitions/TableColumnInterpretation"
+              {
+                "properties": {
+                  "columnIndex": {
+                    "const": 6
                   },
-                  {
-                    "properties": {
-                      "policy": {
-                        "const": "raw-physical-integer-v1"
-                      },
-                      "physicalBits": {
-                        "const": 32
-                      },
-                      "physicalSigned": {
-                        "const": false
-                      },
-                      "candidateBits": {
-                        "const": 16
-                      },
-                      "candidateUnsigned": {
-                        "const": true
-                      }
+                  "evidence": {
+                    "const": "strictNumeric"
+                  },
+                  "value": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$",
+                    "maxLength": 5
+                  },
+                  "candidateReference": {
+                    "const": {
+                      "table": "SpellCategory",
+                      "column": "ID"
                     }
+                  },
+                  "interpretation": {
+                    "type": "null"
                   }
-                ]
+                }
               }
-            }
+            ]
           }
         },
         {
@@ -13670,49 +15420,77 @@
             }
           },
           "then": {
-            "properties": {
-              "columnIndex": {
-                "const": 8
-              },
-              "evidence": {
-                "const": "rawPhysicalInteger"
-              },
-              "value": {
-                "$ref": "#/definitions/CreatureId"
-              },
-              "candidateReference": {
-                "const": {
-                  "table": "ChrSpecialization",
-                  "column": "ID"
+            "anyOf": [
+              {
+                "properties": {
+                  "columnIndex": {
+                    "const": 8
+                  },
+                  "evidence": {
+                    "const": "rawPhysicalInteger"
+                  },
+                  "value": {
+                    "$ref": "#/definitions/CreatureId"
+                  },
+                  "candidateReference": {
+                    "const": {
+                      "table": "ChrSpecialization",
+                      "column": "ID"
+                    }
+                  },
+                  "interpretation": {
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/TableColumnInterpretation"
+                      },
+                      {
+                        "properties": {
+                          "policy": {
+                            "const": "raw-physical-integer-v1"
+                          },
+                          "physicalBits": {
+                            "const": 32
+                          },
+                          "physicalSigned": {
+                            "const": false
+                          },
+                          "candidateBits": {
+                            "const": 16
+                          },
+                          "candidateUnsigned": {
+                            "const": true
+                          }
+                        }
+                      }
+                    ]
+                  }
                 }
               },
-              "interpretation": {
-                "allOf": [
-                  {
-                    "$ref": "#/definitions/TableColumnInterpretation"
+              {
+                "properties": {
+                  "columnIndex": {
+                    "const": 8
                   },
-                  {
-                    "properties": {
-                      "policy": {
-                        "const": "raw-physical-integer-v1"
-                      },
-                      "physicalBits": {
-                        "const": 32
-                      },
-                      "physicalSigned": {
-                        "const": false
-                      },
-                      "candidateBits": {
-                        "const": 16
-                      },
-                      "candidateUnsigned": {
-                        "const": true
-                      }
+                  "evidence": {
+                    "const": "strictNumeric"
+                  },
+                  "value": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$",
+                    "maxLength": 5
+                  },
+                  "candidateReference": {
+                    "const": {
+                      "table": "ChrSpecialization",
+                      "column": "ID"
                     }
+                  },
+                  "interpretation": {
+                    "type": "null"
                   }
-                ]
+                }
               }
-            }
+            ]
           }
         },
         {
@@ -13790,6 +15568,13 @@
                       "const": "4002a5b1"
                     },
                     "columnIndex": {
+                      "type": "null"
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "sourceOrdinal": {
                       "type": "null"
                     }
                   }
@@ -13987,7 +15772,18 @@
           "then": {
             "properties": {
               "target": {
-                "$ref": "#/definitions/ItemEffectsSourceReference"
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsSourceReference"
+                  },
+                  {
+                    "properties": {
+                      "sourceOrdinal": {
+                        "type": "null"
+                      }
+                    }
+                  }
+                ]
               },
               "observedCandidates": {
                 "const": "1"
@@ -14605,6 +16401,13 @@
                       "type": "null"
                     }
                   }
+                },
+                {
+                  "properties": {
+                    "sourceOrdinal": {
+                      "type": "null"
+                    }
+                  }
                 }
               ]
             },
@@ -14682,7 +16485,18 @@
           "then": {
             "properties": {
               "target": {
-                "$ref": "#/definitions/ItemEffectsSourceReference"
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsSourceReference"
+                  },
+                  {
+                    "properties": {
+                      "sourceOrdinal": {
+                        "type": "null"
+                      }
+                    }
+                  }
+                ]
               },
               "observedCandidates": {
                 "const": "1"
@@ -15233,6 +17047,13 @@
                   "const": 1
                 }
               }
+            },
+            {
+              "properties": {
+                "sourceOrdinal": {
+                  "type": "null"
+                }
+              }
             }
           ]
         }
@@ -15281,6 +17102,13 @@
                       "const": "46c66698"
                     },
                     "columnIndex": {
+                      "type": "null"
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "sourceOrdinal": {
                       "type": "null"
                     }
                   }
@@ -15376,7 +17204,18 @@
                 "const": "1"
               },
               "target": {
-                "$ref": "#/definitions/ItemEffectsSourceReference"
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsSourceReference"
+                  },
+                  {
+                    "properties": {
+                      "sourceOrdinal": {
+                        "type": "null"
+                      }
+                    }
+                  }
+                ]
               },
               "absence": {
                 "type": "null"
@@ -15414,7 +17253,18 @@
                 "const": "1"
               },
               "target": {
-                "$ref": "#/definitions/ItemEffectsSourceReference"
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsSourceReference"
+                  },
+                  {
+                    "properties": {
+                      "sourceOrdinal": {
+                        "type": "null"
+                      }
+                    }
+                  }
+                ]
               },
               "absence": {
                 "type": "null"
@@ -15450,7 +17300,18 @@
                 "const": "1"
               },
               "target": {
-                "$ref": "#/definitions/ItemEffectsSourceReference"
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsSourceReference"
+                  },
+                  {
+                    "properties": {
+                      "sourceOrdinal": {
+                        "type": "null"
+                      }
+                    }
+                  }
+                ]
               },
               "absence": {
                 "type": "null"
@@ -15486,7 +17347,18 @@
                 "const": "1"
               },
               "target": {
-                "$ref": "#/definitions/ItemEffectsSourceReference"
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ItemEffectsSourceReference"
+                  },
+                  {
+                    "properties": {
+                      "sourceOrdinal": {
+                        "type": "null"
+                      }
+                    }
+                  }
+                ]
               },
               "absence": {
                 "type": "null"

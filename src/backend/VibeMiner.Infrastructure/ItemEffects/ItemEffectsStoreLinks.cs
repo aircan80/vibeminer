@@ -12,7 +12,7 @@ public sealed partial class ItemEffectsStore
         new(source, bridge.Source.CapturedSnapshot!, bridge.Index) : null;
     private static ItemEffectsBridgeBinding Binding(ItemEffectsItemsProof original, SourceProbe source) => new(
         original.Snapshot.Context, original.Opening.Build.Version, original.Opening.Reference, original.Configurations,
-        source.CapturedSnapshot!, source.Admission!.Artifact, new(new("00cb674f", 0), new("00cb674f", 1), new("00cb674f", 2)));
+        source.CapturedSnapshot!, source.Admission!.Artifact, source.Link.Fields);
 
     public Task<ItemEffectsReadiness> ReadAsync(ItemEffectsSelection selection, CancellationToken token) =>
         RunAsync(false, null, token, operation => LinksAsync(selection, false, operation));
@@ -33,7 +33,8 @@ public sealed partial class ItemEffectsStore
             var result = Readiness(selection, resolution, null);
             await CountAsync(result, token); await FinishAsync(original, resolution, [], token); return result;
         }
-        await operation.ReportAsync(new(prepare ? "Preparing effects bridge index" : "Verifying local effects bridge", "stage", TableId: "00cb674f"));
+        var bridgeTable = Role(resolution.Source).TableId;
+        await operation.ReportAsync(new(prepare ? "Preparing effects bridge index" : "Verifying local effects bridge", "stage", TableId: bridgeTable));
         BridgeBorrow? borrow = null;
         try
         {
@@ -48,7 +49,7 @@ public sealed partial class ItemEffectsStore
             {
                 var index = borrow.Index!;
                 var incoming = index.Artifact with { Binding = Binding(original, resolution.Source) };
-                await operation.ReportAsync(new("Saving exact effects bridge admission", "stage", TableId: "00cb674f"));
+                await operation.ReportAsync(new("Saving exact effects bridge admission", "stage", TableId: bridgeTable));
                 var preparedAt = clock.GetUtcNow().ToString("O", CultureInfo.InvariantCulture);
                 var saved = await CatalogCopyAsync(() => catalog.CommitItemEffectsBridgeAdmissionAsync(original, incoming, preparedAt, token), token);
                 resolution = resolution with { Index = saved };
@@ -69,13 +70,15 @@ public sealed partial class ItemEffectsStore
     private static ItemEffectsReadiness Readiness(ItemEffectsSelection selection, BridgeResolution resolution, uint? count)
     {
         var source = resolution.Source.Public;
+        // The build's link, so every state can name its link table even without a snapshot (#86); null while undecided.
+        var link = resolution.Source.Provisional ? null : resolution.Source.Link.Name;
         if (source.State == ItemEffectsSourceState.Ready && resolution.Index is { } index && count is not null)
             return new(selection, true, ItemEffectsReadinessState.Ready,
                 new(selection.Context, index.Artifact.ContentKey, index.PreparedAt, ItemEffectsValidation.IndexRevision,
-                    ItemEffectsValidation.OrderPolicy, source.Snapshot!, index.Artifact.Binding.Fields, index.Artifact.RowCount), N(count.Value), source);
+                    ItemEffectsValidation.OrderPolicy, source.Snapshot!, index.Artifact.Binding.Fields, index.Artifact.RowCount), N(count.Value), source, Link: link);
         if (source.State is ItemEffectsSourceState.NotPrepared or ItemEffectsSourceState.Ready)
-            return new(selection, true, ItemEffectsReadinessState.NotPrepared, Source: source);
-        return new(selection, true, Enum.Parse<ItemEffectsReadinessState>(source.State.ToString()), Source: source, Problem: source.Problem);
+            return new(selection, true, ItemEffectsReadinessState.NotPrepared, Source: source, Link: link);
+        return new(selection, true, Enum.Parse<ItemEffectsReadinessState>(source.State.ToString()), Source: source, Problem: source.Problem, Link: link);
     }
     private async Task<BridgeResolution> ResolveBridgeAsync(ItemEffectsItemsProof original, bool prepare, Operation operation)
     {

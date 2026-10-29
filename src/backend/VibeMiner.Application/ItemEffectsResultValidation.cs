@@ -13,6 +13,12 @@ public static partial class ItemEffectsValidation
     {
         Require(value is not null && value.Selection == selection && Enum.IsDefined(value.State));
         if (value.Source is not null) Source(value.Source, ItemEffectsSourceRole.Bridge, selection.Context);
+        // The build's link names its table even with no snapshot (#86); it is null only with no source or while undecided,
+        // and a snapshot's own table and layout must be that link's bridge.
+        Require(value.Link is null || ItemEffectsLinks.All.Any(link => link.Name == value.Link));
+        Require(value.Source is not null || value.Link is null);
+        if (value.Source?.Snapshot is { } bridgeSnapshot) Require(value.Link == Link(bridgeSnapshot).Name);
+        if (value.State == ItemEffectsReadinessState.Ready) Require(value.Link is not null);
         if (value.State == ItemEffectsReadinessState.MissingItem)
         { Require(!value.Admitted && value.Snapshot is null && value.Source is null && value.ObservedAssociations is null && value.Problem is null); return; }
         Require(value.Admitted);
@@ -43,6 +49,7 @@ public static partial class ItemEffectsValidation
         Require(Unsigned(request.Selection.ItemId, int.MaxValue));
         Require(value is not null && value.Selection == request.Selection && value.BridgeIndexArtifactId == request.BridgeIndexArtifactId && value.OrderPolicy == OrderPolicy);
         Snapshot(value.BridgeSource, ItemEffectsSourceRole.Bridge, request.Selection.Context);
+        var link = Link(value.BridgeSource);
         var total = U(value.BridgeSource.RowCount);
         Require(total <= 65536 && Count(value.ObservedAssociations, total));
         var edges = Entries(value.Edges, request.Limit);
@@ -55,8 +62,11 @@ public static partial class ItemEffectsValidation
             Require(ordinal < total && (previous is null || ordinal == previous + 1)); previous = ordinal;
             Reference(edge.Bridge, value.BridgeSource, null);
             Require(Count(edge.Bridge.SourceOrdinal, total == 0 ? 0 : total - 1));
-            Numeric(edge.ParentItemId, BridgeTable, 2); Numeric(edge.ItemEffectId, BridgeTable, 1);
+            Numeric(edge.ParentItemId, link.Fields.ItemId.TableId, link.Fields.ItemId.ColumnIndex);
+            Numeric(edge.ItemEffectId, link.Fields.ItemEffectId.TableId, link.Fields.ItemEffectId.ColumnIndex);
             Require(edge.ParentItemId.Value == request.Selection.ItemId);
+            // ParentItemID links: the ItemEffect row is its own effect, so the key is that row's ID (#86).
+            if (link.SameTable) Require(edge.ItemEffectId.Value == edge.Bridge.RowId);
         }
         if (request.After is not null)
         {
@@ -196,14 +206,23 @@ public static partial class ItemEffectsValidation
             else { Require(value.HistoricalArtifactId is null); Problem(value.Problem, value.State.ToString()); }
         }
     }
+    // The reviewed profile this snapshot is for its role: by exact table and layout, never by role alone (#86).
+    private static ItemEffectsTableProfile Profile(TableDataSnapshot value, ItemEffectsSourceRole role)
+    {
+        Require(value is not null);
+        var profile = role switch
+        {
+            ItemEffectsSourceRole.Bridge => ItemEffectsLinks.ForBridge(value.TableId, value.LayoutHash)?.Bridge,
+            ItemEffectsSourceRole.Effect => ItemEffectsLinks.ForEffect(value.TableId, value.LayoutHash)?.Effect,
+            _ => ItemEffectsLinks.SpellName
+        };
+        Require(profile is not null); return profile;
+    }
+    private static ItemEffectsLink Link(TableDataSnapshot bridge) => ItemEffectsLinks.ForBridge(bridge.TableId, bridge.LayoutHash) ?? throw BadResult();
     private static void Snapshot(TableDataSnapshot value, ItemEffectsSourceRole role, ItemsContext context)
     {
-        var (table, fdid, layout, definition, count) = role switch
-        {
-            ItemEffectsSourceRole.Bridge => (BridgeTable, "3177687", "96F083AD", "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb", 3),
-            ItemEffectsSourceRole.Effect => (EffectTable, "969941", "4CA77678", "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c", 10),
-            _ => (NameTable, "1990283", "782EE721", "d48ae2eb0455a30451cadda1c63627b9ad4ad4e9c4e473cd3444def1981fa667", 2)
-        };
+        var profile = Profile(value, role);
+        var (table, fdid, layout, definition, count) = (profile.TableId, profile.FileDataId, profile.Layout, profile.Definition, profile.Columns.Count);
         Require(value is not null && value.ProductId == context.ProductId && value.BuildIdentity == context.BuildIdentity && value.SourceRegion == context.SourceRegion &&
             value.ResearchLocale == context.ResearchLocale && value.TableId == table && value.LayoutHash == layout &&
             // The pinned definition, or one fetched from WoWDBDefs (D101) that names its own commit.
@@ -213,8 +232,11 @@ public static partial class ItemEffectsValidation
         Require(value.Source is not null && value.Source.Location is not null && Hash(value.Source.Sha256) && Hex(value.Source.ContentKey, 32) && Hex(value.Source.EncodingKey, 32) &&
             Unsigned(value.Source.EncodedBytes, long.MaxValue) && Unsigned(value.Source.DecodedBytes, long.MaxValue) && Time(value.Source.RetrievedAt) && Time(value.Source.VerifiedAt) &&
             BoundedText(value.Source.SourceUrl, 4096) && BoundedText(value.Source.VerifierRevision, 128));
-        var decoder = "wdc5-values-v7+table-admission" + (value.Source.Projection is null ? "" : "-projection") + (role == ItemEffectsSourceRole.Effect ? "-v4" : "-v3");
-        Require(value.DecoderRevision == decoder);
+        // v4 for Retail ItemEffect's raw rules; Classic ItemEffect is v4 read with the bundled definition and v3 with a fetched one.
+        var stem = "wdc5-values-v7+table-admission" + (value.Source.Projection is null ? "" : "-projection");
+        // Classic ItemEffect: v4 exactly when read with the bundled definition, v3 with a fetched one (D101).
+        Require(profile.RawColumns.Count > 0 ? value.DecoderRevision == stem + "-v4" :
+            table == EffectTable ? value.DecoderRevision == stem + (value.FetchedDefinition is null ? "-v4" : "-v3") : value.DecoderRevision == stem + "-v3");
         Require(value.Association is not null && value.Association.FileDataId == fdid && value.Association.ResearchLocale == "enUS" &&
             value.Association.EncodingSource is not null && value.Association.RootSource is not null);
         _ = Entries(value.Association.Memberships, 256);
@@ -222,16 +244,11 @@ public static partial class ItemEffectsValidation
         for (var i = 0; i < count; i++)
         {
             var column = columns[i];
-            var name = role switch { ItemEffectsSourceRole.Bridge => i switch { 0 => "ID", 1 => "ItemEffectID", _ => "ItemID" }, ItemEffectsSourceRole.Effect => EffectFields[i], _ => i == 0 ? "ID" : "Name_lang" };
+            var name = profile.Columns[i];
             Require(column is not null && column.Name == name && column.IsId == (i == 0) && column.Family == (role == ItemEffectsSourceRole.Name && i == 1 ? "string" : "integer"));
-            if (role == ItemEffectsSourceRole.Effect && i is 3 or 6 or 8) { Raw(column.Interpretation, i); Require(column.Reference is null); }
+            if (profile.RawColumns.Contains(i)) Raw(column.Interpretation, i);
             else Require(column.Interpretation is null);
-            var reference = role switch
-            {
-                ItemEffectsSourceRole.Bridge => i switch { 1 => new TableReference("ItemEffect", "ID"), 2 => new("Item", "ID"), _ => null },
-                ItemEffectsSourceRole.Effect => i switch { 7 => new TableReference("Spell", "ID"), 9 => new("PlayerCondition", "ID"), _ => null }, _ => null
-            };
-            Require(column.Reference == reference);
+            Require(column.Reference == profile.References[i]);
         }
         var coverage = value.Coverage; Require(coverage is not null && coverage.Scope is "complete" or "unencryptedSections");
         var coverageCounts = new[] { coverage.DeclaredRecords, coverage.PhysicalRows, coverage.CopyRows, coverage.ExcludedKeyedSections, coverage.ExcludedDeclaredRecords,
@@ -246,25 +263,30 @@ public static partial class ItemEffectsValidation
     {
         Require(value is not null && value.Context == context && Hash(value.ArtifactId) && Time(value.PreparedAt) && value.Revision == IndexRevision && value.OrderPolicy == OrderPolicy);
         Snapshot(value.BridgeSource, ItemEffectsSourceRole.Bridge, context);
-        Require(Count(value.EmittedRows, 65536) && value.EmittedRows == value.BridgeSource.RowCount && value.Fields is not null &&
-            value.Fields.RowId == new ItemEffectsFieldReference(BridgeTable, 0) && value.Fields.ItemEffectId == new ItemEffectsFieldReference(BridgeTable, 1) && value.Fields.ItemId == new ItemEffectsFieldReference(BridgeTable, 2));
+        Require(Count(value.EmittedRows, 65536) && value.EmittedRows == value.BridgeSource.RowCount && value.Fields is not null && value.Fields == Link(value.BridgeSource).Fields);
     }
     private static void Fields(IReadOnlyList<ItemEffectFieldEvidence>? values, TableDataSnapshot source)
     {
-        var fields = Entries(values, 9); Require(fields.Length == 9);
+        var fields = Entries(values, 9); Require(fields.Length == 9); var profile = Profile(source, ItemEffectsSourceRole.Effect);
         for (var j = 0; j < fields.Length; j++)
         {
             var i = j + 1; var field = fields[j];
             Require(field is not null && field.Name == EffectFields[i] && field.ColumnIndex == i && Enum.IsDefined(field.Evidence));
-            if (i is 3 or 6 or 8)
+            // SpellCategoryID and ChrSpecializationID keep their declared target as an inert hint: an unverified
+            // candidate on Retail's raw widths, the declared reference on Classic's (#86). No value is looked up.
+            var hint = i switch { 6 => new TableReference("SpellCategory", "ID"), 8 => new("ChrSpecialization", "ID"), 9 => new("PlayerCondition", "ID"), _ => null };
+            if (profile.RawColumns.Contains(i))
             {
                 Require(field.Evidence == ItemEffectEvidenceKind.RawPhysicalInteger && Unsigned(field.Value, uint.MaxValue)); Raw(field.Interpretation, i);
-                Require(field.Interpretation == source.Columns[i].Interpretation && field.CandidateReference == (i switch { 6 => new TableReference("SpellCategory", "ID"), 8 => new("ChrSpecialization", "ID"), _ => null }));
+                Require(field.Interpretation == source.Columns[i].Interpretation && field.CandidateReference == hint);
             }
-            else if (i == 9) Require(field.Evidence == ItemEffectEvidenceKind.UnverifiedCandidate && Signed(field.Value) && field.Interpretation is null && field.CandidateReference == new TableReference("PlayerCondition", "ID"));
-            else Require(field.Evidence == ItemEffectEvidenceKind.StrictNumeric && (i is 1 or 2 ? Unsigned(field.Value, 255) : Signed(field.Value)) && field.Interpretation is null && field.CandidateReference is null);
+            else if (i == 9) Require(field.Evidence == ItemEffectEvidenceKind.UnverifiedCandidate && Signed(field.Value) && field.Interpretation is null && field.CandidateReference == hint);
+            else Require(field.Evidence == ItemEffectEvidenceKind.StrictNumeric && (i is 1 or 2 ? Unsigned(field.Value, 255) : i is 6 or 8 ? Unsigned(field.Value, ushort.MaxValue) : i == 3 ? Signed16(field.Value) : Signed(field.Value)) &&
+                field.Interpretation is null && field.CandidateReference == hint);
         }
     }
+    // Classic Charges is declared signed16 and read at that width (#86).
+    private static bool Signed16(string? value) => Signed(value) && int.Parse(value!, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture) is >= short.MinValue and <= short.MaxValue;
     private static void Raw(TableColumnInterpretation? value, int index) => Require(value is not null && value.Policy == "raw-physical-integer-v1" && value.PhysicalBits == 32 && !value.PhysicalSigned &&
         value.CandidateBits == 16 && value.CandidateUnsigned == (index != 3) && BoundedText(value.Warning, 512));
     private static void Numeric([NotNull] ItemEffectsSourceValue? value, string table, int column) => Require(value is not null && value.TableId == table && value.ColumnIndex == column && Signed(value.Value));

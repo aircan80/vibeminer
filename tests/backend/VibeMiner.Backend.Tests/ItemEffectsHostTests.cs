@@ -31,6 +31,68 @@ public sealed class ItemEffectsHostTests
     }
     private static object Request(string id,string method,object parameters)=>new{protocolVersion=1,id,method,@params=parameters};
 
+    // #86: the real Host's wire output for every link kind, checked in beside the examples. A field the Host drops or a
+    // new one it doesn't send changes this output; engine-contract.test.mjs validates the same file against the schema,
+    // so the pair fails the gate whenever the Host and the contract disagree. Regenerate with VIBEMINER_WRITE_WIRE_FIXTURES=1.
+    [Fact]
+    public async Task HostWireOutputForEachLinkMatchesTheSchemaCheckedFixture()
+    {
+        var parent=Fixture<ItemEffectsReadiness>("item-effects-parent-readiness");parent=parent with{Source=parent.Source! with{Snapshot=parent.Snapshot!.BridgeSource}};
+        var unsupported=new ItemEffectsProblem("ITEM_EFFECTS_SOURCE_UNSUPPORTED","The selected source profile is unsupported.",false);
+        var cases=new (string Name,string Method,Action<Store> Arrange)[]
+        {
+            ("readinessItemXItemEffect","items.effects.data",_=>{}),
+            ("readinessParentItemId","items.effects.data",s=>s.ReadinessResult=()=>parent),
+            ("readinessParentItemIdUnsupported","items.effects.data",s=>s.ReadinessResult=()=>new(parent.Selection,true,ItemEffectsReadinessState.Unsupported,
+                Source:new(ItemEffectsSourceRole.Bridge,ItemEffectsSourceState.Unsupported,Problem:unsupported),Problem:unsupported,Link:"parentItemId")),
+            ("readinessUndecided","items.effects.data",s=>s.ReadinessResult=()=>new(parent.Selection,true,ItemEffectsReadinessState.NotPrepared,
+                Source:new(ItemEffectsSourceRole.Bridge,ItemEffectsSourceState.NotPrepared))),
+            ("pageParentItemId","items.effects.page",s=>s.PageResult=_=>Fixture<ItemEffectsPage>("item-effects-parent-page")),
+            ("detailsParentItemId","items.effects.details",s=>s.DetailsResult=_=>Fixture<ItemEffectDetailsResult>("item-effect-parent-details")),
+            ("namesParentItemId","items.effects.names",s=>s.NamesResult=_=>Fixture<ItemEffectNamesResult>("item-effect-parent-names"))
+        };
+        var wire=new System.Text.Json.Nodes.JsonObject();
+        foreach(var (name,method,arrange) in cases)
+        {
+            var store=new Store();arrange(store);await using var service=new ItemEffectsService(store);await using var session=await Session.Start(service);
+            await session.Send("wire",method,Scope(method));var frame=await session.Receive();
+            Assert.True(frame.TryGetProperty("result",out var result),name+": "+frame.GetRawText());wire[name]=System.Text.Json.Nodes.JsonNode.Parse(result.GetRawText());
+        }
+        var path=RepositoryPaths.File("contracts/examples/item-effects-host-wire.json");
+        if(Environment.GetEnvironmentVariable("VIBEMINER_WRITE_WIRE_FIXTURES")=="1")File.WriteAllText(path,wire.ToJsonString(new JsonSerializerOptions{WriteIndented=true})+"\n");
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path)),wire),
+            "The Host's effects wire output differs from contracts/examples/item-effects-host-wire.json; regenerate it and keep the schema test green.");
+        Assert.Equal("parentItemId",wire["readinessParentItemIdUnsupported"]!["link"]!.GetValue<string>());Assert.Null(wire["readinessUndecided"]!["link"]);
+    }
+    // #86: the ParentItemID examples (one ItemEffect admission as bridge and effect) pass the same relational validators.
+    [Fact]
+    public void ParentItemIdExamplesSatisfyTheRelationalValidators()
+    {
+        var readiness=Fixture<ItemEffectsReadiness>("item-effects-parent-readiness");readiness=readiness with{Source=readiness.Source! with{Snapshot=readiness.Snapshot!.BridgeSource}};
+        ItemEffectsValidation.Validate(readiness,readiness.Selection);
+        // Classic ItemEffect revisions pair with their definition: v4 bundled, v3 fetched; each wrong pairing is refused.
+        static TableDataSnapshot Revision(TableDataSnapshot s,string from,string to)=>s with{DecoderRevision=s.DecoderRevision.Replace(from,to)};
+        static ItemEffectsReadiness With(ItemEffectsReadiness r,TableDataSnapshot s)=>r with{Snapshot=r.Snapshot! with{BridgeSource=s},Source=r.Source! with{Snapshot=s}};
+        var bridge=readiness.Snapshot!.BridgeSource;
+        var fetched=bridge with{DefinitionSha256=new string('e',64),ProviderRevision=new string('a',40),FetchedDefinition=new(new string('a',40),DateTimeOffset.Parse("2026-10-25T00:00:00Z")),FetchedBecause="layoutMatch",SchemaMatch="layoutOnly",BundledFallback=false};
+        ItemEffectsValidation.Validate(With(readiness,Revision(fetched,"-v4","-v3")),readiness.Selection);
+        foreach(var pairing in new[]{Revision(bridge,"-v4","-v3"),fetched})
+            Assert.Equal("ITEM_EFFECTS_RESULT_INVALID",Assert.Throws<DiscoveryException>(()=>ItemEffectsValidation.Validate(With(readiness,pairing),readiness.Selection)).Code);
+        // The link names the snapshot's link and is present whenever a source is.
+        foreach(var link in new string?[]{"itemXItemEffect",null})
+            Assert.Equal("ITEM_EFFECTS_RESULT_INVALID",Assert.Throws<DiscoveryException>(()=>ItemEffectsValidation.Validate(readiness with{Link=link},readiness.Selection)).Code);
+        var page=Fixture<ItemEffectsPage>("item-effects-parent-page");ItemEffectsValidation.Validate(page,new ItemEffectsPageRequest(page.Selection,page.BridgeIndexArtifactId));
+        var details=Fixture<ItemEffectDetailsResult>("item-effect-parent-details");
+        ItemEffectsValidation.Validate(details,new ItemEffectDetailsRequest(details.Selection,details.BridgeIndexArtifactId,details.Outcomes.Select(o=>o.Key).ToArray()));
+        var names=Fixture<ItemEffectNamesResult>("item-effect-parent-names");
+        ItemEffectsValidation.Validate(names,new ItemEffectNamesRequest(names.Selection,names.BridgeIndexArtifactId,names.ItemEffectArtifactId,names.Outcomes.Select(o=>o.Key).ToArray()));
+        var wrong=details with{Outcomes=[details.Outcomes[0] with{Fields=[..details.Outcomes[0].Fields!.Select((f,i)=>i==2?f with{Evidence=ItemEffectEvidenceKind.RawPhysicalInteger}:f)]},details.Outcomes[1]]};
+        Assert.Equal("ITEM_EFFECTS_RESULT_INVALID",Assert.Throws<DiscoveryException>(()=>ItemEffectsValidation.Validate(wrong,new ItemEffectDetailsRequest(details.Selection,details.BridgeIndexArtifactId,details.Outcomes.Select(o=>o.Key).ToArray()))).Code);
+        // Classic Charges is signed16.
+        var charges=details with{Outcomes=[details.Outcomes[0] with{Fields=[..details.Outcomes[0].Fields!.Select((f,i)=>i==2?f with{Value="32768"}:f)]},details.Outcomes[1]]};
+        Assert.Equal("ITEM_EFFECTS_RESULT_INVALID",Assert.Throws<DiscoveryException>(()=>ItemEffectsValidation.Validate(charges,new ItemEffectDetailsRequest(details.Selection,details.BridgeIndexArtifactId,details.Outcomes.Select(o=>o.Key).ToArray()))).Code);
+    }
+
     [Fact]
     public async Task MissingServiceAdvertisesNoEffectsAndAllSevenRoutesRefuseWithoutSimulatedData()
     {
@@ -230,7 +292,8 @@ public sealed class ItemEffectsHostTests
         internal Func<Func<ItemEffectsProgress,Task>,Task>? Report;
         private async Task<T> Prepare<T>(ItemEffectsOperation operation,Func<ItemEffectsProgress,Task> report,CancellationToken token,Func<T> result){if(Report is not null)await Report(report);return await Work(operation,token,result);}
         private async Task<T> Work<T>(ItemEffectsOperation operation,CancellationToken token,Func<T> result){Calls[(int)operation]++;if(Before is not null)await Before(operation,token);return result();}
-        public Task<ItemEffectsReadiness> ReadAsync(ItemEffectsSelection selection,CancellationToken token)=>Work(ItemEffectsOperation.Read,token,Readiness);
+        internal Func<ItemEffectsReadiness> ReadinessResult=Readiness;
+        public Task<ItemEffectsReadiness> ReadAsync(ItemEffectsSelection selection,CancellationToken token)=>Work(ItemEffectsOperation.Read,token,ReadinessResult);
         public Task<ItemEffectsReadiness> PrepareLinksAsync(ItemEffectsSelection selection,Func<ItemEffectsProgress,Task> progress,CancellationToken token)=>Prepare(ItemEffectsOperation.PrepareLinks,progress,token,Readiness);
         public Task<ItemEffectsPage> ReadPageAsync(ItemEffectsPageRequest request,CancellationToken token)=>Work(ItemEffectsOperation.ReadPage,token,()=>PageResult(request));
         public Task<ItemEffectDetailsResult> ReadDetailsAsync(ItemEffectDetailsRequest request,CancellationToken token)=>Work(ItemEffectsOperation.ReadDetails,token,()=>DetailsResult(request));

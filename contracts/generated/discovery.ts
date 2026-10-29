@@ -155,9 +155,40 @@ export type ItemEffectNameState =
 export type ItemEffectsAbsence = 'absentFromCompleteSource' | 'unknownOutsideReadableScope';
 export type ItemEffectEvidenceKind = 'strictNumeric' | 'rawPhysicalInteger' | 'unverifiedCandidate';
 export type ItemEffectsSource = ItemEffectsSource1;
+export type ItemEffectsBridgeFields = ItemEffectsBridgeFields1 & ItemEffectsBridgeFields2;
+export type ItemEffectsBridgeFields1 =
+  | {
+      rowId?: {
+        tableId?: '00cb674f';
+        columnIndex?: 0;
+      };
+      itemEffectId?: {
+        tableId?: '00cb674f';
+        columnIndex?: 1;
+      };
+      itemId?: {
+        tableId?: '00cb674f';
+        columnIndex?: 2;
+      };
+    }
+  | {
+      rowId?: {
+        tableId?: '4002a5b1';
+        columnIndex?: 0;
+      };
+      itemEffectId?: {
+        tableId?: '4002a5b1';
+        columnIndex?: 0;
+      };
+      itemId?: {
+        tableId?: '4002a5b1';
+        columnIndex?: 10;
+      };
+    };
 export type ItemEffectsReadiness = ItemEffectsReadiness1;
 export type ItemEffectsSourceValue = ItemEffectsSourceValue1;
 export type ItemEffectsSourceReference = ItemEffectsSourceReference1;
+export type ItemEffectsEdge = ItemEffectsEdge1;
 export type ItemEffectFieldEvidence = ItemEffectFieldEvidence1;
 export type ItemEffectOutcome = ItemEffectOutcome1;
 export type ItemEffectSpellEvidence = ItemEffectSpellEvidence1;
@@ -2614,19 +2645,13 @@ export interface ItemEffectsSource1 {
   problem: ItemEffectsProblem | null;
 }
 export interface ItemEffectsFieldReference {
-  tableId: '00cb674f';
+  tableId: '00cb674f' | '4002a5b1';
   columnIndex: number;
 }
-export interface ItemEffectsBridgeFields {
-  rowId: ItemEffectsFieldReference & {
-    columnIndex?: 0;
-  };
-  itemEffectId: ItemEffectsFieldReference & {
-    columnIndex?: 1;
-  };
-  itemId: ItemEffectsFieldReference & {
-    columnIndex?: 2;
-  };
+export interface ItemEffectsBridgeFields2 {
+  rowId: ItemEffectsFieldReference;
+  itemEffectId: ItemEffectsFieldReference;
+  itemId: ItemEffectsFieldReference;
 }
 export interface ItemEffectsIndexSnapshot {
   context: ItemsContext;
@@ -2635,50 +2660,148 @@ export interface ItemEffectsIndexSnapshot {
   revision: 'item-effect-bridge-index-v1';
   orderPolicy: 'signed-item-unsigned-bridge-source-ordinal-v1';
   bridgeSource: TableDataSnapshot &
-    ((
+    (
+      | ((
+          | {
+              definitionSha256?: '3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb';
+              providerRevision?: 'b9a63096cdd99b26967f17f9515377ae62cadfd7';
+            }
+          | {
+              providerRevision?: string;
+            }
+        ) & {
+          tableId?: '00cb674f';
+          layoutHash?: '96F083AD';
+          association?: {
+            fileDataId?: '3177687';
+          };
+          decoderRevision?: 'wdc5-values-v7+table-admission-v3' | 'wdc5-values-v7+table-admission-projection-v3';
+          /**
+           * @minItems 3
+           * @maxItems 3
+           */
+          columns?: [
+            {
+              name: 'ID';
+              family: 'integer';
+              isId: true;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'ItemEffectID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'ItemEffect'; column: 'ID'};
+              interpretation: null;
+            },
+            {
+              name: 'ItemID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'Item'; column: 'ID'};
+              interpretation: null;
+            }
+          ];
+          rowCount?: string;
+        })
       | {
-          definitionSha256?: '3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb';
-          providerRevision?: 'b9a63096cdd99b26967f17f9515377ae62cadfd7';
+          tableId?: '4002a5b1';
+          layoutHash?: '1BF9CF3A';
+          association?: {
+            fileDataId?: '969941';
+          };
+          decoderRevision?:
+            | 'wdc5-values-v7+table-admission-v3'
+            | 'wdc5-values-v7+table-admission-projection-v3'
+            | 'wdc5-values-v7+table-admission-v4'
+            | 'wdc5-values-v7+table-admission-projection-v4';
+          /**
+           * @minItems 11
+           * @maxItems 11
+           */
+          columns?: [
+            {
+              name: 'ID';
+              family: 'integer';
+              isId: true;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'LegacySlotIndex';
+              family: 'integer';
+              isId: false;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'TriggerType';
+              family: 'integer';
+              isId: false;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'Charges';
+              family: 'integer';
+              isId: false;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'CoolDownMSec';
+              family: 'integer';
+              isId: false;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'CategoryCoolDownMSec';
+              family: 'integer';
+              isId: false;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'SpellCategoryID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'SpellCategory'; column: 'ID'};
+              interpretation: null;
+            },
+            {
+              name: 'SpellID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'Spell'; column: 'ID'};
+              interpretation: null;
+            },
+            {
+              name: 'ChrSpecializationID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'ChrSpecialization'; column: 'ID'};
+              interpretation: null;
+            },
+            {
+              name: 'PlayerConditionID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'PlayerCondition'; column: 'ID'};
+              interpretation: null;
+            },
+            {
+              name: 'ParentItemID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'Item'; column: 'ID'};
+              interpretation: null;
+            }
+          ];
+          rowCount?: string;
         }
-      | {
-          providerRevision?: string;
-        }
-    ) & {
-      tableId?: '00cb674f';
-      layoutHash?: '96F083AD';
-      association?: {
-        fileDataId?: '3177687';
-      };
-      decoderRevision?: 'wdc5-values-v7+table-admission-v3' | 'wdc5-values-v7+table-admission-projection-v3';
-      /**
-       * @minItems 3
-       * @maxItems 3
-       */
-      columns?: [
-        {
-          name: 'ID';
-          family: 'integer';
-          isId: true;
-          reference: null;
-          interpretation: null;
-        },
-        {
-          name: 'ItemEffectID';
-          family: 'integer';
-          isId: false;
-          reference: {table: 'ItemEffect'; column: 'ID'};
-          interpretation: null;
-        },
-        {
-          name: 'ItemID';
-          family: 'integer';
-          isId: false;
-          reference: {table: 'Item'; column: 'ID'};
-          interpretation: null;
-        }
-      ];
-      rowCount?: string;
-    });
+    );
   fields: ItemEffectsBridgeFields;
   emittedRows: string;
 }
@@ -2694,6 +2817,7 @@ export interface ItemEffectsReadiness1 {
       })
     | null;
   problem: ItemEffectsProblem | null;
+  link: ('itemXItemEffect' | 'parentItemId') | null;
 }
 export interface ItemEffectsSourceValue1 {
   tableId: '00cb674f' | '4002a5b1';
@@ -2709,18 +2833,20 @@ export interface ItemEffectsSourceReference1 {
   sourceOrdinal: string | null;
   columnIndex: number | null;
 }
-export interface ItemEffectsEdge {
+export interface ItemEffectsEdge1 {
   key: ItemEffectsEdgeKey;
   bridge: ItemEffectsSourceReference & {
-    tableId?: '00cb674f';
+    tableId?: '00cb674f' | '4002a5b1';
+    sourceOrdinal?: string;
+    columnIndex?: null;
   };
   parentItemId: ItemEffectsSourceValue & {
-    tableId?: '00cb674f';
-    columnIndex?: 2;
+    tableId?: '00cb674f' | '4002a5b1';
+    columnIndex?: 2 | 10;
   };
   itemEffectId: ItemEffectsSourceValue & {
-    tableId?: '00cb674f';
-    columnIndex?: 1;
+    tableId?: '00cb674f' | '4002a5b1';
+    columnIndex?: 0 | 1;
   };
 }
 export interface ItemEffectsPage {
@@ -2728,50 +2854,148 @@ export interface ItemEffectsPage {
   bridgeIndexArtifactId: string;
   orderPolicy: 'signed-item-unsigned-bridge-source-ordinal-v1';
   bridgeSource: TableDataSnapshot &
-    ((
+    (
+      | ((
+          | {
+              definitionSha256?: '3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb';
+              providerRevision?: 'b9a63096cdd99b26967f17f9515377ae62cadfd7';
+            }
+          | {
+              providerRevision?: string;
+            }
+        ) & {
+          tableId?: '00cb674f';
+          layoutHash?: '96F083AD';
+          association?: {
+            fileDataId?: '3177687';
+          };
+          decoderRevision?: 'wdc5-values-v7+table-admission-v3' | 'wdc5-values-v7+table-admission-projection-v3';
+          /**
+           * @minItems 3
+           * @maxItems 3
+           */
+          columns?: [
+            {
+              name: 'ID';
+              family: 'integer';
+              isId: true;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'ItemEffectID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'ItemEffect'; column: 'ID'};
+              interpretation: null;
+            },
+            {
+              name: 'ItemID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'Item'; column: 'ID'};
+              interpretation: null;
+            }
+          ];
+          rowCount?: string;
+        })
       | {
-          definitionSha256?: '3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb';
-          providerRevision?: 'b9a63096cdd99b26967f17f9515377ae62cadfd7';
+          tableId?: '4002a5b1';
+          layoutHash?: '1BF9CF3A';
+          association?: {
+            fileDataId?: '969941';
+          };
+          decoderRevision?:
+            | 'wdc5-values-v7+table-admission-v3'
+            | 'wdc5-values-v7+table-admission-projection-v3'
+            | 'wdc5-values-v7+table-admission-v4'
+            | 'wdc5-values-v7+table-admission-projection-v4';
+          /**
+           * @minItems 11
+           * @maxItems 11
+           */
+          columns?: [
+            {
+              name: 'ID';
+              family: 'integer';
+              isId: true;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'LegacySlotIndex';
+              family: 'integer';
+              isId: false;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'TriggerType';
+              family: 'integer';
+              isId: false;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'Charges';
+              family: 'integer';
+              isId: false;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'CoolDownMSec';
+              family: 'integer';
+              isId: false;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'CategoryCoolDownMSec';
+              family: 'integer';
+              isId: false;
+              reference: null;
+              interpretation: null;
+            },
+            {
+              name: 'SpellCategoryID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'SpellCategory'; column: 'ID'};
+              interpretation: null;
+            },
+            {
+              name: 'SpellID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'Spell'; column: 'ID'};
+              interpretation: null;
+            },
+            {
+              name: 'ChrSpecializationID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'ChrSpecialization'; column: 'ID'};
+              interpretation: null;
+            },
+            {
+              name: 'PlayerConditionID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'PlayerCondition'; column: 'ID'};
+              interpretation: null;
+            },
+            {
+              name: 'ParentItemID';
+              family: 'integer';
+              isId: false;
+              reference: {table: 'Item'; column: 'ID'};
+              interpretation: null;
+            }
+          ];
+          rowCount?: string;
         }
-      | {
-          providerRevision?: string;
-        }
-    ) & {
-      tableId?: '00cb674f';
-      layoutHash?: '96F083AD';
-      association?: {
-        fileDataId?: '3177687';
-      };
-      decoderRevision?: 'wdc5-values-v7+table-admission-v3' | 'wdc5-values-v7+table-admission-projection-v3';
-      /**
-       * @minItems 3
-       * @maxItems 3
-       */
-      columns?: [
-        {
-          name: 'ID';
-          family: 'integer';
-          isId: true;
-          reference: null;
-          interpretation: null;
-        },
-        {
-          name: 'ItemEffectID';
-          family: 'integer';
-          isId: false;
-          reference: {table: 'ItemEffect'; column: 'ID'};
-          interpretation: null;
-        },
-        {
-          name: 'ItemID';
-          family: 'integer';
-          isId: false;
-          reference: {table: 'Item'; column: 'ID'};
-          interpretation: null;
-        }
-      ];
-      rowCount?: string;
-    });
+    );
   observedAssociations: string;
   /**
    * @minItems 0
@@ -2948,6 +3172,8 @@ export interface ItemEffectOutcome1 {
     | (ItemEffectsSourceReference & {
         tableId?: '4002a5b1';
         columnIndex?: null;
+      } & {
+        sourceOrdinal?: null;
       })
     | null;
   fields:
@@ -3146,6 +3372,8 @@ export interface ItemEffectSpellEvidence1 {
     | (ItemEffectsSourceReference & {
         tableId?: '4002a5b1';
         columnIndex?: null;
+      } & {
+        sourceOrdinal?: null;
       })
     | null;
   spellId:
@@ -3162,6 +3390,8 @@ export interface ItemEffectNameIssue {
   source: ItemEffectsSourceReference & {
     tableId?: '46c66698';
     columnIndex?: 1;
+  } & {
+    sourceOrdinal?: null;
   };
 }
 export interface ItemEffectNameOutcome1 {
@@ -3173,6 +3403,8 @@ export interface ItemEffectNameOutcome1 {
     | (ItemEffectsSourceReference & {
         tableId?: '46c66698';
         columnIndex?: null;
+      } & {
+        sourceOrdinal?: null;
       })
     | null;
   text: string | null;

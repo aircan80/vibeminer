@@ -82,3 +82,19 @@ test('a link table the build does not ship reads as not available for this build
  await expect(p.getByRole('button',{name:/^Retry/})).toHaveCount(0);await expect(p).not.toContainText('need attention');await expect(page.locator('body')).not.toContainText(/needs attention/i);await expect(p.locator('details.effect-phase-details')).not.toHaveAttribute('open','');await capture(page,s.app,'not-in-build',heading(p));
  await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Home',exact:true}).click();await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Items',exact:true}).click();await select(page);await expect(panel(page).getByRole('status')).toHaveText('Not available for this build');
  const requests=await calls(s.data);expect(requests.filter(r=>r.method==='items.effects.prepare')).toHaveLength(1);expect(requests.some(r=>r.method==='items.effects.page')).toBe(false);}finally{await s.close();}});
+// #86: a Classic build links through ItemEffect.ParentItemID. One ItemEffect link per card opens its exact row in Tables.
+test('ParentItemID effects name their link and open the exact ItemEffect row',async()=>{test.setTimeout(60_000);const s=await opened();try{const{page}=s;
+ await writeFile(path.join(s.data,'effects-scenario.json'),JSON.stringify({scenario:'parent'}));await select(page);const p=panel(page);
+ await expect(names(p)).toHaveText(['Authored spell label','Authored spell label']);await expect(p.getByText('ItemEffect.ParentItemID → SpellName',{exact:true})).toBeVisible();await expect(p).not.toContainText('ItemXItemEffect');
+ await capture(page,s.app,'parent-link',heading(p));
+ const second=p.getByRole('article').nth(1);await expect(second.getByRole('button',{name:/^ItemEffect #/})).toHaveCount(1);
+ const link=second.getByRole('button',{name:/^ItemEffect #1/});await link.focus();await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{name:'Record #1',exact:true})).toBeVisible();await page.getByRole('button',{name:'Return to Items selection',exact:false}).click();await expect(link).toBeFocused();
+ const requests=await calls(s.data);const ordinal=requests.find(r=>r.method==='tables.rows'&&r.params.tableId==='4002a5b1');expect(ordinal.params).toMatchObject({after:'0',limit:1});}finally{await s.close();}});
+// #86: an unsupported ParentItemID link file has no snapshot; the engine's link names ItemEffect in every visible line.
+test('an unsupported ParentItemID link names ItemEffect, not ItemXItemEffect, with no Retry',async()=>{test.setTimeout(60_000);const s=await opened(false);try{const{page}=s;
+ await writeFile(path.join(s.data,'effects-scenario.json'),JSON.stringify({scenario:'parent-unsupported'}));await writeFile(path.join(s.data,'release-effects-links'),'release');await select(page);const p=panel(page);
+ await expect(p.getByText("ItemEffect can't be read here",{exact:true})).toBeVisible();await expect(p.getByText('ItemEffect.ParentItemID → SpellName',{exact:true})).toBeVisible();
+ await expect(p.getByText('ItemEffect.ParentItemID source · Unsupported',{exact:true})).toBeVisible();await expect(p).not.toContainText('ItemXItemEffect');
+ await expect(p.locator('.effect-error')).not.toContainText('selected source profile');await expect(p.getByRole('button',{name:/^Retry/})).toHaveCount(0);
+ await capture(page,s.app,'parent-unsupported',heading(p));}finally{await s.close();}});

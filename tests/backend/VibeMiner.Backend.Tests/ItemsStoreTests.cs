@@ -291,7 +291,10 @@ public sealed class ItemsStoreTests(ITestOutputHelper output)
         internal async Task<SourceFixture> Source(string table, InventoryFixture.FixtureObject bytes, string? decoder = null)
         {
             var provider = await TablesCatalog.Provider.Value; var bundled = provider.Definitions[table];
-            var sparse = table == ItemsProjection.SparseTable; var layout = sparse ? "1C17D17F" : "996192AA";
+            var sparse = table == ItemsProjection.SparseTable;
+            // A build other than 12.1.5.70448 (e.g. Classic Era 1.15.9, #86) uses the layout its listed block names.
+            var listed = Opening.Build.Version == "12.1.5.70448" ? [] : (await TablesCatalog.Provider.Value).Definitions[table].Document.SelectBuild(Opening.Build.Version).Blocks;
+            var layout = listed.Count == 1 ? listed[0].LayoutHashes[0] : sparse ? "1C17D17F" : "996192AA";
             // The rows are read with the definition chosen for this build and layout, bundled or fetched (D101).
             var definition = await Definitions.ForFeatureLayoutAsync(table, Opening.Build.Version, layout, default);
             var source = new ContentReceipt(bytes.ContentKey, bytes.EncodingKey, Convert.ToHexStringLower(SHA256.HashData(bytes.Encoded)),

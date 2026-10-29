@@ -148,10 +148,12 @@ internal sealed partial class ItemEffectsBridgeArtifacts
                 {
                     var tuple = await ReadCoreAsync(next, token);
                     if (tuple.ItemId != parent) throw ItemEffectsBridgePolicy.Invalid();
+                    var fields = Artifact.Binding.Fields;
                     var edge = new ItemEffectsEdge(new(ItemEffectsBridgePolicy.N(tuple.IndexOrdinal)),
-                        new(ItemEffectsBridgePolicy.Table, source.ArtifactId, tuple.BridgeId.ToString(System.Globalization.CultureInfo.InvariantCulture), tuple.IsCopy,
+                        new(source.TableId, source.ArtifactId, tuple.BridgeId.ToString(System.Globalization.CultureInfo.InvariantCulture), tuple.IsCopy,
                             tuple.CopySourceId?.ToString(System.Globalization.CultureInfo.InvariantCulture), tuple.SourceOrdinal.ToString(System.Globalization.CultureInfo.InvariantCulture)),
-                        new(ItemEffectsBridgePolicy.Table, 2, ItemEffectsBridgePolicy.N(tuple.ItemId)), new(ItemEffectsBridgePolicy.Table, 1, ItemEffectsBridgePolicy.N(tuple.ItemEffectId)));
+                        new(fields.ItemId.TableId, fields.ItemId.ColumnIndex, ItemEffectsBridgePolicy.N(tuple.ItemId)),
+                        new(fields.ItemEffectId.TableId, fields.ItemEffectId.ColumnIndex, ItemEffectsBridgePolicy.N(tuple.ItemEffectId)));
                     edges.Add(edge); var after = next + 1;
                     var candidate = Page(after); var fits = false;
                     await owner.CpuAsync(() => fits = Fits(candidate, owner.maximumPageBytes), token);

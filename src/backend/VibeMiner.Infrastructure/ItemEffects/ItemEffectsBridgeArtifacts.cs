@@ -46,6 +46,8 @@ internal sealed partial class ItemEffectsBridgeArtifacts(Func<Action, Cancellati
             callerOwnedStaging.Length != 0 || callerOwnedStaging.Position != 0 || readPage is null) throw ItemEffectsBridgePolicy.Invalid();
         await ItemEffectsBridgePolicy.ValidateProfileAsync(owned, token, CpuAsync, definitions);
         var count = checked((int)ItemEffectsBridgePolicy.Total(owned)); var rowCount = ItemEffectsBridgePolicy.N(count);
+        // Columns come from the binding's link: ItemXItemEffect.ItemID/ItemEffectID, or ItemEffect.ParentItemID/ID (#86).
+        var columns = owned.Source.Columns.Count; var itemColumn = owned.Fields.ItemId.ColumnIndex; var effectColumn = owned.Fields.ItemEffectId.ColumnIndex;
         byte[]? metadata = null; string? key = null;
         await CpuAsync(() =>
         {
@@ -73,10 +75,10 @@ internal sealed partial class ItemEffectsBridgeArtifacts(Func<Action, Cancellati
                 for (var i = 0; i < pageCount; i++)
                 {
                     token.ThrowIfCancellationRequested(); var row = page.Rows[i];
-                    if (row is null || row.Values is null || row.Values.Count != 3 || row.IsCopy != row.CopySourceId.HasValue ||
+                    if (row is null || row.Values is null || row.Values.Count != columns || row.IsCopy != row.CopySourceId.HasValue ||
                         row.TextIssues is { Count: > 0 } || previousId is { } previous && row.Id < previous ||
                         row.Values[0] != row.Id.ToString(CultureInfo.InvariantCulture)) throw ItemEffectsBridgePolicy.Invalid();
-                    var parent = Signed(row.Values[2]); var effect = Signed(row.Values[1]);
+                    var parent = Signed(row.Values[itemColumn]); var effect = Signed(row.Values[effectColumn]);
                     var ordinal = checked((uint)(after + i));
                     Write(first.AsSpan(checked((int)ordinal * ItemEffectsBridgePolicy.TupleBytes), ItemEffectsBridgePolicy.TupleBytes),
                         new(ordinal, parent, row.Id, effect, row.IsCopy, row.CopySourceId, ordinal));

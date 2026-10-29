@@ -27,7 +27,7 @@ public sealed partial class ItemEffectsStore
         EdgeSelection[] edges;
         await using (var selected = await BorrowBridgeAsync(original, bridge, false, false, token))
             edges = await ReadEdgesAsync(selected, Parent(original), owned.Edges, token);
-        var effect = edges.Any(edge => edge.Tuple.ItemEffectId >= 0) ? await ProbeAsync(original, ItemEffectsSourceRole.Effect, token) : Unchecked(ItemEffectsSourceRole.Effect);
+        var effect = edges.Any(edge => edge.Tuple.ItemEffectId >= 0) ? await ProbeAsync(original, ItemEffectsSourceRole.Effect, token) : Unchecked(ItemEffectsSourceRole.Effect, bridge.Source.Link);
         if (prepare && effect.Public.State == ItemEffectsSourceState.NotPrepared)
             effect = await PrepareOptionalAsync(original, effect, bridge, operation);
         // No reader/query borrow crossed the prerequisite wait.
@@ -88,22 +88,24 @@ public sealed partial class ItemEffectsStore
         if (found.MatchCount == 0) return new(key, N(id), ItemEffectState.NotFoundInAdmittedScope, "0", Absence: Absence(source));
         if (found.MatchCount > 1) return new(key, N(id), ItemEffectState.Ambiguous, N(found.MatchCount));
         var row = found.Row!;
-        if (row.Id != (uint)id || row.IsCopy != row.CopySourceId.HasValue || row.Values.Count != 10 || row.Values[0] != N(row.Id)) throw RowInvalid();
+        var profile = Role(source);
+        if (row.Id != (uint)id || row.IsCopy != row.CopySourceId.HasValue || row.Values.Count != profile.Columns.Count || row.Values[0] != N(row.Id)) throw RowInvalid();
         var fields = new ItemEffectFieldEvidence[9];
         for (var i = 1; i <= 9; i++)
         {
-            var value = row.Values[i];
+            var value = row.Values[i]; var raw = profile.RawColumns.Contains(i);
+            // Retail's raw-width inputs keep their physical u32; Classic's are read at their declared u16 (#86).
             if (row.TextIssues?.Any(issue => issue.ColumnIndex == i) == true ||
-                (i is 1 or 2 ? !Unsigned(value, byte.MaxValue) : i is 3 or 6 or 8 ? !Unsigned(value, uint.MaxValue) : !Signed(value)))
+                (i is 1 or 2 ? !Unsigned(value, byte.MaxValue) : raw ? !Unsigned(value, uint.MaxValue) : i is 6 or 8 ? !Unsigned(value, ushort.MaxValue) : !Signed(value) || i == 3 && int.Parse(value!, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture) is < short.MinValue or > short.MaxValue))
                 return new(key, N(id), ItemEffectState.FieldUnavailable, Problem: FieldProblem);
-            var kind = i is 3 or 6 or 8 ? ItemEffectEvidenceKind.RawPhysicalInteger :
+            var kind = raw ? ItemEffectEvidenceKind.RawPhysicalInteger :
                 i == 9 ? ItemEffectEvidenceKind.UnverifiedCandidate : ItemEffectEvidenceKind.StrictNumeric;
             var candidate = i switch { 6 => new TableReference("SpellCategory", "ID"), 8 => new("ChrSpecialization", "ID"), 9 => new("PlayerCondition", "ID"), _ => null };
             fields[i - 1] = new(EffectColumns[i], i, value, kind, source.CapturedSnapshot!.Columns[i].Interpretation, candidate);
         }
         return new(key, N(id), ItemEffectState.ObservedReady, "1", Target(source, row), Array.AsReadOnly(fields));
     }
-    private static ItemEffectsSourceReference Target(SourceProbe source, Db2Row row) => new(Role(source.Role).Table,
+    private static ItemEffectsSourceReference Target(SourceProbe source, Db2Row row) => new(Role(source).TableId,
         source.CapturedSnapshot!.ArtifactId, N(row.Id), row.IsCopy, row.CopySourceId is { } id ? N(id) : null);
     private static ItemEffectsAbsence Absence(SourceProbe source) => source.CapturedSnapshot!.Coverage.Scope == "complete" ?
         ItemEffectsAbsence.AbsentFromCompleteSource : ItemEffectsAbsence.UnknownOutsideReadableScope;

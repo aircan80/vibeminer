@@ -36,7 +36,7 @@ public sealed record ItemEffectsIndexSnapshot(ItemsContext Context, string Artif
 public sealed record ItemEffectsReadiness(ItemEffectsSelection Selection, bool Admitted,
     ItemEffectsReadinessState State, ItemEffectsIndexSnapshot? Snapshot = null,
     string? ObservedAssociations = null, ItemEffectsSource? Source = null,
-    ItemEffectsProblem? Problem = null);
+    ItemEffectsProblem? Problem = null, string? Link = null);
 
 public sealed record ItemEffectsSourceValue(string TableId, int ColumnIndex, string Value);
 public sealed record ItemEffectsSourceReference(string TableId, string ArtifactId, string RowId,

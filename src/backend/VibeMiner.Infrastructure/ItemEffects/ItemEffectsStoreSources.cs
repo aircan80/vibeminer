@@ -8,18 +8,13 @@ namespace VibeMiner.Infrastructure;
 
 public sealed partial class ItemEffectsStore
 {
+    // Link is the build's item-to-effect link (#86): it decides which table and profile each role reads.
     private sealed record SourceProbe(ItemEffectsSourceRole Role, StoredTableAdmission? Admission,
-        TableDataSnapshot? CapturedSnapshot, ItemEffectsSource Public, bool CurrentProfile);
-    private static readonly string[] EffectColumns = ["ID", "LegacySlotIndex", "TriggerType", "Charges", "CoolDownMSec", "CategoryCoolDownMSec",
-        "SpellCategoryID", "SpellID", "ChrSpecializationID", "PlayerConditionID"];
-    private static (string Table, string Fdid, string Layout, string Definition) Role(ItemEffectsSourceRole role) => role switch
-    {
-        ItemEffectsSourceRole.Bridge => ("00cb674f", "3177687", "96F083AD", "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb"),
-        ItemEffectsSourceRole.Effect => ("4002a5b1", "969941", "4CA77678", "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c"),
-        ItemEffectsSourceRole.Name => ("46c66698", "1990283", "782EE721", "d48ae2eb0455a30451cadda1c63627b9ad4ad4e9c4e473cd3444def1981fa667"),
-        _ => throw new DiscoveryException("INVALID_REQUEST", "Choose one exact effects source role.")
-    };
-    private static SourceProbe Unchecked(ItemEffectsSourceRole role) => new(role, null, null, new(role, ItemEffectsSourceState.NotChecked), false);
+        TableDataSnapshot? CapturedSnapshot, ItemEffectsSource Public, bool CurrentProfile, ItemEffectsLink Link, bool Provisional = false);
+    private static readonly string[] EffectColumns = [.. ItemEffectsLinks.ClassicItemEffect.Columns];
+    private static ItemEffectsTableProfile Role(ItemEffectsLink link, ItemEffectsSourceRole role) => ItemEffectsLinks.Profile(link, role);
+    private static ItemEffectsTableProfile Role(SourceProbe probe) => ItemEffectsLinks.Profile(probe.Link, probe.Role);
+    private static SourceProbe Unchecked(ItemEffectsSourceRole role, ItemEffectsLink link) => new(role, null, null, new(role, ItemEffectsSourceState.NotChecked), false, link);
     private static ItemEffectsProblem Problem(ItemEffectsSourceState state) => state switch
     {
         ItemEffectsSourceState.Unavailable => new("ITEM_EFFECTS_SOURCE_UNAVAILABLE", "The selected source is unavailable.", true),
@@ -42,25 +37,27 @@ public sealed partial class ItemEffectsStore
         using (EnterQuery(token))
         {
         // This is the bounded original-authority read, never generic Tables readiness.
-        var admission = await catalog.ReadItemEffectsSourceAsync(original.Opening, role, token);
-        if (admission is null) return new(role, null, null, new(role, ItemEffectsSourceState.NotPrepared), false);
-        var info = Role(role); var version = original.Opening.Build.Version;
-        var (_, bundled) = await TableDefinitionSources.FeatureTableAsync(info.Table, token);
+        var chosen = await LinkAsync(original, token); var link = chosen ?? ItemEffectsLinks.Parent;
+        var info = Role(link, role);
+        var admission = await catalog.ReadItemEffectsSourceAsync(original.Opening, role, token, info.TableId);
+        if (admission is null) return new(role, null, null, new(role, ItemEffectsSourceState.NotPrepared), false, link, chosen is null);
+        var version = original.Opening.Build.Version;
+        var (_, bundled) = await TableDefinitionSources.FeatureTableAsync(info.TableId, token);
         // D101: the definition Tables chooses now for these rows, bundled or fetched, under the Settings switch.
-        var definition = await definitions.ForFeatureRowsAsync(info.Table, version, admission.Artifact, token);
+        var definition = await definitions.ForFeatureRowsAsync(info.TableId, version, admission.Artifact, token);
         await CpuAsync(() =>
         {
             var chosen = admission.Artifact.Binding.DefinitionSha256 == definition.Sha256 && admission.Artifact.Binding.ProviderRevision == definition.Revision;
-            var snapshot = Snapshot(original.Snapshot.Context, admission, role, chosen ? definition : null, version, bundled);
-            var state = CurrentState(role, admission.Artifact.Binding.DecoderRevision, admission.Artifact.Header.LayoutHash,
+            var snapshot = Snapshot(original.Snapshot.Context, admission, info, chosen ? definition : null, version, bundled);
+            var state = CurrentState(role, info, admission.Artifact.Binding.DecoderRevision, admission.Artifact.Header.LayoutHash,
                 admission.Source.Projection is not null, definition, bundled, version, chosen);
             var probe = new SourceProbe(role, admission, snapshot, new(role, state,
-                HistoricalArtifactId: state == ItemEffectsSourceState.NotPrepared ? snapshot.ArtifactId : null), false);
+                HistoricalArtifactId: state == ItemEffectsSourceState.NotPrepared ? snapshot.ArtifactId : null), false, link);
             // Recognized history publishes no current semantic or physical facts. Let shared
             // Tables upgrade it under today's chosen definition before current eligibility.
             if (state == ItemEffectsSourceState.NotPrepared) { result = probe; return; }
             if (state != ItemEffectsSourceState.Ready) { result = Failed(probe, ItemEffectsSourceState.Unsupported); return; }
-            if (!Qualified(version, role, admission, definition, bundled, token))
+            if (!Qualified(version, info, admission, definition, bundled, token))
             { result = Failed(probe, ItemEffectsSourceState.Unsupported); return; }
             result = probe with { Public = new(role, ItemEffectsSourceState.Ready, snapshot), CurrentProfile = true };
         }, token);
@@ -98,13 +95,13 @@ public sealed partial class ItemEffectsStore
         }
     }
     private static TableDataSnapshot Snapshot(ItemsContext context, StoredTableAdmission admission,
-        ItemEffectsSourceRole role, TableDefinition? definition, string version, BundledTableDefinition bundled)
+        ItemEffectsTableProfile profile, TableDefinition? definition, string version, BundledTableDefinition bundled)
     {
         var artifact = admission.Artifact; var c = artifact.Completion;
         var columns = artifact.Header.Columns.Select(column => definition is not null ? TableDataStore.ProjectColumn(column, definition.Document) :
             new TableDataColumn(column.Name, column.Kind, column.IsId, null, column.Interpretation is { } p ?
                 new(p.Policy, p.PhysicalBits, p.PhysicalSigned, p.CandidateBits, p.CandidateUnsigned, p.Warning) : null)).ToArray();
-        TableDataSnapshot snapshot = new(context.ProductId, context.BuildIdentity, context.SourceRegion, Role(role).Table, context.ResearchLocale,
+        TableDataSnapshot snapshot = new(context.ProductId, context.BuildIdentity, context.SourceRegion, profile.TableId, context.ResearchLocale,
             artifact.ContentKey, admission.PreparedAt, artifact.Header.LayoutHash.ToUpperInvariant(), artifact.Binding.DefinitionSha256,
             artifact.Binding.ProviderRevision, artifact.Binding.DecoderRevision, admission.Source, admission.Association, Array.AsReadOnly(columns),
             new(c.Scope, N(c.DeclaredRecords), N(c.PhysicalRows), N(c.CopyRows), N(c.ExcludedEncryptedSections),
@@ -116,32 +113,26 @@ public sealed partial class ItemEffectsStore
     // The reviewed profile per role: the exact layout, file and every field's name, width and flags. Any definition, bundled
     // or fetched (D101), qualifies when its block for that layout says the same; the Effect raw columns also need the
     // reviewed raw rules, which a fetched definition gets only for an identical block.
-    private static bool Qualified(string version, ItemEffectsSourceRole role, StoredTableAdmission admission,
+    private static bool Qualified(string version, ItemEffectsTableProfile info, StoredTableAdmission admission,
         TableDefinition definition, BundledTableDefinition bundled, CancellationToken token)
     {
-        var info = Role(role); var artifact = admission.Artifact;
-        if (artifact.Header.SchemaVersion != 5 || !string.Equals(artifact.Header.TableHash, info.Table, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(artifact.Header.LayoutHash, info.Layout, StringComparison.OrdinalIgnoreCase) || admission.Association.FileDataId != info.Fdid ||
+        var artifact = admission.Artifact;
+        if (artifact.Header.SchemaVersion != 5 || !string.Equals(artifact.Header.TableHash, info.TableId, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(artifact.Header.LayoutHash, info.Layout, StringComparison.OrdinalIgnoreCase) || admission.Association.FileDataId != info.FileDataId ||
             artifact.Binding.DefinitionSha256 != definition.Sha256 || artifact.Binding.ProviderRevision != definition.Revision ||
-            artifact.Binding.DecoderRevision != TableDataStore.AdmissionRevision(info.Table, definition, bundled, version, info.Layout, admission.Source.Projection is not null, token) ||
+            artifact.Binding.DecoderRevision != TableDataStore.AdmissionRevision(info.TableId, definition, bundled, version, info.Layout, admission.Source.Projection is not null, token) ||
+
             artifact.Binding.SchemaSelectionSha256 != TableRowArtifacts.SchemaSelectionKey(definition.Document, version, token)) return false;
         var selected = definition.Document.SelectFile(version, info.Layout, token);
-        var names = role == ItemEffectsSourceRole.Bridge ? new[] { "ID", "ItemEffectID", "ItemID" } :
-            role == ItemEffectsSourceRole.Effect ? EffectColumns : ["ID", "Name_lang"];
-        if (selected.Blocks.Count != 1 || selected.Blocks[0].Fields.Count != names.Length || artifact.Header.Columns.Count != names.Length) return false;
-        for (var i = 0; i < names.Length; i++)
+        var names = info.Columns;
+        if (selected.Blocks.Count != 1 || selected.Blocks[0].Fields.Count != names.Count || artifact.Header.Columns.Count != names.Count) return false;
+        for (var i = 0; i < names.Count; i++)
         {
             token.ThrowIfCancellationRequested(); var field = selected.Blocks[0].Fields[i]; var actual = artifact.Header.Columns[i];
-            var text = role == ItemEffectsSourceRole.Name && i == 1;
-            var relation = role == ItemEffectsSourceRole.Bridge && i == 2;
-            var noninline = i == 0 || relation;
-            var bits = role == ItemEffectsSourceRole.Effect ? i is 1 or 2 ? 8 : i is 3 or 6 or 8 ? 16 : 32 : 32;
-            var unsigned = role == ItemEffectsSourceRole.Effect && i is 1 or 2 or 6 or 8;
-            if (field.Column.VerifiedName != !(role == ItemEffectsSourceRole.Effect && i == 9) || field.Column.Name != names[i] || field.Column.Family != (text ? "locstring" : "int") ||
-                field.ArrayLength != 1 || field.IsId != (i == 0) || field.NonInline != noninline || field.RelationStorage != relation ||
-                !text && (field.IntegerBits != bits || field.Unsigned != unsigned) || actual.Name != names[i] ||
+            var text = info.TableId == ItemEffectsLinks.SpellName.TableId && i == 1;
+            if (!ItemEffectsLinkChoice.FieldMatches(info, i, field) || actual.Name != names[i] ||
                 actual.Kind != (text ? "string" : "integer") || actual.IsId != (i == 0)) return false;
-            if (role == ItemEffectsSourceRole.Effect && i is 3 or 6 or 8)
+            if (info.RawColumns.Contains(i))
             {
                 if (actual.Interpretation is not { Policy: "raw-physical-integer-v1", PhysicalBits: 32, PhysicalSigned: false, CandidateBits: 16 } p ||
                     p.CandidateUnsigned != (i != 3) || p.Warning.Length is < 1 or > 512 || p.Warning.Any(char.IsControl)) return false;
@@ -186,29 +177,34 @@ public sealed partial class ItemEffectsStore
     {
         var token = operation.Token;
         if (initial.Public.State != ItemEffectsSourceState.NotPrepared) return initial;
-        var info = Role(initial.Role);
+        var info = Role(initial);
         for (var attempt = 0; attempt < 8; attempt++)
         {
+            info = Role(initial);
             // No query or physical borrow exists while waiting for the shared producer.
             await CheckOriginalAsync(original, bridge, token);
-            _ = await catalog.ReadItemEffectsSourceAsync(original.Opening, initial.Role, token);
+            _ = await catalog.ReadItemEffectsSourceAsync(original.Opening, initial.Role, token, info.TableId);
             try
             {
                 _ = await tables.PrepareAsync(new(original.Snapshot.Context.ProductId, original.Snapshot.Context.BuildIdentity,
-                    original.Snapshot.Context.SourceRegion, info.Table, original.Snapshot.Context.ResearchLocale, FetchedDefinitions: true, Feature: "Item effects"),
-                    stage => operation.ReportAsync(new(stage, "stage", TableId: info.Table)), token);
+                    original.Snapshot.Context.SourceRegion, info.TableId, original.Snapshot.Context.ResearchLocale, FetchedDefinitions: true, Feature: "Item effects"),
+                    stage => operation.ReportAsync(new(stage, "stage", TableId: info.TableId)), token);
             }
             catch (DiscoveryException error) when (error.Code == "TABLE_DATA_BUSY")
             {
-                await operation.ReportAsync(new("Waiting for shared table preparation", "stage", TableId: info.Table));
+                await operation.ReportAsync(new("Waiting for shared table preparation", "stage", TableId: info.TableId));
                 await tables.WaitForAvailabilityAsync(token);
                 continue;
             }
+            // An undecided build needs ItemEffect whichever way its layout decides, so a failure there names ItemEffect's link (#86).
             catch (Exception error) when (AcquisitionFailure(error, out _))
-            { _ = AcquisitionFailure(error, out var state); return Failed(initial, state); }
+            { _ = AcquisitionFailure(error, out var state); return Failed(initial with { Provisional = false }, state); }
             // Required persisted authority preflight is outside the optional acquisition catch.
             var current = await ProbeAsync(original, initial.Role, token);
             await CheckOriginalAsync(original, bridge, token);
+            // An undecided build's link reads ItemEffect first; once its layout chose ItemXItemEffect, prepare that (#86).
+            if (current.Public.State == ItemEffectsSourceState.NotPrepared && Role(current).TableId != info.TableId)
+            { initial = current; continue; }
             if (initial.Admission is { } prior && current.Admission is { } next)
             {
                 var same = false; await CpuAsync(() => same = ItemEffectsBridgePolicy.SameAuthority(prior.Source, next.Source) &&
@@ -222,6 +218,20 @@ public sealed partial class ItemEffectsStore
             return current;
         }
         throw Busy();
+    }
+    // The build's link (#86, D104). The bundled ItemEffect definition decides whenever its blocks for the build agree, so no
+    // ItemEffect authority is read early. When they disagree, the ItemEffect definition Tables chooses for the admitted
+    // ItemEffect rows (D101, bundled or fetched) decides by that file's layout; until the file is admitted the link reads as
+    // ParentItemID, which prepares ItemEffect first. Null means that provisional, undecided state.
+    private async Task<ItemEffectsLink?> LinkAsync(ItemEffectsItemsProof original, CancellationToken token)
+    {
+        var version = original.Opening.Build.Version; var table = ItemEffectsLinks.ClassicItemEffect.TableId;
+        var (_, bundled) = await TableDefinitionSources.FeatureTableAsync(table, token);
+        if (ItemEffectsLinkChoice.For(bundled.Document, version, null, token) is { } decided) return decided;
+        var effect = await catalog.ReadItemEffectsSourceAsync(original.Opening, ItemEffectsSourceRole.Effect, token);
+        if (effect is null) return null;
+        var definition = await definitions.ForFeatureRowsAsync(table, version, effect.Artifact, token);
+        return ItemEffectsLinkChoice.For(definition.Document, version, effect.Artifact.Header.LayoutHash, token) ?? ItemEffectsLinks.Parent;
     }
     private static bool AcquisitionFailure(Exception error, out ItemEffectsSourceState state)
     {
@@ -265,10 +275,10 @@ public sealed partial class ItemEffectsStore
         foreach (var source in sources)
         {
             if (!source.CurrentProfile || source.Admission is null) continue;
-            var table = Role(source.Role).Table; var version = original.Opening.Build.Version;
+            var table = Role(source).TableId; var version = original.Opening.Build.Version;
             var (_, bundled) = await TableDefinitionSources.FeatureTableAsync(table, token);
             var definition = await definitions.ForFeatureRowsAsync(table, version, source.Admission.Artifact, token);
-            var valid = false; await CpuAsync(() => valid = Qualified(version, source.Role, source.Admission, definition, bundled, token), token);
+            var valid = false; await CpuAsync(() => valid = Qualified(version, Role(source), source.Admission, definition, bundled, token), token);
             if (!valid) throw source.Role == ItemEffectsSourceRole.Bridge ? Stale() : new DiscoveryException("ITEM_EFFECTS_TARGET_STALE", "The selected target source changed.", true);
         }
         var targets = consulted.Where(probe => probe.Admission is not null).Select(probe =>
@@ -305,22 +315,32 @@ public sealed partial class ItemEffectsStore
     /// ItemEffect block that differs from the reviewed one, so it gets no raw rules and keeps v3.
     /// </summary>
     internal static ItemEffectsSourceState CurrentState(ItemEffectsSourceRole role, string decoderRevision, string layout, bool projected,
+        TableDefinition definition, BundledTableDefinition bundled, string version, bool chosen) =>
+        CurrentState(role, ItemEffectsLinks.Profile(ItemEffectsLinks.Bridge, role), decoderRevision, layout, projected, definition, bundled, version, chosen);
+    private static ItemEffectsSourceState CurrentState(ItemEffectsSourceRole role, ItemEffectsTableProfile profile, string decoderRevision, string layout, bool projected,
         TableDefinition definition, BundledTableDefinition bundled, string version, bool chosen)
     {
-        var state = RevisionState(role, decoderRevision, projected);
+        var state = RevisionState(role, decoderRevision, projected, profile);
         if (!chosen) return state == ItemEffectsSourceState.Ready ? ItemEffectsSourceState.NotPrepared : state;
         if (state == ItemEffectsSourceState.NotPrepared &&
-            decoderRevision == TableDataStore.AdmissionRevision(Role(role).Table, definition, bundled, version, layout, projected))
+            decoderRevision == TableDataStore.AdmissionRevision(profile.TableId, definition, bundled, version, layout, projected))
             return ItemEffectsSourceState.Unsupported;
         return state;
     }
+    // The revisions a profile's current rows carry. Retail ItemEffect 4CA77678 needs v4, the reviewed raw rules. Classic
+    // ItemEffect 1BF9CF3A is v4 read with the bundled definition (its rules exist but match no column) and v3 with a fetched
+    // one (D101); Qualified then checks the exact revision for the chosen definition. Other tables keep v3.
+    private static bool CurrentRevision(ItemEffectsTableProfile profile, string revision, bool projected)
+    {
+        var stem = "wdc5-values-v7+table-admission" + (projected ? "-projection" : "");
+        return profile.RawColumns.Count > 0 ? revision == stem + "-v4" :
+            revision == stem + "-v3" || profile.TableId == ItemEffectsLinks.ClassicItemEffect.TableId && revision == stem + "-v4";
+    }
     // These are exact previously shipped interpretations, never a version-prefix/suffix grant.
-    internal static ItemEffectsSourceState RevisionState(ItemEffectsSourceRole role, string revision, bool projected)
+    internal static ItemEffectsSourceState RevisionState(ItemEffectsSourceRole role, string revision, bool projected, ItemEffectsTableProfile? profile = null)
     {
         if (!Enum.IsDefined(role)) throw new DiscoveryException("INVALID_REQUEST", "Choose one exact effects source role.");
-        var current = "wdc5-values-v7+table-admission" + (projected ? "-projection" : "") +
-            (role == ItemEffectsSourceRole.Effect ? "-v4" : "-v3");
-        if (revision == current) return ItemEffectsSourceState.Ready;
+        if (CurrentRevision(profile ?? ItemEffectsLinks.Profile(ItemEffectsLinks.Bridge, role), revision, projected)) return ItemEffectsSourceState.Ready;
         var historical = projected ? revision is
             "wdc5-fixed-values-v3+table-admission-projection-v1" or
             "wdc5-values-v4+table-admission-projection-v1" or

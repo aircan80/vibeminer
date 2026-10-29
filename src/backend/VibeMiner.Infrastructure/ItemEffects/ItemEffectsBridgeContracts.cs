@@ -140,22 +140,29 @@ internal static class ItemEffectsBridgePolicy
         try
         {
             ShallowBounds(b); ItemsService.Validate(b.Context); var s = b.Source; var r = b.Rows; var c = r.Completion; var coverage = s.Coverage;
-            var total = Total(b); var names = new[] { "ID", "ItemEffectID", "ItemID" };
+            // The binding's bridge is one reviewed link profile: ItemXItemEffect, or ItemEffect.ParentItemID (#86). Both keep
+            // v3, except a Classic ItemEffect read with the bundled definition (v4).
+            var link = Link(s); var profile = link.Bridge; var names = profile.Columns; var table = profile.TableId; var layout = profile.Layout;
+            var total = Total(b);
             if (b.BuildVersion is null || b.BuildVersion.Length is < 7 or > 43 || s.Coverage is null ||
-                s.ProductId != b.Context.ProductId || s.BuildIdentity != b.Context.BuildIdentity || s.SourceRegion != b.Context.SourceRegion || s.ResearchLocale != "enUS" || s.TableId != Table ||
-                r.Header.SchemaVersion != 5 || s.LayoutHash != Layout || !string.Equals(r.Header.TableHash, Table, StringComparison.OrdinalIgnoreCase) || r.Header.LayoutHash.ToUpperInvariant() != Layout ||
+                s.ProductId != b.Context.ProductId || s.BuildIdentity != b.Context.BuildIdentity || s.SourceRegion != b.Context.SourceRegion || s.ResearchLocale != "enUS" || s.TableId != table ||
+                r.Header.SchemaVersion != 5 || s.LayoutHash != layout || !string.Equals(r.Header.TableHash, table, StringComparison.OrdinalIgnoreCase) || r.Header.LayoutHash.ToUpperInvariant() != layout ||
                 !Hash(s.DefinitionSha256) || !Hash(s.ProviderRevision, 40) || s.DecoderRevision !=
-                    (s.Source.Projection is null ? TableDataStore.DecoderRevision : TableDataStore.ProjectionDecoderRevision) ||
+                    (s.Source.Projection is null ? TableDataStore.DecoderRevision : TableDataStore.ProjectionDecoderRevision) &&
+                    // A Classic ItemEffect bridge read with the bundled definition carries ItemEffect's v4 (D101); the profile
+                    // check against the chosen definition then requires the exact one.
+                    !(table == ItemEffectsLinks.ClassicItemEffect.TableId && s.DecoderRevision ==
+                        (s.Source.Projection is null ? TableDataStore.ItemEffectDecoderRevision : TableDataStore.ItemEffectProjectionDecoderRevision)) ||
                 s.ArtifactId != r.ContentKey || r.ContentKey != TableRowArtifacts.ContentKey(r.Binding) || !Hash(r.Sha256) || r.ByteLength is < 64 or > VerifiedObjectStore.MaxObjectBytes ||
                 r.Binding.SourceSha256 != s.Source.Sha256 || r.Binding.DefinitionSha256 != s.DefinitionSha256 || r.Binding.ProviderRevision != s.ProviderRevision || r.Binding.Locale != "enUS" || r.Binding.DecoderRevision != s.DecoderRevision ||
                 !Hash(r.Binding.DecodedSha256) || !Hash(r.Binding.SchemaSelectionSha256) || s.Source.Projection is { } projection && r.Binding.DecodedSha256 != projection.IdentitySha256 ||
                 c.ConsumedBytes != Number(s.Source.DecodedBytes) ||
                 s.Source.VerifierRevision != (s.Source.Projection is null ? "content-blte-v1" : ContentProjectionIdentity.VerifierRevision) ||
                 s.Source.Projection is { } admittedProjection && admittedProjection.IdentitySha256 != ContentProjectionIdentity.Compute(s.Source.ContentKey, s.Source.EncodingKey, s.Source.DecodedBytes, admittedProjection) ||
-                s.Association.FileDataId != FileDataId || s.Association.ResearchLocale != "enUS" || s.Association.EncodingSource.Role != "encoding" || s.Association.RootSource.Role != "root" ||
+                s.Association.FileDataId != profile.FileDataId || s.Association.ResearchLocale != "enUS" || s.Association.EncodingSource.Role != "encoding" || s.Association.RootSource.Role != "root" ||
                 !Hash(s.Source.ContentKey, 32) || !Hash(s.Source.EncodingKey, 32) || !Hash(s.Source.Sha256) || Number(s.Source.EncodedBytes) is < 1 or > VerifiedObjectStore.MaxObjectBytes || Number(s.Source.DecodedBytes) is < 1 or > VerifiedObjectStore.MaxObjectBytes ||
-                s.Columns.Count != 3 || r.Header.Columns.Count != 3 || b.Configurations.Any(v => v is null) || b.Configurations.Count(v => v.Role == "buildConfig") != 1 || b.Configurations.Count(v => v.Role == "cdnConfig") != 1 ||
-                b.Fields.RowId != new ItemEffectsFieldReference(Table, 0) || b.Fields.ItemEffectId != new ItemEffectsFieldReference(Table, 1) || b.Fields.ItemId != new ItemEffectsFieldReference(Table, 2) ||
+                s.Columns.Count != names.Count || r.Header.Columns.Count != names.Count || b.Configurations.Any(v => v is null) || b.Configurations.Count(v => v.Role == "buildConfig") != 1 || b.Configurations.Count(v => v.Role == "cdnConfig") != 1 ||
+                b.Fields != link.Fields ||
                 c.DeclaredRecords < 0 || c.ExcludedPhysicalRecords < 0 || c.ExcludedCopyRecords < 0 || c.ExcludedEncryptedSections < 0 || c.TextIssueCount != 0 ||
                 c.DeclaredRecords != checked(c.PhysicalRows + c.ExcludedPhysicalRecords) || r.Header.DeclaredRecords != c.DeclaredRecords || r.Header.DeclaredCopyRecords != checked(c.CopyRows + c.ExcludedCopyRecords) ||
                 c.Scope is not ("complete" or "unencryptedSections") || c.Scope == "complete" && (c.ExcludedPhysicalRecords != 0 || c.ExcludedCopyRecords != 0 || c.ExcludedEncryptedSections != 0 || s.Source.Projection is not null) ||
@@ -164,7 +171,7 @@ internal static class ItemEffectsBridgePolicy
                 coverage.DeclaredCopyRecords != N(r.Header.DeclaredCopyRecords) || coverage.ExcludedKeyedSections != N(c.ExcludedEncryptedSections) ||
                 coverage.ExcludedPhysicalRecords != N(c.ExcludedPhysicalRecords) || coverage.ExcludedCopyRecords != N(c.ExcludedCopyRecords) ||
                 coverage.ExcludedDeclaredRecords != N(checked(c.ExcludedPhysicalRecords + c.ExcludedCopyRecords)) || s.RowCount != N(total) || s.TextIssueCount != "0") throw Invalid();
-            for (var i = 0; i < 3; i++)
+            for (var i = 0; i < names.Count; i++)
                 if (s.Columns[i] is not { } column || r.Header.Columns[i] is not { } raw || column.Name != names[i] || raw.Name != names[i] ||
                     column.Family != "integer" || raw.Kind != "integer" || column.Interpretation is not null || raw.Interpretation is not null || column.IsId != (i == 0) || raw.IsId != (i == 0)) throw Invalid();
             _ = Bytes(b);
@@ -186,7 +193,7 @@ internal static class ItemEffectsBridgePolicy
     {
         token.ThrowIfCancellationRequested();
         await cpuSlice(() => ValidateBinding(binding), token);
-        var definition = await definitions.ForFeatureRowsAsync(Table, binding.BuildVersion, binding.Rows, token);
+        var definition = await definitions.ForFeatureRowsAsync(Link(binding.Source).Bridge.TableId, binding.BuildVersion, binding.Rows, token);
         if (binding.Source.DefinitionSha256 != definition.Sha256 || binding.Source.ProviderRevision != definition.Revision)
             throw new DiscoveryException("ITEM_EFFECTS_BRIDGE_STALE", "The selected effects bridge source or index changed.", true);
         await cpuSlice(() => ValidateProfile(binding, definition, token), token);
@@ -195,17 +202,17 @@ internal static class ItemEffectsBridgePolicy
     {
         ValidateBinding(binding); token.ThrowIfCancellationRequested();
         if (binding.Rows.Binding.SchemaSelectionSha256 != TableRowArtifacts.SchemaSelectionKey(definition.Document, binding.BuildVersion, token)) throw Invalid();
-        var selected = definition.Document.SelectFile(binding.BuildVersion, Layout, token);
-        if (selected.Blocks.Count != 1 || selected.Blocks[0].Fields.Count != 3) throw Invalid();
-        var fields = selected.Blocks[0].Fields; var names = new[] { "ID", "ItemEffectID", "ItemID" };
-        for (var i = 0; i < 3; i++)
-        {
-            var field = fields[i];
-            if (!field.Column.VerifiedName || field.Column.Name != names[i] || field.Column.Family != "int" || field.ArrayLength != 1 || field.IntegerBits != 32 ||
-                field.Unsigned != false || field.IsId != (i == 0) || field.NonInline != (i != 1) || field.RelationStorage != (i == 2) ||
+        var profile = Link(binding.Source).Bridge;
+        if (binding.Source.DecoderRevision != binding.Rows.Binding.DecoderRevision) throw Invalid();
+        var selected = definition.Document.SelectFile(binding.BuildVersion, profile.Layout, token);
+        if (selected.Blocks.Count != 1 || selected.Blocks[0].Fields.Count != profile.Columns.Count) throw Invalid();
+        var fields = selected.Blocks[0].Fields;
+        for (var i = 0; i < profile.Columns.Count; i++)
+            if (!ItemEffectsLinkChoice.FieldMatches(profile, i, fields[i]) ||
                 binding.Source.Columns[i] != TableDataStore.ProjectColumn(binding.Rows.Header.Columns[i], definition.Document)) throw Invalid();
-        }
     }
+    internal static ItemEffectsLink Link(TableDataSnapshot source) =>
+        source is null ? throw Invalid() : ItemEffectsLinks.ForBridge(source.TableId, source.LayoutHash) ?? throw Invalid();
     internal static bool SameAuthority<T>(T first, T current)
     {
         var a = JsonNode.Parse(Bytes(first)); var b = JsonNode.Parse(Bytes(current));

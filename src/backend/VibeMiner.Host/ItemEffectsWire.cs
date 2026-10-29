@@ -69,7 +69,7 @@ internal static class ItemEffectsWire
     private static string Name<T>(T value)where T:struct,Enum=>Enum.IsDefined(value)?JsonNamingPolicy.CamelCase.ConvertName(value.ToString()):
         throw new DiscoveryException("ITEM_EFFECTS_RESULT_INVALID","The effects result uses an undefined state.");
     internal static object Readiness(ItemEffectsReadiness value)=>new
-    {value.Selection,value.Admitted,state=Name(value.State),value.Snapshot,value.ObservedAssociations,source=value.Source is null?null:Source(value.Source),value.Problem};
+    {value.Selection,value.Admitted,state=Name(value.State),value.Snapshot,value.ObservedAssociations,source=value.Source is null?null:Source(value.Source),value.Problem,value.Link};
     private static object Source(ItemEffectsSource value)=>new{role=Name(value.Role),state=Name(value.State),value.Snapshot,value.HistoricalArtifactId,value.Problem};
     internal static object Page(ItemEffectsPage value)=>new{value.Selection,value.BridgeIndexArtifactId,value.OrderPolicy,value.BridgeSource,value.ObservedAssociations,value.Edges,value.NextCursor};
     internal static object Details(ItemEffectDetailsResult value)=>new

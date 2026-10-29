@@ -40,8 +40,9 @@ export function fetchedWhy(sources:TableDataSnapshot[],build:string):string[]{
 
 /** One line for a feature's own state (effects, labels): which of its tables used a fetched definition, or null. */
 export function fetchedNote(sources:(TableDataSnapshot|null|undefined)[]):string|null{
- const fetched=sources.filter((s):s is TableDataSnapshot=>!!s?.fetchedDefinition);
- return fetched.length?`${list(fetched.map(tableName))} read with ${fetched.length>1?'definitions':'a definition'} fetched from WoWDBDefs. Names and meanings are community data, not verified.`:null;}
+ // One table named once: on Classic the ParentItemID link source and the effect source are the same ItemEffect (#86).
+ const names=[...new Set(sources.filter((s):s is TableDataSnapshot=>!!s?.fetchedDefinition).map(tableName))];
+ return names.length?`${list(names)} read with ${names.length>1?'definitions':'a definition'} fetched from WoWDBDefs. Names and meanings are community data, not verified.`:null;}
 
 /**
  * D101: a feature view says, as Tables does, when its tables were read with a definition fetched from WoWDBDefs or

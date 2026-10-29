@@ -18,7 +18,7 @@ public sealed partial class ItemEffectsStore
         EdgeSelection[] edges;
         await using (var first = await BorrowBridgeAsync(original, bridge, false, false, token))
             edges = await ReadEdgesAsync(first, Parent(original), owned.Edges, token);
-        var effect = edges.Any(edge => edge.Tuple.ItemEffectId >= 0) ? await ProbeAsync(original, ItemEffectsSourceRole.Effect, token) : Unchecked(ItemEffectsSourceRole.Effect);
+        var effect = edges.Any(edge => edge.Tuple.ItemEffectId >= 0) ? await ProbeAsync(original, ItemEffectsSourceRole.Effect, token) : Unchecked(ItemEffectsSourceRole.Effect, bridge.Source.Link);
         if (effect.CurrentProfile && effect.CapturedSnapshot!.ArtifactId != owned.ItemEffectArtifactId) effect = Failed(effect, ItemEffectsSourceState.Stale);
         var evidence = SpellsForState(effect, edges);
         // This initial local phase establishes eligibility. Its borrow is gone before Name can acquire.
@@ -35,7 +35,7 @@ public sealed partial class ItemEffectsStore
             }
         }
         var name = evidence.Any(spell => spell.State == ItemEffectState.ObservedReady && spell.SpellId!.Value[0] != '-') ?
-            await ProbeAsync(original, ItemEffectsSourceRole.Name, token) : Unchecked(ItemEffectsSourceRole.Name);
+            await ProbeAsync(original, ItemEffectsSourceRole.Name, token) : Unchecked(ItemEffectsSourceRole.Name, bridge.Source.Link);
         if (prepare && name.Public.State == ItemEffectsSourceState.NotPrepared)
             name = await PrepareOptionalAsync(original, name, bridge, operation);
         await using var index = await BorrowBridgeAsync(original, bridge, false, false, token);
@@ -123,7 +123,7 @@ public sealed partial class ItemEffectsStore
         if (found.MatchCount == 0) return new(ItemEffectState.NotFoundInAdmittedScope, N(id), "0", Absence: Absence(source));
         if (found.MatchCount > 1) return new(ItemEffectState.Ambiguous, N(id), N(found.MatchCount));
         var row = found.Row!;
-        if (row.Id != (uint)id || row.IsCopy != row.CopySourceId.HasValue || row.Values.Count != 10 || row.Values[0] != N(row.Id)) throw RowInvalid();
+        if (row.Id != (uint)id || row.IsCopy != row.CopySourceId.HasValue || row.Values.Count != Role(source).Columns.Count || row.Values[0] != N(row.Id)) throw RowInvalid();
         if (!Signed(row.Values[7]) || row.TextIssues?.Any(issue => issue.ColumnIndex == 7) == true)
             return new(ItemEffectState.FieldUnavailable, N(id), Problem: FieldProblem);
         return new(ItemEffectState.ObservedReady, N(id), "1", Target(source, row), new("4002a5b1", 7, row.Values[7]));
