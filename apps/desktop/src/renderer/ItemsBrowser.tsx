@@ -117,7 +117,7 @@ export function ItemsBrowser({effectsLoading,effectsAvailable=false,effectsSourc
  useLayoutEffect(()=>{if(!prepStatusLeft.current)return;prepStatusLeft.current=false;if(prepStatus.current||!active)return;
   const now=document.activeElement;if(now&&now!==document.body)return;(input.current&&!input.current.disabled?input.current:heading.current)?.focus({preventScroll:true});});
  // Ctrl+F focuses the Items search, as on Tables and Files; in the one-pane layout it shows the list first.
- useEffect(()=>{if(!active)return;const key=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='f'&&!input.current?.closest('[inert]')){event.preventDefault();setPane('list');requestAnimationFrame(()=>{input.current?.focus();input.current?.select();});}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active]);
+ useEffect(()=>{if(!active)return;const key=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='f'&&!input.current?.closest('[inert]')){event.preventDefault();showPane('search');}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active]);
  useLayoutEffect(()=>{const l=listScroll.current;if(active&&l&&Math.abs(l.scrollTop-listTop.current)>1)l.scrollTop=listTop.current;},[active]);
  useEffect(()=>{if(active&&!activated.current){activated.current=true;void readiness();}},[active]);
  useEffect(()=>{if(!op||itemsKey(op.intent.context)!==key)return;if(['pending','stopping'].includes(op.status))observed.current=op.id;if(op.result&&observed.current===op.id&&seen.current!==op.id){seen.current=op.id;accept(op.result);}},[flow.operation]);
@@ -141,7 +141,11 @@ export function ItemsBrowser({effectsLoading,effectsAvailable=false,effectsSourc
  function choose(item:ItemSummary,show:boolean){void inspect(item);keepRow(item.id);if(show&&compact){detailFocus.current=true;setPane('detail');}}
  function keepRow(id:string){requestAnimationFrame(()=>{const l=listScroll.current,o=document.getElementById(`iv-opt-${id}`);if(!l||!o)return;const head=l.querySelector<HTMLElement>('.iv-thead')?.offsetHeight??0,top=o.offsetTop-head,bottom=o.offsetTop+o.offsetHeight-l.clientHeight;if(l.scrollTop>top)l.scrollTop=top;else if(l.scrollTop<bottom)l.scrollTop=bottom;});}
  function listKey(e:React.KeyboardEvent){const entries=page?.entries??[];if(!entries.length)return;const i=entries.findIndex(x=>x.id===selected?.id);const t={ArrowDown:i+1,ArrowUp:i<0?0:i-1,Home:0,End:entries.length-1,PageDown:i+10,PageUp:i-10}[e.key];if(t!==undefined){e.preventDefault();choose(entries[Math.max(0,Math.min(entries.length-1,t))],false);}else if(e.key==='Enter'&&i>=0){e.preventDefault();choose(entries[i],true);}}
- function showPane(next:'list'|'detail'){setPane(next);requestAnimationFrame(()=>{if(next==='list'){listbox.current?.focus({preventScroll:true});if(selected)keepRow(selected.id);}else document.querySelector<HTMLElement>('.iv-switch [data-pane="detail"]')?.focus();});}
+ // A pane switch moves focus in the commit that shows the pane, never a frame later: a deferred move could land after the reader (or
+ // a keypress) had already moved focus on, and pull it back to the switch (#93).
+ const [paneFocus,setPaneFocus]=useState<{target:'list'|'detail'|'search';serial:number}|null>(null);
+ function showPane(target:'list'|'detail'|'search'){setPane(target==='detail'?'detail':'list');setPaneFocus(old=>({target,serial:(old?.serial??0)+1}));}
+ useLayoutEffect(()=>{if(!paneFocus)return;if(paneFocus.target==='search'){input.current?.focus();input.current?.select();}else if(paneFocus.target==='list'){listbox.current?.focus({preventScroll:true});if(selected)keepRow(selected.id);}else document.querySelector<HTMLElement>('.iv-switch [data-pane="detail"]')?.focus();},[paneFocus]);
  const effectsHeading=useRef<HTMLHeadingElement>(null),effectsFocus=useRef<string|null>(null);
  const effectsIntent:EffectsIntent|null=effectsAvailable&&effectsLoading&&snapshot&&selected?{params:{...context,itemsArtifactId:snapshot.artifactId,itemId:selected.id},summary:selected,buildVersion:workspace.build.version}:null;
  const effectKey=effectsIntent?effectsKey(effectsIntent.params):null;

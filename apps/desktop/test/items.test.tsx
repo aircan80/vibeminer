@@ -143,6 +143,20 @@ it('shows the selected item in its own pane in the one-pane layout, focusing its
  fireEvent.keyDown(listbox(),{key:'Enter'});await waitFor(()=>expect(screen.getByRole('heading',{name:'Authored sword 5',level:2})).toHaveFocus());
 });
 
+// #93: the pane switch moved focus a frame later, so a focus move made right after the click (a keypress under load) was pulled back.
+it('moves focus in the same commit as a one-pane switch, and a focus move right after it is never pulled back',async()=>{
+ setup(true,undefined,{compact:true});await ready();
+ fireEvent.click(await findRow('4'));await waitFor(()=>expect(screen.getByRole('heading',{name:'Authored sword 4',level:2})).toHaveFocus());
+ const frame=()=>act(()=>new Promise<void>(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>done()))));
+ fireEvent.click(screen.getByRole('button',{name:'Items list'}));expect(listbox()).toHaveFocus();
+ const search=screen.getByRole('searchbox',{name:'Name contains'});search.focus();await frame();expect(search).toHaveFocus();
+ const detail=screen.getByRole('button',{name:'Selected item'});fireEvent.click(detail);expect(detail).toHaveFocus();
+ const record=screen.getByRole('button',{name:/^Item #4/});record.focus();await frame();expect(record).toHaveFocus();
+ fireEvent.keyDown(window,{key:'f',ctrlKey:true});expect(search).toHaveFocus();
+ expect(document.querySelector('.iv-panes')).toHaveAttribute('data-pane','list');
+ listbox().focus();await frame();expect(listbox()).toHaveFocus();
+});
+
 it('automatically prepares only on deliberate Items activation and does not cancel on area/build departure',async()=>{
  const{bridge,pending}=setup(false);await waitFor(()=>expect(bridge.itemsPrepare).toHaveBeenCalledTimes(1));
  fireEvent.click(screen.getByRole('button',{name:'Switch area'}));fireEvent.click(screen.getByRole('button',{name:'Choose build'}));expect(bridge.cancel).not.toHaveBeenCalled();

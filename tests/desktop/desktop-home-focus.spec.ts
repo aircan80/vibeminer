@@ -97,8 +97,9 @@ test('at 200% an Items source record keeps the records head, notices and Return 
     await page.locator('#iv-opt-9').click();
     await text(page, 2);
     // One pane at a time at 200%: show the selected item, then open its whole Item record from the head.
-    await page.getByRole('button', { name: 'Selected item', exact: true }).click();
-    const source = page.getByRole('button', { name: /^Item #9/ }); await source.focus(); await page.keyboard.press('Enter');
+    // The switch keeps focus once its pane shows (#93); act only after that, so the app's focus move can't land after ours.
+    const shown = page.getByRole('button', { name: 'Selected item', exact: true }); await shown.click(); await expect(shown).toBeFocused();
+    const source = page.getByRole('button', { name: /^Item #9/ }); await source.focus(); await expect(source).toBeFocused(); await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Table data', exact: true })).toBeFocused();
     await expect(page.locator('.dh-records .dh-return-link')).toBeVisible();
     const layout = await page.evaluate(() => { const records = document.querySelector<HTMLElement>('.dh-records')!, foot = records.querySelector(':scope>.dh-pane-foot')!.getBoundingClientRect(), head = records.querySelector(':scope>.dh-pane-head')!.getBoundingClientRect(), ret = records.querySelector('.dh-return-link')!.getBoundingClientRect(), notices = [...records.querySelectorAll('.dh-data:not([hidden])>.dh-notice')].map(n => n.getBoundingClientRect()); return { scroll: records.scrollTop, headTop: Math.round(head.top - records.getBoundingClientRect().top), retPinned: ret.top >= head.bottom - 1 && ret.bottom <= foot.top, noticesClear: notices.every(n => n.bottom <= foot.top + 1) }; });
@@ -169,6 +170,9 @@ test('a held keyboard page read neither reflows the grid nor undoes a later move
     for (const scale of [1, 2]) {
       await text(page, scale);
       await row('0').click(); await page.keyboard.press('End'); await expect(row('49')).toBeFocused();
+      // At 200% the shell scrolls the header out of view, so the floating activity entry appears and the shell re-reveals the row above it.
+      // That arrives from an IntersectionObserver a frame or more later (#93): measure only once it has.
+      await expect(page.locator('.download-activity-floating')).toHaveCount(scale === 2 ? 1 : 0);
       // The scrolled grid keeps its corner header above the sticky Record ID cells.
       expect(await page.locator('.dh-data:not([hidden]) thead th').first().evaluate(el => { const r = el.getBoundingClientRect(); return document.elementFromPoint(r.left + 8, r.top + r.height / 2) === el || el.contains(document.elementFromPoint(r.left + 8, r.top + r.height / 2)); })).toBe(true);
       const before = await gridBox();
