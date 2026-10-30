@@ -15,7 +15,7 @@ export class IconsController{
  private cache=new Map<string,{image:NonNullable<ItemIconBatch['outcomes'][number]['image']>;url:string;expires:number}>();
  get documentToken():number{return this.document;}
  readonly images:ImagePort;
- constructor(private engine:Engine,dataDirectory:string,private now:()=>number=()=>performance.now(),images?:ImagePort){
+ constructor(private engine:Engine,dataDirectory:string,private now:()=>number=()=>performance.now(),images?:ImagePort,private lifetime=90000){
   this.images=images??new IconImageProtocol({dataDirectory,openIcon:(p,signal)=>this.open(p,signal),closeIcon:id=>this.close(id)});
  }
  private async open(p:IconImageRequest,signal:AbortSignal):Promise<ItemIconLeaseDescriptor>{
@@ -58,8 +58,9 @@ export class IconsController{
     const cached=this.cache.get(outcome.itemId),image=outcome.image;
     if(cached&&(cached.image.artifactId!==image.artifactId||cached.image.byteLength!==image.byteLength||cached.image.width!==image.width||cached.image.height!==image.height))throw new EngineFailure('ICON_VIEW_CHANGED','The admitted image changed within this exact view. Reopen the Items page to reassess it.');
     if(!cached&&this.cache.size>=51)throw new EngineFailure('ICON_VIEW_CAPACITY','This image view reached its bounded target limit. Reopen the Items page.');
-    let url=cached&&cached.expires-this.now()>=1?cached.url:null;
-    if(!url){try{url=this.images.issue({context:result.context,featureArtifact:params.artifactId,itemId:outcome.itemId,artifactId:image.artifactId},image);}catch{this.failed=true;throw new EngineFailure('ICON_DELIVERY_UNAVAILABLE','Verified image delivery is unavailable. Restart VibeMiner to reconnect.');}this.cache.set(outcome.itemId,{image:{...image},url,expires:this.now()+90000});}
+    // A URL near its end is reissued, so a renderer refresh at its expiry always gets a usable lifetime.
+    let url=cached&&cached.expires-this.now()>=this.lifetime/3?cached.url:null;
+    if(!url){try{url=this.images.issue({context:result.context,featureArtifact:params.artifactId,itemId:outcome.itemId,artifactId:image.artifactId},image);}catch{this.failed=true;throw new EngineFailure('ICON_DELIVERY_UNAVAILABLE','Verified image delivery is unavailable. Restart VibeMiner to reconnect.');}this.cache.set(outcome.itemId,{image:{...image},url,expires:this.now()+this.lifetime});}
     return{...outcome,image:{width:image.width,height:image.height,byteLength:image.byteLength,url,requestLifetimeMs:Math.min(1500000,Math.floor(this.cache.get(outcome.itemId)!.expires-started))}};
    });
    return{context:result.context,artifactId:result.artifactId,outcomes};

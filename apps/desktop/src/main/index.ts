@@ -47,6 +47,8 @@ function geometryOwner():GeometryDocumentOwner{
 }
 function geometryDocumentGone(){const old=geometryDocument;geometryDocument=null;geometryDocumentBlocked=false;if(old)void geometry.documentGone(old).catch(geometryCleanupFailure);}
 const iconCleanupFailure=()=>{console.error('Verified image cleanup could not be confirmed; image delivery remains unavailable.');};
+// Authored-fixture e2e runs may shorten the icon URL lifetime to watch its refresh; the app always uses 90 s.
+const iconUrlLifetime=()=>process.env.VIBEMINER_AUTHORED_FIXTURES==='1'&&/^[1-9][0-9]{3,4}$/.test(process.env.VIBEMINER_FIXTURE_ICON_URL_LIFETIME_MS??'')?Number(process.env.VIBEMINER_FIXTURE_ICON_URL_LIFETIME_MS):90000;
 const engineDataDirectory=()=>path.resolve(process.env.VIBEMINER_DATA_DIR||path.join(app.getPath('userData'),'engine-v1'));
 let window: BrowserWindow | null = null;
 let quitting = false;
@@ -166,7 +168,7 @@ async function openWindow(): Promise<void> {
 }
 app.whenReady().then(async () => {
   engine = createEngine();
-  icons=new IconsController(engine,engineDataDirectory());
+  icons=new IconsController(engine,engineDataDirectory(),undefined,undefined,iconUrlLifetime());
   geometryBinary=new GeometryBinaryProtocol({dataDirectory:engineDataDirectory(),hasEngineExited:()=>engine.hasExited,openGeometry:async(params,signal)=>{
     const id=`geometry_open_${randomUUID()}`,cancel=()=>{void engine.request('request.cancel',{requestId:id}).catch(()=>{/* Original Open remains observed. */});};
     signal.addEventListener('abort',cancel,{once:true});try{if(signal.aborted)throw new EngineFailure('CANCELED','The geometry view was left.');return await engine.request<CreatureGeometryLeaseDescriptor>('creatures.geometry.open',params,id);}finally{signal.removeEventListener('abort',cancel);}
