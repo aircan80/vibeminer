@@ -214,49 +214,15 @@ internal sealed partial class GeometrySourceClosure
         // Our own readers and size checks name the feature, malformation or limit in a short fixed message (#75, #98); keep it.
         // A limit leads with what tripped it, such as the file's sizes and the caps, in plain words (#111).
         var own = OwnMessage(e.Code) && e.Message.Length is > 0 and <= 400;
+        // Our own readers' limits are caps on the file they read; every other limit is named, with who owns its cap (#116).
+        var (named, owner) = state == CreatureGeometryState.ResourceLimit && !own ? NamedLimitOwner(e.Code, dependency, e.Message) : ("", GeometryLimitOwner.File);
         var message = state == CreatureGeometryState.ResourceLimit
-            ? own ? e.Message : NamedLimit(e.Code, dependency, e.Message)
+            ? own ? e.Message : named
             : "The original geometry source could not be admitted (" + state + ")" + (own ? ": " + e.Message : ".");
         // The source-size refusal already says it is a size limit. Codes mix byte and count caps (memberships, vertices,
         // output bytes), so every other limit says only "a limit", which is true of both.
         if (state == CreatureGeometryState.ResourceLimit && !e.Retryable && !message.EndsWith(GeometrySourceVerification.SizeLimit, StringComparison.Ordinal))
             message += " This is a limit, not a corrupt file.";
-        return new(state, dependency, new(e.Code, message, e.Retryable), reached);
+        return new(state, dependency, new(e.Code, message, e.Retryable), reached, Headline(state, e.Code, e.Retryable, owner));
     }
-    // A limit with no reader message of its own is named in plain words (#114). A cap on one of the build's own lists
-    // (encoding manifest, install manifest, ROOT, CDN configuration, archive indexes) names that list, not the file being
-    // read. A BLTE cap keeps which BLTE cap it was. Any other code is read as words, e.g. BLTE_FRAME_LIMIT is "the BLTE
-    // frame limit". Capacity codes are shared queues that are full now, not a fixed cap on the file.
-    internal static string NamedLimit(string code, CreatureGeometryDependency dependency, string detail = "")
-    {
-        var file = dependency switch
-        {
-            CreatureGeometryDependency.Model => "model file", CreatureGeometryDependency.Skin => "SKIN file",
-            CreatureGeometryDependency.Texture => "texture file", CreatureGeometryDependency.Artifact => "geometry artifact", _ => "display metadata"
-        };
-        var list = code switch
-        {
-            "EN_LIMIT" or "RESOLVER_LIMIT" => "encoding manifest",
-            "IN_LIMIT" => "install manifest",
-            "ROOT_LIMIT" or "ROOT_SCOPE_LIMIT" or "ASSET_SOURCE_LIMIT" => "ROOT file list",
-            "CONFIG_LIMIT" => "CDN configuration",
-            "ARCHIVE_INDEX_LIMIT" or "CONTENT_LOCATOR_LIMIT" or "BULK_LOCATOR_LIMIT" => "archive index lookup",
-            _ => null
-        };
-        if (list is not null) return $"The build's {list} is over its limit, so the {file} was not read.";
-        if (code == "BLTE_LIMIT") return $"The {file} is over the BLTE {BlteCap(detail)} limit.";
-        var capacity = code.EndsWith("_CAPACITY", StringComparison.Ordinal);
-        var words = code.Split('_', StringSplitOptions.RemoveEmptyEntries)
-            .Select(w => w is "BLTE" or "ROOT" or "CDN" or "DB2" or "TACT" or "M2" or "SKIN" ? w : w.ToLowerInvariant());
-        var name = string.Join(' ', words);
-        return capacity ? $"The {name} is full, so the {file} was not read." : $"The {file} is over the {name}.";
-    }
-    // The BLTE readers' messages are fixed; pick out which cap tripped (BlteDecoder and its projection reader).
-    private static string BlteCap(string detail) =>
-        detail.Contains("chunk count", StringComparison.Ordinal) ? "chunk count"
-        : detail.Contains("chunk-header", StringComparison.Ordinal) || detail.Contains("header exceeds the chunk", StringComparison.Ordinal) ? "chunk header size"
-        : detail.Contains("working-memory", StringComparison.Ordinal) ? "chunk memory"
-        : detail.Contains("sixteen-MiB", StringComparison.Ordinal) ? "chunk size"
-        : detail.Contains("range bound", StringComparison.Ordinal) ? "readable range count"
-        : detail.Contains("object", StringComparison.Ordinal) ? "object size" : "size";
 }

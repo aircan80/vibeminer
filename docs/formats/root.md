@@ -68,6 +68,8 @@ ROOT has no global FDID index. Finding one FDID, or proving it is absent, needs 
 | `RootTargetLookup` | ≤1,024 target IDs, ≤4,096 matches | One-off lookups, e.g. a table's FDID |
 | `RootBatchLookup` | ≤128 nonzero target IDs, ≤4,096 matches per ID, ≤32,768 total | Asset batches (icons, models): one pass for up to 128 IDs, results in ascending ID order |
 
+Both refuse with `ROOT_LIMIT`. The per-ID cap and the total have their own messages, so a caller can say a file has too many variants rather than blame the ROOT list (#116).
+
 Asset resolution sessions cache results per exact build/source: at most 1,024 FDID outcomes, 32,768 memberships and 16 MiB of charged memory. Results are committed to the cache only after the scan reaches EOF and all EN lookups succeed. Retained decoded ROOT bytes (`root-native-file-v1`) are re-checked on reuse: local SHA-256 and length, MD5 equal to the ROOT CKey, and a full grammar pass.
 
 ## Selection policies

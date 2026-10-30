@@ -10,6 +10,7 @@ const ready = JSON.parse(await readFile(new URL('../../contracts/examples/creatu
 const lease = JSON.parse(await readFile(new URL('../../contracts/examples/creature-geometry-lease.json', import.meta.url)));
 const textured = JSON.parse(await readFile(new URL('../../contracts/examples/creature-geometry-textured.json', import.meta.url)));
 const appearanceLease = JSON.parse(await readFile(new URL('../../contracts/examples/creature-geometry-appearance-lease.json', import.meta.url)));
+const limit = JSON.parse(await readFile(new URL('../../contracts/examples/creature-geometry-limit.json', import.meta.url)));
 const selection = { ...ready.context, artifactId: ready.artifactId, creatureId: ready.creatureId, slot: ready.slot };
 
 test('geometry control carries compact original selection and bounded owned manifest', () => {
@@ -38,6 +39,23 @@ test('nonready geometry cannot supply bytes and source receipt order remains mod
   assert.equal(check('CreatureGeometryResult')({ ...ready, sources: [{ ...ready.sources[0], encodedBytes: 4194305 }, ready.sources[1]] }), false);
   assert.equal(check('CreatureGeometryLeaseDescriptor')({ ...lease, leaseId: '../path' }), false);
   assert.equal(check('CreatureGeometryCloseParams')({ leaseId: lease.leaseId, force: true }), false);
+});
+
+test('the engine names a problem headline, and a too-large one only for a limit that will not pass on a retry (#116)', () => {
+  const result = check('CreatureGeometryResult');
+  assert.ok(result(limit), JSON.stringify(result.errors));
+  assert.equal(limit.problem.headline, 'buildListTooLarge');
+  const { headline, ...withoutHeadline } = limit.problem;
+  assert.equal(result({ ...limit, problem: withoutHeadline }), false);
+  assert.equal(result({ ...limit, problem: { ...limit.problem, headline: 'tooLarge' } }), false);
+  for (const big of ['modelTooLarge', 'buildListTooLarge']) {
+    assert.ok(result({ ...limit, problem: { ...limit.problem, headline: big } }));
+    assert.equal(result({ ...limit, problem: { ...limit.problem, headline: big, retryable: true } }), false, big);
+    assert.equal(result({ ...limit, state: 'corrupt', problem: { ...limit.problem, headline: big } }), false, big);
+  }
+  for (const small of ['notDrawn', 'encrypted', 'unsupported']) {
+    assert.ok(result({ ...limit, state: 'corrupt', problem: { ...limit.problem, headline: small, retryable: true } }), small);
+  }
 });
 
 test('geometry progress stage and dependency have finite codes independent of human label', () => {

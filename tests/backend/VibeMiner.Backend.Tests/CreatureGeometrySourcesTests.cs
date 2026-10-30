@@ -194,15 +194,11 @@ public sealed class CreatureGeometrySourcesTests
         "The geometry proof exceeds its bounded metadata allowance. This is a limit, not a corrupt file.")]
     [InlineData("MODEL_LIMIT", "The model has 65,537 vertices; geometry reads at most 65,536.", false,
         "The model has 65,537 vertices; geometry reads at most 65,536. This is a limit, not a corrupt file.")]
-    // #114: a limit with no reader message of its own is named from its code; a full shared capacity says it is full.
-    [InlineData("BLTE_FRAME_LIMIT", "Reader detail.", false, "The model file is over the BLTE frame limit. This is a limit, not a corrupt file.")]
-    [InlineData("CONTENT_VARIANT_LIMIT", "Reader detail.", false, "The model file is over the content variant limit. This is a limit, not a corrupt file.")]
-    [InlineData("BLTE_LIMIT", "BLTE exceeds the chunk count limit.", false, "The model file is over the BLTE chunk count limit. This is a limit, not a corrupt file.")]
+    // #114, #116: a limit with no reader message of its own is named, with the owner of its cap. Every code's words, and the
+    // real BLTE and ROOT reader refusals, are in CreatureGeometryLimitWordsTests.
     [InlineData("EN_LIMIT", "EN trailer exceeds its byte limit.", false,
         "The build's encoding manifest is over its limit, so the model file was not read. This is a limit, not a corrupt file.")]
-    [InlineData("IN_LIMIT", "Reader detail.", false,
-        "The build's install manifest is over its limit, so the model file was not read. This is a limit, not a corrupt file.")]
-    [InlineData("ACQUISITION_CAPACITY", "Reader detail.", true, "The acquisition capacity is full, so the model file was not read.")]
+    [InlineData("ACQUISITION_CAPACITY", "Reader detail.", true, "The engine's download queue is full, so the model file was not read.")]
     [InlineData("CREATURE_GEOMETRY_RESOURCE_LIMIT", "Geometry payload reservations are at their bounded capacity.", true, "Geometry payload reservations are at their bounded capacity.")]
     [InlineData("MODEL_INVALID", "The M2 header is short.", false, "The original geometry source could not be admitted (Corrupt): The M2 header is short.")]
     public void Failure_message_leads_with_the_limit_and_names_only_the_source_size_as_a_size_limit(string code, string detail, bool retryable, string expected)
@@ -211,24 +207,6 @@ public sealed class CreatureGeometrySourcesTests
         Assert.Equal(expected, failure.Problem.Message); Assert.Equal(code, failure.Problem.Code);
         Assert.Equal(code == "MODEL_INVALID" ? CreatureGeometryState.Corrupt : CreatureGeometryState.ResourceLimit, failure.State);
         Assert.DoesNotContain("one of its limits", failure.Problem.Message);
-    }
-    [Fact]
-    public void A_named_limit_names_the_file_it_was_reading()
-    {
-        // A BLTE cap keeps which cap it was, from the reader's fixed message.
-        Assert.Equal("The SKIN file is over the BLTE chunk count limit.",
-            GeometrySourceClosure.NamedLimit("BLTE_LIMIT", CreatureGeometryDependency.Skin, "BLTE exceeds the chunk count limit."));
-        Assert.Equal("The model file is over the BLTE object size limit.",
-            GeometrySourceClosure.NamedLimit("BLTE_LIMIT", CreatureGeometryDependency.Model, "BLTE exceeds the object byte limit."));
-        Assert.Equal("The model file is over the BLTE chunk memory limit.",
-            GeometrySourceClosure.NamedLimit("BLTE_LIMIT", CreatureGeometryDependency.Model, "BLTE compressed chunk exceeds the working-memory limit."));
-        // A cap on one of the build's own lists names that list, not the file being read.
-        Assert.Equal("The build's encoding manifest is over its limit, so the model file was not read.",
-            GeometrySourceClosure.NamedLimit("EN_LIMIT", CreatureGeometryDependency.Model, "EN specification count exceeds its limit."));
-        Assert.Equal("The build's install manifest is over its limit, so the SKIN file was not read.",
-            GeometrySourceClosure.NamedLimit("IN_LIMIT", CreatureGeometryDependency.Skin));
-        Assert.Equal("The build's ROOT file list is over its limit, so the texture file was not read.",
-            GeometrySourceClosure.NamedLimit("ROOT_LIMIT", CreatureGeometryDependency.Texture));
     }
     [Theory]
     [InlineData(false)]

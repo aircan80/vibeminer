@@ -56,9 +56,11 @@ internal sealed class GeometryPreparedSources(GeometrySourceClosure closure, M2G
 
 
 internal sealed class GeometrySourceFailureException(CreatureGeometryState state, CreatureGeometryDependency dependency,
-    DiscoveryException problem, IReadOnlyList<CreatureGeometrySource> sources) : Exception(problem.Message, problem)
+    DiscoveryException problem, IReadOnlyList<CreatureGeometrySource> sources,
+    CreatureGeometryHeadline headline = CreatureGeometryHeadline.NotDrawn) : Exception(problem.Message, problem)
 {
     internal CreatureGeometryState State { get; } = state;
+    internal CreatureGeometryHeadline Headline { get; } = headline;
     internal CreatureGeometryDependency Dependency { get; } = dependency;
     internal DiscoveryException Problem { get; } = problem;
     internal IReadOnlyList<CreatureGeometrySource> Sources { get; } = Snapshot(sources);

@@ -39,7 +39,7 @@ it('pages only bounded section evidence and never remounts or changes all-sectio
 it('gives Q0 and empty-source failure useful metadata without fabricated manifest or verified asset facts',()=>{
  const {flow}=fixture('outcome');const q0={...result,state:'noDeclaredTriangles' as const,manifest:null};const {rerender,container}=render(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:q0,message:'The main SKIN declares no triangles, so this model has no surface to draw. The file is not corrupt.',canMount:false}}}} onReturn={()=>{}}/>);
  expect(container.querySelector('canvas')).toBeNull();expect(screen.queryByText('Declared section evidence')).not.toBeInTheDocument();expect(screen.queryByText('Declared geometry')).not.toBeInTheDocument();expect(screen.getByText('Model · full verified source')).toBeVisible();
- rerender(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:{...q0,state:'protected',sources:[],problem:{code:'PROTECTED',message:'Authored protected source',retryable:false,dependency:'skin',target:null}},canMount:false}}}} onReturn={()=>{}}/>);
+ rerender(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:{...q0,state:'protected',sources:[],problem:{code:'PROTECTED',message:'Authored protected source',retryable:false,dependency:'skin',target:null,headline:'encrypted'}},canMount:false}}}} onReturn={()=>{}}/>);
  expect(screen.queryByText(/full verified source/)).not.toBeInTheDocument();expect(screen.getByText('Model FileDataID · source value')).toBeVisible();
 });
 it('does not offer empty early section inspection, then preserves the focused pager at both boundaries',async()=>{

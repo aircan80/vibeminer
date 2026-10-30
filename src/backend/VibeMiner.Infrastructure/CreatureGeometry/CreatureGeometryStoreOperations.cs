@@ -44,10 +44,12 @@ public sealed partial class CreatureGeometryStore
                 var result=new Publication(catalog,budget,prepared,descriptor,appearance,binding,retain,use);prepared=null;return result;
             }
             catch(GeometrySourceFailureException error)
-            {return new FailurePublication(error.State,error.Sources,new(error.Problem.Code,error.Problem.Message,error.Problem.Retryable,error.Dependency));}
+            {return new FailurePublication(error.State,error.Sources,new(error.Problem.Code,error.Problem.Message,error.Problem.Retryable,error.Dependency,Headline:error.Headline));}
             catch(DiscoveryException error)when(prepared is not null&&error.Code.StartsWith("GEOMETRY_ARTIFACT_",StringComparison.Ordinal))
-            {return new FailurePublication(error.Code=="GEOMETRY_ARTIFACT_LIMIT"?CreatureGeometryState.ResourceLimit:error.Code=="GEOMETRY_ARTIFACT_UNSUPPORTED"?CreatureGeometryState.Unsupported:CreatureGeometryState.Corrupt,
-                prepared.Sources,new(error.Code,error.Message,error.Retryable,CreatureGeometryDependency.Artifact));}
+            {var state=error.Code=="GEOMETRY_ARTIFACT_LIMIT"?CreatureGeometryState.ResourceLimit:error.Code=="GEOMETRY_ARTIFACT_UNSUPPORTED"?CreatureGeometryState.Unsupported:CreatureGeometryState.Corrupt;
+                // The artifact limit is a cap on the geometry this model builds (#116).
+                return new FailurePublication(state,prepared.Sources,new(error.Code,error.Message,error.Retryable,CreatureGeometryDependency.Artifact,
+                    Headline:GeometrySourceClosure.Headline(state,error.Code,error.Retryable,GeometryLimitOwner.File)));}
             finally{if(prepared is not null)await prepared.DisposeAsync();}
         }
         // A ready texture chain becomes one verified VMA1 object. An artifact failure is an appearance outcome, never a geometry one.

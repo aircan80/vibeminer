@@ -35,17 +35,21 @@ public sealed partial class CreatureGeometryStore : ICreatureGeometryStore, IAsy
     private static async Task ObserveCancellationAsync(CancellationTokenSource cancellation)
     { try { await cancellation.CancelAsync(); } catch (AggregateException) { } }
     private static CreatureDisplayMetadataRequest Own(CreatureDisplayMetadataRequest selection) => selection with { Context = selection.Context with { } };
-    private static CreatureGeometryProblem MetadataProblem(CreatureDisplayMetadataProblem problem) =>
-        new(problem.Code, problem.Message, problem.Retryable, CreatureGeometryDependency.Metadata, problem.Target);
+    // A metadata problem is never a geometry limit, so its headline is only ever encrypted, unsupported or not drawn (#116).
+    private static CreatureGeometryProblem MetadataProblem(CreatureGeometryState state, CreatureDisplayMetadataProblem problem) =>
+        new(problem.Code, problem.Message, problem.Retryable, CreatureGeometryDependency.Metadata, problem.Target,
+            GeometrySourceClosure.Headline(state, problem.Code, problem.Retryable, GeometryLimitOwner.Engine));
     private static CreatureGeometryResult Result(CreatureDisplayMetadataRequest request, GeometryDisplayAuthorizationResult metadata,
         CreatureGeometryState state, IReadOnlyList<CreatureGeometrySource>? sources = null, CreatureGeometryManifest? manifest = null, CreatureGeometryProblem? problem = null,
         CreatureGeometryAppearance? appearance = null) =>
         CreatureGeometryValidation.Snapshot(new(request.Context, request.ArtifactId, request.CreatureId, request.Slot,
             CreatureGeometryValidation.Policy, metadata.Core.Opening.Reference, state, metadata.Metadata,
             sources ?? Array.Empty<CreatureGeometrySource>(), manifest, problem, state == CreatureGeometryState.Ready ? appearance : null), request);
-    private static CreatureGeometryResult MetadataResult(CreatureDisplayMetadataRequest request, GeometryDisplayAuthorizationResult value) =>
-        Result(request, value, value.Metadata.State == CreatureDisplayMetadataState.NotPrepared ? CreatureGeometryState.NotPrepared : CreatureGeometryState.MetadataNotResolved,
-            problem: value.Problem is null ? null : MetadataProblem(value.Problem));
+    private static CreatureGeometryResult MetadataResult(CreatureDisplayMetadataRequest request, GeometryDisplayAuthorizationResult value)
+    {
+        var state = value.Metadata.State == CreatureDisplayMetadataState.NotPrepared ? CreatureGeometryState.NotPrepared : CreatureGeometryState.MetadataNotResolved;
+        return Result(request, value, state, problem: value.Problem is null ? null : MetadataProblem(state, value.Problem));
+    }
 
     public ValueTask DisposeAsync()
     {

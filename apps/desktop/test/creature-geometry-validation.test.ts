@@ -2,6 +2,7 @@ import {it,expect} from 'vitest';
 import type {CreatureGeometryResult} from '../../../contracts/generated/discovery';
 import ready from '../../../contracts/examples/creature-geometry-ready.json';
 import texturedJson from '../../../contracts/examples/creature-geometry-textured.json';
+import limitJson from '../../../contracts/examples/creature-geometry-limit.json';
 import {validGeometryRead,validGeometryOpen,validGeometryManifest,snapshotGeometryManifest,creatureGeometryMatches,validGeometryViewEnter,validGeometrySceneDisposal,validGeometryProgress} from '../src/shared/creature-geometry';
 const p={...ready.context,researchLocale:'enUS' as const,artifactId:ready.artifactId,creatureId:ready.creatureId,slot:ready.slot};
 it('accepts exact current compact evidence and safe numeric geometry manifest without widening original Creature/C2 authority',()=>{expect(validGeometryRead(p)).toBe(true);expect(validGeometryRead({...p,expectedGeometryArtifactId:null})).toBe(true);expect(creatureGeometryMatches(ready as unknown as CreatureGeometryResult,p)).toBe(true);expect(validGeometryManifest(ready.manifest)).toBe(true);const m=snapshotGeometryManifest(ready.manifest);expect(Object.isFrozen(m.bounds.min)).toBe(true);expect(validGeometryOpen({...p,geometryArtifactId:m.artifactId})).toBe(true);});
@@ -19,3 +20,11 @@ it('accepts a D095 standard-resolution texture variant and refuses one that is n
   expect(creatureGeometryMatches(withVariant({...variant,...change}),q)).toBe(false);
 });
 it('requires exact promoted Float32 JSON coordinates rather than their rounded shortest Single spelling',()=>{const m={...structuredClone(ready.manifest),bounds:{min:[Math.fround(0.1),0,0],max:[Math.fround(0.2),1,1]}};expect(validGeometryManifest(m)).toBe(true);expect(validGeometryManifest({...m,bounds:{min:[0.1,0,0],max:[0.2,1,1]}})).toBe(false);});
+it('takes the engine\'s problem headline and refuses a too-large one outside a limit that won\'t pass on a retry (#116)',()=>{
+ const limit=limitJson as unknown as CreatureGeometryResult,q={...limit.context,researchLocale:'enUS' as const,artifactId:limit.artifactId,creatureId:limit.creatureId,slot:limit.slot};
+ const as=(change:Record<string,unknown>,state=limit.state)=>({...limit,state,problem:{...limit.problem!,...change}}) as unknown as CreatureGeometryResult;
+ expect(creatureGeometryMatches(limit,q)).toBe(true);
+ for(const headline of['modelTooLarge','buildListTooLarge']){expect(creatureGeometryMatches(as({headline}),q)).toBe(true);expect(creatureGeometryMatches(as({headline,retryable:true}),q)).toBe(false);expect(creatureGeometryMatches(as({headline},'corrupt'),q)).toBe(false);}
+ for(const headline of['notDrawn','encrypted','unsupported'])expect(creatureGeometryMatches(as({headline,retryable:true},'corrupt'),q)).toBe(true);
+ for(const headline of[undefined,'tooLarge',null])expect(creatureGeometryMatches(as({headline}),q)).toBe(false);
+});

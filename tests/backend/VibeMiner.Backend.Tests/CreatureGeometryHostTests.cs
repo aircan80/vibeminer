@@ -2,9 +2,11 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using VibeMiner.Application;
 using VibeMiner.Domain;
 using VibeMiner.Host;
+using VibeMiner.Infrastructure;
 using Xunit;
 using static VibeMiner.Backend.Tests.CreatureGeometryTestFixture;
 
@@ -172,6 +174,19 @@ public sealed class CreatureGeometryHostTests
         var source = mapped.RootElement.GetProperty("sources")[0];
         Assert.Equal("model", source.GetProperty("role").GetString()); Assert.Equal(100, source.GetProperty("encodedBytes").GetInt64());
         Assert.False(source.TryGetProperty("sourceUrl", out _)); Assert.Equal("metadataResolved", mapped.RootElement.GetProperty("metadata").GetProperty("state").GetString());
+        // #116: the problem carries the headline the engine chose, in the schema's camelCase.
+        var limit = Result(ready: true) with { State = CreatureGeometryState.ResourceLimit, Manifest = null, Sources = [], Appearance = null,
+            Problem = new("EN_LIMIT", "The build's encoding manifest is over its limit.", false, CreatureGeometryDependency.Model, Headline: CreatureGeometryHeadline.BuildListTooLarge) };
+        using var problem = JsonDocument.Parse(JsonSerializer.Serialize(CreatureGeometryWire.Result(limit), Json));
+        var wire = problem.RootElement.GetProperty("problem");
+        Assert.Equal(["code", "message", "retryable", "dependency", "target", "headline"], wire.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("buildListTooLarge", wire.GetProperty("headline").GetString());
+        // The authored example's problem is exactly what the engine sends for an encoding manifest cap on the model.
+        var failure = GeometrySourceClosure.Failure(new DiscoveryException("EN_LIMIT", "EN specification count exceeds its limit."), CreatureGeometryDependency.Model, []);
+        var engine = limit with { Problem = new(failure.Problem.Code, failure.Problem.Message, failure.Problem.Retryable, failure.Dependency, Headline: failure.Headline) };
+        var sent = JsonNode.Parse(JsonSerializer.Serialize(CreatureGeometryWire.Result(engine), Json))!["problem"];
+        var example = JsonNode.Parse(File.ReadAllText(RepositoryPaths.File("contracts/examples/creature-geometry-limit.json")))!["problem"];
+        Assert.True(JsonNode.DeepEquals(example, sent), sent!.ToJsonString());
     }
 
     [Fact]

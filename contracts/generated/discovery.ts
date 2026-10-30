@@ -251,6 +251,11 @@ export type CreatureGeometryTextureState =
  * Textured draw of a ready geometry pair; see contracts/creature-geometry-v1.md#appearance.
  */
 export type CreatureGeometryAppearance = CreatureGeometryAppearance1;
+export type CreatureGeometryProblem = CreatureGeometryProblem1;
+/**
+ * The headline the desktop shows for a geometry problem, chosen by the engine. modelTooLarge is a cap on the file being read; buildListTooLarge is a cap on one of the build's own lists, so the file was not read. Both only for a resourceLimit state that is not retryable.
+ */
+export type CreatureGeometryHeadline = 'notDrawn' | 'encrypted' | 'unsupported' | 'modelTooLarge' | 'buildListTooLarge';
 export type CreatureGeometryResult = CreatureGeometryResult1;
 
 export interface DiscoveryContract {
@@ -4234,12 +4239,13 @@ export interface CreatureGeometrySource {
   rootLookupRevision: 'root-native-file-v1';
   encodingSelectionPolicy: 'lexicographic-complete-encoding-v1';
 }
-export interface CreatureGeometryProblem {
+export interface CreatureGeometryProblem1 {
   code: string;
   message: string;
   retryable: boolean;
   dependency: CreatureGeometryDependency | null;
   target: ('display' | 'model') | null;
+  headline: CreatureGeometryHeadline;
 }
 export interface CreatureGeometryResult1 {
   context: CreaturesContext;

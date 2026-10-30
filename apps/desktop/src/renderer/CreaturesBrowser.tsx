@@ -1,7 +1,7 @@
 import {ActivityLink} from './DownloadActivity';
 import {useCallback,useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
-import type {WorkspaceSnapshot,CreaturesSnapshot,CreaturesPage,CreatureSummary,CreatureDetail,TableDataSnapshot,TableDataPage,CreatureDisplayMetadataResult,CreatureDisplayFactsResult,CreatureDisplayRecordFacts,CreatureDisplayFact,CreatureDisplayFactCell} from '../../../../contracts/generated/discovery';
+import type {WorkspaceSnapshot,CreaturesSnapshot,CreaturesPage,CreatureSummary,CreatureDetail,TableDataSnapshot,TableDataPage,CreatureDisplayMetadataResult,CreatureDisplayFactsResult,CreatureDisplayRecordFacts,CreatureDisplayFact,CreatureDisplayFactCell,CreatureGeometryHeadline} from '../../../../contracts/generated/discovery';
 import type {DiscoveryBridge} from '../shared/bridge';
 import {creatureKey,validCreatureQuery,creaturesSnapshotMatches,creaturesReadinessMatches,creaturesPageMatches,creatureInspectMatches,type CreaturePageParams} from '../shared/creatures';
 import {displayKey,creatureDisplayMatches,creatureDisplayFactsMatches,creatureLabelListsMatches,type CreatureDisplayParams} from '../shared/creature-display';
@@ -418,15 +418,16 @@ function PreviewBox({preview,params,metadata,loading,name,slot,displayId,auto,ac
  if(mine&&!outcome)return <div className="cv-preview"><div ref={statusRef} tabIndex={-1} className="cv-pbox cv-pending" role="status"><span><span className="dh-pulse" aria-hidden="true"/> Loading model<br/><span className="cv-pstage">{mine.message}</span></span></div></div>;
  if(busy&&busyTries<BUSY_TRIES)return <div className="cv-preview"><div ref={statusRef} tabIndex={-1} className="cv-pbox cv-pending" role="status"><span><span className="dh-pulse" aria-hidden="true"/> Waiting for the engine<br/><span className="cv-pstage">It is busy with other reads; this model is asked for again by itself</span></span></div></div>;
  if(outcome&&!notKept&&result?.state!=='ready'){
-  const code=problem?.code??'',encrypted=result?.state==='protected'||/ENCRYPT|KEY_UNAVAILABLE|PROTECTED/.test(code),unsupported=/UNSUPPORTED/.test(code)||result?.state==='unsupported';
+  // #116: the engine picks a result problem's headline, such as a model or build list too large. A request error has only its
+  // code (the camera's own refusal among them), so it still reads as encrypted or unsupported from that.
+  const error=outcome.error?.code,headline:CreatureGeometryHeadline=error!==undefined?/ENCRYPT|KEY_UNAVAILABLE|PROTECTED/.test(error)?'encrypted':/UNSUPPORTED/.test(error)?'unsupported':'notDrawn':result?.problem?.headline??'notDrawn';
   // #98: a state with no problem still names itself, so no outcome is left without a reason.
-  const empty=result?.state==='noDeclaredTriangles',tooLarge=result?.state==='resourceLimit'&&!problem?.retryable;
-  // #114: a cap on one of the build's own lists isn't the model's size; the note says the model was never read. Keep in step with NamedLimit (GeometrySources.cs).
-  const buildList=/^(EN|IN|RESOLVER|ROOT|ROOT_SCOPE|ASSET_SOURCE|CONFIG|ARCHIVE_INDEX|CONTENT_LOCATOR|BULK_LOCATOR)_LIMIT$/.test(code);
-  const word=busy?'Engine still busy':encrypted?'Encrypted model':unsupported?'Unsupported model':empty?'Nothing to draw':tooLarge?buildList?'Build list too large':'Model too large':outcome.message==='Geometry preparation stopped'?'Loading stopped':'Model not drawn';
+  const empty=result?.state==='noDeclaredTriangles';
+  const word=busy?'Engine still busy':headline!=='notDrawn'?HEADLINES[headline]:empty?'Nothing to draw':outcome.message==='Geometry preparation stopped'?'Loading stopped':HEADLINES.notDrawn;
   return <div className="cv-preview"><div ref={statusRef} tabIndex={-1} className="cv-pbox cv-off" role="img" aria-label={word}>{word}</div><p className="cv-pnote">{problem?<><code>{problem.code}</code> {problem.message}</>:result&&<><code>{result.state}</code> {outcome.message}</>}</p>{(problem?.retryable||word==='Loading stopped')&&<button ref={showRef} type="button" className="dh-btn dh-small" onClick={()=>{focusNext.current='stop';setBusyTries(0);flow.session.retry();}}>Retry model</button>}</div>;
  }
  return <div className="cv-preview"><div className="cv-pbox cv-idle" aria-hidden="true">No preview yet</div><button ref={showRef} type="button" className="dh-btn dh-small" aria-label={`Show model preview for display ${displayId}`} onClick={e=>{focusNext.current='stop';setBusyTries(0);preview.show(params,metadata!,name,e.currentTarget);}}>Show model</button></div>;
 }
 /** A deliberate Show model asks a busy engine again this many times (about 20 s) before it says the engine is still busy. */
 const BUSY_TRIES=10;
+const HEADLINES:Record<CreatureGeometryHeadline,string>={notDrawn:'Model not drawn',encrypted:'Encrypted model',unsupported:'Unsupported model',modelTooLarge:'Model too large',buildListTooLarge:'Build list too large'};

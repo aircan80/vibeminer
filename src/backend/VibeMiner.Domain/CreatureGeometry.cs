@@ -18,8 +18,13 @@ public sealed record CreatureGeometrySource(CreatureGeometrySourceRole Role, str
     string ContentKey, string EncodingKey, string EncodedSha256, long EncodedBytes, long DecodedBytes,
     string FullVerifierRevision, string AssociationSha256, string VariantPolicy,
     string EncodingLookupRevision, string RootLookupRevision, string EncodingSelectionPolicy);
+/// <summary>The headline the desktop shows for a problem, chosen by the engine (#116). ModelTooLarge is a cap on the file
+/// being read (its size, a count it declares, its ROOT variants); BuildListTooLarge is a cap on one of the build's own lists,
+/// so the file was never read. Both are only for a resourceLimit state that is not retryable.</summary>
+public enum CreatureGeometryHeadline { NotDrawn, Encrypted, Unsupported, ModelTooLarge, BuildListTooLarge }
 public sealed record CreatureGeometryProblem(string Code, string Message, bool Retryable,
-    CreatureGeometryDependency? Dependency = null, CreatureDisplayTargetRole? Target = null);
+    CreatureGeometryDependency? Dependency = null, CreatureDisplayTargetRole? Target = null,
+    CreatureGeometryHeadline Headline = CreatureGeometryHeadline.NotDrawn);
 public sealed record CreatureGeometryProgress(string Stage, string Label, string Unit,
     long? Completed = null, long? Total = null, CreatureGeometryDependency? Dependency = null);
 public sealed record CreatureGeometryResult(CreaturesContext Context, string ArtifactId, string CreatureId,

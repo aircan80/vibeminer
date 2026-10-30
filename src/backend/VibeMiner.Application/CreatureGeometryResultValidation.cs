@@ -28,7 +28,11 @@ public static partial class CreatureGeometryValidation
         if (value.Problem is { } problem)
             Require(Text(problem.Code, 64) && problem.Code.All(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_') && Text(problem.Message, 512) &&
                 (problem.Dependency is null || Enum.IsDefined(problem.Dependency.Value)) && (problem.Target is null ||
-                    problem.Dependency == CreatureGeometryDependency.Metadata && Enum.IsDefined(problem.Target.Value)));
+                    problem.Dependency == CreatureGeometryDependency.Metadata && Enum.IsDefined(problem.Target.Value)) &&
+                Enum.IsDefined(problem.Headline) &&
+                // A too-large headline is only for a limit that won't pass on a retry (#116).
+                (problem.Headline is not (CreatureGeometryHeadline.ModelTooLarge or CreatureGeometryHeadline.BuildListTooLarge) ||
+                    value.State == CreatureGeometryState.ResourceLimit && !problem.Retryable));
         if (metadata.State is CreatureDisplayMetadataState.Protected or CreatureDisplayMetadataState.Unsupported or
             CreatureDisplayMetadataState.Unavailable or CreatureDisplayMetadataState.Corrupt or CreatureDisplayMetadataState.ResourceLimit)
             Require(value.Problem is { Dependency: CreatureGeometryDependency.Metadata } && value.Problem.Target ==

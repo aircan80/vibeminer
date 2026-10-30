@@ -70,7 +70,7 @@ internal static class CreatureGeometryWire
         appearance = value.Appearance is { } appearance ? Appearance(appearance) : null,
         problem = value.Problem is { } problem ? new
         { problem.Code, problem.Message, problem.Retryable, dependency = problem.Dependency is { } dependency ? Name(dependency) : null,
-            target = problem.Target is { } target ? Name(target) : null } : null
+            target = problem.Target is { } target ? Name(target) : null, headline = Name(problem.Headline) } : null
     };
 
     internal static object Manifest(CreatureGeometryManifest value) => new

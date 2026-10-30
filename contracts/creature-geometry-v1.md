@@ -35,7 +35,7 @@ Every geometry reply frame (envelope and newline included) is at most 65,536 UTF
 | `sources` | Exactly two (`model`, then `skin`) for `ready` and `noDeclaredTriangles`; empty for every other state |
 | `manifest` | VMG1 manifest; present only for `ready` |
 | `appearance` | Present (possibly `notPrepared`) only for `ready`; null otherwise. See [appearance](#appearance) |
-| `problem` | `code` (≤64 uppercase chars), `message` (≤512), `retryable`, `dependency` (`metadata`/`model`/`skin`/`artifact`), `target` (only for metadata problems) |
+| `problem` | `code` (≤64 uppercase chars), `message` (≤512), `retryable`, `dependency` (`metadata`/`model`/`skin`/`artifact`), `target` (only for metadata problems), `headline` (see below) |
 
 Each source record: `role`, `fileDataId`, `contentKey`, `encodingKey`, `encodedSha256` (of the original encoded bytes), `encodedBytes`, `decodedBytes`, `fullVerifierRevision` (`content-blte-v1`), `associationSha256`, `variantPolicy` (`all-root-variants-consistent-asset-v1`), `encodingLookupRevision`, `rootLookupRevision`, `encodingSelectionPolicy` (`lexicographic-complete-encoding-v1`). No URLs, routes or paths.
 
@@ -55,6 +55,20 @@ Each source record: `role`, `fileDataId`, `contentKey`, `encodingKey`, `encodedS
 | `unavailable` | CDN unavailable. |
 | `corrupt` | Hash, key, grammar or receipt conflict. |
 | `resourceLimit` | A size, count or reservation limit was exceeded. A model or SKIN over the source caps is refused before acquisition; the message names its decoded and encoded sizes and the caps. A limit that is not retryable says it is not a corrupt file (D110). |
+
+### Headline
+
+`problem.headline` is the headline the desktop shows, chosen by the engine ([D111](../docs/DECISIONS.md)). The desktop keeps no list of codes.
+
+| Headline | When |
+| --- | --- |
+| `encrypted` | `protected`, or a code naming encryption or a missing key |
+| `unsupported` | `unsupported`, or a code naming an unsupported feature |
+| `modelTooLarge` | A `resourceLimit` that is not retryable, on the file being read: its size, a count it declares, its ROOT variants, its BLTE chunk table, the artifact it builds |
+| `buildListTooLarge` | A `resourceLimit` that is not retryable, on one of the build's own lists (encoding or install manifest, ROOT, CDN configuration, archive indexes, file inventory); the file was not read |
+| `notDrawn` | Everything else, including a full engine queue and a cap with no owner the engine can name |
+
+The two too-large headlines are only for a `resourceLimit` that is not retryable. A limit message names the cap's owner: "The build's encoding manifest is over its limit, so the model file was not read.", "The model file has more than 4,096 ROOT variants; geometry reads at most 4,096.", "The engine's download queue is full, so the model file was not read." Authored example: [creature-geometry-limit.json](examples/creature-geometry-limit.json).
 
 Busy, stale authority, deadline and cleanup failure are request errors, not states: `CREATURE_GEOMETRY_BUSY`, `CREATURE_GEOMETRY_STALE`, `CREATURE_GEOMETRY_DEADLINE_EXCEEDED`, `CREATURE_GEOMETRY_CLEANUP_FAILED`, `CREATURES_BUSY`, `CREATURES_QUERY_BUSY`. Cancellation and busy outcomes are never cached.
 

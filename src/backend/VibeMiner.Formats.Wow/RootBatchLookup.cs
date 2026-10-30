@@ -74,7 +74,10 @@ public static class RootBatchLookup
             token.ThrowIfCancellationRequested();
             if (targets.TryGetValue(entry.FileDataId, out var selected))
             {
-                if (selected.Count == MaxMatchesPerTarget || matches == MaxMatches)
+                // A file's own variants and the whole batch are separate caps; say which (#116).
+                if (selected.Count == MaxMatchesPerTarget)
+                    throw Error("ROOT_LIMIT", "A requested FileDataID exceeds the per-file variant bound.");
+                if (matches == MaxMatches)
                     throw Error("ROOT_LIMIT", "Requested FileDataIDs exceed the batch membership bound.");
                 selected.Add(new(block, ordinal, entry));
                 matches++;

@@ -19199,6 +19199,9 @@
               "type": "null"
             }
           ]
+        },
+        "headline": {
+          "$ref": "#/definitions/CreatureGeometryHeadline"
         }
       },
       "required": [
@@ -19206,9 +19209,44 @@
         "message",
         "retryable",
         "dependency",
-        "target"
+        "target",
+        "headline"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "retryable": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "headline": {
+                "enum": [
+                  "notDrawn",
+                  "encrypted",
+                  "unsupported"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "CreatureGeometryHeadline": {
+      "title": "CreatureGeometryHeadline",
+      "description": "The headline the desktop shows for a geometry problem, chosen by the engine. modelTooLarge is a cap on the file being read; buildListTooLarge is a cap on one of the build's own lists, so the file was not read. Both only for a resourceLimit state that is not retryable.",
+      "type": "string",
+      "enum": [
+        "notDrawn",
+        "encrypted",
+        "unsupported",
+        "modelTooLarge",
+        "buildListTooLarge"
+      ]
     },
     "CreatureGeometryAppearanceState": {
       "title": "CreatureGeometryAppearanceState",
@@ -20122,6 +20160,39 @@
             "properties": {
               "sources": {
                 "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "state": {
+                  "const": "resourceLimit"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "problem": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "properties": {
+                      "headline": {
+                        "enum": [
+                          "notDrawn",
+                          "encrypted",
+                          "unsupported"
+                        ]
+                      }
+                    }
+                  }
+                ]
               }
             }
           }

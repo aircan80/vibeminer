@@ -33,10 +33,11 @@ export function creatureGeometry(display,requested,manifest){
  v.manifest=state==='ready'?{...manifest,modelFileDataId:Number(display.modelFileDataId),skinFileDataId:Number(v.sources[1].fileDataId)}:null;
  if(!['ready','noDeclaredTriangles'].includes(state))v.sources=[];
  if(state==='notPrepared')v.problem=null;
- else if(!['ready','noDeclaredTriangles'].includes(state))v.problem={code:'AUTHORED_'+state.replace(/[A-Z]/g,c=>'_'+c).toUpperCase(),message:'Authored geometry outcome.',retryable:false,dependency:'skin',target:null};
+ else if(!['ready','noDeclaredTriangles'].includes(state))v.problem={code:'AUTHORED_'+state.replace(/[A-Z]/g,c=>'_'+c).toUpperCase(),message:'Authored geometry outcome.',retryable:false,dependency:'skin',target:null,
+  headline:{protected:'encrypted',unsupported:'unsupported',resourceLimit:'modelTooLarge'}[state]??'notDrawn'};
  // Authored wording in the engine's own shape: the sizes and caps first, then which kind of limit it is (#111).
  if(state==='resourceLimit')v.problem.message='Authored model: the model file is 12.4 MiB decoded and 4.1 MiB encoded; geometry reads at most 8 MiB decoded and 4 MiB encoded. This is a size limit, not a corrupt file.';
- if(encrypted)v.problem={code:'BLTE_KEY_UNAVAILABLE',message:'Authored encrypted model: TACT key 0123456789ABCDEF isn\'t available.',retryable:false,dependency:'model',target:null};
+ if(encrypted)v.problem={code:'BLTE_KEY_UNAVAILABLE',message:'Authored encrypted model: TACT key 0123456789ABCDEF isn\'t available.',retryable:false,dependency:'model',target:null,headline:'encrypted'};
  return v;
 }
 // Authored VMA1 v2 textured appearance over the same octahedron. Not game data. Layout follows contracts/geometry-vma1-v2.md.

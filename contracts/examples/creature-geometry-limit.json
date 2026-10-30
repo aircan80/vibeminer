@@ -1,0 +1,136 @@
+{
+  "context": {
+    "productId": "wow",
+    "buildIdentity": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sourceRegion": "us",
+    "researchLocale": "enUS"
+  },
+  "artifactId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "creatureId": "7",
+  "slot": 0,
+  "opening": {
+    "generation": "1",
+    "region": "us",
+    "versionsSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "versionsRowOrdinal": 0,
+    "cdnsSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "cdnsRowOrdinal": 0
+  },
+  "policy": "creature-source-geometry-v1",
+  "state": "resourceLimit",
+  "metadata": {
+    "state": "metadataResolved",
+    "creatureSource": {
+      "tableId": "c9d6b6b3",
+      "artifactId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "rowId": "7",
+      "columnIndex": null
+    },
+    "creatureCoverage": {
+      "scope": "unencryptedSections",
+      "declaredRecords": "4",
+      "physicalRows": "2",
+      "copyRows": "1",
+      "excludedKeyedSections": "1",
+      "excludedDeclaredRecords": "2",
+      "declaredCopyRecords": "1",
+      "excludedPhysicalRecords": "2",
+      "excludedCopyRecords": "0"
+    },
+    "selected": {
+      "slot": 0,
+      "displayId": "23",
+      "probability": "0.25",
+      "state": "declared",
+      "displayField": {
+        "tableId": "c9d6b6b3",
+        "columnIndex": 8
+      },
+      "probabilityField": {
+        "tableId": "c9d6b6b3",
+        "columnIndex": 12
+      }
+    },
+    "absence": null,
+    "modelId": "19",
+    "modelFileDataId": "123456",
+    "requiredTableId": null,
+    "appearance": "notEvaluated",
+    "targets": [
+      {
+        "role": "display",
+        "tableId": "bfdaf9f1",
+        "artifactId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "coverage": {
+          "scope": "unencryptedSections",
+          "declaredRecords": "4",
+          "physicalRows": "2",
+          "copyRows": "1",
+          "excludedKeyedSections": "1",
+          "excludedDeclaredRecords": "2",
+          "declaredCopyRecords": "1",
+          "excludedPhysicalRecords": "2",
+          "excludedCopyRecords": "0"
+        },
+        "matchCount": "1",
+        "row": {
+          "source": {
+            "tableId": "bfdaf9f1",
+            "artifactId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "rowId": "23",
+            "columnIndex": 0
+          },
+          "isCopy": true,
+          "copySourceId": "11",
+          "edgeValue": {
+            "tableId": "bfdaf9f1",
+            "columnIndex": 0,
+            "value": "19"
+          }
+        }
+      },
+      {
+        "role": "model",
+        "tableId": "7f695fa5",
+        "artifactId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "coverage": {
+          "scope": "complete",
+          "declaredRecords": "2",
+          "physicalRows": "2",
+          "copyRows": "1",
+          "excludedKeyedSections": "0",
+          "excludedDeclaredRecords": "0",
+          "declaredCopyRecords": "1",
+          "excludedPhysicalRecords": "0",
+          "excludedCopyRecords": "0"
+        },
+        "matchCount": "1",
+        "row": {
+          "source": {
+            "tableId": "7f695fa5",
+            "artifactId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "rowId": "19",
+            "columnIndex": 0
+          },
+          "isCopy": false,
+          "copySourceId": null,
+          "edgeValue": {
+            "tableId": "7f695fa5",
+            "columnIndex": 0,
+            "value": "123456"
+          }
+        }
+      }
+    ]
+  },
+  "sources": [],
+  "manifest": null,
+  "problem": {
+    "code": "EN_LIMIT",
+    "message": "The build's encoding manifest is over its limit, so the model file was not read. This is a limit, not a corrupt file.",
+    "retryable": false,
+    "dependency": "model",
+    "target": null,
+    "headline": "buildListTooLarge"
+  }
+}

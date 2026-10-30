@@ -283,6 +283,20 @@ public sealed class CreatureGeometryValidationTests
         Assert.Throws<DiscoveryException>(() => CreatureGeometryValidation.Snapshot(r with { Problem = new("BAD", "Failed source.", false, CreatureGeometryDependency.Metadata, CreatureDisplayTargetRole.Model) }, Selection));
         CreatureGeometryValidation.Snapshot(r with { Problem = new("BAD", "Failed source.", false, CreatureGeometryDependency.Metadata, CreatureDisplayTargetRole.Display) }, Selection);
     }
+    // #116: a too-large headline is only for a resourceLimit that won't pass on a retry.
+    [Theory]
+    [InlineData(CreatureGeometryHeadline.ModelTooLarge)]
+    [InlineData(CreatureGeometryHeadline.BuildListTooLarge)]
+    public void A_too_large_headline_needs_a_limit_that_is_not_retryable(CreatureGeometryHeadline headline)
+    {
+        var r = Result(ready: true) with { State = CreatureGeometryState.ResourceLimit, Manifest = null, Sources = [], Appearance = null,
+            Problem = new("EN_LIMIT", "The build's encoding manifest is over its limit.", false, CreatureGeometryDependency.Model, Headline: headline) };
+        Assert.Equal(headline, CreatureGeometryValidation.Snapshot(r, Selection).Problem!.Headline);
+        Assert.Throws<DiscoveryException>(() => CreatureGeometryValidation.Snapshot(r with { Problem = r.Problem! with { Retryable = true } }, Selection));
+        Assert.Throws<DiscoveryException>(() => CreatureGeometryValidation.Snapshot(r with { State = CreatureGeometryState.Corrupt }, Selection));
+        Assert.Throws<DiscoveryException>(() => CreatureGeometryValidation.Snapshot(r with { Problem = r.Problem! with { Headline = (CreatureGeometryHeadline)99 } }, Selection));
+        CreatureGeometryValidation.Snapshot(r with { State = CreatureGeometryState.Corrupt, Problem = r.Problem! with { Headline = CreatureGeometryHeadline.NotDrawn } }, Selection);
+    }
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
