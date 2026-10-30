@@ -110,7 +110,8 @@ it('treats the same creature and slot in another build as its own waiting intent
 });
 it('withdraws a held local readiness intent without starting a preparation when its old read succeeds',async()=>{
  const{bridge}=setup(),held=deferred<BridgeReply<CreatureDisplayMetadataResult>>();vi.mocked(bridge.creatureDisplayRead!).mockReturnValueOnce(held.promise);
- await choose();const stop=await within(displays()).findByRole('button',{name:'Stop waiting for displays'});stop.focus();fireEvent.click(stop);
+ // Stop waiting shows as soon as the slot is reading, but the read starts in an effect after that render (#107).
+ await choose();await waitFor(()=>expect(bridge.creatureDisplayRead).toHaveBeenCalledTimes(1));const stop=within(displays()).getByRole('button',{name:'Stop waiting for displays'});stop.focus();fireEvent.click(stop);
  await act(async()=>held.resolve(ok(creatureDisplay(core,creatureSummary(core,'0')!,0,opening))));
  expect(bridge.creatureDisplayPrepare).not.toHaveBeenCalled();expect(within(displays()).getByRole('button',{name:'Retry display tables'})).toBeVisible();
  fireEvent.click(screen.getByRole('button',{name:'Switch area'}));fireEvent.click(screen.getByRole('button',{name:'Switch area'}));expect(bridge.creatureDisplayRead).toHaveBeenCalledTimes(1);
