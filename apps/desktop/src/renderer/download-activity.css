@@ -16,3 +16,7 @@
 .apphead.unified-build-header .download-activity-trigger,.app-header .download-activity-trigger{display:flex;align-items:center;gap:.65rem;text-align:left;font:inherit;color:#243b3a}
 .apphead.unified-build-header .download-activity-trigger>span,.app-header .download-activity-trigger>span{margin:0}
 .apphead.unified-build-header .unified-header-actions button{font-size:.733333rem}
+
+/* The floating entry keeps white on teal in every state. The shared button:hover rule in styles.css is more specific than its class
+   alone and painted it pale under its white text (#113). Hover and press darken it like Home's primary buttons. */
+.download-activity-floating:hover,.download-activity-floating:active{background:#125b54;border-color:#125b54;color:#fff}
