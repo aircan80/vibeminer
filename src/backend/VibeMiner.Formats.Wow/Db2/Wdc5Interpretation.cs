@@ -9,12 +9,14 @@ public static partial class Wdc5TableReader
     // columns require explicit metadata-selected opt-in for wider physical values.
     // This is metadata-selected before Header, never a fallback triggered by a row.
     private static bool UsesRawPhysical(Storage storage,DbdField field)=>field.Column.Family=="int"
-        &&(!field.Column.VerifiedName||storage.VerifiedRawEvidence)&&!field.IsId&&PhysicalValueBits(storage)>(field.IntegerBits??32);
+        &&(!field.Column.VerifiedName||storage.VerifiedRawEvidence||storage.RawBecauseLowBitsCollide)&&!field.IsId&&PhysicalValueBits(storage)>(field.IntegerBits??32);
 
     private static Db2ValueInterpretation? RawInterpretation(Storage storage,DbdField field)=>!UsesRawPhysical(storage,field)?null:
         new("raw-physical-integer-v1",PhysicalValueBits(storage),storage.Kind==5,field.IntegerBits??32,field.Unsigned==true,
             storage.VerifiedRawEvidence
                 ?"Candidate integer width is narrower than the physical value width. Explicit raw evidence preserves this entire column without narrowing; semantic references and calculations are not admitted."
+                :storage.RawBecauseLowBitsCollide
+                ?"Candidate integer width is narrower than the physical value width. Keeping only the low bits would give different stored values the same number, so this entire column keeps its physical integers; semantic references and calculations are not admitted."
                 :"Unverified provider field: values preserve the physical integer without narrowing to the candidate schema. Names, relationships and semantic meaning are unverified.");
 
     // D079: pallet and common values are always stored as 32 bits. When a verified integer field is narrower and some stored
@@ -54,17 +56,38 @@ public static partial class Wdc5TableReader
             }
             if(column.Kind==2){if(Observe(column.P1))foreach(var value in column.Common!.Values)if(!Observe(value))break;}
             else foreach(var value in column.Palette)if(!Observe(value))break;
+            // D109 (#101): one pattern narrows only when no two different stored values keep the same low bits; 0x00000005
+            // and 0xFFFF0005 would both read 5. Such a column keeps its physical values and the table still opens.
+            var collides=patterns.Count==1&&LowBitsCollide(column,width,token);
             if(yielding)
             {
-                // Two or more patterns keep the whole column raw. One narrows it; none means every value fits and it reads at its width.
-                if(patterns.Count>1)continue;
+                // Two or more patterns or colliding low bits keep the whole column raw. One pattern narrows it; none means
+                // every value fits and it reads at its width.
+                if(patterns.Count>1||collides)continue;
                 column.VerifiedRawEvidence=false;column.KeepsLowBits=patterns.Count==1;any=true;continue;
             }
             if(patterns.Count>1)throw VaryingUpperBits(field,column.Kind,width,unsigned,patterns);
+            if(collides){column.RawBecauseLowBitsCollide=true;any=true;continue;}
             column.KeepsLowBits=patterns.Count==1;
             any|=column.KeepsLowBits;
         }
         return any;
+    }
+    // True when two different stored values of the column have the same low bits at the definition width. DBD integer
+    // widths below 32 are 8 or 16, so the table of upper bits seen per low-bit value is at most 64 Ki entries.
+    private static bool LowBitsCollide(Storage column,int width,CancellationToken token)
+    {
+        var mask=(1u<<width)-1;var upperOf=new uint[1<<width];var seenLow=new bool[1<<width];var seen=0;
+        bool Collides(uint value)
+        {
+            if((++seen&4095)==0)token.ThrowIfCancellationRequested();
+            var low=value&mask;var upper=value>>width;
+            if(!seenLow[low]){seenLow[low]=true;upperOf[low]=upper;return false;}
+            return upperOf[low]!=upper;
+        }
+        if(column.Kind==2){if(Collides(column.P1))return true;foreach(var value in column.Common!.Values)if(Collides(value))return true;return false;}
+        foreach(var value in column.Palette)if(Collides(value))return true;
+        return false;
     }
     private static VibeMiner.Domain.DiscoveryException VaryingUpperBits(DbdField field,uint kind,int width,bool unsigned,List<uint> patterns)
     {

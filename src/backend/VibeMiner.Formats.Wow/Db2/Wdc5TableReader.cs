@@ -23,6 +23,8 @@ public static partial class Wdc5TableReader
         // D108: the matched raw rule gives way to narrowing when the column has one constant upper-bit pattern.
         public bool RawNarrowsWhenConstant;
         public bool KeepsLowBits;
+        // #101: one upper pattern, but keeping only the low bits would give two different stored values the same number.
+        public bool RawBecauseLowBitsCollide;
     }
     private sealed record Location(long Offset,int Section,int GlobalIndex,int LocalIndex,uint PhysicalId);
     private sealed record BoundField(DbdField Field,int StorageIndex,FieldSource Source=FieldSource.Physical);

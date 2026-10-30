@@ -142,6 +142,45 @@ public sealed class Wdc5LowBitNarrowingTests
         Assert.True(sink.NarrowedBeforeRows||narrowed!=true);
     }
 
+    // D109 (#101): one pattern narrows only when no two different stored values keep the same low bits. A fitting
+    // 0x00000005 next to 0xFFFF0005 would otherwise both read 5, so the column keeps its physical values; the table opens.
+    [Theory]
+    [InlineData(3,"<u16>",new ulong[]{5,0xffff0005})]
+    [InlineData(3,"<16>",new ulong[]{0xffff0005,5})]
+    [InlineData(3,"<8>",new ulong[]{0xffffff9c,0x29c})]
+    [InlineData(2,"<u8>",new ulong[]{0,0x780100})]
+    public async Task Low_bits_that_would_merge_two_stored_values_keep_the_column_raw(uint kind,string schema,ulong[] values)
+    {
+        var sink=new Sink();await Read(Fixture(kind,32,values,schema),sink);
+        Assert.Equal(values.Select(v=>v.ToString(System.Globalization.CultureInfo.InvariantCulture)),sink.Rows.Select(r=>r.Values[1]));
+        var column=sink.Header!.Columns[1];Assert.Null(column.Narrowing);
+        Assert.Equal("raw-physical-integer-v1",column.Interpretation!.Policy);Assert.Contains("same number",column.Interpretation.Warning);
+        Assert.Null(TableDataStore.ProjectColumn(column,Fixture(kind,32,values,schema).Definition).Reference);
+    }
+
+    [Theory]
+    [InlineData(new ulong[]{5,0xffff0005},"5,4294901765")]
+    [InlineData(new ulong[]{0xffff0005,5},"4294901765,5")]
+    public async Task A_rule_that_narrows_when_constant_keeps_colliding_low_bits_raw(ulong[] values,string expected)
+    {
+        var f=Fixture(3,32,values,"<16>");var limits=Evidence(f);
+        limits=limits with{VerifiedRawIntegerRules=[limits.VerifiedRawIntegerRules![0] with{NarrowsWhenConstant=true}]};
+        var sink=new Sink();await Read(f,sink,limits);
+        Assert.Equal(expected.Split(','),sink.Rows.Select(r=>r.Values[1]));
+        Assert.NotNull(sink.Header!.Columns[1].Interpretation);Assert.Null(sink.Header.Columns[1].Narrowing);
+    }
+
+    [Theory]
+    // The fixture's one-bit pallet index reads entries 0 and 1; selection still checks every pallet entry.
+    [InlineData("<16>",new ulong[]{0xffffff9c,0xffff0005,0xffff0000,0xffffffff},"-100,5,-100,5")]
+    [InlineData("<16>",new ulong[]{0xffffff9c,0x30005},"-100,5")]
+    [InlineData("<u16>",new ulong[]{6,0xffff0005},"6,5")]
+    public async Task One_pattern_whose_low_bits_stay_distinct_still_narrows(string schema,ulong[] values,string expected)
+    {
+        var sink=new Sink();await Read(Fixture(3,32,values,schema),sink);
+        Assert.Equal(expected.Split(','),sink.Rows.Select(r=>r.Values[1]));Assert.Equal(new Db2ValueNarrowing(32,16),sink.Header!.Columns[1].Narrowing);
+    }
+
     [Fact]
     public async Task A_rule_without_narrows_when_constant_keeps_a_constant_pattern_raw()
     {
