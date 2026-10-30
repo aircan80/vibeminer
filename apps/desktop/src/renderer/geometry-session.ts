@@ -92,9 +92,8 @@ export class GeometrySession{
  private startDesired(){
   const intent=this.desired;if(!intent||this.active||this.closing)return;
   const decision=this.decisions.get(geometryIntentKey(intent));
-  // A local-only look never replays a remembered Stop or failure: it only says nothing is drawn, and Show model decides (#62).
-  if(decision&&this.desiredLocal){this.publish({view:Object.freeze({intent,generation:++this.generation,phase:'outcome',message:'Geometry is not kept for this display',result:null,error:null,canMount:false,sections:[],sectionOffset:0})});return;}
-  if(decision||this.decisions.size>=256){const error=decision?.error??(decision?null:failure('GEOMETRY_CONTROL_RESOURCE_LIMIT','The session limit for remembered stopped or failed geometry requests was reached. Existing decisions are preserved.',false));this.publish({view:Object.freeze({intent,generation:++this.generation,phase:'outcome',message:decision?.kind==='stopped'?'Geometry preparation stopped':'Geometry needs attention',result:null,error,canMount:false,sections:[],sectionOffset:0})});return;}
+  // A local-only look never replays a remembered Stop or failure: it reads what is kept, draws it, and leaves the decision for Show model (#62, #99).
+  if(!this.desiredLocal&&(decision||this.decisions.size>=256)){const error=decision?.error??(decision?null:failure('GEOMETRY_CONTROL_RESOURCE_LIMIT','The session limit for remembered stopped or failed geometry requests was reached. Existing decisions are preserved.',false));this.publish({view:Object.freeze({intent,generation:++this.generation,phase:'outcome',message:decision?.kind==='stopped'?'Geometry preparation stopped':'Geometry needs attention',result:null,error,canMount:false,sections:[],sectionOffset:0})});return;}
   const previous=this.operation;
   if(previous&&geometryIntentKey(previous.snapshot.intent)===geometryIntentKey(intent)&&previous.snapshot.status==='succeeded'&&previous.result&&previous.result.state!=='ready'){
    if(!creatureGeometryMatches(previous.result,intent.selection)||!geometryAnchorMatches(intent.anchor,previous.result)){

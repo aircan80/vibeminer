@@ -4,7 +4,7 @@ import path from 'node:path';
 import {launch,root,size,text} from './helpers';
 // #59: Creatures → slot metadata → Geometry → verified VMG1 body drawn by the real main protocol and WebGL scene.
 const methods=async(data:string)=>(await readFile(path.join(data,'requests.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line) as {method:string;params:Record<string,unknown>});
-async function opened(state='ready',textured=false){
+async function opened(state='ready',textured:boolean|'notPrepared'=false){
  const s=await launch(true,false,false,true,false,false,true,true,false,false,false,false,true);
  try{
   await size(s.app,1280,800);
@@ -159,6 +159,34 @@ test('A model stopped after leaving and coming back keeps keyboard focus in its 
  await expect(card(page).getByRole('button',{name:'Stop loading model',exact:true})).toBeVisible();await expect(card(page)).not.toContainText('Loading stopped');
  await expect.poll(async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare').length).toBe(before+1);
 }finally{await s.close();}});
+// #99: after Stop the automatic look reads before it answers. Focus handed to Show model waits on the card's status during that
+// read and goes on to what it shows, unless the user moved it meanwhile. An outcome with no button ends the handoff on its status.
+type FocusStep=(page:Page,data:string,app:ElectronApplication)=>Promise<void>;
+const home=(page:Page)=>page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Home',exact:true});
+const cachedAs=async(data:string,state:string)=>{await writeFile(path.join(data,'cached-geometry'),'cached');await writeFile(path.join(data,'geometry-state.json'),JSON.stringify({state,textured:false}));};
+const focusCases:[string,FocusStep,FocusStep][]=[
+ ['returns to Show model when nothing is kept',async()=>{},async page=>{await expect(show(page)).toBeFocused({timeout:20000});}],
+ ['goes on to Open geometry view when the kept model draws',async(_page,data)=>cachedAs(data,'ready'),async page=>{await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});await expect(openView(page)).toBeFocused({timeout:20000});}],
+ ['stays where the user moved it during the read',async page=>{await home(page).focus();},async page=>{await expect(show(page)).toBeVisible({timeout:20000});await expect(home(page)).toBeFocused();}],
+ ['ends on the status of an outcome with no button, and nothing takes focus later',async(_page,data)=>cachedAs(data,'unsupported'),async(page,_data,app)=>{
+  await expect(card(page).getByRole('img',{name:'Unsupported model',exact:true})).toBeFocused({timeout:20000});
+  await expect(card(page).locator('.cv-preview button')).toHaveCount(0);
+  // The card renders again (a narrower window, then back) with focus on the page: the ended handoff leaves it there.
+  await page.evaluate(()=>(document.activeElement as HTMLElement).blur());
+  await size(app,900,700);await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(900);await size(app,1280,800);await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(1280);
+  await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));expect(await page.evaluate(()=>document.activeElement===document.body)).toBe(true);}],
+];
+for(const[name,during,after]of focusCases)test(`After Stop, focus during the automatic read ${name} (#99)`,async()=>{test.setTimeout(120000);const s=await opened();try{
+ const{page}=s;await writeFile(path.join(s.data,'hold-geometry-prepare'),'hold');
+ await show(page).click();await expect(card(page).getByRole('button',{name:'Stop loading model',exact:true})).toBeVisible();
+ await page.locator('#cv-opt-2').click();await expect(page.getByRole('heading',{level:2,name:'Authored creature 2'})).toBeVisible();
+ await page.locator('#cv-opt-0').click();const stop=card(page).getByRole('button',{name:'Stop loading model',exact:true});await expect(stop).toBeVisible();
+ await writeFile(path.join(s.data,'hold-geometry-read'),'hold');await stop.focus();await page.keyboard.press('Enter');
+ await expect.poll(()=>readFile(path.join(s.data,'waiting-geometry-read'),'utf8').then(()=>true,()=>false),{timeout:20000}).toBe(true);
+ await expect.poll(()=>page.evaluate(()=>!!document.activeElement?.matches('article.cv-display .cv-pending[role=status]'))).toBe(true);
+ await during(page,s.data,s.app);await unlink(path.join(s.data,'hold-geometry-read'));await writeFile(path.join(s.data,'release-geometry-read'),'release');
+ await after(page,s.data,s.app);
+}finally{await s.close();}});
 test('After its tries a busy engine reads "Engine still busy" with Retry model, which draws once the engine answers',async()=>{test.setTimeout(120000);const s=await opened();try{
  const{page}=s;await writeFile(path.join(s.data,'cached-geometry'),'cached');await page.locator('#cv-opt-6').click();await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
  await page.locator('#cv-opt-0').click();await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
@@ -167,6 +195,21 @@ test('After its tries a busy engine reads "Engine still busy" with Retry model, 
  await expect(card(page)).toContainText('Engine still busy',{timeout:60000});await expect(card(page)).toContainText('CREATURES_QUERY_BUSY');await expect(card(page)).not.toContainText('Model not drawn');
  await writeFile(path.join(s.data,'geometry-read-busy'),'0');await card(page).getByRole('button',{name:'Retry model',exact:true}).click();
  await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+}finally{await s.close();}});
+// #99: a remembered Stop of the texture load never hides the kept lines: Return reads what is kept and draws it.
+test('Return after stopping the texture load in the geometry view draws the kept lines again',async()=>{test.setTimeout(120000);const s=await opened('ready','notPrepared');try{
+ const{page}=s;await writeFile(path.join(s.data,'cached-geometry'),'cached');
+ await page.locator('#cv-opt-6').click();await page.locator('#cv-opt-0').click();await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(0);
+ await writeFile(path.join(s.data,'hold-geometry-prepare'),'hold');await openView(page).click();
+ const stop=page.getByRole('button',{name:'Stop preparing geometry',exact:true});await expect(stop).toBeVisible({timeout:20000});await stop.click();
+ await expect.poll(async()=>(await methods(s.data)).some(r=>r.method==='request.cancel')).toBe(true);
+ await expect(page.getByRole('status').filter({hasText:'Geometry preparation stopped'})).toBeVisible({timeout:20000});
+ const reads=(await methods(s.data)).filter(r=>r.method==='creatures.geometry.read').length;
+ await page.getByRole('button',{name:'← Return to Creatures selection',exact:true}).click();
+ await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});await expect(card(page)).not.toContainText('No preview yet');await expect(openView(page)).toBeFocused({timeout:20000});
+ expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.read').length).toBeGreaterThan(reads);
+ expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(1);
 }finally{await s.close();}});
 test('A ready display appearance draws the textured surfaces from its verified VMA1 body and shows the texture chain (#63)',async()=>{test.setTimeout(120000);const s=await opened('ready',true);try{
  const{page}=s;await show(page).click();await expect(openView(page)).toBeVisible({timeout:20000});await openView(page).click();

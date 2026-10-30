@@ -379,7 +379,10 @@ function PreviewBox({preview,params,metadata,loading,name,slot,displayId,auto,ac
  // and back, Return from Tables or Files). It only looks: nothing is prepared or downloaded, and a busy engine just leaves Show model.
  const otherDrawn=!!preview.view&&preview.slot!==slot&&preview.view.phase!=='outcome';
  useEffect(()=>{if(!active)tried.current=false;},[active]);
- useEffect(()=>{if(!flow||!active||!resolved||!auto||tried.current||mine||opHere||otherDrawn)return;tried.current=true;preview.show(params,metadata!,name,null,true);},[resolved,auto,active,!!mine,!!opHere,otherDrawn]);
+ useEffect(()=>{if(!flow||!active||!resolved||!auto||tried.current||mine||opHere||otherDrawn)return;tried.current=true;
+  // The look reads before it answers, so Show model briefly gives way to its status: focus on it moves along and comes back (#99).
+  if(!focusNext.current&&showRef.current&&document.activeElement===showRef.current)focusNext.current='show';
+  preview.show(params,metadata!,name,null,true);},[resolved,auto,active,!!mine,!!opHere,otherDrawn]);
  // The canvas mounts as soon as the view can draw (the session draws into it); Open geometry view waits for the drawing.
  const mountable=!!mine&&mine.canMount,ready=mountable&&mine!.phase==='ready';
  const outcome=mine&&!pending&&mine.phase==='outcome'?mine:null,result=outcome?.result,problem=outcome?.error??result?.problem??null;
@@ -392,11 +395,17 @@ function PreviewBox({preview,params,metadata,loading,name,slot,displayId,auto,ac
  // and to Open geometry view once drawn (straight away for a kept model). A deliberate move elsewhere is left alone.
  useLayoutEffect(()=>{const want=focusNext.current;if(!want)return;const now=document.activeElement,ours=!now||now===document.body||now===stopRef.current||now===showRef.current||now===statusRef.current;
   // After Stop the card may first read or wait before Show model or Retry model comes back: focus waits on its status meanwhile.
-  if(want==='show'){if(showRef.current){focusNext.current=null;if(ours)showRef.current.focus();}else if(statusRef.current&&ours&&now!==statusRef.current)statusRef.current.focus();return;}
+  // If that look draws a kept model instead, focus goes on to Open geometry view (#99).
+  // Any outcome ends the handoff on its status (only a busy engine that is asked again keeps it), so nothing grabs focus later.
+  if(want==='show'){if(!ours){focusNext.current=null;return;}
+   if(ready&&openRef.current){focusNext.current=null;openRef.current.focus();return;}
+   if(showRef.current){focusNext.current=null;showRef.current.focus();return;}
+   if(statusRef.current&&now!==statusRef.current)statusRef.current.focus();
+   if(outcome&&!(busy&&busyTries<BUSY_TRIES))focusNext.current=null;return;}
   if(!ours){focusNext.current=null;return;}
   if(ready&&openRef.current){focusNext.current=null;openRef.current.focus();return;}
   if(stopRef.current){if(now!==stopRef.current)stopRef.current.focus();return;}
-  if(statusRef.current){if(now!==statusRef.current)statusRef.current.focus();return;}
+  if(statusRef.current){if(now!==statusRef.current)statusRef.current.focus();if(outcome&&!(busy&&busyTries<BUSY_TRIES))focusNext.current=null;return;}
   if(showRef.current&&!mine){focusNext.current=null;showRef.current.focus();}});
  if(!flow)return null;
  if(loading)return <div className="cv-preview"><div className="cv-pbox cv-off" role="img" aria-label="Model preview waits for the display tables">Preview after CreatureModelData</div></div>;

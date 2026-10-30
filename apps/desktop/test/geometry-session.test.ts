@@ -234,14 +234,16 @@ it('a busy read on a deliberate entry is a retryable outcome that Retry asks aga
  await until(h.session,()=>!!h.session.snapshot().view?.canMount);expect(h.bridge.creatureGeometryRead).toHaveBeenCalledTimes(2);
 });
 
-it('a local-only look never replays a remembered Stop: it reads as not drawn and leaves the decision for Show model',async()=>{
+it('a local-only look never replays a remembered Stop: it reads what is kept and leaves the decision for Show model',async()=>{
  const h=setup();vi.mocked(h.bridge.creatureGeometryRead!).mockImplementation(async()=>ok(h.missing));const held=defer<BridgeReply<CreatureGeometryResult>>();vi.mocked(h.bridge.creatureGeometryPrepare!).mockReturnValueOnce(held.promise);
  h.start();await until(h.session,()=>h.session.snapshot().operation?.status==='pending');h.session.stopPreparation(h.session.snapshot().operation!.id);held.resolve({ok:false,error:{code:'CANCELED',message:'Stopped.',retryable:true}});
  await until(h.session,()=>h.session.snapshot().view?.phase==='outcome'&&!h.session.snapshot().retirement);expect(h.session.snapshot().view!.message).toBe('Geometry preparation stopped');
- await h.session.leave('navigation');h.session.enter(h.intent,{localOnly:true});
- const v=h.session.snapshot().view!;expect(v.phase).toBe('outcome');expect(v.error).toBeNull();expect(v.result).toBeNull();expect(v.message).not.toBe('Geometry preparation stopped');
+ await h.session.leave('navigation');h.session.enter(h.intent,{localOnly:true});expect(h.session.snapshot().view!.message).not.toBe('Geometry preparation stopped');
+ h.session.iconsHiddenCommitted(h.session.snapshot().view!.generation);await until(h.session,()=>h.session.snapshot().view?.phase==='outcome'&&!h.session.snapshot().retirement);
+ // #99: it really reads; nothing is kept here, so it says so without a remembered error and without preparing.
+ const v=h.session.snapshot().view!;expect(v.error).toBeNull();expect(v.result?.state).toBe('notPrepared');expect(v.message).toBe('Geometry is not kept for this display');expect(h.bridge.creatureGeometryPrepare).toHaveBeenCalledTimes(1);
  // Show model is a fresh, deliberate request: it prepares again instead of replaying the Stop.
  await until(h.session,()=>!h.session.snapshot().retirement);vi.mocked(h.bridge.creatureGeometryPrepare!).mockResolvedValueOnce(ok(h.result));vi.mocked(h.bridge.creatureGeometryRead!).mockImplementation(async()=>ok(h.result));
- h.session.enter(h.intent,{fresh:true});await until(h.session,()=>h.session.snapshot().view?.phase!=='outcome');expect(h.session.snapshot().view!.message).not.toBe('Geometry preparation stopped');
+ h.session.enter(h.intent,{fresh:true});await until(h.session,()=>!['outcome','waiting'].includes(h.session.snapshot().view?.phase??'outcome'));expect(h.session.snapshot().view!.message).not.toBe('Geometry preparation stopped');
  h.session.iconsHiddenCommitted(h.session.snapshot().view!.generation);await until(h.session,()=>!!h.session.snapshot().view?.canMount);
 });

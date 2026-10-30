@@ -68,6 +68,22 @@ describe('textured appearance presentation',()=>{
   expect(h.bridge.creatureGeometryPrepare).not.toHaveBeenCalled();
   expect(h.session.snapshot().view?.result?.appearance?.state).toBe('notPrepared');expect(h.session.snapshot().view?.message).toBe('Unposed source edges drawn');
  });
+ // #99: a remembered Stop of the texture Prepare must not hide the kept lines when the Creatures preview looks again.
+ it('a local-only look after a stopped texture Prepare reads and draws the kept lines, while the view itself still replays the Stop',async()=>{
+  const h=setup('notPrepared');let finish!:(reply:BridgeReply<CreatureGeometryResult>)=>void;
+  vi.mocked(h.bridge.creatureGeometryPrepare!).mockReturnValueOnce(new Promise(r=>{finish=r;}));
+  h.start();await until(h.session,()=>h.session.snapshot().operation?.status==='pending');
+  h.session.stopPreparation(h.session.snapshot().operation!.id);finish({ok:false,error:{code:'CANCELED',message:'Stopped.',retryable:true}});
+  await until(h.session,()=>h.session.snapshot().view?.message==='Geometry preparation stopped'&&!h.session.snapshot().retirement);
+  await h.session.leave('return');const reads=vi.mocked(h.bridge.creatureGeometryRead!).mock.calls.length;
+  h.session.enter(h.intent,{localOnly:true});expect(h.session.snapshot().view?.message).not.toBe('Geometry is not kept for this display');
+  h.session.iconsHiddenCommitted(h.session.snapshot().view!.generation);await drawn(h);
+  expect(h.bridge.creatureGeometryRead).toHaveBeenCalledTimes(reads+1);expect(h.bridge.creatureGeometryPrepare).toHaveBeenCalledTimes(1);
+  expect(h.session.snapshot().view?.message).toBe('Unposed source edges drawn');expect(h.session.snapshot().view?.error).toBeNull();
+  // The geometry view's own entry still replays the remembered Stop instead of preparing again.
+  await h.session.leave('navigation');h.session.enter(h.intent);
+  expect(h.session.snapshot().view?.message).toBe('Geometry preparation stopped');expect(h.bridge.creatureGeometryPrepare).toHaveBeenCalledTimes(1);
+ });
  it('still draws the retained lines when only the texture Prepare fails',async()=>{
   const h=setup('notPrepared');vi.mocked(h.bridge.creatureGeometryPrepare!).mockResolvedValue({ok:false,error:{code:'NETWORK_UNAVAILABLE',message:'Offline.',retryable:true}});
   h.start();await drawn(h);
