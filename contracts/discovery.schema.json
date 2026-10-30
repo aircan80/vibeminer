@@ -4366,6 +4366,36 @@
       ],
       "additionalProperties": false
     },
+    "TableDefinitionCheck": {
+      "title": "TableDefinitionCheck",
+      "description": "The last time WoWDBDefs was asked about this table (D081, #81). Present only while definitionFetch is on, the bundled definition doesn't list the build (or the admitted rows' layout on it) and WoWDBDefs was asked before. The engine always sends fetched or failure. fetched is the definition the cache holds, which may not cover the build either; failure is the code when that last attempt failed, kept only while the engine runs, so after a restart only the cached definition shows; nextCheckAfter is when opening the table's data asks WoWDBDefs again by itself: 15 minutes after a failed attempt or after a check whose definition doesn't cover the build, 24 h after one that does; at or before checkedAt means at the next open. After an offline or failed attempt Retry table data asks at once.",
+      "type": "object",
+      "properties": {
+        "checkedAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        },
+        "fetched": {
+          "$ref": "#/definitions/TableDefinitionFetched"
+        },
+        "failure": {
+          "enum": [
+            "DEFINITION_FETCH_OFFLINE",
+            "DEFINITION_FETCH_FAILED",
+            "DEFINITION_FETCH_TOO_LARGE",
+            "DEFINITION_FETCH_INVALID",
+            "DEFINITION_FETCH_NOT_FOUND"
+          ]
+        },
+        "nextCheckAfter": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        }
+      },
+      "required": [
+        "checkedAt",
+        "nextCheckAfter"
+      ],
+      "additionalProperties": false
+    },
     "TablesProblem": {
       "title": "TablesProblem",
       "type": "object",
@@ -4440,6 +4470,9 @@
             "on",
             "off"
           ]
+        },
+        "definitionCheck": {
+          "$ref": "#/definitions/TableDefinitionCheck"
         }
       },
       "required": [

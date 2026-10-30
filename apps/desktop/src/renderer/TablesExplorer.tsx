@@ -9,7 +9,7 @@ import { validRecordId } from '../shared/table-data';
 import { createPortal } from 'react-dom';
 import type { TableCatalogEntry, TableCatalogPage, TableDefinitionField, TableDefinitionProvider, TableDefinitionSnapshot, TableDataSnapshot, TableReference, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
-import { fetchedLabel, fieldType, tableCatalogMatches, tableDefinitionMatches, type TablesCatalogParams } from '../shared/tables';
+import { fetchedLabel, fieldType, uncoveredDefinitionMatch, tableCatalogMatches, tableDefinitionMatches, type TablesCatalogParams } from '../shared/tables';
 import { exactCount } from '../shared/inventory';
 
 type Tab = 'data' | 'structure' | 'relations';
@@ -190,6 +190,14 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
     window.addEventListener('vibeminer-settings-changed', changed);
     return () => window.removeEventListener('vibeminer-settings-changed', changed);
   }, []);
+  // #81: a failed load may have asked WoWDBDefs, so the inspector reads the definition again and says what that check found.
+  const failedRead = useRef<string | null>(null);
+  useEffect(() => {
+    const op = flow.operation;
+    if (!op || op.status !== 'failed' || failedRead.current === op.id || op.definition.productId !== context.productId || op.definition.buildIdentity !== context.buildIdentity || op.definition.sourceRegion !== context.sourceRegion) return;
+    failedRead.current = op.id;
+    if (currentTrail.current.some(v => v.snapshot.entry.tableId === op.definition.entry.tableId)) void refreshLatest.current(op.definition.entry.tableId);
+  }, [flow.operation?.id, flow.operation?.status]);
   const savePosition = (id: number, value: DataPosition) => setTrail(previous => previous.some(v => v.id === id) ? previous.map(v => v.id === id ? { ...v, position: value } : v) : previous);
   const clearFollow = (id: number) => setTrail(previous => previous.map(v => v.id === id ? { ...v, follow: undefined, position: undefined } : v));
   function update(changes: Partial<View>) { setTrail(previous => previous.map((value, index) => index === position ? { ...value, ...changes } : value)); }
@@ -239,7 +247,7 @@ export function TablesExplorer({ snapshot, bridge, active, tableLoading, sourceR
     {admission && <><dt>Full decoded content key</dt><dd>{isPartialSource(admission.source) ? 'Not verified · expected key only' : 'Verified'}</dd></>}
     {view && <><dt>Provider table</dt><dd className="dh-mono dh-selectable">{view.snapshot.entry.tableId}</dd><dt>DB2 FileDataID</dt><dd className="dh-selectable">{view.snapshot.entry.db2FileDataId ?? 'Not supplied · not an absence claim'}</dd></>}
     {candidate && <><dt>Candidate layout</dt><dd className="dh-mono">{candidate.layoutHash}</dd></>}
-    {view?.snapshot.definition && (layoutOnly || admission?.schemaMatch === 'layoutOnly') && <><dt>Definition match</dt><dd className="definition-match">{admission?.schemaMatch === 'layoutOnly' ? 'Matched by layout, build not listed' : definition?.candidates.length ? 'Build not listed · opens only if the file’s layout matches a candidate' : view.snapshot.definitionFetch === 'on' && !definition?.fetched ? 'Build not listed · no bundled layout on its version line; opening Data fetches a newer definition from WoWDBDefs' : 'Build not listed · no layout on its version line, so the table can’t open'}</dd></>}
+    {view?.snapshot.definition && (layoutOnly || admission?.schemaMatch === 'layoutOnly') && <><dt>Definition match</dt><dd className="definition-match">{admission?.schemaMatch === 'layoutOnly' ? 'Matched by layout, build not listed' : definition?.candidates.length ? 'Build not listed · opens only if the file’s layout matches a candidate' : view.snapshot.definitionFetch === 'on' && !definition?.fetched ? uncoveredDefinitionMatch(view.snapshot.definitionCheck) : 'Build not listed · no layout on its version line, so the table can’t open'}</dd></>}
     {view?.snapshot.definition && <><dt>Definition from</dt><dd className="definition-source">{view.snapshot.definition.fetched ? <>{fetchedLabel(view.snapshot.definition.fetched)} · not bundled or verified · WoWDBDefs contributors, CC BY-SA 4.0</> : 'Bundled with VibeMiner'}</dd></>}
     {view?.snapshot.definition && <><dt>Definition SHA-256</dt><dd className="dh-mono dh-selectable">{view.snapshot.definition.sha256}</dd><dt>Definition source</dt><dd className="dh-mono dh-selectable">{view.snapshot.definition.sourceUrl}</dd></>}
     {provided && <><dt>Definitions</dt><dd>{provided.name}</dd><dt>License</dt><dd>{provided.license}</dd><dt>{definition?.fetched ? 'Bundled revision' : 'Revision'}</dt><dd className="dh-mono dh-selectable">{provided.revision}</dd>{definition?.fetched && <><dt>Fetched revision</dt><dd className="dh-mono dh-selectable">{definition.fetched.revision}</dd></>}<dt>Provider manifest SHA-256</dt><dd className="dh-mono dh-selectable">{provided.manifestSha256}</dd><dt>Provider source</dt><dd className="dh-mono dh-selectable">{provided.sourceUrl}</dd></>}

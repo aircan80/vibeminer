@@ -118,6 +118,25 @@ public sealed class WoWDBDefsDefinitions
         return Due(cached, covers, now);
     }
 
+    /// <summary>The outcome of the last time WoWDBDefs was asked about this table (#81), or null when it never was. Local
+    /// only. The cached definition and its check time survive a restart; a failure is kept only while the engine runs,
+    /// and a first open after a restart asks again anyway. NextCheckAfter is when opening the table's data asks again by
+    /// itself: the gap after a failure (as re-checks wait; Retry table data asks at once), else the gap or, for a covering
+    /// cache, the refresh interval after the cache's last check.</summary>
+    public async Task<TableDefinitionCheck?> LastCheckAsync(string tableId, string tableName, Func<DbdDocument, bool> covers, CancellationToken token)
+    {
+        Validate(tableId, tableName);
+        var cached = await CachedAsync(tableId, tableName, token);
+        var failed = failures.TryGetValue(tableId, out var last);
+        if (cached is null && !failed) return null;
+        var now = time.GetUtcNow();
+        // A success clears the failure, so a kept failure is always the newest attempt.
+        var checkedAt = failed ? last.At : cached!.CheckedAt;
+        var next = failed ? checkedAt + gap : cached!.CheckedAt > now ? now
+            : cached.CheckedAt + (covers(cached.Document) && refresh > gap ? refresh : gap);
+        return new(checkedAt, cached?.Info, failed ? last.Failure.Code : null, next);
+    }
+
     // A cache that covers what's needed is asked about again after the refresh interval; one that doesn't, after the
     // minimum gap. A check time in the future (a clock moved back) is due.
     private bool Due(FetchedTableDefinition? cached, Func<DbdDocument, bool> covers, DateTimeOffset now)

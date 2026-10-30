@@ -396,6 +396,14 @@ test('A table read with a definition fetched from WoWDBDefs says so with its com
   validate('TableDefinitionSnapshot', { ...definition, definitionFetch: 'off' });
   for (const value of ['yes', true, null])
     assert.equal(validator('TableDefinitionSnapshot')({ ...definition, definitionFetch: value }), false, String(value));
+  // #81: the last WoWDBDefs check, a fetched definition that didn't cover the build or a failed attempt.
+  const check = { checkedAt: '2026-10-30T22:23:53.2321344+00:00', fetched, nextCheckAfter: '2026-10-30T22:38:53.2321344+00:00' };
+  validate('TableDefinitionSnapshot', { ...definition, definitionFetch: 'on', definitionCheck: check });
+  validate('TableDefinitionCheck', { checkedAt: check.checkedAt, failure: 'DEFINITION_FETCH_NOT_FOUND', nextCheckAfter: check.checkedAt });
+  validate('TableDefinitionCheck', { ...check, failure: 'DEFINITION_FETCH_OFFLINE' });
+  for (const value of [null, { ...check, fetched: null }, { ...check, failure: null }, { ...check, failure: 'SCHEMA_BUILD_NOT_LISTED' }, { ...check, nextCheckAfter: undefined }, { ...check, checkedAt: '22:23' },
+    { ...check, fetched: { revision: fetched.revision } }, { ...check, extra: true }])
+    assert.equal(validator('TableDefinitionSnapshot')({ ...definition, definitionFetch: 'on', definitionCheck: value }), false, JSON.stringify(value));
 });
 
 test('Reference text keeps exact keys, closed states, the actual text source and bound page shape', async () => {

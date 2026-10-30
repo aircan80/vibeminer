@@ -876,6 +876,72 @@ public sealed class FetchedDefinitionTests
         Assert.True(h.GitHub.Requests.Count == 3, $"{path}: the retry made one attempt (commit, then file)");
     }
 
+    [Fact]
+    public async Task After_a_fetch_that_does_not_cover_the_build_the_definition_says_what_it_found_also_after_a_restart()
+    {
+        // #81: the bundled and the fetched definition both lack the build's line.
+        await using var h = await Tables.Create("77.0.0.100");
+        h.GitHub.Serve("Item", Revision, Encoding.UTF8.GetBytes(ItemDbd));
+        var before = await h.Catalog.ReadDefinitionAsync(h.DefinitionRequest, default);
+        Assert.Null(before.DefinitionCheck); Assert.Contains("fetches the newest WoWDBDefs definition", before.Problem!.Message);
+        var checkedAt = h.Clock.Now;
+        Assert.Equal("SCHEMA_BUILD_NOT_LISTED", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Store.PrepareAsync(h.Request, None, default))).Code);
+        var asked = h.GitHub.Requests.Count;
+        h.Clock.Now += TimeSpan.FromMinutes(1);
+        var expected = new TableDefinitionCheck(checkedAt, new(Revision, checkedAt), null, checkedAt + WoWDBDefsDefinitions.DefaultMinimumGap);
+        var after = await h.Catalog.ReadDefinitionAsync(h.DefinitionRequest, default);
+        Assert.Equal(expected, after.DefinitionCheck);
+        Assert.Null(after.Definition!.Fetched); Assert.DoesNotContain("fetches the newest", after.Problem!.Message);
+        Assert.Equal("Neither the pinned definition nor the WoWDBDefs definition fetched 2026-10-23 (1111111) lists this exact build or any layout on its version line, so this table can’t open. Once 15 minutes have passed since that check, Retry table data or opening its data again asks WoWDBDefs again.", after.Problem.Message);
+        var json = JsonSerializer.Serialize(after, Json);
+        Assert.Contains("\"definitionCheck\":{\"checkedAt\":\"2026-10-23T12:00:00+00:00\",\"fetched\":{\"revision\":\"" + Revision + "\"", json);
+        Assert.DoesNotContain("\"failure\"", json);
+        // A relaunch reads the same outcome from the cache record, and opening again inside the gap doesn't ask GitHub.
+        await using var restarted = h.Restart();
+        Assert.Equal(expected, (await new TablesCatalog(h.DiscoveryCatalog, h.Sources()).ReadDefinitionAsync(h.DefinitionRequest, default)).DefinitionCheck);
+        await Assert.ThrowsAsync<DiscoveryException>(() => restarted.PrepareAsync(h.Request, None, default));
+        Assert.Equal(asked, h.GitHub.Requests.Count);
+        // Once nextCheckAfter has passed, opening the data asks again and the check moves on.
+        h.Clock.Now = expected.NextCheckAfter;
+        await Assert.ThrowsAsync<DiscoveryException>(() => restarted.PrepareAsync(h.Request, None, default));
+        Assert.True(h.GitHub.Requests.Count > asked);
+        var moved = (await new TablesCatalog(h.DiscoveryCatalog, h.Sources()).ReadDefinitionAsync(h.DefinitionRequest, default)).DefinitionCheck!;
+        Assert.Equal(h.Clock.Now, moved.CheckedAt); Assert.Equal(h.Clock.Now + WoWDBDefsDefinitions.DefaultMinimumGap, moved.NextCheckAfter);
+        // Off: no check is shown, since nothing is fetched.
+        h.Policy.Enabled = false;
+        Assert.Null((await h.Catalog.ReadDefinitionAsync(h.DefinitionRequest, default)).DefinitionCheck);
+    }
+
+    [Fact]
+    public async Task Rows_opened_by_a_bundled_layout_match_name_their_layout_when_the_fetched_file_lists_the_build_under_another()
+    {
+        // The fetched file lists 1.60.1.70500 only with layout 1234ABCD; the file has 9A2A4834, which the bundled line matches.
+        await using var h = await Tables.Create("1.60.1.70500");
+        h.GitHub.Serve("Item", Revision, ItemWith("1234ABCD", "1.60.1.70500"));
+        Assert.Equal(TableSchemaMatch.LayoutOnly, (await h.Store.PrepareAsync(h.Request, None, default)).SchemaMatch);
+        var snapshot = await h.Catalog.ReadDefinitionAsync(h.DefinitionRequest, default);
+        Assert.Null(snapshot.Definition!.Fetched); Assert.Equal(new TableDefinitionFetched(Revision, h.Clock.Now), snapshot.DefinitionCheck!.Fetched);
+        Assert.Contains("The WoWDBDefs definition fetched 2026-10-23 (1111111) has no block for this file’s layout 9A2A4834 on this build;", snapshot.Problem!.Message);
+        Assert.DoesNotContain("doesn’t list it", snapshot.Problem.Message);
+    }
+
+    [Fact]
+    public async Task A_failed_check_shows_until_the_engine_restarts_and_names_when_opening_asks_again()
+    {
+        await using var h = await Tables.Create("77.0.0.100");
+        var (store, catalog) = h.Shared();
+        h.GitHub.Failure = new HttpRequestException(HttpRequestError.ConnectionError, "offline");
+        var at = h.Clock.Now;
+        Assert.Equal("DEFINITION_FETCH_OFFLINE", (await Assert.ThrowsAsync<DiscoveryException>(() => store.PrepareAsync(h.Request, None, default))).Code);
+        var snapshot = await catalog.ReadDefinitionAsync(h.DefinitionRequest, default);
+        // Re-checks wait the gap after a failure; Retry asks at once.
+        Assert.Equal(new TableDefinitionCheck(at, null, "DEFINITION_FETCH_OFFLINE", at + WoWDBDefsDefinitions.DefaultMinimumGap), snapshot.DefinitionCheck);
+        Assert.Equal("The pinned definition does not list this exact build or any layout on its version line, and the last check of WoWDBDefs for a newer one failed (DEFINITION_FETCH_OFFLINE). Retry table data asks again at once.", snapshot.Problem!.Message);
+        Assert.DoesNotContain("\"fetched\"", JsonSerializer.Serialize(snapshot.DefinitionCheck, Json));
+        // Failures aren't kept across a restart; the first open there asks again anyway.
+        Assert.Null((await new TablesCatalog(h.DiscoveryCatalog, h.Sources()).ReadDefinitionAsync(h.DefinitionRequest, default)).DefinitionCheck);
+    }
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>One opened build whose Item file has the given layout, a fake GitHub and a switchable policy.</summary>
@@ -929,6 +995,12 @@ public sealed class FetchedDefinitionTests
         internal TableDefinitionSources Sources() => new(new WoWDBDefsDefinitions(directory.Path, new HttpClient(GitHub), Clock), Policy);
         /// <summary>A new store and definition cache over the same storage, as after an engine restart.</summary>
         internal TableDataStore Restart() { var store = new TableDataStore(DiscoveryCatalog, objects, cdnClient, definitions: Sources()); stores.Add(store); return store; }
+        /// <summary>A store and catalogue over one definition cache, as the engine wires them.</summary>
+        internal (TableDataStore Store, TablesCatalog Catalog) Shared()
+        {
+            var sources = Sources(); var store = new TableDataStore(DiscoveryCatalog, objects, cdnClient, definitions: sources); stores.Add(store);
+            return (store, new(DiscoveryCatalog, sources));
+        }
         public async ValueTask DisposeAsync()
         {
             foreach (var store in stores) await store.DisposeAsync();

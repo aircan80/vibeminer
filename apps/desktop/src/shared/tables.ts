@@ -1,4 +1,4 @@
-import type { TableCatalogPage, TableDefinitionProvider, TableDefinitionSnapshot, TableDefinitionField, TableDefinitionFetched } from '../../../../contracts/generated/discovery';
+import type { TableCatalogPage, TableDefinitionProvider, TableDefinitionSnapshot, TableDefinitionField, TableDefinitionFetched, TableDefinitionCheck } from '../../../../contracts/generated/discovery';
 import type { OpenParams } from './bridge';
 export type TablesCatalogParams = OpenParams & { query?: string; limit?: number; after?: string };
 export type TableDefinitionParams = OpenParams & { tableId: string };
@@ -25,6 +25,32 @@ export function fetchedLabel(fetched: TableDefinitionFetched): string {
 export function fetchedCompactLabel(fetched: TableDefinitionFetched): string {
   return `WoWDBDefs · ${new Date(fetched.fetchedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })} · ${fetched.revision.slice(0, 7)}`;
 }
+const checkFailures = new Set(['DEFINITION_FETCH_OFFLINE', 'DEFINITION_FETCH_FAILED', 'DEFINITION_FETCH_TOO_LARGE', 'DEFINITION_FETCH_INVALID', 'DEFINITION_FETCH_NOT_FOUND']);
+const instant = (text: unknown) => typeof text === 'string' && !Number.isNaN(Date.parse(text));
+// #81: the last WoWDBDefs check comes only with fetching on, for a named table with a bundled definition, and says what it found.
+function validCheck(value: TableDefinitionSnapshot, check: TableDefinitionCheck | undefined): boolean {
+  if (check === undefined) return true;
+  if (!check || typeof check !== 'object' || value.definitionFetch !== 'on' || !value.definition || !value.entry.name || !instant(check.checkedAt) || !instant(check.nextCheckAfter)) return false;
+  if (check.fetched === undefined && check.failure === undefined) return false;
+  if (check.failure !== undefined && !checkFailures.has(check.failure)) return false;
+  return check.fetched === undefined || !!check.fetched && /^[0-9a-f]{40}$/.test(check.fetched.revision) && instant(check.fetched.fetchedAt);
+}
+const shortTime = (at: number, now: number) => new Date(at).toDateString() === new Date(now).toDateString()
+  ? new Date(at).toLocaleTimeString(undefined, { timeStyle: 'short' })
+  : new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+/** The inspector's Definition match for an unlisted build with no layout on its version line while fetching is on (D081,
+ * #81): before WoWDBDefs was asked, a fetch is still to come; after, what the last check found and when Data asks again. */
+export function uncoveredDefinitionMatch(check: TableDefinitionCheck | undefined, now = Date.now()): string {
+  if (!check) return 'Build not listed · no bundled layout on its version line; opening Data fetches a newer definition from WoWDBDefs';
+  const checked = shortTime(Date.parse(check.checkedAt), now), next = Date.parse(check.nextCheckAfter);
+  const neither = check.fetched ? `no layout on its version line in the bundled definition or WoWDBDefs ${check.fetched.revision.slice(0, 7)}` : 'no bundled layout on its version line';
+  // Data offers Retry table data at once after an offline or failed attempt, otherwise once the wait has passed; reopening
+  // Data after the wait asks too.
+  const retryNow = next <= now || check.failure === 'DEFINITION_FETCH_OFFLINE' || check.failure === 'DEFINITION_FETCH_FAILED';
+  const again = `${retryNow ? '' : `from ${shortTime(next, now)}, `}Retry table data asks WoWDBDefs again`;
+  if (check.failure) return `Build not listed · ${neither}; the last WoWDBDefs check failed (${check.failure}, ${checked}); ${again}`;
+  return `Build not listed · ${neither} (checked ${checked}), so the table can’t open; ${again}`;
+}
 export function sameProvider(a: TableDefinitionProvider, b: TableDefinitionProvider): boolean { return a.name === b.name && a.revision === b.revision && a.manifestSha256 === b.manifestSha256 && a.license === b.license && a.sourceUrl === b.sourceUrl; }
 export function tableCatalogMatches(value: TableCatalogPage, p: TablesCatalogParams, provider?: TableDefinitionProvider): boolean {
   if (value.productId !== p.productId || value.buildIdentity !== p.buildIdentity || value.sourceRegion !== p.sourceRegion || value.query !== (p.query ?? '') || !decimal.test(value.totalCount) || value.entries.length > (p.limit ?? 50) || provider && !sameProvider(value.provider, provider)) return false;
@@ -44,6 +70,7 @@ function fieldsValid(fields: TableDefinitionField[]): boolean {
 export function tableDefinitionMatches(value: TableDefinitionSnapshot, p: TableDefinitionParams, buildVersion?: string, provider?: TableDefinitionProvider): boolean {
   if (value.productId !== p.productId || value.buildIdentity !== p.buildIdentity || value.sourceRegion !== p.sourceRegion || value.entry.tableId !== p.tableId || value.entry.sourceState !== 'notChecked' || value.entry.rowsState !== 'notPrepared' || buildVersion !== undefined && value.buildVersion !== buildVersion || provider && !sameProvider(value.provider, provider)) return false;
   if (value.definitionFetch !== undefined && value.definitionFetch !== 'on' && value.definitionFetch !== 'off') return false;
+  if (!validCheck(value, value.definitionCheck)) return false;
   if (!value.definition) return !!value.problem?.code.trim() && !!value.problem.message.trim();
   if (value.entry.definitionState !== 'bundled' || !fieldsValid(value.definition.columns)) return false;
   // D081: a fetched definition comes only from the fixed WoWDBDefs address for its commit and table, and only while fetching is on.

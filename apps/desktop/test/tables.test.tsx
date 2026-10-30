@@ -72,6 +72,50 @@ describe('provider definition exploration without readable records', () => {
     const unbundled = within(screen.getByRole('region', { name: 'Provider definitions on this page' })).getByRole('button', { name: /^AchievementDefinition not bundled/ }); fireEvent.click(unbundled); await screen.findByText('DEFINITION_NOT_BUNDLED'); expect(screen.getByRole('heading', { level: 2, name: 'Achievement' })).toBeVisible();
     vi.mocked(bridge.tableDefinition).mockResolvedValue(success({ ...definitions['50238ec2'], definition: { ...definitions['50238ec2'].definition!, candidates: [] }, problem: { code: 'SCHEMA_BUILD_NOT_LISTED', message: 'The exact build is not listed.' } })); await select(); expect(screen.getByText('SCHEMA_BUILD_NOT_LISTED')).toBeVisible(); expect(screen.getByText(/Universal COLUMNS declarations/)).toBeVisible(); expect(screen.queryByText(/Candidate 996192AA explicitly/)).not.toBeInTheDocument();
   });
+  it('says what the last WoWDBDefs check found once a load asked and failed, instead of promising a fetch (#81)', async () => {
+    const { bridge } = setup();
+    const unlisted: TableDefinitionSnapshot = { ...definitions['50238ec2'], definitionFetch: 'on', definition: { ...definitions['50238ec2'].definition!, candidates: [] }, problem: { code: 'SCHEMA_BUILD_NOT_LISTED', message: 'The exact build is not listed.' } };
+    const checkedAt = new Date(Date.now() - 60_000).toISOString(), next = new Date(Date.now() + 14 * 60_000).toISOString();
+    const checked: TableDefinitionSnapshot = { ...unlisted, definitionCheck: { checkedAt, fetched: { revision: 'a3840427a39ec2abdd645a9e824b9c72d95da6f4', fetchedAt: checkedAt }, nextCheckAfter: next } };
+    vi.mocked(bridge.tableDefinition).mockResolvedValue(success(unlisted));
+    await select();
+    const match = () => document.querySelector('.definition-match');
+    expect(match()).toHaveTextContent('Build not listed · no bundled layout on its version line; opening Data fetches a newer definition from WoWDBDefs');
+    vi.mocked(bridge.tableDefinition).mockResolvedValue(success(checked));
+    vi.mocked(bridge.tablePrepare).mockResolvedValue({ ok: false, error: { code: 'SCHEMA_BUILD_NOT_LISTED', message: 'Neither definition lists the build.', retryable: false } });
+    fireEvent.click(screen.getByRole('button', { name: 'Data' }));
+    await waitFor(() => expect(match()).toHaveTextContent(/^Build not listed · no layout on its version line in the bundled definition or WoWDBDefs a384042 \(checked .+\), so the table can’t open; from .+, Retry table data asks WoWDBDefs again$/));
+    expect(match()).not.toHaveTextContent('fetches a newer definition');
+    expect(bridge.tablePrepare).toHaveBeenCalledTimes(1);
+  });
+  it('asks WoWDBDefs again after the last check’s wait: on reopening Data once per check, and through Retry while staying on Data (#81 QA)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const start = Date.parse('2026-10-30T20:28:00Z'); vi.setSystemTime(start);
+      const { bridge } = setup();
+      const unlisted: TableDefinitionSnapshot = { ...definitions['50238ec2'], definitionFetch: 'on', definition: { ...definitions['50238ec2'].definition!, candidates: [] }, problem: { code: 'SCHEMA_BUILD_NOT_LISTED', message: 'The exact build is not listed.' } };
+      const checkedAt = new Date(start).toISOString(), next = new Date(start + 15 * 60_000).toISOString();
+      const checked: TableDefinitionSnapshot = { ...unlisted, definitionCheck: { checkedAt, fetched: { revision: 'a3840427a39ec2abdd645a9e824b9c72d95da6f4', fetchedAt: checkedAt }, nextCheckAfter: next } };
+      vi.mocked(bridge.tableDefinition).mockResolvedValue(success(unlisted));
+      vi.mocked(bridge.tablePrepare).mockResolvedValue({ ok: false, error: { code: 'SCHEMA_BUILD_NOT_LISTED', message: 'Neither definition lists the build.', retryable: false } });
+      await select();
+      vi.mocked(bridge.tableDefinition).mockResolvedValue(success(checked));
+      const retry = () => screen.queryByRole('button', { name: 'Retry table data' });
+      const reopen = async () => { fireEvent.click(screen.getByRole('button', { name: 'Structure' })); fireEvent.click(screen.getByRole('button', { name: 'Data' })); await act(async () => { await new Promise(done => setTimeout(done, 50)); }); };
+      fireEvent.click(screen.getByRole('button', { name: 'Data' }));
+      await waitFor(() => expect(document.querySelector('.definition-match')).toHaveTextContent(/; from .+, Retry table data asks WoWDBDefs again$/));
+      expect(bridge.tablePrepare).toHaveBeenCalledTimes(1); expect(retry()).toBeNull();
+      // Inside the wait, reopening Data leaves the failed load alone.
+      await reopen(); expect(bridge.tablePrepare).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(start + 16 * 60_000);
+      // After it, reopening Data asks again, once for that check time.
+      await reopen(); await waitFor(() => expect(bridge.tablePrepare).toHaveBeenCalledTimes(2));
+      await reopen(); expect(bridge.tablePrepare).toHaveBeenCalledTimes(2);
+      // Staying on Data, Retry table data is offered once the wait is over, and asks.
+      fireEvent.click(await screen.findByRole('button', { name: 'Retry table data' }));
+      await waitFor(() => expect(bridge.tablePrepare).toHaveBeenCalledTimes(3));
+    } finally { vi.useRealTimers(); }
+  });
   it('drops superseded and area-detached definition replies without selecting or stealing focus', async () => {
     const { bridge, rerender } = setup(); const first = deferred<BridgeReply<TableDefinitionSnapshot>>(); vi.mocked(bridge.tableDefinition).mockImplementation(p => p.tableId === '50238ec2' ? first.promise : Promise.resolve(success(definitions[p.tableId])));
     const list = await screen.findByRole('region', { name: 'Provider definitions on this page' }); fireEvent.click(await within(list).findByRole('button', { name: /^ItemDefinition bundled/ })); await select('Material'); await act(async () => first.resolve(success(definitions['50238ec2']))); expect(screen.getByRole('heading', { level: 2, name: 'Material' })).toBeVisible();

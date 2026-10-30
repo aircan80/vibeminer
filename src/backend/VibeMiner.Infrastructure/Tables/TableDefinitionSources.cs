@@ -42,8 +42,10 @@ public sealed class TableDefinitionSources(WoWDBDefsDefinitions? fetched = null,
     internal async Task<bool> FetchEnabledAsync(CancellationToken token) =>
         fetched is not null && policy is not null && await policy.FetchEnabledAsync(token);
 
-    internal static string Describe(FetchedTableDefinition definition) =>
-        $"WoWDBDefs definition fetched {definition.FetchedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} ({definition.Revision[..7]})";
+    // The fetch date in the machine's local time, as the desktop shows its dates (#81).
+    internal static string Describe(FetchedTableDefinition definition) => Describe(definition.Info);
+    internal static string Describe(TableDefinitionFetched definition) =>
+        $"WoWDBDefs definition fetched {definition.FetchedAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} ({definition.Revision[..7]})";
 
     /// <summary>Lists the build, and when the file's layout is known, a block of that build carries it.</summary>
     internal static bool Exact(DbdDocument document, string build, string? layout, CancellationToken token) =>
@@ -102,6 +104,14 @@ public sealed class TableDefinitionSources(WoWDBDefsDefinitions? fetched = null,
     internal async Task<TableDefinition> BeforeFileAsync(TableCatalogEntry entry, BundledTableDefinition bundled, string build,
         bool fetchEnabled, CancellationToken token) =>
         (await ChooseAsync(entry, bundled, build, null, fetchEnabled, null, token)).Definition ?? TableDefinition.Bundled(bundled);
+
+    /// <summary>The last WoWDBDefs check for a table the bundled definition doesn't list exactly (#81), from local state
+    /// only, so Tables can say what the last fetch found. Null when fetching doesn't apply or WoWDBDefs was never asked.
+    /// The caller has checked the switch.</summary>
+    internal async Task<TableDefinitionCheck?> LastCheckAsync(TableCatalogEntry entry, BundledTableDefinition bundled, string build,
+        string? layout, CancellationToken token) =>
+        fetched is null || entry.Name is null || Exact(bundled.Document, build, layout, token) ? null
+            : await fetched.LastCheckAsync(entry.TableId, entry.Name, document => Exact(document, build, layout, token), token);
 
     /// <summary>Why nothing can read this build or layout, in words that say what still works and what to do next.
     /// Feature names the feature that needs the table (D101); null is the Tables view.</summary>

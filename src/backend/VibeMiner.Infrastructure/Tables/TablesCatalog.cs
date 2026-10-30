@@ -39,7 +39,7 @@ public sealed class TablesCatalog(DiscoveryCatalog catalog, TableDefinitionSourc
         var provider = await Provider.Value.WaitAsync(token);
         var entry = provider.Entries.SingleOrDefault(entry => entry.TableId == request.TableId)
             ?? throw new DiscoveryException("TABLE_NOT_IN_PROVIDER", "This exact table identity is not listed by the pinned definition provider.");
-        TableDefinitionInfo? info = null; TablesProblem? problem; string? fetch = null;
+        TableDefinitionInfo? info = null; TablesProblem? problem; string? fetch = null; TableDefinitionCheck? check = null;
         if (!provider.Definitions.TryGetValue(entry.TableId, out var bundled))
             problem = new("DEFINITION_NOT_BUNDLED", "This provider entry is listed, but its definition data is not bundled in this application yet.");
         else
@@ -48,7 +48,9 @@ public sealed class TablesCatalog(DiscoveryCatalog catalog, TableDefinitionSourc
             // the bundled definition doesn't cover. Fetching itself happens when the table's data is prepared.
             var fetchEnabled = await definitions.FetchEnabledAsync(token);
             fetch = fetchEnabled ? "on" : "off";
-            var definition = await ChooseAsync(context, entry, bundled, fetchEnabled, token);
+            var (definition, rowsLayout) = await ChooseAsync(context, entry, bundled, fetchEnabled, token);
+            // #81: what the last WoWDBDefs check found, so a table it didn't cover no longer says a fetch is still to come.
+            check = fetchEnabled ? await definitions.LastCheckAsync(entry, bundled, context.Build.Version, rowsLayout, token) : null;
             var selection = definition.Document.SelectBuild(context.Build.Version, token: token);
             var listed = selection.Blocks.Count > 0;
             // An unlisted build previews the layouts a file could open by on its version line (D080).
@@ -71,32 +73,53 @@ public sealed class TablesCatalog(DiscoveryCatalog catalog, TableDefinitionSourc
             var noun = definition.Fetched is null ? "The pinned definition" : "The " + definition.Described;
             problem = !listed && layouts.Length == 0
                 ? new("SCHEMA_BUILD_NOT_LISTED", definition.Fetched is null && fetchEnabled
-                    ? "The pinned definition does not list this exact build or any layout on its version line. Opening its data first fetches the newest WoWDBDefs definition for this table."
+                    ? check is null
+                        ? "The pinned definition does not list this exact build or any layout on its version line. Opening its data first fetches the newest WoWDBDefs definition for this table."
+                        : NotCovered(check)
                     : !fetchEnabled
                     ? "The pinned definition does not list this exact build or any layout on its version line, so this table can’t open. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest definition for this table."
                     : $"{noun} does not list this exact build or any layout on its version line; no nearby or latest definition was substituted.")
                 : !listed
                 ? new("SCHEMA_BUILD_NOT_LISTED", $"{noun} does not list this exact build. Data can open only if the file's layout hash matches one of its candidate layouts; that match is by layout, and the build stays unverified." +
-                    (definition.Fetched is null && fetchEnabled ? " Opening its data first checks WoWDBDefs for a definition that lists this build." : ""))
+                    (definition.Fetched is null && fetchEnabled ? check is null ? " Opening its data first checks WoWDBDefs for a definition that lists this build."
+                        : check.Failure is { } code ? $" The last check of WoWDBDefs for a definition that lists this build failed ({code}); opening its data asks again once {Minutes} minutes have passed."
+                        // With admitted rows the check is for their layout: the fetched file may list the build under another one.
+                        : $" The {TableDefinitionSources.Describe(check.Fetched!)} {(rowsLayout is null ? "doesn’t list it either" : $"has no block for this file’s layout {rowsLayout} on this build")}; opening its data asks WoWDBDefs again, {AtMost}." : ""))
                 : selection.Status == "ambiguous" || conflicting || layouts.Length != 1 || selection.Blocks.Any(block => block.LayoutHashes.Count == 0)
                     ? new("SCHEMA_LAYOUT_UNVERIFIED", "The build has multiple or unspecified layout interpretations. Actual source headers are required before selecting a readable schema.")
                     : null;
         }
-        return new(request.ProductId, request.BuildIdentity, request.SourceRegion, context.Build.Version, provider.Info, entry, info, problem, fetch);
+        return new(request.ProductId, request.BuildIdentity, request.SourceRegion, context.Build.Version, provider.Info, entry, info, problem, fetch, check);
     }
 
-    private async Task<TableDefinition> ChooseAsync(CapturedOpeningContext context, TableCatalogEntry entry, BundledTableDefinition bundled,
+    private static readonly string Minutes = WoWDBDefsDefinitions.DefaultMinimumGap.TotalMinutes.ToString(CultureInfo.InvariantCulture);
+    private static readonly string Again = $"Once {Minutes} minutes have passed since that check, Retry table data or opening its data again asks WoWDBDefs again.";
+    private static readonly string AtMost = $"at most once every {Minutes} minutes";
+
+    // #81: an unlisted build with no layout on its line, after WoWDBDefs was asked. Either way opening the data asks again
+    // once the gap has passed; after an offline or failed attempt Retry table data asks at once.
+    private static string NotCovered(TableDefinitionCheck check)
+    {
+        var lead = check.Fetched is null
+            ? "The pinned definition does not list this exact build or any layout on its version line"
+            : $"Neither the pinned definition nor the {TableDefinitionSources.Describe(check.Fetched)} lists this exact build or any layout on its version line";
+        return check.Failure is { } code
+            ? $"{lead}, and the last check of WoWDBDefs for a newer one failed ({code}). {(code is "DEFINITION_FETCH_OFFLINE" or "DEFINITION_FETCH_FAILED" ? "Retry table data asks again at once." : Again)}"
+            : $"{lead}, so this table can’t open. {Again}";
+    }
+
+    private async Task<(TableDefinition Definition, string? Layout)> ChooseAsync(CapturedOpeningContext context, TableCatalogEntry entry, BundledTableDefinition bundled,
         bool fetchEnabled, CancellationToken token)
     {
-        if (!fetchEnabled) return TableDefinition.Bundled(bundled);
+        if (!fetchEnabled) return (TableDefinition.Bundled(bundled), null);
         StoredTableAdmission? admission = null;
         // Tables data has one research locale in this version. A damaged admission is reported by Data, not here.
         try { admission = await catalog.ReadTableAdmissionAsync(context, entry.TableId, "enUS", token); }
         catch (DiscoveryException) { admission = null; }
         // The definition Data reads the file's layout with now; rows read with another are refreshed by Data.
         return admission is not null
-            ? await definitions.ForRowsAsync(entry, bundled, context.Build.Version, admission.Artifact, fetchEnabled, token)
-            : await definitions.BeforeFileAsync(entry, bundled, context.Build.Version, fetchEnabled, token);
+            ? (await definitions.ForRowsAsync(entry, bundled, context.Build.Version, admission.Artifact, fetchEnabled, token), admission.Artifact.Header.LayoutHash)
+            : (await definitions.BeforeFileAsync(entry, bundled, context.Build.Version, fetchEnabled, token), null);
     }
 
     private async Task<CapturedOpeningContext> Context(WorkspaceRequest request, CancellationToken token)

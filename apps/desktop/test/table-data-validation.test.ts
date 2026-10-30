@@ -4,7 +4,7 @@ import type {TableDataSnapshot,TableDefinitionSnapshot,TableDataPage} from '../.
 import fixture from '../../../tests/desktop/fixtures/table-data.json';
 import definitions from '../../../tests/desktop/fixtures/table-definitions.json';
 import {validTableData,validTableRows,validRecordId,tableDataMatches,tableRowsMatch,definitionChanged} from '../src/shared/table-data';
-import {fetchedDefinitionUrl,fetchedLabel,tableDefinitionMatches} from '../src/shared/tables';
+import {fetchedDefinitionUrl,fetchedLabel,tableDefinitionMatches,uncoveredDefinitionMatch} from '../src/shared/tables';
 const snapshot=fixture as TableDataSnapshot, definition=definitions.definitions.b977271e as TableDefinitionSnapshot;
 const params={productId:snapshot.productId,buildIdentity:snapshot.buildIdentity,sourceRegion:snapshot.sourceRegion,tableId:snapshot.tableId,researchLocale:'enUS' as const};
 const query={...params,artifactId:snapshot.artifactId,limit:50};
@@ -46,6 +46,28 @@ describe('exact table admission and bounded local row queries',()=>{
   expect(tableDefinitionMatches({...fetchedDefinition,definitionFetch:'off'},context)).toBe(false);
   expect(tableDefinitionMatches({...definition,definitionFetch:'maybe'} as unknown as TableDefinitionSnapshot,context)).toBe(false);
   expect(fetchedLabel(fetched)).toMatch(/^Definition from WoWDBDefs \(fetched .*2026, a50ca6f\)$/);
+ });
+ it('accepts the last WoWDBDefs check only with fetching on and words what it found (#81)',()=>{
+  const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,tableId:params.tableId};
+  const now=Date.parse('2026-10-30T22:30:00Z'),fetched={revision:'a3840427a39ec2abdd645a9e824b9c72d95da6f4',fetchedAt:'2026-10-30T22:23:53Z'};
+  const check={checkedAt:'2026-10-30T22:23:53Z',fetched,nextCheckAfter:'2026-10-30T22:38:53Z'};
+  const on={...definition,definitionFetch:'on' as const};
+  expect(tableDefinitionMatches({...on,definitionCheck:check},context)).toBe(true);
+  expect(tableDefinitionMatches({...on,definitionCheck:{checkedAt:check.checkedAt,failure:'DEFINITION_FETCH_NOT_FOUND',nextCheckAfter:check.checkedAt}},context)).toBe(true);
+  for(const bad of [{...check,fetched:undefined},{...check,failure:'SCHEMA_BUILD_NOT_LISTED'},{...check,checkedAt:'later'},{...check,fetched:{...fetched,revision:'a384042'}}])
+   expect(tableDefinitionMatches({...on,definitionCheck:bad} as unknown as TableDefinitionSnapshot,context),JSON.stringify(bad)).toBe(false);
+  expect(tableDefinitionMatches({...definition,definitionFetch:'off',definitionCheck:check},context)).toBe(false);
+  expect(uncoveredDefinitionMatch(undefined,now)).toBe('Build not listed · no bundled layout on its version line; opening Data fetches a newer definition from WoWDBDefs');
+  const waiting=uncoveredDefinitionMatch(check,now);
+  expect(waiting).toMatch(/^Build not listed · no layout on its version line in the bundled definition or WoWDBDefs a384042 \(checked .+\), so the table can’t open; from .+, Retry table data asks WoWDBDefs again$/);
+  expect(waiting).not.toContain('fetches a newer definition');
+  expect(uncoveredDefinitionMatch(check,Date.parse('2026-10-30T22:40:00Z'))).toMatch(/so the table can’t open; Retry table data asks WoWDBDefs again$/);
+  expect(uncoveredDefinitionMatch({checkedAt:check.checkedAt,failure:'DEFINITION_FETCH_OFFLINE',nextCheckAfter:check.checkedAt},now))
+   .toMatch(/^Build not listed · no bundled layout on its version line; the last WoWDBDefs check failed \(DEFINITION_FETCH_OFFLINE, .+\); Retry table data asks WoWDBDefs again$/);
+  // Not retryable from Data until the wait has passed.
+  expect(uncoveredDefinitionMatch({checkedAt:check.checkedAt,failure:'DEFINITION_FETCH_NOT_FOUND',nextCheckAfter:check.nextCheckAfter},now))
+   .toMatch(/^Build not listed · no bundled layout on its version line; the last WoWDBDefs check failed \(DEFINITION_FETCH_NOT_FOUND, .+\); from .+, Retry table data asks WoWDBDefs again$/);
+  expect(uncoveredDefinitionMatch({...check,failure:'DEFINITION_FETCH_FAILED'},now)).toMatch(/^Build not listed · no layout on its version line in the bundled definition or WoWDBDefs a384042; the last WoWDBDefs check failed \(DEFINITION_FETCH_FAILED, /);
  });
  it('expands declared array fields to actual named scalar columns',()=>{const changed=structuredClone(definition);changed.definition!.candidates[0]!.fields[0]!.arrayLength=2;const array={...snapshot,columns:[{...snapshot.columns[0],name:'ID[0]'},{...snapshot.columns[0],name:'ID[1]'},...snapshot.columns.slice(1)]};expect(tableDataMatches(array,params,changed)).toBe(true);});
 });

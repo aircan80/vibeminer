@@ -1180,6 +1180,7 @@ export interface TableDefinitionSnapshot1 {
    * on: the Tables view may fetch a newer definition from WoWDBDefs when its data is prepared, exact build first (D081). off: the Settings switch is off or unreadable. Absent when the table has no bundled definition.
    */
   definitionFetch?: 'on' | 'off';
+  definitionCheck?: TableDefinitionCheck;
 }
 export interface TableDefinitionInfo {
   sha256: string;
@@ -1378,6 +1379,27 @@ export interface TablesProblem {
   code: string;
   message: string;
 }
+/**
+ * The last time WoWDBDefs was asked about this table (D081, #81). Present only while definitionFetch is on, the bundled definition doesn't list the build (or the admitted rows' layout on it) and WoWDBDefs was asked before. The engine always sends fetched or failure. fetched is the definition the cache holds, which may not cover the build either; failure is the code when that last attempt failed, kept only while the engine runs, so after a restart only the cached definition shows; nextCheckAfter is when opening the table's data asks WoWDBDefs again by itself: 15 minutes after a failed attempt or after a check whose definition doesn't cover the build, 24 h after one that does; at or before checkedAt means at the next open. After an offline or failed attempt Retry table data asks at once.
+ */
+export interface TableDefinitionCheck {
+  checkedAt: SettingsTimestamp;
+  fetched?: TableDefinitionFetched1;
+  failure?:
+    | 'DEFINITION_FETCH_OFFLINE'
+    | 'DEFINITION_FETCH_FAILED'
+    | 'DEFINITION_FETCH_TOO_LARGE'
+    | 'DEFINITION_FETCH_INVALID'
+    | 'DEFINITION_FETCH_NOT_FOUND';
+  nextCheckAfter: SettingsTimestamp;
+}
+/**
+ * A definition fetched from the WoWDBDefs repository at runtime (D081), never bundled or verified: the commit that last changed its file and when these exact bytes were first fetched.
+ */
+export interface TableDefinitionFetched1 {
+  revision: string;
+  fetchedAt: SettingsTimestamp;
+}
 export interface TableDataSnapshot {
   productId: string;
   buildIdentity: string;
@@ -1403,7 +1425,7 @@ export interface TableDataSnapshot {
    * layoutOnly: no definition block lists this build; the file's layout hash chose the block (D080). Omitted: a block lists the exact build and layout.
    */
   schemaMatch?: 'layoutOnly';
-  fetchedDefinition?: TableDefinitionFetched1;
+  fetchedDefinition?: TableDefinitionFetched2;
   /**
    * With fetchedDefinition, which rule chose it (D081). exactBuild: it lists the build and the bundled definition doesn't. layoutNotBundled: the bundled definition lists the build but has no block for the file's layout, and the fetched one has one. layoutMatch: neither lists the build and only the fetched block matches the file's layout (schemaMatch layoutOnly).
    */
@@ -1507,9 +1529,9 @@ export interface TableDataCoverage {
   excludedCopyRecords: string;
 }
 /**
- * Present when the rows were read with a definition fetched from WoWDBDefs (D081); providerRevision is then its commit.
+ * A definition fetched from the WoWDBDefs repository at runtime (D081), never bundled or verified: the commit that last changed its file and when these exact bytes were first fetched.
  */
-export interface TableDefinitionFetched1 {
+export interface TableDefinitionFetched2 {
   revision: string;
   fetchedAt: SettingsTimestamp;
 }
