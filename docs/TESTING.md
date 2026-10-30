@@ -89,6 +89,15 @@ When a result must be attributable to an exact commit:
 
 Use component tests for view state and interaction; use real Electron checks for focus, keyboard, navigation, stale results and responsive progress. Compare screenshots with the guided discovery reference at 1280×800 and 1440×1100, at 100% and 200% text. Verify offline, empty, loading, failure/retry, unsupported and canceled states.
 
+### One e2e run at a time
+
+Overlapping Electron runs make each other flaky, so `npm run test:e2e` runs through `tools/e2e-lock.mjs`, which takes an exclusive lock shared by every worktree of the checkout: `vibeminer-e2e.lock` under `git rev-parse --git-common-dir`. A second run prints the holder's pid, worktree and start time once, then waits and starts when the lock is free. Just run the command; don't write your own wait loop.
+
+- The lock goes when the run exits, including on a failure or Ctrl-C (the signal goes to Playwright first).
+- A lock left by a killed run (SIGKILL, power loss) names a dead pid, and the next run takes it over and says so.
+- Outside a git checkout, such as a `git archive` tree, there's no shared lock. The run prints a note and goes ahead unlocked, so don't start two at once there.
+- `npm run test:e2e:unlocked` skips the lock. Leave it to the wrapper.
+
 Electron tests reach tasks through the persistent header activity trigger (`.download-activity-trigger`) and its panel; see `tests/desktop/activity-helpers.ts`. Don't add per-screen progress selectors that the unified activity replaced.
 
 Native packages must launch the bundled C# engine and UI on each advertised OS/architecture. Verify paths with spaces, data locations, offline reopen, shutdown, version agreement and applicable notices. Signing/notarization and assistive-technology testing need their own actual results.
