@@ -4,9 +4,11 @@ public sealed record Wdc5Limits(long MaxDecodedBytes=256L<<20,long MaxRows=1_000
     int MaxSections=128,int MaxRecordBytes=65536,int MaxAuxiliaryBytes=32<<20,int MaxStringBytes=65536,
     long MaxIndexBytes=128L<<20,int MaxColumns=512,int MaxCopyDepth=64,bool AllowPartialEncryptedSections=false,
     bool AllowRawTextEvidence=false,long MaxRawTextEvidenceBytes=16L<<20,long MaxRelationshipBytes=16L<<20,int MaxRelationshipEntries=1_000_000,string? DefinitionSha256=null,IReadOnlyList<Wdc5RawIntegerRule>? VerifiedRawIntegerRules=null);
-/// <summary>Trusted adapter scope for one exact provider column. The caller verifies the original definition bytes.</summary>
+/// <summary>Trusted adapter scope for one exact provider column. The caller verifies the original definition bytes.
+/// <see cref="NarrowsWhenConstant"/> (D108): when the column's values that don't fit the definition width all share one upper-bit
+/// pattern, it narrows like any D087 column instead; with two or more it keeps the raw evidence and is never refused.</summary>
 public sealed record Wdc5RawIntegerRule(string ExpectedDefinitionSha256,string TableHash,string LayoutHash,int FieldOrdinal,
-    string FieldName,uint StorageKind,int PhysicalBits,int CandidateBits,bool CandidateUnsigned);
+    string FieldName,uint StorageKind,int PhysicalBits,int CandidateBits,bool CandidateUnsigned,bool NarrowsWhenConstant=false);
 public sealed record Db2ValueInterpretation(string Policy,int PhysicalBits,bool PhysicalSigned,
     int CandidateBits,bool CandidateUnsigned,string Warning);
 /// <summary>D079: a verified integer field whose 32-bit pallet or common values don't all fit its definition width keeps the low

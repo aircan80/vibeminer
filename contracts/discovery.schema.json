@@ -11469,8 +11469,8 @@
                             "enum": [
                               "wdc5-values-v7+table-admission-v3",
                               "wdc5-values-v7+table-admission-projection-v3",
-                              "wdc5-values-v7+table-admission-v4",
-                              "wdc5-values-v7+table-admission-projection-v4"
+                              "wdc5-values-v7+table-admission-v5",
+                              "wdc5-values-v7+table-admission-projection-v5"
                             ]
                           },
                           "columns": {
@@ -11800,8 +11800,8 @@
                               "properties": {
                                 "decoderRevision": {
                                   "enum": [
-                                    "wdc5-values-v7+table-admission-v4",
-                                    "wdc5-values-v7+table-admission-projection-v4"
+                                    "wdc5-values-v7+table-admission-v5",
+                                    "wdc5-values-v7+table-admission-projection-v5"
                                   ]
                                 }
                               }
@@ -11863,8 +11863,8 @@
                           },
                           "decoderRevision": {
                             "enum": [
-                              "wdc5-values-v7+table-admission-v4",
-                              "wdc5-values-v7+table-admission-projection-v4"
+                              "wdc5-values-v7+table-admission-v5",
+                              "wdc5-values-v7+table-admission-projection-v5"
                             ]
                           },
                           "columns": {
@@ -11949,52 +11949,82 @@
                                 ]
                               },
                               {
-                                "properties": {
-                                  "name": {
-                                    "const": "Charges"
-                                  },
-                                  "family": {
-                                    "const": "integer"
-                                  },
-                                  "isId": {
-                                    "const": false
-                                  },
-                                  "reference": {
-                                    "const": null
-                                  },
-                                  "interpretation": {
-                                    "allOf": [
-                                      {
-                                        "$ref": "#/definitions/TableColumnInterpretation"
+                                "anyOf": [
+                                  {
+                                    "properties": {
+                                      "name": {
+                                        "const": "Charges"
                                       },
-                                      {
-                                        "properties": {
-                                          "policy": {
-                                            "const": "raw-physical-integer-v1"
+                                      "family": {
+                                        "const": "integer"
+                                      },
+                                      "isId": {
+                                        "const": false
+                                      },
+                                      "reference": {
+                                        "const": null
+                                      },
+                                      "interpretation": {
+                                        "allOf": [
+                                          {
+                                            "$ref": "#/definitions/TableColumnInterpretation"
                                           },
-                                          "physicalBits": {
-                                            "const": 32
-                                          },
-                                          "physicalSigned": {
-                                            "const": false
-                                          },
-                                          "candidateBits": {
-                                            "const": 16
-                                          },
-                                          "candidateUnsigned": {
-                                            "const": false
+                                          {
+                                            "properties": {
+                                              "policy": {
+                                                "const": "raw-physical-integer-v1"
+                                              },
+                                              "physicalBits": {
+                                                "const": 32
+                                              },
+                                              "physicalSigned": {
+                                                "const": false
+                                              },
+                                              "candidateBits": {
+                                                "const": 16
+                                              },
+                                              "candidateUnsigned": {
+                                                "const": false
+                                              }
+                                            }
                                           }
-                                        }
+                                        ]
                                       }
+                                    },
+                                    "required": [
+                                      "name",
+                                      "family",
+                                      "isId",
+                                      "reference",
+                                      "interpretation"
+                                    ]
+                                  },
+                                  {
+                                    "properties": {
+                                      "name": {
+                                        "const": "Charges"
+                                      },
+                                      "family": {
+                                        "const": "integer"
+                                      },
+                                      "isId": {
+                                        "const": false
+                                      },
+                                      "reference": {
+                                        "const": null
+                                      },
+                                      "interpretation": {
+                                        "type": "null"
+                                      }
+                                    },
+                                    "required": [
+                                      "name",
+                                      "family",
+                                      "isId",
+                                      "reference",
+                                      "interpretation"
                                     ]
                                   }
-                                },
-                                "required": [
-                                  "name",
-                                  "family",
-                                  "isId",
-                                  "reference",
-                                  "interpretation"
                                 ]
                               },
                               {
@@ -12050,52 +12080,85 @@
                                 ]
                               },
                               {
-                                "properties": {
-                                  "name": {
-                                    "const": "SpellCategoryID"
-                                  },
-                                  "family": {
-                                    "const": "integer"
-                                  },
-                                  "isId": {
-                                    "const": false
-                                  },
-                                  "reference": {
-                                    "const": null
-                                  },
-                                  "interpretation": {
-                                    "allOf": [
-                                      {
-                                        "$ref": "#/definitions/TableColumnInterpretation"
+                                "anyOf": [
+                                  {
+                                    "properties": {
+                                      "name": {
+                                        "const": "SpellCategoryID"
                                       },
-                                      {
-                                        "properties": {
-                                          "policy": {
-                                            "const": "raw-physical-integer-v1"
+                                      "family": {
+                                        "const": "integer"
+                                      },
+                                      "isId": {
+                                        "const": false
+                                      },
+                                      "reference": {
+                                        "const": null
+                                      },
+                                      "interpretation": {
+                                        "allOf": [
+                                          {
+                                            "$ref": "#/definitions/TableColumnInterpretation"
                                           },
-                                          "physicalBits": {
-                                            "const": 32
-                                          },
-                                          "physicalSigned": {
-                                            "const": false
-                                          },
-                                          "candidateBits": {
-                                            "const": 16
-                                          },
-                                          "candidateUnsigned": {
-                                            "const": true
+                                          {
+                                            "properties": {
+                                              "policy": {
+                                                "const": "raw-physical-integer-v1"
+                                              },
+                                              "physicalBits": {
+                                                "const": 32
+                                              },
+                                              "physicalSigned": {
+                                                "const": false
+                                              },
+                                              "candidateBits": {
+                                                "const": 16
+                                              },
+                                              "candidateUnsigned": {
+                                                "const": true
+                                              }
+                                            }
                                           }
-                                        }
+                                        ]
                                       }
+                                    },
+                                    "required": [
+                                      "name",
+                                      "family",
+                                      "isId",
+                                      "reference",
+                                      "interpretation"
+                                    ]
+                                  },
+                                  {
+                                    "properties": {
+                                      "name": {
+                                        "const": "SpellCategoryID"
+                                      },
+                                      "family": {
+                                        "const": "integer"
+                                      },
+                                      "isId": {
+                                        "const": false
+                                      },
+                                      "reference": {
+                                        "const": {
+                                          "table": "SpellCategory",
+                                          "column": "ID"
+                                        }
+                                      },
+                                      "interpretation": {
+                                        "type": "null"
+                                      }
+                                    },
+                                    "required": [
+                                      "name",
+                                      "family",
+                                      "isId",
+                                      "reference",
+                                      "interpretation"
                                     ]
                                   }
-                                },
-                                "required": [
-                                  "name",
-                                  "family",
-                                  "isId",
-                                  "reference",
-                                  "interpretation"
                                 ]
                               },
                               {
@@ -12128,52 +12191,85 @@
                                 ]
                               },
                               {
-                                "properties": {
-                                  "name": {
-                                    "const": "ChrSpecializationID"
-                                  },
-                                  "family": {
-                                    "const": "integer"
-                                  },
-                                  "isId": {
-                                    "const": false
-                                  },
-                                  "reference": {
-                                    "const": null
-                                  },
-                                  "interpretation": {
-                                    "allOf": [
-                                      {
-                                        "$ref": "#/definitions/TableColumnInterpretation"
+                                "anyOf": [
+                                  {
+                                    "properties": {
+                                      "name": {
+                                        "const": "ChrSpecializationID"
                                       },
-                                      {
-                                        "properties": {
-                                          "policy": {
-                                            "const": "raw-physical-integer-v1"
+                                      "family": {
+                                        "const": "integer"
+                                      },
+                                      "isId": {
+                                        "const": false
+                                      },
+                                      "reference": {
+                                        "const": null
+                                      },
+                                      "interpretation": {
+                                        "allOf": [
+                                          {
+                                            "$ref": "#/definitions/TableColumnInterpretation"
                                           },
-                                          "physicalBits": {
-                                            "const": 32
-                                          },
-                                          "physicalSigned": {
-                                            "const": false
-                                          },
-                                          "candidateBits": {
-                                            "const": 16
-                                          },
-                                          "candidateUnsigned": {
-                                            "const": true
+                                          {
+                                            "properties": {
+                                              "policy": {
+                                                "const": "raw-physical-integer-v1"
+                                              },
+                                              "physicalBits": {
+                                                "const": 32
+                                              },
+                                              "physicalSigned": {
+                                                "const": false
+                                              },
+                                              "candidateBits": {
+                                                "const": 16
+                                              },
+                                              "candidateUnsigned": {
+                                                "const": true
+                                              }
+                                            }
                                           }
-                                        }
+                                        ]
                                       }
+                                    },
+                                    "required": [
+                                      "name",
+                                      "family",
+                                      "isId",
+                                      "reference",
+                                      "interpretation"
+                                    ]
+                                  },
+                                  {
+                                    "properties": {
+                                      "name": {
+                                        "const": "ChrSpecializationID"
+                                      },
+                                      "family": {
+                                        "const": "integer"
+                                      },
+                                      "isId": {
+                                        "const": false
+                                      },
+                                      "reference": {
+                                        "const": {
+                                          "table": "ChrSpecialization",
+                                          "column": "ID"
+                                        }
+                                      },
+                                      "interpretation": {
+                                        "type": "null"
+                                      }
+                                    },
+                                    "required": [
+                                      "name",
+                                      "family",
+                                      "isId",
+                                      "reference",
+                                      "interpretation"
                                     ]
                                   }
-                                },
-                                "required": [
-                                  "name",
-                                  "family",
-                                  "isId",
-                                  "reference",
-                                  "interpretation"
                                 ]
                               },
                               {
@@ -12267,8 +12363,8 @@
                             "enum": [
                               "wdc5-values-v7+table-admission-v3",
                               "wdc5-values-v7+table-admission-projection-v3",
-                              "wdc5-values-v7+table-admission-v4",
-                              "wdc5-values-v7+table-admission-projection-v4"
+                              "wdc5-values-v7+table-admission-v5",
+                              "wdc5-values-v7+table-admission-projection-v5"
                             ]
                           },
                           "columns": {
@@ -12598,8 +12694,8 @@
                               "properties": {
                                 "decoderRevision": {
                                   "enum": [
-                                    "wdc5-values-v7+table-admission-v4",
-                                    "wdc5-values-v7+table-admission-projection-v4"
+                                    "wdc5-values-v7+table-admission-v5",
+                                    "wdc5-values-v7+table-admission-projection-v5"
                                   ]
                                 }
                               }
@@ -13366,8 +13462,8 @@
                       "enum": [
                         "wdc5-values-v7+table-admission-v3",
                         "wdc5-values-v7+table-admission-projection-v3",
-                        "wdc5-values-v7+table-admission-v4",
-                        "wdc5-values-v7+table-admission-projection-v4"
+                        "wdc5-values-v7+table-admission-v5",
+                        "wdc5-values-v7+table-admission-projection-v5"
                       ]
                     },
                     "columns": {
@@ -13697,8 +13793,8 @@
                         "properties": {
                           "decoderRevision": {
                             "enum": [
-                              "wdc5-values-v7+table-admission-v4",
-                              "wdc5-values-v7+table-admission-projection-v4"
+                              "wdc5-values-v7+table-admission-v5",
+                              "wdc5-values-v7+table-admission-projection-v5"
                             ]
                           }
                         }
@@ -14892,8 +14988,8 @@
                       "enum": [
                         "wdc5-values-v7+table-admission-v3",
                         "wdc5-values-v7+table-admission-projection-v3",
-                        "wdc5-values-v7+table-admission-v4",
-                        "wdc5-values-v7+table-admission-projection-v4"
+                        "wdc5-values-v7+table-admission-v5",
+                        "wdc5-values-v7+table-admission-projection-v5"
                       ]
                     },
                     "columns": {
@@ -15223,8 +15319,8 @@
                         "properties": {
                           "decoderRevision": {
                             "enum": [
-                              "wdc5-values-v7+table-admission-v4",
-                              "wdc5-values-v7+table-admission-projection-v4"
+                              "wdc5-values-v7+table-admission-v5",
+                              "wdc5-values-v7+table-admission-projection-v5"
                             ]
                           }
                         }

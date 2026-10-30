@@ -1053,6 +1053,18 @@ test('the real Host effects wire output satisfies the wire schema for every link
  const none={...wire.readinessUndecided,state:'notPrepared',source:null,link:'parentItemId'};assert.equal(validator('ItemEffectsReadiness')(none),false);
  validate('ItemEffectsReadiness',{...none,link:null});
 });
+// D108 (#95): a Retail input column narrows (declared width, declared reference) or stays raw (no reference), each on its own.
+test('Retail ItemEffect inputs are narrowed with their references or raw without them',async()=>{
+ const {narrowEffectInputs}=await import('../desktop/fixtures/item-effects.mjs');
+ const load=async n=>JSON.parse(await readFile(path.join(root,`contracts/examples/${n}.json`),'utf8'));
+ for(const mixed of[false,true]){const f=narrowEffectInputs({details:await load('item-effect-details'),names:await load('item-effect-names')},{mixed});validate('ItemEffectDetailsResult',f.details);validate('ItemEffectNamesResult',f.names);}
+ const bad=(change,why)=>{const f={details:null,names:null};return load('item-effect-details').then(async d=>{f.details=d;f.names=await load('item-effect-names');narrowEffectInputs(f);change(f.details);assert.equal(validator('ItemEffectDetailsResult')(f.details),false,why);});};
+ await bad(v=>{v.source.snapshot.columns[6].reference=null;},'a narrowed SpellCategoryID keeps its declared reference');
+ await bad(v=>{v.source.snapshot.columns[3].reference={table:'Spell',column:'ID'};},'Charges has no reference');
+ await bad(v=>{v.outcomes[0].fields[2].value='4294901760';},'a narrowed Charges is signed16');
+ const raw=await load('item-effect-details');raw.source.snapshot.columns[8].reference={table:'ChrSpecialization',column:'ID'};assert.equal(validator('ItemEffectDetailsResult')(raw),false,'a raw column carries no reference');
+ const old=await load('item-effect-details');old.source.snapshot.decoderRevision=old.source.snapshot.decoderRevision.replace('-v5','-v4');assert.equal(validator('ItemEffectDetailsResult')(old),false,'Retail rows carry v5');
+});
 test('ParentItemID effects pin the Classic ItemEffect profile and its own link columns',async()=>{
  const load=async n=>JSON.parse(await readFile(path.join(root,`contracts/examples/${n}.json`),'utf8'));
  const readiness=await load('item-effects-parent-readiness'),page=await load('item-effects-parent-page'),details=await load('item-effect-parent-details'),names=await load('item-effect-parent-names');
@@ -1066,9 +1078,10 @@ test('ParentItemID effects pin the Classic ItemEffect profile and its own link c
  bad('ItemEffectsReadiness',readiness,v=>v.snapshot.bridgeSource.columns.pop(),'the Classic bridge keeps all eleven columns');
  bad('ItemEffectDetailsResult',details,v=>v.outcomes[0].fields[5].value='65536','Classic SpellCategoryID is u16');
  bad('ItemEffectDetailsResult',details,v=>v.outcomes[0].target.sourceOrdinal='0','a target reference carries no source ordinal');
- // Classic ItemEffect revisions pair with their definition: v4 bundled, v3 fetched (D101).
- const v3=s=>{s.decoderRevision=s.decoderRevision.replace('-v4','-v3');},fetched=s=>Object.assign(s,{definitionSha256:'e'.repeat(64),providerRevision:'a'.repeat(40),fetchedDefinition:{revision:'a'.repeat(40),fetchedAt:'2026-10-25T00:00:00Z'},fetchedBecause:'layoutMatch',schemaMatch:'layoutOnly',bundledFallback:false});
- bad('ItemEffectsPage',page,v=>v3(v.bridgeSource),'bundled Classic rows carry v4');
+ // Classic ItemEffect revisions pair with their definition: v5 bundled (v4 before D108), v3 fetched (D101).
+ const v3=s=>{s.decoderRevision=s.decoderRevision.replace('-v5','-v3');},fetched=s=>Object.assign(s,{definitionSha256:'e'.repeat(64),providerRevision:'a'.repeat(40),fetchedDefinition:{revision:'a'.repeat(40),fetchedAt:'2026-10-25T00:00:00Z'},fetchedBecause:'layoutMatch',schemaMatch:'layoutOnly',bundledFallback:false});
+ bad('ItemEffectsPage',page,v=>v3(v.bridgeSource),'bundled Classic rows carry v5');
+ bad('ItemEffectsPage',page,v=>{v.bridgeSource.decoderRevision=v.bridgeSource.decoderRevision.replace('-v5','-v4');},'v4 Classic rows are from before D108');
  bad('ItemEffectsPage',page,v=>fetched(v.bridgeSource),'fetched Classic rows carry v3');
  const fetchedPage=structuredClone(page);fetched(fetchedPage.bridgeSource);v3(fetchedPage.bridgeSource);validate('ItemEffectsPage',fetchedPage);
  bad('ItemEffectsReadiness',readiness,v=>v.link='retail','readiness names one of the two links');

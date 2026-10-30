@@ -149,7 +149,7 @@ internal static class ItemEffectsBridgePolicy
                 r.Header.SchemaVersion != 5 || s.LayoutHash != layout || !string.Equals(r.Header.TableHash, table, StringComparison.OrdinalIgnoreCase) || r.Header.LayoutHash.ToUpperInvariant() != layout ||
                 !Hash(s.DefinitionSha256) || !Hash(s.ProviderRevision, 40) || s.DecoderRevision !=
                     (s.Source.Projection is null ? TableDataStore.DecoderRevision : TableDataStore.ProjectionDecoderRevision) &&
-                    // A Classic ItemEffect bridge read with the bundled definition carries ItemEffect's v4 (D101); the profile
+                    // A Classic ItemEffect bridge read with the bundled definition carries ItemEffect's v5 (D101, D108); the profile
                     // check against the chosen definition then requires the exact one.
                     !(table == ItemEffectsLinks.ClassicItemEffect.TableId && s.DecoderRevision ==
                         (s.Source.Projection is null ? TableDataStore.ItemEffectDecoderRevision : TableDataStore.ItemEffectProjectionDecoderRevision)) ||

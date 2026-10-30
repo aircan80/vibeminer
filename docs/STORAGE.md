@@ -120,10 +120,10 @@ Derived indexes use STAGING generations and batched writes. Complete authenticat
 
 Table admissions carry a decoder/admission revision. Revision bumps are scoped per table, definition and provider: the scoped Item effect revision applies only to its exact pinned definition/provider. An admission with a stale but recognized revision stays readable as "not prepared", is rebuilt lazily when a feature needs it, and is never backfilled in bulk. An unrecognized revision (invented combination, `v999`, or a scoped revision on another table) is unsupported, never silently upgraded.
 
-Current revisions are `wdc5-values-v7+table-admission-v3` and `wdc5-values-v7+table-admission-projection-v3`, plus `-v4` of each for the pinned Item effect source only ([TableDataStore](../src/backend/VibeMiner.Infrastructure/TablesData/TableDataStore.cs)). Recognized historical revisions:
+Current revisions are `wdc5-values-v7+table-admission-v3` and `wdc5-values-v7+table-admission-projection-v3`, plus `-v5` of each for the Item effect source read with its reviewed rules ([D108](DECISIONS.md)) and `-v4` of each for a fetched ItemSubClass or CreatureDisplayInfo definition read with reviewed raw rules ([D101](DECISIONS.md), [TableDataStore](../src/backend/VibeMiner.Infrastructure/TablesData/TableDataStore.cs)). Recognized historical revisions:
 
-- Full: `wdc5-fixed-values-v1+table-admission-v1`, `wdc5-fixed-values-v3+table-admission-v1`, `wdc5-values-v5+table-admission-v1`, `wdc5-values-v6+table-admission-v1`, `wdc5-values-v7+table-admission-v2`, `wdc5-values-v7+table-admission-v3` (historical for Effect).
-- Projected: `wdc5-fixed-values-v3+table-admission-projection-v1`, `wdc5-values-v4+table-admission-projection-v1`, `wdc5-values-v5+table-admission-projection-v1`, `wdc5-values-v6+table-admission-projection-v1`, `wdc5-values-v7+table-admission-projection-v2`, `wdc5-values-v7+table-admission-projection-v3`.
+- Full: `wdc5-fixed-values-v1+table-admission-v1`, `wdc5-fixed-values-v3+table-admission-v1`, `wdc5-values-v5+table-admission-v1`, `wdc5-values-v6+table-admission-v1`, `wdc5-values-v7+table-admission-v2`, `wdc5-values-v7+table-admission-v3` (historical for Effect), `wdc5-values-v7+table-admission-v4` (historical for Effect since D108).
+- Projected: `wdc5-fixed-values-v3+table-admission-projection-v1`, `wdc5-values-v4+table-admission-projection-v1`, `wdc5-values-v5+table-admission-projection-v1`, `wdc5-values-v6+table-admission-projection-v1`, `wdc5-values-v7+table-admission-projection-v2`, `wdc5-values-v7+table-admission-projection-v3`, `wdc5-values-v7+table-admission-projection-v4` (historical for Effect since D108).
 
 There was never a full `values-v4` or `fixed-values-v2` admission.
 

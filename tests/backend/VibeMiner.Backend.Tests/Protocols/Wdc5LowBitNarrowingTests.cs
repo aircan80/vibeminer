@@ -122,6 +122,34 @@ public sealed class Wdc5LowBitNarrowingTests
         Assert.Equal("7864583",Assert.Single(rule.Rows).Values[1]);Assert.NotNull(rule.Header!.Columns[1].Interpretation);Assert.Null(rule.Header.Columns[1].Narrowing);
     }
 
+    // D108 (#95): a rule that narrows when constant reads like any D087 column when its misfit values share one upper-bit
+    // pattern, keeps its raw evidence when they don't (never refusing the table), and reads at its width when all fit.
+    [Theory]
+    [InlineData(new ulong[]{0xffff0000,0xffffffff},"<16>","0,-1",true)]
+    [InlineData(new ulong[]{0x30005,0x30007},"<u16>","5,7",true)]
+    [InlineData(new ulong[]{0x10000,0x80000000},"<16>","65536,2147483648",false)]
+    [InlineData(new ulong[]{0x10005,0x20005},"<u16>","65541,131077",false)]
+    [InlineData(new ulong[]{5,0xffffffff},"<16>","5,-1",null)]
+    public async Task A_rule_that_narrows_when_constant_narrows_one_pattern_and_keeps_mixed_columns_raw(ulong[] values,string schema,string expected,bool? narrowed)
+    {
+        var f=Fixture(3,32,values,schema);var limits=Evidence(f);
+        limits=limits with{VerifiedRawIntegerRules=[limits.VerifiedRawIntegerRules![0] with{NarrowsWhenConstant=true}]};
+        var sink=new Sink();await Read(f,sink,limits);
+        Assert.Equal(expected.Split(','),sink.Rows.Select(r=>r.Values[1]));
+        var column=sink.Header!.Columns[1];
+        Assert.Equal(narrowed==false,column.Interpretation is not null);
+        Assert.Equal(narrowed==true?new Db2ValueNarrowing(32,16):null,column.Narrowing);
+        Assert.True(sink.NarrowedBeforeRows||narrowed!=true);
+    }
+
+    [Fact]
+    public async Task A_rule_without_narrows_when_constant_keeps_a_constant_pattern_raw()
+    {
+        var f=Fixture(3,32,[0xffff0000,0xffff0001],"<16>");var sink=new Sink();await Read(f,sink,Evidence(f));
+        Assert.Equal(["4294901760","4294901761"],sink.Rows.Select(r=>r.Values[1]));
+        Assert.NotNull(sink.Header!.Columns[1].Interpretation);Assert.Null(sink.Header.Columns[1].Narrowing);
+    }
+
     [Fact]
     public async Task A_narrowed_column_keeps_its_declared_reference_on_the_wire()
     {

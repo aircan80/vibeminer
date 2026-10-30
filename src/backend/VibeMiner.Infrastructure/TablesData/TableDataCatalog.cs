@@ -178,7 +178,8 @@ public sealed partial class DiscoveryCatalog
         if (source.Projection is null && (artifact.Binding.DecoderRevision.EndsWith("+table-admission-projection-v1", StringComparison.Ordinal) ||
             artifact.Binding.DecoderRevision.EndsWith("+table-admission-projection-v2", StringComparison.Ordinal) ||
             artifact.Binding.DecoderRevision.EndsWith("+table-admission-projection-v3", StringComparison.Ordinal) ||
-            artifact.Binding.DecoderRevision.EndsWith("+table-admission-projection-v4", StringComparison.Ordinal)))
+            artifact.Binding.DecoderRevision.EndsWith("+table-admission-projection-v4", StringComparison.Ordinal) ||
+            artifact.Binding.DecoderRevision.EndsWith("+table-admission-projection-v5", StringComparison.Ordinal)))
             throw TableIntegrity("A fully decoded source cannot be admitted using a partial-projection table revision.");
         var seen = new HashSet<(string, string)>();
         foreach (var m in association.Memberships)
@@ -194,9 +195,15 @@ public sealed partial class DiscoveryCatalog
     private static bool SupportedPartialAdmissionRevision(TableRowsArtifact artifact, bool requireCurrentRevision) =>
         artifact.Binding.DecoderRevision == TableDataStore.AdmissionRevision(artifact.Header.TableHash, artifact.Binding.DefinitionSha256,
             artifact.Binding.ProviderRevision, projected: true) ||
-        artifact.Binding.DecoderRevision == TableDataStore.ItemEffectProjectionDecoderRevision &&
-            TableDataStore.MayBeFetchedReviewedAdmission(artifact.Header.TableHash, artifact.Header.LayoutHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision) || (!requireCurrentRevision && artifact.Binding.DecoderRevision is
-            ("wdc5-fixed-values-v3+table-admission-projection-v1" or "wdc5-values-v4+table-admission-projection-v1" or "wdc5-values-v5+table-admission-projection-v1" or "wdc5-values-v6+table-admission-projection-v1" or "wdc5-values-v7+table-admission-projection-v2" or TableDataStore.ProjectionDecoderRevision));
+        artifact.Binding.DecoderRevision == TableDataStore.ReviewedRevision(artifact.Header.TableHash, projected: true) &&
+            TableDataStore.MayBeFetchedReviewedAdmission(artifact.Header.TableHash, artifact.Header.LayoutHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision) || (!requireCurrentRevision && (artifact.Binding.DecoderRevision is
+            ("wdc5-fixed-values-v3+table-admission-projection-v1" or "wdc5-values-v4+table-admission-projection-v1" or "wdc5-values-v5+table-admission-projection-v1" or "wdc5-values-v6+table-admission-projection-v1" or "wdc5-values-v7+table-admission-projection-v2" or TableDataStore.ProjectionDecoderRevision) ||
+            // ItemEffect rows read with its raw rules before D108 stay readable for a source-preserving refresh.
+            artifact.Binding.DecoderRevision == TableDataStore.ReviewedProjectionDecoderRevision && HistoricalItemEffectV4(artifact)));
+    private static bool HistoricalItemEffectV4(TableRowsArtifact artifact) =>
+        string.Equals(artifact.Header.TableHash, "4002a5b1", StringComparison.OrdinalIgnoreCase) &&
+        (TableDataStore.IsItemEffectAdmission(artifact.Header.TableHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision) ||
+         TableDataStore.MayBeFetchedReviewedAdmission(artifact.Header.TableHash, artifact.Header.LayoutHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision));
 
     private void ValidateTableSourceAssociation(ContentReceipt source, SelectedFileAssociation association, Microsoft.Data.Sqlite.SqliteTransaction? transaction)
     {
@@ -213,6 +220,11 @@ public sealed partial class DiscoveryCatalog
     private static void ValidateTableArtifact(TableRowsArtifact artifact)
     {
         if (artifact.Binding.DecoderRevision is TableDataStore.ItemEffectDecoderRevision or TableDataStore.ItemEffectProjectionDecoderRevision &&
+            (!string.Equals(artifact.Header.TableHash, "4002a5b1", StringComparison.OrdinalIgnoreCase) ||
+             !TableDataStore.IsItemEffectAdmission(artifact.Header.TableHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision) &&
+             !TableDataStore.MayBeFetchedReviewedAdmission(artifact.Header.TableHash, artifact.Header.LayoutHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision)))
+            throw TableIntegrity("The scoped v5 interpretation cannot identify another table, layout or provider definition.");
+        if (artifact.Binding.DecoderRevision is TableDataStore.ReviewedDecoderRevision or TableDataStore.ReviewedProjectionDecoderRevision &&
             !TableDataStore.IsItemEffectAdmission(artifact.Header.TableHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision) &&
             !TableDataStore.MayBeFetchedReviewedAdmission(artifact.Header.TableHash, artifact.Header.LayoutHash, artifact.Binding.DefinitionSha256, artifact.Binding.ProviderRevision))
             throw TableIntegrity("The scoped v4 interpretation cannot identify another table, layout or provider definition.");

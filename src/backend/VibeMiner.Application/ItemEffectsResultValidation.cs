@@ -232,11 +232,11 @@ public static partial class ItemEffectsValidation
         Require(value.Source is not null && value.Source.Location is not null && Hash(value.Source.Sha256) && Hex(value.Source.ContentKey, 32) && Hex(value.Source.EncodingKey, 32) &&
             Unsigned(value.Source.EncodedBytes, long.MaxValue) && Unsigned(value.Source.DecodedBytes, long.MaxValue) && Time(value.Source.RetrievedAt) && Time(value.Source.VerifiedAt) &&
             BoundedText(value.Source.SourceUrl, 4096) && BoundedText(value.Source.VerifierRevision, 128));
-        // v4 for Retail ItemEffect's raw rules; Classic ItemEffect is v4 read with the bundled definition and v3 with a fetched one.
+        // v5 for Retail ItemEffect's reviewed rules (D108); Classic ItemEffect is v5 read with the bundled definition and v3 with a fetched one.
         var stem = "wdc5-values-v7+table-admission" + (value.Source.Projection is null ? "" : "-projection");
-        // Classic ItemEffect: v4 exactly when read with the bundled definition, v3 with a fetched one (D101).
-        Require(profile.RawColumns.Count > 0 ? value.DecoderRevision == stem + "-v4" :
-            table == EffectTable ? value.DecoderRevision == stem + (value.FetchedDefinition is null ? "-v4" : "-v3") : value.DecoderRevision == stem + "-v3");
+        // Classic ItemEffect: v5 exactly when read with the bundled definition, v3 with a fetched one (D101).
+        Require(profile.RawColumns.Count > 0 ? value.DecoderRevision == stem + "-v5" :
+            table == EffectTable ? value.DecoderRevision == stem + (value.FetchedDefinition is null ? "-v5" : "-v3") : value.DecoderRevision == stem + "-v3");
         Require(value.Association is not null && value.Association.FileDataId == fdid && value.Association.ResearchLocale == "enUS" &&
             value.Association.EncodingSource is not null && value.Association.RootSource is not null);
         _ = Entries(value.Association.Memberships, 256);
@@ -246,9 +246,11 @@ public static partial class ItemEffectsValidation
             var column = columns[i];
             var name = profile.Columns[i];
             Require(column is not null && column.Name == name && column.IsId == (i == 0) && column.Family == (role == ItemEffectsSourceRole.Name && i == 1 ? "string" : "integer"));
-            if (profile.RawColumns.Contains(i)) Raw(column.Interpretation, i);
+            // D108: a reviewed column is raw (no reference) only when its upper bits vary; otherwise it reads at its declared width.
+            var raw = profile.RawColumns.Contains(i) && column.Interpretation is not null;
+            if (raw) Raw(column.Interpretation, i);
             else Require(column.Interpretation is null);
-            Require(column.Reference == profile.References[i]);
+            Require(column.Reference == (raw ? null : profile.References[i]));
         }
         var coverage = value.Coverage; Require(coverage is not null && coverage.Scope is "complete" or "unencryptedSections");
         var coverageCounts = new[] { coverage.DeclaredRecords, coverage.PhysicalRows, coverage.CopyRows, coverage.ExcludedKeyedSections, coverage.ExcludedDeclaredRecords,
@@ -275,7 +277,7 @@ public static partial class ItemEffectsValidation
             // SpellCategoryID and ChrSpecializationID keep their declared target as an inert hint: an unverified
             // candidate on Retail's raw widths, the declared reference on Classic's (#86). No value is looked up.
             var hint = i switch { 6 => new TableReference("SpellCategory", "ID"), 8 => new("ChrSpecialization", "ID"), 9 => new("PlayerCondition", "ID"), _ => null };
-            if (profile.RawColumns.Contains(i))
+            if (profile.RawColumns.Contains(i) && source.Columns[i].Interpretation is not null)
             {
                 Require(field.Evidence == ItemEffectEvidenceKind.RawPhysicalInteger && Unsigned(field.Value, uint.MaxValue)); Raw(field.Interpretation, i);
                 Require(field.Interpretation == source.Columns[i].Interpretation && field.CandidateReference == hint);

@@ -98,13 +98,15 @@ Effects rules:
 
   | Table / layout | Field (flattened ordinal) | Declared | Physical |
   | --- | --- | --- | --- |
-  | ItemEffect `4CA77678` | Charges (3) | signed16 | Pallet uint32 |
-  | ItemEffect `4CA77678` | SpellCategoryID (6) | unsigned16 | Pallet uint32 |
-  | ItemEffect `4CA77678` | ChrSpecializationID (8) | unsigned16 | Pallet uint32 |
+  | ItemEffect `4CA77678` | Charges (3) | signed16 | Pallet uint32, raw only when its upper bits vary (D108) |
+  | ItemEffect `4CA77678` | SpellCategoryID (6) | unsigned16 | Pallet uint32, raw only when its upper bits vary (D108) |
+  | ItemEffect `4CA77678` | ChrSpecializationID (8) | unsigned16 | Pallet uint32, raw only when its upper bits vary (D108) |
   | ItemSubClass `1E67DB87` | PrerequisiteProficiency (6) | signed8 | Pallet uint32 |
   | CreatureDisplayInfo `7275F5F6` | NPCSoundID (8) | unsigned16 | Pallet uint32 |
   | CreatureDisplayInfo `7275F5F6` | ObjectEffectPackageID (12) | unsigned16 | Common uint32 |
   | CreatureDisplayInfo `7275F5F6` | AnimReplacementSetID (13) | unsigned16 | Common uint32 |
+
+  Retail 12.1.5.70575 stores all three with one constant pattern above bit 16 (Charges `0xFFFF`, SpellCategoryID `0x3`, ChrSpecializationID `0x14`), so they narrow to their declared width: a stored `0xFFFF0000` is Charges 0 (#95).
 
   Only these exact definition/layout/field tuples get the exception. ItemEffect `SpellID` (ordinal 7) keeps its normal signed32 `Spell.ID` reference. See [table data](../contracts/table-data-v1.md) and [item effects](../contracts/item-effects-v1.md).
 - **Pallet and common values carry junk upper bits.** Any other verified 8- or 16-bit field stored as 32-bit pallet or common values keeps the low bits at its declared width when some value doesn't fit (D079), and keeps its reference: on 5.5.4.67849 Item.ItemGroupSoundsID `0x780107` is ItemGroupSounds 7. The column's `narrowing` says so. Only a column whose misfit values all share one upper-bit pattern narrows (D087), as in every case seen (see [WDC5 numbers](formats/wdc5.md#numbers)); varying upper bits and inline fields that don't fit still fail.

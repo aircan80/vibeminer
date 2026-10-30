@@ -38,6 +38,40 @@ public sealed class ItemEffectsResultValidationTests
         Bad(() => ItemEffectsValidation.Validate(result with { Outcomes = [outcome with { Target = outcome.Target! with { RowId = "1" } }] }, Details));
     }
 
+    // D108 (#95): a Retail column whose upper bits are one constant pattern narrows, so it reads at its declared width with
+    // its declared reference, like Classic. Thunderfury's Charges 0xFFFF0000 is then 0. A narrowed column never claims raw
+    // evidence or a value outside its width, and a raw column never carries a reference.
+    [Fact]
+    public void NarrowedRetailInputsReadAtTheirDeclaredWidthWithTheirDeclaredReference()
+    {
+        var raw = Source(ItemEffectsSourceRole.Effect);
+        var source = Narrowed(raw, 3, 6, 8);
+        var fields = Fields(source); var outcome = new ItemEffectOutcome(new("0"), "0", ItemEffectState.ObservedReady, "1", Target(source, "0"), fields);
+        var result = new ItemEffectDetailsResult(Details.Selection, Details.BridgeIndexArtifactId, ItemEffectsValidation.InputPolicy, new(ItemEffectsSourceRole.Effect, ItemEffectsSourceState.Ready, source), [outcome]);
+        ItemEffectsValidation.Validate(result, Details);
+        Assert.Equal(ItemEffectEvidenceKind.StrictNumeric, fields[2].Evidence); Assert.Equal("0", fields[2].Value);
+        var negative = fields.ToArray(); negative[2] = negative[2] with { Value = "-1" };
+        ItemEffectsValidation.Validate(result with { Outcomes = [outcome with { Fields = negative }] }, Details);
+        // One narrowed, two still raw: each column decides for itself.
+        var mixed = Narrowed(raw, 3); var mixedFields = Fields(mixed);
+        ItemEffectsValidation.Validate(result with { Source = result.Source with { Snapshot = mixed }, Outcomes = [outcome with { Target = Target(mixed, "0"), Fields = mixedFields }] }, Details);
+        Assert.Equal(ItemEffectEvidenceKind.RawPhysicalInteger, mixedFields[5].Evidence);
+        Bad(() => ItemEffectsValidation.Validate(result with { Source = result.Source with { Snapshot = source with { Columns = [.. source.Columns.Select((c, i) => i == 6 ? c with { Reference = null } : c)] } } }, Details));
+        Bad(() => ItemEffectsValidation.Validate(result with { Source = result.Source with { Snapshot = raw with { Columns = [.. raw.Columns.Select((c, i) => i == 6 ? c with { Reference = new("SpellCategory", "ID") } : c)] } } }, Details));
+        foreach (var (column, value) in new[] { (3, "4294901760"), (3, "32768"), (6, "65536"), (8, "-1") })
+        {
+            var edited = fields.ToArray(); edited[column - 1] = edited[column - 1] with { Value = value };
+            Bad(() => ItemEffectsValidation.Validate(result with { Outcomes = [outcome with { Fields = edited }] }, Details));
+        }
+        var claimed = fields.ToArray(); claimed[2] = claimed[2] with { Evidence = ItemEffectEvidenceKind.RawPhysicalInteger };
+        Bad(() => ItemEffectsValidation.Validate(result with { Outcomes = [outcome with { Fields = claimed }] }, Details));
+    }
+    private static TableDataSnapshot Narrowed(TableDataSnapshot source, params int[] columns) => source with
+    {
+        Columns = [.. source.Columns.Select((c, i) => !columns.Contains(i) ? c : c with { Interpretation = null,
+            Reference = i switch { 6 => new("SpellCategory", "ID"), 8 => new("ChrSpecialization", "ID"), _ => null } })]
+    };
+
     // D101: an effect source read with a definition fetched from WoWDBDefs names that definition's commit; one that
     // claims the pinned revision, or a fetched commit that isn't its own, is refused.
     [Fact]
@@ -273,7 +307,7 @@ public sealed class ItemEffectsResultValidationTests
     internal static ItemEffectsSourceReference Target(TableDataSnapshot source, string id) => new(source.TableId, source.ArtifactId, id, false, null);
     internal static ItemEffectFieldEvidence[] Fields(TableDataSnapshot source) => source.Columns.Skip(1).Select((column, j) =>
     {
-        var i = j + 1; var raw = i is 3 or 6 or 8;
+        var i = j + 1; var raw = i is 3 or 6 or 8 && column.Interpretation is not null;
         return new ItemEffectFieldEvidence(column.Name, i, raw ? "4294967295" : "0", raw ? ItemEffectEvidenceKind.RawPhysicalInteger : i == 9 ? ItemEffectEvidenceKind.UnverifiedCandidate : ItemEffectEvidenceKind.StrictNumeric,
             column.Interpretation, i switch { 6 => new("SpellCategory", "ID"), 8 => new("ChrSpecialization", "ID"), 9 => new("PlayerCondition", "ID"), _ => null });
     }).ToArray();
@@ -295,7 +329,7 @@ public sealed class ItemEffectsResultValidationTests
         var location = new ContentLocation("direct", "0", "1", null);
         MetadataReceipt Metadata(string sourceRole) => new(sourceRole, new('1', 32), new('2', 32), new('3', 64), "1", "1", "https://example.invalid/source", Stamp, Stamp, "test", location);
         return new("wow", Details.Selection.Context.BuildIdentity, "us", table, "enUS", artifact, Stamp, layout, definition, "b9a63096cdd99b26967f17f9515377ae62cadfd7",
-            "wdc5-values-v7+table-admission" + (role == ItemEffectsSourceRole.Effect ? "-v4" : "-v3"),
+            "wdc5-values-v7+table-admission" + (role == ItemEffectsSourceRole.Effect ? "-v5" : "-v3"),
             new(new('1', 32), new('2', 32), new('3', 64), "1", "1", "https://example.invalid/source", Stamp, Stamp, "test", location),
             new(fdid, "enUS", "test", Metadata("encoding"), Metadata("root"), [new("0", "0", new('1', 32), "0", "0", "0", "0", "0", null)]), columns,
             new(partial ? "unencryptedSections" : "complete", partial ? "3" : "2", "2", "0", partial ? "1" : "0", partial ? "1" : "0", "0", partial ? "1" : "0", "0"), "2");

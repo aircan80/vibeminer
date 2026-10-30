@@ -20,6 +20,8 @@ public static partial class Wdc5TableReader
         public uint[] Palette=[];
         public Dictionary<uint,uint>? Common;
         public bool VerifiedRawEvidence;
+        // D108: the matched raw rule gives way to narrowing when the column has one constant upper-bit pattern.
+        public bool RawNarrowsWhenConstant;
         public bool KeepsLowBits;
     }
     private sealed record Location(long Offset,int Section,int GlobalIndex,int LocalIndex,uint PhysicalId);

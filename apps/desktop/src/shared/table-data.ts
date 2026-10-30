@@ -43,7 +43,9 @@ function validNarrowing(column:TableDataColumn):boolean {
  const n=column.narrowing;
  return n===undefined || column.family==='integer' && !column.isId && !column.interpretation && n.storedBits===32 && (n.usedBits===8||n.usedBits===16);
 }
-const itemEffectRevision='wdc5-values-v7+table-admission-v4',itemEffectProjectionRevision='wdc5-values-v7+table-admission-projection-v4';
+// v5 (D108): ItemEffect's reviewed rules. v4: a fetched ItemSubClass or CreatureDisplayInfo definition with reviewed rules (D101).
+const itemEffectRevision='wdc5-values-v7+table-admission-v5',itemEffectProjectionRevision='wdc5-values-v7+table-admission-projection-v5';
+const fetchedRevision='wdc5-values-v7+table-admission-v4',fetchedProjectionRevision='wdc5-values-v7+table-admission-projection-v4';
 const bundledProvider='b9a63096cdd99b26967f17f9515377ae62cadfd7';
 // The reviewed bundled definition, or (D101) a fetched one the engine reads with the same reviewed rules because its block
 // for the reviewed layout is identical. The engine checks that; here a fetched one only has to name its own commit.
@@ -57,11 +59,14 @@ function itemEffectScope(s:TableDataSnapshot):boolean {
 // never share a key with rows that definition decoded without them.
 const fetchedReviewedScope=(s:TableDataSnapshot)=>!!s.fetchedDefinition&&(s.tableId==='95d8638f'&&s.layoutHash==='1E67DB87'&&reviewedDefinition(s,'e06461a556669dd560dc8908e417fac9343894f4fd4d446e2d3dc721a908891c')
  ||s.tableId==='bfdaf9f1'&&s.layoutHash==='7275F5F6'&&reviewedDefinition(s,'64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425'));
-export const reviewedRevision=(s:TableDataSnapshot)=>isPartialSource(s.source)?itemEffectProjectionRevision:itemEffectRevision;
+export const reviewedRevision=(s:TableDataSnapshot)=>s.tableId==='4002a5b1'
+ ?isPartialSource(s.source)?itemEffectProjectionRevision:itemEffectRevision
+ :isPartialSource(s.source)?fetchedProjectionRevision:fetchedRevision;
 function validScopedAdmissionRevision(s:TableDataSnapshot):boolean {
- if(s.decoderRevision!==itemEffectRevision&&s.decoderRevision!==itemEffectProjectionRevision)return true;
  // The version envelope precedes actual-layout selection; it grants no raw field by itself.
- return (itemEffectScope(s)||fetchedReviewedScope(s))&&s.decoderRevision===reviewedRevision(s);
+ if(s.decoderRevision===itemEffectRevision||s.decoderRevision===itemEffectProjectionRevision)return itemEffectScope(s)&&s.decoderRevision===reviewedRevision(s);
+ if(s.decoderRevision===fetchedRevision||s.decoderRevision===fetchedProjectionRevision)return fetchedReviewedScope(s)&&s.decoderRevision===reviewedRevision(s);
+ return true;
 }
 // These reviewed backend admissions preserve raw evidence for an exact pinned
 // definition/layout. No value decoding or general verified-field widening occurs here.

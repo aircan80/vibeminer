@@ -2997,8 +2997,8 @@ export interface ItemEffectsIndexSnapshot {
           decoderRevision?:
             | 'wdc5-values-v7+table-admission-v3'
             | 'wdc5-values-v7+table-admission-projection-v3'
-            | 'wdc5-values-v7+table-admission-v4'
-            | 'wdc5-values-v7+table-admission-projection-v4';
+            | 'wdc5-values-v7+table-admission-v5'
+            | 'wdc5-values-v7+table-admission-projection-v5';
           /**
            * @minItems 11
            * @maxItems 11
@@ -3191,8 +3191,8 @@ export interface ItemEffectsPage {
           decoderRevision?:
             | 'wdc5-values-v7+table-admission-v3'
             | 'wdc5-values-v7+table-admission-projection-v3'
-            | 'wdc5-values-v7+table-admission-v4'
-            | 'wdc5-values-v7+table-admission-projection-v4';
+            | 'wdc5-values-v7+table-admission-v5'
+            | 'wdc5-values-v7+table-admission-projection-v5';
           /**
            * @minItems 11
            * @maxItems 11

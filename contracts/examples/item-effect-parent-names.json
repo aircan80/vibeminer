@@ -27,7 +27,7 @@
         "layoutHash": "1BF9CF3A",
         "definitionSha256": "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c",
         "providerRevision": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
-        "decoderRevision": "wdc5-values-v7+table-admission-projection-v4",
+        "decoderRevision": "wdc5-values-v7+table-admission-projection-v5",
         "source": {
           "contentKey": "66666666666666666666666666666666",
           "encodingKey": "77777777777777777777777777777777",

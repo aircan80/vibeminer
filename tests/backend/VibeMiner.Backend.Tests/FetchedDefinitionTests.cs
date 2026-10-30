@@ -615,7 +615,10 @@ public sealed class FetchedDefinitionTests
         {
             var revision = TableDataStore.AdmissionRevision(table, same, bundled, "77.0.0.100", layout, projected);
             var before = projected ? TableDataStore.ProjectionDecoderRevision : TableDataStore.DecoderRevision;
-            Assert.Equal(projected ? TableDataStore.ItemEffectProjectionDecoderRevision : TableDataStore.ItemEffectDecoderRevision, revision);
+            // ItemEffect's reviewed rules carry v5 (D108), the other reviewed tables v4.
+            Assert.Equal(table == "4002a5b1" ? projected ? TableDataStore.ItemEffectProjectionDecoderRevision : TableDataStore.ItemEffectDecoderRevision
+                : projected ? TableDataStore.ReviewedProjectionDecoderRevision : TableDataStore.ReviewedDecoderRevision, revision);
+            Assert.Equal(TableDataStore.ReviewedRevision(table, projected), revision);
             TableArtifactBinding Binding(string decoder) => new(new('a', 64), new('b', 64), same.Sha256, same.Revision, "enUS", decoder,
                 TableRowArtifacts.SchemaSelectionKey(same.Document, "77.0.0.100"));
             Assert.NotEqual(TableRowArtifacts.ContentKey(Binding(before)), TableRowArtifacts.ContentKey(Binding(revision)));
@@ -650,12 +653,15 @@ public sealed class FetchedDefinitionTests
         foreach (var projected in new[] { false, true })
         {
             var v3 = projected ? TableDataStore.ProjectionDecoderRevision : TableDataStore.DecoderRevision;
-            var v4 = projected ? TableDataStore.ItemEffectProjectionDecoderRevision : TableDataStore.ItemEffectDecoderRevision;
+            var v5 = projected ? TableDataStore.ItemEffectProjectionDecoderRevision : TableDataStore.ItemEffectDecoderRevision;
+            var v4 = projected ? TableDataStore.ReviewedProjectionDecoderRevision : TableDataStore.ReviewedDecoderRevision;
             Assert.Equal(ItemEffectsSourceState.Unsupported, ItemEffectsStore.CurrentState(Effect, v3, "4CA77678", projected, fetched, bundled, "77.0.0.100", chosen: true));
             Assert.Equal(ItemEffectsSourceState.NotPrepared, ItemEffectsStore.CurrentState(Effect, v3, "4CA77678", projected, fetched, bundled, "77.0.0.100", chosen: false));
             Assert.Equal(ItemEffectsSourceState.NotPrepared, ItemEffectsStore.CurrentState(Effect, v3, "4CA77678", projected, TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", chosen: true));
-            Assert.Equal(ItemEffectsSourceState.Ready, ItemEffectsStore.CurrentState(Effect, v4, "4CA77678", projected, TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", chosen: true));
-            Assert.Equal(ItemEffectsSourceState.NotPrepared, ItemEffectsStore.CurrentState(Effect, v4, "4CA77678", projected, TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", chosen: false));
+            Assert.Equal(ItemEffectsSourceState.Ready, ItemEffectsStore.CurrentState(Effect, v5, "4CA77678", projected, TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", chosen: true));
+            Assert.Equal(ItemEffectsSourceState.NotPrepared, ItemEffectsStore.CurrentState(Effect, v5, "4CA77678", projected, TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", chosen: false));
+            // D108: rows read with the raw rules before it (v4) are prepared again.
+            Assert.Equal(ItemEffectsSourceState.NotPrepared, ItemEffectsStore.CurrentState(Effect, v4, "4CA77678", projected, TableDefinition.Bundled(bundled), bundled, "12.1.5.70448", chosen: true));
         }
     }
 

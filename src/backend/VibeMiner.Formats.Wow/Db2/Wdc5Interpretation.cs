@@ -40,7 +40,9 @@ public static partial class Wdc5TableReader
         {
             if(bound.Source!=FieldSource.Physical||bound.StorageIndex<0)continue;
             var column=storage[bound.StorageIndex];var field=bound.Field;
-            if(!NarrowsToLowBits(column,field))continue;
+            // D108: a raw rule that narrows when constant is checked like any other column, but never refuses the table.
+            var yielding=column.VerifiedRawEvidence&&column.RawNarrowsWhenConstant&&column.Kind is 2 or 3 or 4;
+            if(!yielding&&!NarrowsToLowBits(column,field))continue;
             var width=field.IntegerBits??32;var unsigned=field.Unsigned==true;var seen=0;var patterns=new List<uint>(ReportedUpperPatterns);
             // Returns false once enough patterns are collected to refuse the column.
             bool Observe(uint value)
@@ -52,6 +54,12 @@ public static partial class Wdc5TableReader
             }
             if(column.Kind==2){if(Observe(column.P1))foreach(var value in column.Common!.Values)if(!Observe(value))break;}
             else foreach(var value in column.Palette)if(!Observe(value))break;
+            if(yielding)
+            {
+                // Two or more patterns keep the whole column raw. One narrows it; none means every value fits and it reads at its width.
+                if(patterns.Count>1)continue;
+                column.VerifiedRawEvidence=false;column.KeepsLowBits=patterns.Count==1;any=true;continue;
+            }
             if(patterns.Count>1)throw VaryingUpperBits(field,column.Kind,width,unsigned,patterns);
             column.KeepsLowBits=patterns.Count==1;
             any|=column.KeepsLowBits;
@@ -110,10 +118,11 @@ public static partial class Wdc5TableReader
             if(bound.Source!=FieldSource.Physical||bound.StorageIndex<0||field.IsId||field.RelationStorage
                 ||!field.Column.VerifiedName||field.Column.Family!="int")continue;
             var column=storage[bound.StorageIndex];var bits=PhysicalValueBits(column);
-            column.VerifiedRawEvidence=rules.Any(rule=>rule.ExpectedDefinitionSha256==definitionSha256&&rule.TableHash==tableHash
+            var matched=rules.FirstOrDefault(rule=>rule.ExpectedDefinitionSha256==definitionSha256&&rule.TableHash==tableHash
                 &&rule.LayoutHash==layoutHash&&rule.FieldOrdinal==ordinal&&rule.FieldName==field.Column.Name
                 &&rule.StorageKind==column.Kind&&rule.PhysicalBits==bits&&rule.CandidateBits==(field.IntegerBits??32)
                 &&rule.CandidateUnsigned==(field.Unsigned==true));
+            column.VerifiedRawEvidence=matched is not null;column.RawNarrowsWhenConstant=matched?.NarrowsWhenConstant==true;
         }
     }
 }

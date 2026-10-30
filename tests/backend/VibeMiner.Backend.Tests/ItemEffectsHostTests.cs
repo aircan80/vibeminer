@@ -70,13 +70,13 @@ public sealed class ItemEffectsHostTests
     {
         var readiness=Fixture<ItemEffectsReadiness>("item-effects-parent-readiness");readiness=readiness with{Source=readiness.Source! with{Snapshot=readiness.Snapshot!.BridgeSource}};
         ItemEffectsValidation.Validate(readiness,readiness.Selection);
-        // Classic ItemEffect revisions pair with their definition: v4 bundled, v3 fetched; each wrong pairing is refused.
+        // Classic ItemEffect revisions pair with their definition: v5 bundled, v3 fetched; each wrong pairing is refused.
         static TableDataSnapshot Revision(TableDataSnapshot s,string from,string to)=>s with{DecoderRevision=s.DecoderRevision.Replace(from,to)};
         static ItemEffectsReadiness With(ItemEffectsReadiness r,TableDataSnapshot s)=>r with{Snapshot=r.Snapshot! with{BridgeSource=s},Source=r.Source! with{Snapshot=s}};
         var bridge=readiness.Snapshot!.BridgeSource;
         var fetched=bridge with{DefinitionSha256=new string('e',64),ProviderRevision=new string('a',40),FetchedDefinition=new(new string('a',40),DateTimeOffset.Parse("2026-10-25T00:00:00Z")),FetchedBecause="layoutMatch",SchemaMatch="layoutOnly",BundledFallback=false};
-        ItemEffectsValidation.Validate(With(readiness,Revision(fetched,"-v4","-v3")),readiness.Selection);
-        foreach(var pairing in new[]{Revision(bridge,"-v4","-v3"),fetched})
+        ItemEffectsValidation.Validate(With(readiness,Revision(fetched,"-v5","-v3")),readiness.Selection);
+        foreach(var pairing in new[]{Revision(bridge,"-v5","-v3"),fetched})
             Assert.Equal("ITEM_EFFECTS_RESULT_INVALID",Assert.Throws<DiscoveryException>(()=>ItemEffectsValidation.Validate(With(readiness,pairing),readiness.Selection)).Code);
         // The link names the snapshot's link and is present whenever a source is.
         foreach(var link in new string?[]{"itemXItemEffect",null})

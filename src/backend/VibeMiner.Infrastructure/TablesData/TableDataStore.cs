@@ -17,9 +17,14 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
     private readonly AcquisitionResources? resources;
     internal const string DecoderRevision = Wdc5TableReader.Revision + "+table-admission-v3";
     internal const string ProjectionDecoderRevision = Wdc5TableReader.Revision + "+table-admission-projection-v3";
-    // v4: the bundled ItemEffect scope, and since D101 any fetched definition read with reviewed raw rules.
-    internal const string ItemEffectDecoderRevision = Wdc5TableReader.Revision + "+table-admission-v4";
-    internal const string ItemEffectProjectionDecoderRevision = Wdc5TableReader.Revision + "+table-admission-projection-v4";
+    // v4: since D101 any fetched ItemSubClass or CreatureDisplayInfo definition read with reviewed raw rules. ItemEffect rows
+    // read with v4 (its raw rules before D108) are historical: they stay readable and are prepared again.
+    internal const string ReviewedDecoderRevision = Wdc5TableReader.Revision + "+table-admission-v4";
+    internal const string ReviewedProjectionDecoderRevision = Wdc5TableReader.Revision + "+table-admission-projection-v4";
+    // v5 (D108): the bundled ItemEffect scope and a fetched ItemEffect definition read with the reviewed rules, which now
+    // narrow a column with one constant upper-bit pattern and keep only a mixed column raw.
+    internal const string ItemEffectDecoderRevision = Wdc5TableReader.Revision + "+table-admission-v5";
+    internal const string ItemEffectProjectionDecoderRevision = Wdc5TableReader.Revision + "+table-admission-projection-v5";
     private const string ItemEffectDefinitionSha256 = "7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c";
 
     // The definition envelope is known before decoding. Actual layout/storage must
@@ -41,7 +46,8 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
     // additionally matches actual table/layout/field/storage metadata before Header.
     // Changing this fixed production profile requires a new admission revision.
     // D079 kept these rules: they win over low-bit narrowing, so these exact retail layouts keep their whole-column raw
-    // values and the Item effect evidence built on them. Every other verified pallet/common width mismatch narrows instead.
+    // values. Every other verified pallet/common width mismatch narrows instead. D108: the ItemEffect rules narrow a column
+    // whose misfit values share one upper-bit pattern (12.1.5 Charges 0xFFFF0000 over 0) and keep a mixed column raw.
     // Keyed by the reviewed bundled definition.
     private static readonly IReadOnlyDictionary<string, Wdc5RawIntegerRule[]> ReviewedRawRules = new Dictionary<string, Wdc5RawIntegerRule[]>(StringComparer.Ordinal)
     {
@@ -52,9 +58,9 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
              new("64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425", "BFDAF9F1", "7275F5F6", 12, "ObjectEffectPackageID", 2, 32, 16, true),
              new("64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425", "BFDAF9F1", "7275F5F6", 13, "AnimReplacementSetID", 2, 32, 16, true)],
         [ItemEffectDefinitionSha256] =
-            [new(ItemEffectDefinitionSha256, "4002A5B1", "4CA77678", 3, "Charges", 3, 32, 16, false),
-             new(ItemEffectDefinitionSha256, "4002A5B1", "4CA77678", 6, "SpellCategoryID", 3, 32, 16, true),
-             new(ItemEffectDefinitionSha256, "4002A5B1", "4CA77678", 8, "ChrSpecializationID", 3, 32, 16, true)],
+            [new(ItemEffectDefinitionSha256, "4002A5B1", "4CA77678", 3, "Charges", 3, 32, 16, false, NarrowsWhenConstant: true),
+             new(ItemEffectDefinitionSha256, "4002A5B1", "4CA77678", 6, "SpellCategoryID", 3, 32, 16, true, NarrowsWhenConstant: true),
+             new(ItemEffectDefinitionSha256, "4002A5B1", "4CA77678", 8, "ChrSpecializationID", 3, 32, 16, true, NarrowsWhenConstant: true)],
     };
     private static Wdc5Limits AdmissionLimits(TableDefinition definition, BundledTableDefinition bundled, string build, string? layout) => new(
         AllowPartialEncryptedSections: true, AllowRawTextEvidence: true,
@@ -93,18 +99,22 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
             pair.First.NonInline == pair.Second.NonInline && pair.First.RelationStorage == pair.Second.RelationStorage);
 
     /// <summary>
-    /// The admission revision binds the raw rules a decoding used, so one content key never covers two decodings. v4 is
-    /// the bundled ItemEffect scope and every fetched definition that gets reviewed raw rules (D101); a fetched definition
-    /// without them, like rows decoded before D101, keeps v3. The bundled ItemSubClass and CreatureDisplayInfo rules
-    /// predate v4 and keep their v3 keys.
+    /// The admission revision binds the raw rules a decoding used, so one content key never covers two decodings. v5 is
+    /// the bundled ItemEffect scope and a fetched ItemEffect definition that gets its reviewed rules (D108); v4 is every
+    /// other fetched definition that gets reviewed raw rules (D101); a fetched definition without them, like rows decoded
+    /// before D101, keeps v3. The bundled ItemSubClass and CreatureDisplayInfo rules predate v4 and keep their v3 keys.
     /// </summary>
     internal static string AdmissionRevision(string tableId, TableDefinition definition, BundledTableDefinition bundled, string build, string? layout,
         bool projected, CancellationToken token = default) =>
-        (string.Equals(tableId, "4002a5b1", StringComparison.OrdinalIgnoreCase) || definition.Fetched is not null) &&
-        RawRules(definition, bundled, build, layout, token) is { Count: > 0 }
-            ? projected ? ItemEffectProjectionDecoderRevision : ItemEffectDecoderRevision
+        (IsItemEffectTable(tableId) || definition.Fetched is not null) && RawRules(definition, bundled, build, layout, token) is { Count: > 0 }
+            ? ReviewedRevision(tableId, projected)
             : projected ? ProjectionDecoderRevision : DecoderRevision;
-    /// <summary>A fetched definition may carry v4 only on a reviewed table and layout (D101): another definition than the
+    private static bool IsItemEffectTable(string tableId) => string.Equals(tableId, "4002a5b1", StringComparison.OrdinalIgnoreCase);
+    /// <summary>The revision a table's reviewed raw rules carry: v5 for ItemEffect (D108), v4 for the others (D101).</summary>
+    internal static string ReviewedRevision(string tableId, bool projected) => IsItemEffectTable(tableId)
+        ? projected ? ItemEffectProjectionDecoderRevision : ItemEffectDecoderRevision
+        : projected ? ReviewedProjectionDecoderRevision : ReviewedDecoderRevision;
+    /// <summary>A fetched definition may carry its reviewed revision (<see cref="ReviewedRevision"/>) only on a reviewed table and layout (D101): another definition than the
     /// reviewed bundled one, named by its own WoWDBDefs commit. Reading checks the rest against the definition.</summary>
     internal static bool MayBeFetchedReviewedAdmission(string tableId, string layout, string definitionSha256, string providerRevision) =>
         ReviewedRawRules.Any(pair => pair.Value.Any(rule => string.Equals(rule.TableHash, tableId, StringComparison.OrdinalIgnoreCase) &&

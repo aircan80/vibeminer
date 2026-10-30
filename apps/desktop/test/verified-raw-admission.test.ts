@@ -21,7 +21,7 @@ it('admits the historical exact Subclassv2 profile but keeps Creature rules atv3
 
 function authoredEffect(projected=false){
  const {s,d,p}=authored('subclass'),candidate=d.definition!.candidates[0]!;
- Object.assign(s,{tableId:'4002a5b1',layoutHash:'4CA77678',definitionSha256:'7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c',decoderRevision:projected?'wdc5-values-v7+table-admission-projection-v4':'wdc5-values-v7+table-admission-v4'});
+ Object.assign(s,{tableId:'4002a5b1',layoutHash:'4CA77678',definitionSha256:'7276994228541b94e821a3b7834497c7aa0c8e8f3d1cea83ac17a40f13c4148c',decoderRevision:projected?'wdc5-values-v7+table-admission-projection-v5':'wdc5-values-v7+table-admission-v5'});
  if(projected){s.source=structuredClone(partialTemplate.source) as TableDataSnapshot['source'];s.association=structuredClone(partialTemplate.association) as TableDataSnapshot['association'];s.coverage=structuredClone(partialTemplate.coverage) as TableDataSnapshot['coverage'];s.rowCount=partialTemplate.rowCount;}
  s.association.fileDataId='969941';p.tableId=s.tableId;d.entry.tableId=s.tableId;d.entry.db2FileDataId='969941';d.definition!.sha256=s.definitionSha256;candidate.layoutHash=s.layoutHash;
  const fields={3:'Charges',6:'SpellCategoryID',8:'ChrSpecializationID'} as Record<number,string>;
@@ -30,7 +30,7 @@ function authoredEffect(projected=false){
  for(const ordinal of[3,6,8])s.columns[ordinal].interpretation={policy:'raw-physical-integer-v1',physicalBits:32,physicalSigned:false,candidateBits:16,candidateUnsigned:ordinal!==3,warning:'Authored exact ItemEffect raw evidence; candidate metadata is not a semantic charge or relationship interpretation.'};
  return{s,d,p};
 }
-it.each([false,true])('admits the exact three ItemEffect columns only in the corresponding source-class v4 envelope (projected=%s)',projected=>{const{s,d,p}=authoredEffect(projected);expect(tableDataMatches(s,p,d)).toBe(true);expect(s.columns[3].interpretation!.physicalSigned).toBe(false);expect(s.columns[3].interpretation!.candidateUnsigned).toBe(false);expect(s.columns[7].reference).toEqual({table:'Spell',column:'ID'});for(const ordinal of[3,6,8])expect(s.columns[ordinal].reference).toBeNull();});
+it.each([false,true])('admits the exact three ItemEffect columns only in the corresponding source-class v5 envelope (projected=%s)',projected=>{const{s,d,p}=authoredEffect(projected);expect(tableDataMatches(s,p,d)).toBe(true);expect(s.columns[3].interpretation!.physicalSigned).toBe(false);expect(s.columns[3].interpretation!.candidateUnsigned).toBe(false);expect(s.columns[7].reference).toEqual({table:'Spell',column:'ID'});for(const ordinal of[3,6,8])expect(s.columns[ordinal].reference).toBeNull();});
 it.each([3,6,8])('does not relax another ItemEffect ordinal%i tuple component',ordinal=>{
  const changes=['definition','layout','table','provider','fdid','ordinal','name','candidateBits','candidateSign','physicalBits','physicalSign','revision','id','reference','array','relation','nonInline'] as const;
  for(const change of changes){const{s,d,p}=authoredEffect(),candidate=d.definition!.candidates[0]!,field=candidate.fields[ordinal],column=s.columns[ordinal];
@@ -38,14 +38,28 @@ it.each([3,6,8])('does not relax another ItemEffect ordinal%i tuple component',o
   expect(tableDataMatches(s,p,d),`${ordinal}:${change}`).toBe(false);
  }
 });
-it.each([false,true])('rejects the wrong source-class revision and v4 attached to another scope, with no definition argument too (projected=%s)',projected=>{
- const revisions=['wdc5-values-v7+table-admission-v4','wdc5-values-v7+table-admission-projection-v4'];
+it.each([false,true])('rejects the wrong source-class revision and v5 attached to another scope, with no definition argument too (projected=%s)',projected=>{
+ const revisions=['wdc5-values-v7+table-admission-v5','wdc5-values-v7+table-admission-projection-v5'],before=['wdc5-values-v7+table-admission-v4','wdc5-values-v7+table-admission-projection-v4'];
  const wrong=authoredEffect(projected);wrong.s.decoderRevision=revisions[projected?0:1];expect(tableDataMatches(wrong.s,wrong.p,wrong.d)).toBe(false);expect(tableDataMatches(wrong.s,wrong.p)).toBe(false);
- for(const kind of['subclass','creature']as const){const{s,d,p}=authored(kind);s.decoderRevision=revisions[projected?1:0];expect(tableDataMatches(s,p,d)).toBe(false);expect(tableDataMatches(s,p)).toBe(false);}
+ // D108: ItemEffect rows read with v4, the raw rules before it, are not current.
+ const old=authoredEffect(projected);old.s.decoderRevision=before[projected?1:0];expect(tableDataMatches(old.s,old.p,old.d)).toBe(false);
+ for(const kind of['subclass','creature']as const)for(const revision of[revisions,before]){const{s,d,p}=authored(kind);s.decoderRevision=revision[projected?1:0];expect(tableDataMatches(s,p,d)).toBe(false);expect(tableDataMatches(s,p)).toBe(false);}
+ for(const kind of['subclass','creature']as const){const v5=fetched(authored(kind));v5.s.decoderRevision=revisions[0];expect(tableDataMatches(v5.s,v5.p,v5.d)).toBe(false);}
  for(const name of['table','definition','provider','fdid']as const){const{s,d,p}=authoredEffect(projected);switch(name){case'table':s.tableId=d.entry.tableId=p.tableId='deadbeef';break;case'definition':s.definitionSha256=d.definition!.sha256='0'.repeat(64);break;case'provider':s.providerRevision=d.provider.revision='0'.repeat(40);break;case'fdid':s.association.fileDataId=d.entry.db2FileDataId='1';break;}expect(tableDataMatches(s,p),name).toBe(false);}
 });
-it('recognizes the scoped v4 envelope on another selected layout without opting its verified columns into raw evidence',()=>{const{s,d,p}=authoredEffect();s.layoutHash=d.definition!.candidates[0]!.layoutHash='00000000';for(const ordinal of[3,6,8])s.columns[ordinal].interpretation=null;expect(tableDataMatches(s,p,d)).toBe(true);s.columns[3].interpretation={policy:'raw-physical-integer-v1',physicalBits:32,physicalSigned:false,candidateBits:16,candidateUnsigned:false,warning:'Authored wrong-layout raw annotation.'};expect(tableDataMatches(s,p,d)).toBe(false);});
+it('recognizes the scoped v5 envelope on another selected layout without opting its verified columns into raw evidence',()=>{const{s,d,p}=authoredEffect();s.layoutHash=d.definition!.candidates[0]!.layoutHash='00000000';for(const ordinal of[3,6,8])s.columns[ordinal].interpretation=null;expect(tableDataMatches(s,p,d)).toBe(true);s.columns[3].interpretation={policy:'raw-physical-integer-v1',physicalBits:32,physicalSigned:false,candidateBits:16,candidateUnsigned:false,warning:'Authored wrong-layout raw annotation.'};expect(tableDataMatches(s,p,d)).toBe(false);});
 it('does not confuse a full source receipt with complete native table coverage',()=>{const{s,d,p}=authoredEffect();s.coverage=structuredClone(partialTemplate.coverage) as TableDataSnapshot['coverage'];s.rowCount=partialTemplate.rowCount;expect(tableDataMatches(s,p,d)).toBe(true);});
+// D108 (#95): a reviewed ItemEffect column whose upper bits are one constant pattern narrows: no raw interpretation, the
+// narrowing marker and its declared reference. Each column decides for itself.
+it('admits narrowed reviewed ItemEffect columns with their declared references alongside a raw one',()=>{
+ const{s,d,p}=authoredEffect(),candidate=d.definition!.candidates[0]!;
+ candidate.fields[6]!.reference={table:'SpellCategory',column:'ID'};candidate.fields[8]!.reference={table:'ChrSpecialization',column:'ID'};
+ for(const ordinal of[3,6])Object.assign(s.columns[ordinal],{interpretation:null,narrowing:{storedBits:32,usedBits:16},reference:candidate.fields[ordinal]!.reference});
+ s.columns[8].reference=null;
+ expect(tableDataMatches(s,p,d)).toBe(true);
+ const rawWithReference=structuredClone(s);rawWithReference.columns[8].reference={table:'ChrSpecialization',column:'ID'};expect(tableDataMatches(rawWithReference,p,d)).toBe(false);
+ const both=structuredClone(s);both.columns[3].interpretation=s.columns[8].interpretation;expect(tableDataMatches(both,p,d)).toBe(false);
+});
 // D101: a definition fetched from WoWDBDefs whose block for the reviewed layout is the reviewed one reads the same raw
 // columns (the engine checks the block); here it must name its own commit and never the pinned definition or revision.
 function fetched<T extends {s:TableDataSnapshot;d:TableDefinitionSnapshot}>(value:T):T{

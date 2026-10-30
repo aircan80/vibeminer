@@ -99,13 +99,15 @@ Known width mismatches:
 | --- | --- | --- | --- | --- |
 | Retail 12.1.5.70448 Item, layout `996192AA` | physical ordinal 10, `Field_12_0_0_63534_010` (unverified) | Pallet, 32-bit values (4 values, none fit u8) | u8 | Automatic raw |
 | ItemSubClass, table `95D8638F`, layout `1E67DB87` | logical ordinal 6, `PrerequisiteProficiency` | Kind 3, 32-bit | signed8 | Exact rule |
-| ItemEffect, table `4002A5B1`, layout `4CA77678` | `Charges` (logical 3) | Kind 3, 32-bit | signed16 | Exact rule |
-| same | `SpellCategoryID` (logical 6) | Kind 3, 32-bit | unsigned16 | Exact rule |
-| same | `ChrSpecializationID` (logical 8) | Kind 3, 32-bit | unsigned16 | Exact rule |
+| ItemEffect, table `4002A5B1`, layout `4CA77678` | `Charges` (logical 3) | Kind 3, 32-bit | signed16 | Exact rule, narrows when constant (D108) |
+| same | `SpellCategoryID` (logical 6) | Kind 3, 32-bit | unsigned16 | Exact rule, narrows when constant (D108) |
+| same | `ChrSpecializationID` (logical 8) | Kind 3, 32-bit | unsigned16 | Exact rule, narrows when constant (D108) |
 
-For Charges, half the pallet values are canonical signed16 extensions and half are not, so neither "reject everything above 65,535" nor "treat all wide values as signed" works.
+For Charges, half the pallet values are canonical signed16 extensions and half are not, so neither "reject everything above 65,535" nor "treat all wide values as signed" works. On 12.1.5.70575 every Charges pallet value has `0xFFFF` above bit 16, so both halves are the same habit: the low 16 bits, signed, are the value (`0xFFFF0000` is 0).
 
-These retail rules predate D079 and are kept so retail values and the Item effect evidence don't change. The same retail fields show the pattern D079 narrows (NPCSoundID `0x20000+n`, ObjectEffectPackageID `0x560000+n`, SpellCategoryID `0x30000+n`); retiring a rule would let it narrow instead, and changes that table's values.
+D108: the three ItemEffect rules narrow when constant. A column whose values that don't fit share one upper-bit pattern narrows as D087 does; a column with two or more keeps its whole raw evidence, and the table is never refused for it. A rule without that flag (ItemSubClass, CreatureDisplayInfo) keeps its column raw as before.
+
+These retail rules predate D079 and are kept so retail values don't change; since D108 the ItemEffect ones give way to narrowing when constant. The same retail fields show the pattern D079 narrows (NPCSoundID `0x20000+n`, ObjectEffectPackageID `0x560000+n`, SpellCategoryID `0x30000+n`); retiring a rule would let it narrow instead, and changes that table's values.
 
 Known pallet/common fields that narrow (D079), all verified names with a pinned matching block and one upper-bit pattern each:
 

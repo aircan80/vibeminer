@@ -3,8 +3,9 @@ using VibeMiner.Domain;
 namespace VibeMiner.Application;
 
 /// <summary>One reviewed table profile in an effects chain: identity, pinned layout and definition, and its columns.
-/// RawColumns hold verified raw-width evidence (D079); References are the declared column references the admitted
-/// snapshot carries.</summary>
+/// RawColumns may hold verified raw-width evidence (D079): since D108 such a column is raw only when its upper bits vary, and
+/// otherwise reads at its declared width like any narrowed column. References are the declared column references the admitted
+/// snapshot carries; a column read raw carries none.</summary>
 public sealed record ItemEffectsTableProfile(string TableId, string Table, string FileDataId, string Layout, string Definition,
     IReadOnlyList<string> Columns, IReadOnlyList<TableReference?> References, IReadOnlyList<int> RawColumns);
 
@@ -26,10 +27,10 @@ public static class ItemEffectsLinks
     public static readonly ItemEffectsTableProfile ItemXItemEffect = new("00cb674f", "ItemXItemEffect", "3177687", "96F083AD",
         "3c513c171fc9d4f6aab09147c86b8c5c2da1a573adf4b04904b20067d5e7d0eb", ["ID", "ItemEffectID", "ItemID"],
         [null, R("ItemEffect"), R("Item")], []);
-    // Retail 4CA77678: Charges, SpellCategoryID and ChrSpecializationID are stored 32-bit, declared 16 (D079), so their
-    // declared references are dropped and only inert candidates remain.
+    // Retail 4CA77678: Charges, SpellCategoryID and ChrSpecializationID are stored 32-bit, declared 16. D108: each narrows to
+    // its declared width when its upper bits are one constant pattern (12.1.5 does), and stays raw, with no reference, otherwise.
     public static readonly ItemEffectsTableProfile RetailItemEffect = new("4002a5b1", "ItemEffect", "969941", "4CA77678", ItemEffectDefinition,
-        Inputs, [null, null, null, null, null, null, null, R("Spell"), null, R("PlayerCondition")], [3, 6, 8]);
+        Inputs, [null, null, null, null, null, null, R("SpellCategory"), R("Spell"), R("ChrSpecialization"), R("PlayerCondition")], [3, 6, 8]);
     // Classic 1BF9CF3A (5.5.4, 1.15.9, 2.5.5–2.5.6, 3.80.2): the same ten columns at their declared widths, then ParentItemID.
     public static readonly ItemEffectsTableProfile ClassicItemEffect = new("4002a5b1", "ItemEffect", "969941", "1BF9CF3A", ItemEffectDefinition,
         [.. Inputs, "ParentItemID"], [null, null, null, null, null, null, R("SpellCategory"), R("Spell"), R("ChrSpecialization"), R("PlayerCondition"), R("Item")], []);

@@ -229,7 +229,7 @@ public sealed partial class DiscoveryCatalog
             !CreatureDisplayPolicy.IsLayout(role, rows.Header.LayoutHash) || rows.Binding.DefinitionSha256 != snapshot.DefinitionSha256 ||
             rows.Binding.ProviderRevision != snapshot.ProviderRevision || rows.Binding.DecoderRevision != (admission!.Source.Projection is null ? TableDataStore.DecoderRevision : TableDataStore.ProjectionDecoderRevision) &&
                 // A fetched reviewed CreatureDisplayInfo block reads with its raw rules under v4 (D101).
-                !(rows.Binding.DecoderRevision == (admission.Source.Projection is null ? TableDataStore.ItemEffectDecoderRevision : TableDataStore.ItemEffectProjectionDecoderRevision) &&
+                !(rows.Binding.DecoderRevision == (admission.Source.Projection is null ? TableDataStore.ReviewedDecoderRevision : TableDataStore.ReviewedProjectionDecoderRevision) &&
                   TableDataStore.MayBeFetchedReviewedAdmission(rows.Header.TableHash, rows.Header.LayoutHash, rows.Binding.DefinitionSha256, rows.Binding.ProviderRevision)) ||
             !uint.TryParse(probe.Edge, out var value) || value == 0 || value.ToString(System.Globalization.CultureInfo.InvariantCulture) != probe.Edge ||
             role == CreatureDisplayTargetRole.Display && value > ushort.MaxValue) throw GeometryInvalid();

@@ -22,7 +22,9 @@ public sealed class ItemEffectAdmissionTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Actual_bundled_profile_preserves_three_whole_raw_columns_and_reopens_offline(bool projected)
+    // D108: Charges here has two upper-bit patterns (0x10000, 0x80000000), so it keeps the whole column raw and the table
+    // still opens. SpellCategoryID (0x10000+n) and ChrSpecializationID (0x100000+n) each have one, so they narrow.
+    public async Task Actual_bundled_profile_keeps_a_mixed_column_raw_narrows_constant_ones_and_reopens_offline(bool projected)
     {
         await using var h = await Harness.Create(projected);
         var snapshot = await h.Store.PrepareAsync(h.Request, _ => Task.CompletedTask, default);
@@ -31,15 +33,17 @@ public sealed class ItemEffectAdmissionTests
         var stored = (await h.ReadAdmission())!;
         Assert.Equal("4002A5B1", stored.Artifact.Header.TableHash); // Native uppercase versus canonical catalog lowercase.
         Assert.Equal(TableRowArtifacts.ContentKey(stored.Artifact.Binding), snapshot.ArtifactId);
-        foreach (var ordinal in new[] { 3, 6, 8 })
         {
-            var column = snapshot.Columns[ordinal]; var interpretation = column.Interpretation!;
+            var column = snapshot.Columns[3]; var interpretation = column.Interpretation!;
             Assert.Equal("raw-physical-integer-v1", interpretation.Policy); Assert.Equal(32, interpretation.PhysicalBits);
             Assert.False(interpretation.PhysicalSigned); Assert.Equal(16, interpretation.CandidateBits);
-            Assert.Equal(ordinal != 3, interpretation.CandidateUnsigned); Assert.Null(column.Reference);
-            Assert.NotNull(stored.Artifact.Header.Columns[ordinal].Interpretation);
+            Assert.False(interpretation.CandidateUnsigned); Assert.Null(column.Reference); Assert.Null(column.Narrowing);
+            Assert.NotNull(stored.Artifact.Header.Columns[3].Interpretation);
         }
-        Assert.Equal(new[] { "Charges", "SpellCategoryID", "ChrSpecializationID" }, snapshot.Columns.Where(c => c.Interpretation is not null).Select(c => c.Name));
+        Assert.Equal(new[] { "Charges" }, snapshot.Columns.Where(c => c.Interpretation is not null).Select(c => c.Name));
+        Assert.Equal(new Db2ValueNarrowing(32, 16), stored.Artifact.Header.Columns[6].Narrowing);
+        Assert.Equal(new Db2ValueNarrowing(32, 16), stored.Artifact.Header.Columns[8].Narrowing);
+        Assert.Equal("SpellCategory", snapshot.Columns[6].Reference!.Table); Assert.Equal("ChrSpecialization", snapshot.Columns[8].Reference!.Table);
         Assert.Equal("Spell", snapshot.Columns[7].Reference!.Table); Assert.Null(snapshot.Columns[7].Interpretation);
         var selected = h.Definition.Document.SelectBuild(Version, "4CA77678").Blocks.Single();
         Assert.False(selected.Fields[9].Column.VerifiedName); Assert.False(selected.Fields[3].Unsigned);
@@ -47,6 +51,8 @@ public sealed class ItemEffectAdmissionTests
         Assert.Equal("ChrSpecialization", selected.Fields[8].Column.Reference!.Table);
         var page = await h.ReadRows(snapshot.ArtifactId);
         Assert.Equal(new[] { "4294967295", "65535", "65536", "1", "2147483648", "4294967295" }, page.Rows.Select(r => r.Values[3]));
+        Assert.Equal(new[] { "0", "1", "2", "3", "4", "0" }, page.Rows.Select(r => r.Values[6]));
+        Assert.Equal(new[] { "0", "1", "2", "3", "4", "0" }, page.Rows.Select(r => r.Values[8]));
         var copy = Assert.Single(page.Rows, r => r.IsCopy); Assert.Equal("99", copy.Id); Assert.Equal("10", copy.CopySourceId); Assert.Equal("99", copy.Values[0]);
         Assert.Equal("6", snapshot.RowCount);
         Assert.Equal(projected ? "unencryptedSections" : "complete", snapshot.Coverage.Scope);
@@ -61,6 +67,44 @@ public sealed class ItemEffectAdmissionTests
         Assert.Equal(snapshot.ArtifactId, reopened.ArtifactId); Assert.Equal(snapshot.PreparedAt, reopened.PreparedAt);
         Assert.Equal(JsonSerializer.Serialize(snapshot.Source, Json), JsonSerializer.Serialize(reopened.Source, Json));
         Assert.Equal(requests, h.Handler.Requests); Assert.Equal("6", (await h.ReadRows(reopened.ArtifactId)).TotalCount);
+    }
+
+    // #95, D108: the shape of real Retail Charges (12.1.5.70575): every pallet value carries 0xFFFF above bit 16, so
+    // 0xFFFF0000 is a charge count of 0, not 4294901760. Synthetic values of that shape; no game rows.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Charges_with_one_constant_upper_pattern_narrows_so_0xFFFF0000_reads_as_0(bool projected)
+    {
+        await using var h = await Harness.Create(projected, charges: [0xFFFF0000, 0xFFFF0001, 0xFFFFFFFF, 0xFFFF0005, 0xFFFF8000]);
+        var snapshot = await h.Store.PrepareAsync(h.Request, _ => Task.CompletedTask, default);
+        Assert.Equal(projected ? TableDataStore.ItemEffectProjectionDecoderRevision : TableDataStore.ItemEffectDecoderRevision, snapshot.DecoderRevision);
+        Assert.All(snapshot.Columns, column => Assert.Null(column.Interpretation));
+        var stored = (await h.ReadAdmission())!;
+        foreach (var ordinal in new[] { 3, 6, 8 }) Assert.Equal(new Db2ValueNarrowing(32, 16), stored.Artifact.Header.Columns[ordinal].Narrowing);
+        Assert.Null(snapshot.Columns[3].Reference);
+        var page = await h.ReadRows(snapshot.ArtifactId);
+        Assert.Equal(new[] { "0", "1", "-1", "5", "-32768", "0" }, page.Rows.Select(r => r.Values[3]));
+    }
+
+    // #95, D108: rows retained from before D108 (v4, every reviewed column raw) are stale, prepared again offline from the
+    // same source, and then read Thunderfury-shaped Charges 0xFFFF0000 as 0.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Retained_v4_effect_rows_are_prepared_again_offline_and_narrow_charges(bool projected)
+    {
+        await using var h = await Harness.Create(projected, legacy: true, charges: [0xFFFF0000, 0xFFFF0001, 0xFFFFFFFF, 0xFFFF0005, 0xFFFF8000], legacyRawRules: true);
+        var old = (await h.ReadAdmission())!;
+        Assert.Equal(projected ? TableDataStore.ReviewedProjectionDecoderRevision : TableDataStore.ReviewedDecoderRevision, old.Artifact.Binding.DecoderRevision);
+        Assert.NotNull(old.Artifact.Header.Columns[3].Interpretation);
+        Assert.Null((await h.Store.ReadAsync(h.Request, default)).Snapshot);
+        var requests = h.Handler.Requests; h.Handler.Offline = true; var progress = new List<string>();
+        var fresh = await h.Store.PrepareAsync(h.Request, stage => { progress.Add(stage); return Task.CompletedTask; }, default);
+        Assert.Contains("Updating retained table interpretation", progress); Assert.NotEqual(old.Artifact.ContentKey, fresh.ArtifactId);
+        Assert.Equal(projected ? TableDataStore.ItemEffectProjectionDecoderRevision : TableDataStore.ItemEffectDecoderRevision, fresh.DecoderRevision);
+        Assert.Null(fresh.Columns[3].Interpretation); Assert.Equal(requests, h.Handler.Requests);
+        Assert.Equal(new[] { "0", "1", "-1", "5", "-32768", "0" }, (await h.ReadRows(fresh.ArtifactId)).Rows.Select(r => r.Values[3]));
     }
 
     [Fact]
@@ -265,11 +309,12 @@ public sealed class ItemEffectAdmissionTests
         internal CapturedOpeningContext Context { get; private set; } = null!;
         internal BundledTableDefinition Definition { get; private set; } = null!;
         internal SourceObject Payload { get; private set; } = null!;
-        internal static async Task<Harness> Create(bool projected, bool legacy = false, string tableId = Effect, bool nativePartial = false, string? defect = null)
+        internal static async Task<Harness> Create(bool projected, bool legacy = false, string tableId = Effect, bool nativePartial = false, string? defect = null, uint[]? charges = null,
+            bool legacyRawRules = false)
         {
             var h = new Harness(); var fixture = InventoryFixture.Create(); var provider = await TablesCatalog.Provider.Value;
             h.Definition = provider.Definitions[tableId]; var entry = provider.Entries.Single(e => e.TableId == tableId);
-            h.Payload = Table(h.Definition, tableId, tableId == Effect ? "4CA77678" : "996192AA", projected || nativePartial, legacy || tableId != Effect, defect, projected);
+            h.Payload = Table(h.Definition, tableId, tableId == Effect ? "4CA77678" : "996192AA", projected || nativePartial, legacy || tableId != Effect, defect, projected, charges);
             var root = Root(h.Payload.ContentKey, uint.Parse(entry.Db2FileDataId!, CultureInfo.InvariantCulture)); var encoding = EncodingObject([h.Payload, root]);
             var config = Encoding.UTF8.GetBytes($"root = {root.ContentKey}\nencoding = {encoding.ContentKey} {encoding.EncodingKey}\nencoding-size = {encoding.Decoded.Length} {encoding.Encoded.Length}\n");
             var configKey = Md5(config); var responses = new Dictionary<string, byte[]>(StringComparer.Ordinal)
@@ -292,10 +337,14 @@ public sealed class ItemEffectAdmissionTests
                 using var acquisition = new SelectedFileAcquirer(h.Catalog, h.objects, h.client);
                 await using var selected = await acquisition.AcquireAsync(new("wow", identity.Id, "us"), uint.Parse(entry.Db2FileDataId!, CultureInfo.InvariantCulture), "enUS", _ => Task.CompletedTask, default);
                 var decodedHash = selected.Receipt.Projection?.IdentitySha256 ?? Convert.ToHexStringLower(await SHA256.HashDataAsync(selected.Decoded)); selected.Decoded.Position = 0;
+                // legacyRawRules: the v4 rows ItemEffect had before D108, its exact rules keeping every column raw.
                 var binding = new TableArtifactBinding(selected.Receipt.Sha256, decodedHash, h.Definition.Sha256, provider.Info.Revision, "enUS",
-                    projected ? TableDataStore.ProjectionDecoderRevision : TableDataStore.DecoderRevision, TableRowArtifacts.SchemaSelectionKey(h.Definition.Document, Version));
+                    legacyRawRules ? projected ? TableDataStore.ReviewedProjectionDecoderRevision : TableDataStore.ReviewedDecoderRevision
+                    : projected ? TableDataStore.ProjectionDecoderRevision : TableDataStore.DecoderRevision, TableRowArtifacts.SchemaSelectionKey(h.Definition.Document, Version));
                 await using var rows = new TableRowArtifacts(h.objects);
-                var old = await rows.BuildAsync(selected.Decoded, h.Definition.Document, Version, binding, _ => Task.CompletedTask, default, new(AllowPartialEncryptedSections: true));
+                var rules = legacyRawRules ? TableDataStore.RawRules(TableDefinition.Bundled(h.Definition), h.Definition, Version, "4CA77678")!.Select(rule => rule with { NarrowsWhenConstant = false }).ToArray() : null;
+                var old = await rows.BuildAsync(selected.Decoded, h.Definition.Document, Version, binding, _ => Task.CompletedTask, default,
+                    new(AllowPartialEncryptedSections: true, AllowRawTextEvidence: legacyRawRules, DefinitionSha256: legacyRawRules ? h.Definition.Sha256 : null, VerifiedRawIntegerRules: rules));
                 await h.Catalog.RecordTableArtifactAsync(old, default);
                 // Historical database state intentionally bypasses the current-commit API whose refusal is under test.
                 await h.Execute("INSERT INTO table_admissions VALUES($b,'us',$ref,$t,'enUS',$k,$s,$a,$at)", ("$b", identity.Id),
@@ -319,12 +368,12 @@ public sealed class ItemEffectAdmissionTests
     }
 
     // Original authored fixed WDC5 data using public schema metadata. No native rows or palettes are copied.
-    private static SourceObject Table(BundledTableDefinition definition, string tableId, string layout, bool nativePartial, bool fits, string? defect, bool projected = false)
+    private static SourceObject Table(BundledTableDefinition definition, string tableId, string layout, bool nativePartial, bool fits, string? defect, bool projected = false, uint[]? chargesPalette = null)
     {
         var fields = definition.Document.SelectBuild(Version, layout).Blocks.Single().Fields.Where(f => !f.NonInline).ToArray();
         Assert.All(fields, f => Assert.Equal(1, f.ArrayLength));
         var count = fields.Length; const int physical = 5; var sections = nativePartial ? 2 : 1; var recordSize = count * 4;
-        uint[] charges = fits ? [uint.MaxValue, 65535, 1, 2, 3] : [uint.MaxValue, 65535, 65536, 1, 0x80000000];
+        uint[] charges = chargesPalette ?? (fits ? [uint.MaxValue, 65535, 1, 2, 3] : [uint.MaxValue, 65535, 65536, 1, 0x80000000]);
         var palettes = new Dictionary<int, uint[]>();
         if (tableId == Effect) foreach (var index in new[] { 2, 5, 7 }) palettes[index] = index == 2 ? charges : Enumerable.Range(0, physical).Select(i => (uint)((fits ? 1 : index == 5 ? 65536 : 1048576) + i)).ToArray();
         if (defect == "kind") palettes.Remove(2);

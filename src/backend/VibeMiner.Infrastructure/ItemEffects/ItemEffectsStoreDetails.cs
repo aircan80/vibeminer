@@ -93,8 +93,9 @@ public sealed partial class ItemEffectsStore
         var fields = new ItemEffectFieldEvidence[9];
         for (var i = 1; i <= 9; i++)
         {
-            var value = row.Values[i]; var raw = profile.RawColumns.Contains(i);
-            // Retail's raw-width inputs keep their physical u32; Classic's are read at their declared u16 (#86).
+            // A Retail input stays raw only when its column's upper bits vary (D108) and then keeps its physical u32; otherwise
+            // it is read at its declared width, like Classic's (#86).
+            var value = row.Values[i]; var raw = profile.RawColumns.Contains(i) && source.CapturedSnapshot!.Columns[i].Interpretation is not null;
             if (row.TextIssues?.Any(issue => issue.ColumnIndex == i) == true ||
                 (i is 1 or 2 ? !Unsigned(value, byte.MaxValue) : raw ? !Unsigned(value, uint.MaxValue) : i is 6 or 8 ? !Unsigned(value, ushort.MaxValue) : !Signed(value) || i == 3 && int.Parse(value!, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture) is < short.MinValue or > short.MaxValue))
                 return new(key, N(id), ItemEffectState.FieldUnavailable, Problem: FieldProblem);

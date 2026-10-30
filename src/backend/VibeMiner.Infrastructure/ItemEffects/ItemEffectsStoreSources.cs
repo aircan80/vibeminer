@@ -132,7 +132,8 @@ public sealed partial class ItemEffectsStore
             var text = info.TableId == ItemEffectsLinks.SpellName.TableId && i == 1;
             if (!ItemEffectsLinkChoice.FieldMatches(info, i, field) || actual.Name != names[i] ||
                 actual.Kind != (text ? "string" : "integer") || actual.IsId != (i == 0)) return false;
-            if (info.RawColumns.Contains(i))
+            // D108: a reviewed column is raw only when its upper bits vary; otherwise it reads at its declared width.
+            if (info.RawColumns.Contains(i) && actual.Interpretation is not null)
             {
                 if (actual.Interpretation is not { Policy: "raw-physical-integer-v1", PhysicalBits: 32, PhysicalSigned: false, CandidateBits: 16 } p ||
                     p.CandidateUnsigned != (i != 3) || p.Warning.Length is < 1 or > 512 || p.Warning.Any(char.IsControl)) return false;
@@ -327,14 +328,15 @@ public sealed partial class ItemEffectsStore
             return ItemEffectsSourceState.Unsupported;
         return state;
     }
-    // The revisions a profile's current rows carry. Retail ItemEffect 4CA77678 needs v4, the reviewed raw rules. Classic
-    // ItemEffect 1BF9CF3A is v4 read with the bundled definition (its rules exist but match no column) and v3 with a fetched
-    // one (D101); Qualified then checks the exact revision for the chosen definition. Other tables keep v3.
+    // The revisions a profile's current rows carry. Retail ItemEffect 4CA77678 needs v5, the reviewed rules (D108). Classic
+    // ItemEffect 1BF9CF3A is v5 read with the bundled definition (its rules exist but match no column) and v3 with a fetched
+    // one (D101); Qualified then checks the exact revision for the chosen definition. Other tables keep v3. ItemEffect rows
+    // read with v4, the raw rules before D108, are prepared again.
     private static bool CurrentRevision(ItemEffectsTableProfile profile, string revision, bool projected)
     {
         var stem = "wdc5-values-v7+table-admission" + (projected ? "-projection" : "");
-        return profile.RawColumns.Count > 0 ? revision == stem + "-v4" :
-            revision == stem + "-v3" || profile.TableId == ItemEffectsLinks.ClassicItemEffect.TableId && revision == stem + "-v4";
+        return profile.RawColumns.Count > 0 ? revision == stem + "-v5" :
+            revision == stem + "-v3" || profile.TableId == ItemEffectsLinks.ClassicItemEffect.TableId && revision == stem + "-v5";
     }
     // These are exact previously shipped interpretations, never a version-prefix/suffix grant.
     internal static ItemEffectsSourceState RevisionState(ItemEffectsSourceRole role, string revision, bool projected, ItemEffectsTableProfile? profile = null)
@@ -354,6 +356,9 @@ public sealed partial class ItemEffectsStore
             "wdc5-values-v6+table-admission-v1" or
             "wdc5-values-v7+table-admission-v2" or
             "wdc5-values-v7+table-admission-v3";
+        // ItemEffect rows read with its raw rules before D108 carry v4.
+        historical |= (profile ?? ItemEffectsLinks.Profile(ItemEffectsLinks.Bridge, role)).TableId == ItemEffectsLinks.RetailItemEffect.TableId &&
+            revision == (projected ? "wdc5-values-v7+table-admission-projection-v4" : "wdc5-values-v7+table-admission-v4");
         return historical ? ItemEffectsSourceState.NotPrepared : ItemEffectsSourceState.Unsupported;
     }
 }

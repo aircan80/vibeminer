@@ -36,11 +36,24 @@ export function effectsScenario(params,scenario='ready',pageParams={}){
  // #86: an undecided Classic build whose ItemEffect layout no definition knows: the link is ParentItemID, unsupported.
  if(scenario==='parent-unsupported'){const problem={code:'ITEM_EFFECTS_SOURCE_UNSUPPORTED',message:'The selected source profile is unsupported.',retryable:false};Object.assign(f.readiness,{state:'unsupported',snapshot:null,observedAssociations:null,link:'parentItemId',source:{role:'bridge',state:'unsupported',snapshot:null,historicalArtifactId:null,problem},problem});}
  if(scenario==='not-in-build'){const problem={code:'ITEM_EFFECTS_SOURCE_NOT_IN_BUILD',message:'This build does not include the selected source.',retryable:false};Object.assign(f.readiness,{state:'notInBuild',snapshot:null,observedAssociations:null,source:{role:'bridge',state:'notInBuild',snapshot:null,historicalArtifactId:null,problem},problem});}
+ if(scenario==='narrowed')narrowEffectInputs(f);
  if(scenario==='long-name')for(const o of names.outcomes)o.text='Authored exact source spell name '.repeat(120);
  if(scenario==='whitespace')for(const o of names.outcomes)o.text='\n\n\n   \t';
  if(scenario==='empty-name')for(const o of names.outcomes){o.state='emptyText';o.text='';}
  if(scenario==='invalid-name'){names.sources[1].snapshot.textIssueCount='1';for(const o of names.outcomes){o.state='invalidText';o.text=null;o.issue={code:'DB2_TEXT_ENCODING_INVALID',source:{...o.target,columnIndex:1}};}}
  if(scenario==='large-name')for(const o of names.outcomes){o.state='textTooLarge';o.text=null;o.textUnits='5000';}
+ return f;
+}
+/** D108 (#95): authored Retail inputs whose columns narrowed (one constant upper-bit pattern), read at their declared
+ * width with their declared references. Charges 0 has the shape of a stored 0xFFFF0000; Charges stays raw on the second
+ * occurrence's column only when `mixed` is set, so a raw column keeps its own note. */
+export function narrowEffectInputs(f,{mixed=false}={}){
+ const refs={3:null,6:{table:'SpellCategory',column:'ID'},8:{table:'ChrSpecialization',column:'ID'}},values={3:'0',6:'7',8:'3'};
+ const narrowed=i=>!(mixed&&i===3);
+ for(const snapshot of[f.details.source.snapshot,f.names.sources.find(s=>s.role==='effect')?.snapshot].filter(Boolean))
+  for(const i of[3,6,8])if(narrowed(i))Object.assign(snapshot.columns[i],{interpretation:null,narrowing:{storedBits:32,usedBits:16},reference:refs[i]});
+ for(const outcome of f.details.outcomes)for(const field of outcome.fields??[])if(field.columnIndex in values&&narrowed(field.columnIndex))
+  Object.assign(field,{value:values[field.columnIndex],evidence:'strictNumeric',interpretation:null});
  return f;
 }
 export function effectsNotPrepared(f,phase){const result=structuredClone(phase==='links'?f.readiness:phase==='inputs'?f.details:f.names),source={role:phase==='links'?'bridge':phase==='inputs'?'effect':'name',state:'notPrepared',snapshot:null,historicalArtifactId:null,problem:null};if(phase==='links')return{...result,state:'notPrepared',snapshot:null,source,observedAssociations:null,problem:null};if(phase==='inputs'){result.source=source;result.outcomes=result.outcomes.map(o=>o.state==='effectKeyOutOfRange'?o:{...o,state:'notPrepared',observedCandidates:null,target:null,fields:null,absence:null,problem:null});}else{result.sources[1]=source;result.outcomes=result.outcomes.map(o=>o.state==='effectNotReady'?o:{...o,state:'notPrepared',observedCandidates:null,target:null,text:null,issue:null,textUnits:null,absence:null,problem:null});}return result;}
