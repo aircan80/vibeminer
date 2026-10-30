@@ -118,7 +118,8 @@ public static class M2Appearance
         var skinInput = new M2Input(skin, parsedSkin.Limits, token);
         if (skinInput.Length != parsedSkin.SourceBytes) throw Error("INVALID", "The appearance SKIN differs from the parsed geometry SKIN.");
         var batchDeclaration = parsedSkin.BatchDeclaration;
-        if (batchDeclaration.Stride != 24 || batchDeclaration.Count > parsedModel.Limits.MaxBatches) throw Error("LIMIT", "The SKIN batch count exceeds its bound.");
+        if (batchDeclaration.Stride != 24) throw Error("INVALID", "The SKIN batch records are not 24 bytes each.");
+        if (batchDeclaration.Count > parsedModel.Limits.MaxBatches) throw CountLimit($"The SKIN file has {N(batchDeclaration.Count)} batches", parsedModel.Limits.MaxBatches);
         var batches = new M2Batch[(int)batchDeclaration.Count];
         await skinInput.RecordsAsync(new("batches", batchDeclaration.Offset, batches.Length, 24), (row, i) => batches[i] =
             new(row[0], unchecked((sbyte)row[1]), U16(row, 2), U16(row, 4), U16(row, 6), I16(row, 8), U16(row, 10), U16(row, 12),

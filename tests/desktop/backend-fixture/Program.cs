@@ -7,6 +7,8 @@ using VibeMiner.Desktop.BackendFixture;
 
 try
 {
+    // One-shot mode: print the engine's own Creature geometry limit messages as JSON and exit (#114). No protocol, no data directory.
+    if (args is ["--geometry-limit-messages"]) { Console.WriteLine(await GeometryLimitMessages.ReadAsync()); return 0; }
     if (args.Length != 2 || args[0] != "--data-dir" || !Path.IsPathFullyQualified(args[1]))
     {
         await Console.Error.WriteLineAsync("Usage: BackendFixture --data-dir <absolute authored-data directory>");

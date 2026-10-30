@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Numerics;
 using VibeMiner.Domain;
 using VibeMiner.Protocols.Tact;
@@ -24,6 +25,20 @@ internal sealed class M2Input
         if (Length < 4) throw Error("INVALID", "The model magic is truncated.");
     }
     internal static DiscoveryException Error(string code, string message) => new("MODEL_" + code, message);
+    /// <summary>A count over its cap names the source's count and the cap in plain words, as the size refusal does (#114).</summary>
+    internal static DiscoveryException CountLimit(string what, long maximum, string unit = "") =>
+        Error("LIMIT", what + "; geometry reads at most " + N(maximum) + unit + ".");
+    internal static string N(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+    // "collisionTriangles" reads "collision triangles"; a "SKIN ..." name belongs to the SKIN file, every other to the model.
+    private static string SpanLimit(string name, uint count, int stride)
+    {
+        var skin = name.StartsWith("SKIN ", StringComparison.Ordinal);
+        var words = string.Concat((skin ? name[5..] : name).Select(c => char.IsUpper(c) ? " " + char.ToLowerInvariant(c) : c.ToString()));
+        var owner = skin ? "The SKIN file" : "The model";
+        // Names and filenames are byte strings; every other span counts records.
+        return stride == 1 ? $"{owner}'s {words} is {N(count)} bytes"
+            : $"{owner} has {N(count)} {words}{(words.EndsWith("lookup", StringComparison.Ordinal) ? " entries" : "")}";
+    }
     internal static void CheckLimits(M2Limits limits)
     {
         if (limits.MaxSourceBytes is < 4 or > (64L << 20) || limits.MaxOutputBytes is < 1 or > (128L << 20)
@@ -46,7 +61,7 @@ internal sealed class M2Input
     }
     internal M2Span Span(string name, uint count, uint offset, int stride, int maximum, long origin, long bytes, int header)
     {
-        if (count > maximum) throw Error("LIMIT", $"The {name} count exceeds its decoder limit.");
+        if (count > maximum) throw CountLimit(SpanLimit(name, count, stride), maximum, stride == 1 ? " bytes" : "");
         if (count != 0 && (offset < header || offset > bytes || (long)count * Math.Max(1, stride) > bytes - offset))
             throw Error("INVALID", $"The {name} span lies outside its model section or overlaps its header.");
         return new(name, origin + offset, (int)count, stride);

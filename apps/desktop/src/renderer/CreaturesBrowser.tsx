@@ -421,7 +421,9 @@ function PreviewBox({preview,params,metadata,loading,name,slot,displayId,auto,ac
   const code=problem?.code??'',encrypted=result?.state==='protected'||/ENCRYPT|KEY_UNAVAILABLE|PROTECTED/.test(code),unsupported=/UNSUPPORTED/.test(code)||result?.state==='unsupported';
   // #98: a state with no problem still names itself, so no outcome is left without a reason.
   const empty=result?.state==='noDeclaredTriangles',tooLarge=result?.state==='resourceLimit'&&!problem?.retryable;
-  const word=busy?'Engine still busy':encrypted?'Encrypted model':unsupported?'Unsupported model':empty?'Nothing to draw':tooLarge?'Model too large':outcome.message==='Geometry preparation stopped'?'Loading stopped':'Model not drawn';
+  // #114: a cap on one of the build's own lists isn't the model's size; the note says the model was never read. Keep in step with NamedLimit (GeometrySources.cs).
+  const buildList=/^(EN|IN|RESOLVER|ROOT|ROOT_SCOPE|ASSET_SOURCE|CONFIG|ARCHIVE_INDEX|CONTENT_LOCATOR|BULK_LOCATOR)_LIMIT$/.test(code);
+  const word=busy?'Engine still busy':encrypted?'Encrypted model':unsupported?'Unsupported model':empty?'Nothing to draw':tooLarge?buildList?'Build list too large':'Model too large':outcome.message==='Geometry preparation stopped'?'Loading stopped':'Model not drawn';
   return <div className="cv-preview"><div ref={statusRef} tabIndex={-1} className="cv-pbox cv-off" role="img" aria-label={word}>{word}</div><p className="cv-pnote">{problem?<><code>{problem.code}</code> {problem.message}</>:result&&<><code>{result.state}</code> {outcome.message}</>}</p>{(problem?.retryable||word==='Loading stopped')&&<button ref={showRef} type="button" className="dh-btn dh-small" onClick={()=>{focusNext.current='stop';setBusyTries(0);flow.session.retry();}}>Retry model</button>}</div>;
  }
  return <div className="cv-preview"><div className="cv-pbox cv-idle" aria-hidden="true">No preview yet</div><button ref={showRef} type="button" className="dh-btn dh-small" aria-label={`Show model preview for display ${displayId}`} onClick={e=>{focusNext.current='stop';setBusyTries(0);preview.show(params,metadata!,name,e.currentTarget);}}>Show model</button></div>;

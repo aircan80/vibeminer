@@ -3,3 +3,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("VibeMiner.InventoryMatching.Benchmark")]
 [assembly: InternalsVisibleTo("VibeMiner.DownloadLedger.Benchmark")]
 [assembly: InternalsVisibleTo("VibeMiner.FilesQuery.Benchmark")]
+[assembly: InternalsVisibleTo("BackendFixture")]

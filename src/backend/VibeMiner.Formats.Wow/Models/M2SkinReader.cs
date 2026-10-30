@@ -22,7 +22,7 @@ public static class M2SkinReader
                 U16(row, 10), U16(row, 12), U16(row, 14), U16(row, 16), U16(row, 18), U16(row, 20), U16(row, 22));
             if (batch.SectionIndex >= sections.Length || batch.MaterialIndex >= model.Materials.Count || batch.ColorIndex < -1 || batch.ColorIndex >= colorCount && batch.ColorIndex != -1)
                 throw Error("INVALID", "A SKIN batch has an invalid section/material/color reference.");
-            if (batch.TextureCount > limits.MaxTextures) throw Error("LIMIT", "A batch exceeds its texture-count bound.");
+            if (batch.TextureCount > limits.MaxTextures) throw CountLimit($"A SKIN batch uses {N(batch.TextureCount)} textures", limits.MaxTextures);
             if (batch.TextureCount > 0)
             {
                 if (batch.TextureComboIndex + (long)batch.TextureCount > model.TextureCombos.Count

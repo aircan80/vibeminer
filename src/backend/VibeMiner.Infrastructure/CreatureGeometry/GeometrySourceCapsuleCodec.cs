@@ -198,7 +198,10 @@ internal static class GeometrySourceCapsuleCodec
             if (value.ResearchLocale != "enUS" || !(value.VariantPolicy == AssetResolutionSession.VariantPolicy || texture && value.VariantPolicy == RootTextureVariants.Policy) ||
                 value.EncodingSelectionPolicy != AssetResolutionSession.EncodingSelectionPolicy ||
                 value.EncodingLookupRevision != ResolverArtifacts.EncodingRevision || value.RootLookupRevision != AssetResolutionSessions.RootArtifactRevision) throw Invalid();
-            var count = value.Memberships.Count; if (count is < 1 or > MaximumMemberships) throw Limit(); members = new RootTargetMatch[count];
+            var count = value.Memberships.Count; if (count < 1) throw Limit();
+            if (count > MaximumMemberships) throw new DiscoveryException("CREATURE_GEOMETRY_RESOURCE_LIMIT", string.Create(CultureInfo.InvariantCulture,
+                $"The file has {count:N0} ROOT memberships; geometry reads at most {MaximumMemberships:N0}."));
+            members = new RootTargetMatch[count];
             if (value.Configurations.Count != 2) throw Invalid();
             var first = value.Configurations[0]; var second = value.Configurations[1];
             if (first is null || second is null || first.Role == second.Role) throw Invalid();

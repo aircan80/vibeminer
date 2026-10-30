@@ -20,7 +20,7 @@ public static class M2ModelReader
         {
             for (long at = 0; at < input.Length;)
             {
-                token.ThrowIfCancellationRequested(); if (chunks.Count == limits.MaxChunks) throw Error("LIMIT", "M2 chunk count exceeds its bound.");
+                token.ThrowIfCancellationRequested(); if (chunks.Count == limits.MaxChunks) throw CountLimit($"The model has more than {N(limits.MaxChunks)} chunks", limits.MaxChunks);
                 var header = await input.AtAsync(at, 8);
                 if (header.AsSpan(0, 4).IndexOfAnyExceptInRange((byte)'0', (byte)'Z') >= 0)
                     throw Error("UNSUPPORTED", "The M2 source has an unsupported container/chunk identifier.");
@@ -53,7 +53,7 @@ public static class M2ModelReader
         Declare("globalSequences", 20, 4, limits.MaxMetadataEntries); Declare("sequences", 28, 64, limits.MaxMetadataEntries);
         Declare("sequenceLookup", 36, 2, limits.MaxMetadataEntries); Declare("bones", 44, 88, limits.MaxMetadataEntries);
         Declare("keyBones", 52, 2, limits.MaxMetadataEntries); Declare("vertices", 60, 48, limits.MaxVertices);
-        var viewCount = U32(core, 68); if (viewCount > limits.MaxSkinProfiles) throw Error("LIMIT", "The M2 main-view count exceeds its bound.");
+        var viewCount = U32(core, 68); if (viewCount > limits.MaxSkinProfiles) throw CountLimit($"The model has {N(viewCount)} SKIN profiles", limits.MaxSkinProfiles);
         Declare("colors", 72, 40, limits.MaxMetadataEntries); Declare("textures", 80, 16, limits.MaxTextures);
         Declare("weights", 88, 20, limits.MaxMetadataEntries); Declare("transforms", 96, 60, limits.MaxMetadataEntries);
         Declare("replacements", 104, 2, limits.MaxMetadataEntries); Declare("materials", 112, 4, limits.MaxMaterials);
@@ -126,7 +126,7 @@ public static class M2ModelReader
         if (known.TryGetValue("AFID", out var af))
         {
             if (af.ByteLength % 8 != 0) throw Error("INVALID", "AFID has a partial animation dependency record.");
-            var count = af.ByteLength / 8; if (count > limits.MaxMetadataEntries) throw Error("LIMIT", "AFID exceeds its dependency limit.");
+            var count = af.ByteLength / 8; if (count > limits.MaxMetadataEntries) throw CountLimit($"The model lists {N(count)} animation files", limits.MaxMetadataEntries);
             budget.Add(count, 8); animationFiles = new M2AnimationFile[(int)count];
             await input.RecordsAsync(new("AFID", af.Offset, (int)count, 8), (row, i) => animationFiles[i] = new(U16(row), U16(row, 2), U32(row, 4)));
         }
@@ -145,7 +145,8 @@ public static class M2ModelReader
             if (!known.TryGetValue(id, out var chunk)) return null;
             if (chunk.ByteLength % 4 != 0) throw Error("INVALID", $"The {id} dependency chunk has a partial ID.");
             var count = chunk.ByteLength / 4; var maximum = id == "TXID" ? limits.MaxTextures : id == "SFID" ? limits.MaxSkinProfiles : limits.MaxMetadataEntries;
-            if (count > maximum) throw Error("LIMIT", $"The {id} dependency count exceeds its limit.");
+            var listed = id switch { "TXID" => "texture files", "SFID" => "SKIN files", "BFID" => "bone files", _ => id + " entries" };
+            if (count > maximum) throw CountLimit($"The model lists {N(count)} {listed}", maximum);
             if (expected is not null && (count < expected || !allowExtra && count != expected)) throw Error("INVALID", $"The {id} count differs from model ordinals.");
             budget.Add(count, 4); var ids = new uint[(int)count];
             await input.RecordsAsync(new(id, chunk.Offset, (int)count, 4), (row, i) => ids[i] = U32(row)); return ids;

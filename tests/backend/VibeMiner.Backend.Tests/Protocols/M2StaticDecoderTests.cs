@@ -300,6 +300,24 @@ public sealed class M2StaticDecoderTests
         await Throws("MODEL_LIMIT", () => ReadSkin(Skin(), model, new(MaxTriangleIndices: 3, MaxVertexLookup: 3)));
     }
 
+    // #114: a count refusal names the source's count and the cap in plain words, as the size refusal does.
+    [Fact]
+    public async Task Count_limits_name_the_count_and_the_cap()
+    {
+        async Task<string> Message(Func<Task> action)
+        { var e = await Assert.ThrowsAsync<DiscoveryException>(action); Assert.Equal("MODEL_LIMIT", e.Code); return e.Message; }
+        Assert.Equal("The model has 4 vertices; geometry reads at most 3.", await Message(() => ReadModel(Model(), new(MaxVertices: 3))));
+        Assert.Equal("The model has more than 2 chunks; geometry reads at most 2.", await Message(() => ReadModel(Model(), new(MaxChunks: 2))));
+        var bytes = Model(); U32(bytes, Base(bytes) + 112, 1_000);
+        Assert.Equal("The model has 1,000 materials; geometry reads at most 256.", await Message(() => ReadModel(bytes)));
+        bytes = Model(); U32(bytes, Base(bytes) + 120, 70_000);
+        Assert.Equal("The model has 70,000 bone lookup entries; geometry reads at most 65,536.", await Message(() => ReadModel(bytes)));
+        Assert.Matches(@"^The model's name is \d+ bytes; geometry reads at most 2 bytes\.$", await Message(() => ReadModel(Model(), new(MaxNameBytes: 2))));
+        var model = await ReadModel(Model());
+        Assert.Matches(@"^The SKIN file has \d+ vertex lookup entries; geometry reads at most 3\.$",
+            await Message(() => ReadSkin(Skin(), model, new(MaxTriangleIndices: 3, MaxVertexLookup: 3))));
+    }
+
     [Fact]
     public async Task Cancellation_during_buffered_geometry_read_and_before_assembly_keeps_caller_streams_open()
     {

@@ -1,5 +1,8 @@
 import {test,expect,type Page,type ElectronApplication,type Locator} from '@playwright/test';
 import {writeFile,readFile,mkdir,unlink} from 'node:fs/promises';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {existsSync} from 'node:fs';
 import path from 'node:path';
 import {launch,root,size,text} from './helpers';
 // #59: Creatures → slot metadata → Geometry → verified VMG1 body drawn by the real main protocol and WebGL scene.
@@ -112,11 +115,37 @@ test('A model over a size limit says so with its code, leading with the sizes an
  await expect(card(page)).not.toContainText('admitted');await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);
  await capture(page,s.app,'too-large',card(page),true);
 }finally{await s.close();}});
-test('A model over a count limit says "a limit", not "a size limit" (#111)',async()=>{test.setTimeout(90000);const s=await opened('countLimit');try{
+// #114: these notes are worded by the real C# engine. The backend fixture runs the real M2 reader and failure mapping and
+// prints the problems; the authored engine only carries them to the card, so this checks engine text, not fixture text.
+type EngineProblem={code:string;message:string;retryable:boolean;dependency:string};
+async function engineLimits():Promise<{vertexCount:EngineProblem;namedLimit:EngineProblem;buildListLimit:EngineProblem}>{
+ const local=path.join(root,'.local/toolchains/dotnet/dotnet'),dotnet=process.env.VIBEMINER_DOTNET||(process.env.DOTNET_ROOT?path.join(process.env.DOTNET_ROOT,'dotnet'):existsSync(local)?local:'dotnet');
+ const{stdout}=await promisify(execFile)(dotnet,[path.join(root,'.local/backend-fixture-build/bin/BackendFixture/debug/BackendFixture.dll'),'--geometry-limit-messages'],{timeout:60000});
+ return JSON.parse(stdout);}
+async function engineLimit(problem:EngineProblem){const s=await opened('resourceLimit');await writeFile(path.join(s.data,'geometry-state.json'),JSON.stringify({state:'resourceLimit',textured:false,problem}));return s;}
+test('A model over a count limit names its count and the cap, in the engine\'s own words (#111, #114)',async()=>{test.setTimeout(120000);const{vertexCount}=await engineLimits();
+ expect(vertexCount.code).toBe('MODEL_LIMIT');expect(vertexCount.message).toBe('The model has 65,537 vertices; geometry reads at most 65,536. This is a limit, not a corrupt file.');
+ const s=await engineLimit(vertexCount);try{
  const{page}=s;await show(page).click();
  await expect(card(page).getByRole('img',{name:'Model too large',exact:true})).toBeVisible({timeout:20000});
- await expect(card(page).locator('.cv-pnote')).toHaveText('AUTHORED_RESOURCE_LIMIT Authored model: the M2 vertices count exceeds its bound. This is a limit, not a corrupt file.');
+ await expect(card(page).locator('.cv-pnote')).toHaveText(`MODEL_LIMIT ${vertexCount.message}`);
  await expect(card(page)).not.toContainText('size limit');await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);
+}finally{await s.close();}});
+test('A cap on one of the build\'s own lists names that list and doesn\'t call the model too large (#114)',async()=>{test.setTimeout(120000);const{buildListLimit}=await engineLimits();
+ expect(buildListLimit.message).toBe('The build\'s encoding manifest is over its limit, so the model file was not read. This is a limit, not a corrupt file.');
+ const s=await engineLimit(buildListLimit);try{
+ const{page}=s;await show(page).click();
+ await expect(card(page).getByRole('img',{name:'Build list too large',exact:true})).toBeVisible({timeout:20000});
+ await expect(card(page).locator('.cv-pnote')).toHaveText(`EN_LIMIT ${buildListLimit.message}`);
+ await expect(card(page)).not.toContainText('Model too large');await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);
+}finally{await s.close();}});
+test('A limit with no reader message of its own is named, in the engine\'s own words (#114)',async()=>{test.setTimeout(120000);const{namedLimit}=await engineLimits();
+ expect(namedLimit.message).toBe('The SKIN file is over the BLTE chunk count limit. This is a limit, not a corrupt file.');
+ const s=await engineLimit(namedLimit);try{
+ const{page}=s;await show(page).click();
+ await expect(card(page).getByRole('img',{name:'Model too large',exact:true})).toBeVisible({timeout:20000});
+ await expect(card(page).locator('.cv-pnote')).toHaveText(`BLTE_LIMIT ${namedLimit.message}`);
+ await expect(card(page)).not.toContainText('one of its limits');await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);
 }finally{await s.close();}});
 test('Switching builds closes the open view lease, and no geometry block is left above the panes',async()=>{test.setTimeout(120000);const s=await opened();try{
  const{page}=s,closes=async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length;

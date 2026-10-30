@@ -255,7 +255,10 @@ async function dispatch(request) {
       // {textured:'notPrepared'} keeps the ready lines but not their textures, so opening the view prepares them (#99).
       const untextured=()=>existsSync(path.join(directory,'geometry-state.json'))&&JSON.parse(readFileSync(path.join(directory,'geometry-state.json'),'utf8')).textured==='notPrepared';
       const result=state=>{const v=creatureGeometry(display,state,artifact.manifest);if(state==='ready'&&textured())v.appearance=appearanceArtifact(v.manifest,Number(display.selected.displayId)).appearance;
-       else if(state==='ready'&&untextured())v.appearance={policy:'creature-textured-appearance-v1',state:'notPrepared',display:appearanceArtifact(v.manifest,Number(display.selected.displayId)).appearance.display,textures:[],effects:null,manifest:null,problem:null};return v;};
+       else if(state==='ready'&&untextured())v.appearance={policy:'creature-textured-appearance-v1',state:'notPrepared',display:appearanceArtifact(v.manifest,Number(display.selected.displayId)).appearance.display,textures:[],effects:null,manifest:null,problem:null};
+       // {problem:{code,message,retryable,dependency}} replaces the authored problem with one the real C# engine worded (#114).
+       const engineProblem=existsSync(path.join(directory,'geometry-state.json'))?JSON.parse(readFileSync(path.join(directory,'geometry-state.json'),'utf8')).problem:null;
+       if(engineProblem&&v.problem)v.problem={code:engineProblem.code,message:engineProblem.message,retryable:engineProblem.retryable,dependency:engineProblem.dependency,target:null};return v;};
       // geometry-read-busy holds a count: that many reads fail as a busy engine would (#62 QA), then reads answer again.
       if(method==='creatures.geometry.read'&&existsSync(path.join(directory,'geometry-read-busy'))){const left=Number(readFileSync(path.join(directory,'geometry-read-busy'),'utf8'));if(left>0){writeFileSync(path.join(directory,'geometry-read-busy'),String(left-1));return fail(id,'CREATURES_QUERY_BUSY','Local Creature display reads are at their bounded capacity or retiring.',true);}}
       // hold-geometry-read holds each read until release-geometry-read (#99); what it answers is decided after the release.

@@ -30,7 +30,7 @@ internal static class M2SkinGeometryCore
         // nonempty section palettes. Preserve that raw fact, never invent a maximum.
         // This finite exception does not assert universal zero/sentinel semantics.
         var rawZeroHeader = model.IsChunked && model.Version is (272 or 274) && maxBones == 0;
-        if (maxBones > 256) throw Error("LIMIT", "The SKIN palette exceeds the byte-addressed bone profile.");
+        if (maxBones > 256) throw CountLimit($"The SKIN file's bone palette has {N(maxBones)} bones", 256);
         if (triangleSpan.Count % 3 != 0) throw Error("INVALID", "The SKIN triangle index count is not divisible by three.");
         if (propertiesSpan.Count != lookupSpan.Count) throw Error("INVALID", "SKIN needs one four-byte bone-property record per lookup vertex.");
         budget.Add(lookupSpan.Count, 2); budget.Add(triangleSpan.Count, 6); // retained ushort source + reserved uint geometry result
@@ -51,7 +51,7 @@ internal static class M2SkinGeometryCore
                 || start % 3 != 0 || count % 3 != 0) throw Error("INVALID", "A SKIN section has invalid vertex/triangle ranges.");
             var boneCount = U16(row, 12); var boneStart = U16(row, 14); var influences = U16(row, 16);
             if (rawZeroHeader && boneCount > 256)
-                throw Error("LIMIT", "A SKIN section palette exceeds the finite byte-addressed geometry profile.");
+                throw CountLimit($"A SKIN section's bone palette has {N(boneCount)} bones", 256);
             if (influences > 4 || !rawZeroHeader && boneCount > maxBones || boneCount > 0 && boneStart + (long)boneCount > model.BoneLookup.Count)
                 throw Error("INVALID", "A SKIN section has invalid bone-palette geometry.");
             var radius = F(row, 44); if (radius < 0) throw Error("INVALID", "A SKIN section sort radius is negative.");

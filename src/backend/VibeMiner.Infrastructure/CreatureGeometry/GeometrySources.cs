@@ -8,7 +8,7 @@ namespace VibeMiner.Infrastructure;
 internal sealed partial class GeometrySourceClosure
 {
     internal const long SourcePayloadBytes = 32L << 20;
-    private static readonly M2Limits Limits = new(MaxSourceBytes: 8 << 20, MaxOutputBytes: 8 << 20,
+    internal static readonly M2Limits Limits = new(MaxSourceBytes: 8 << 20, MaxOutputBytes: 8 << 20,
         MaxVertices: 65536, MaxVertexLookup: 65536, MaxTriangleIndices: 131070, MaxSections: 256,
         MaxMaterials: 256, MaxBatches: 512, MaxTextures: 32, MaxSkinProfiles: 32, MaxChunks: 128,
         MaxNameBytes: 4096, MaxMetadataEntries: 8192);
@@ -73,10 +73,13 @@ internal sealed partial class GeometrySourceClosure
             // core charges model retained output plus skin arrays/reserved resolved indices.
             if (modelCanonical.EncodingLookup != skinCanonical.EncodingLookup || modelCanonical.RootLookup != skinCanonical.RootLookup)
                 throw GeometrySourceCapsuleCodec.Invalid();
-            int q = 0;
+            int q = 0; long declared = 0;
             using (await services.Resources.EnterCpuAsync(null, token))
-                foreach (var section in skin.Sections)
-                { token.ThrowIfCancellationRequested(); q = checked(q + section.TriangleCount); if (q > 131070) throw GeometrySourceCapsuleCodec.Limit(); }
+                foreach (var section in skin.Sections) { token.ThrowIfCancellationRequested(); declared += section.TriangleCount; }
+            // Sum every section first so the refusal names the SKIN's own count (#114).
+            if (declared > MaxSectionTriangleIndices) throw new DiscoveryException("CREATURE_GEOMETRY_RESOURCE_LIMIT", string.Create(CultureInfo.InvariantCulture,
+                $"The SKIN file's sections have {declared:N0} triangle indices; geometry reads at most {MaxSectionTriangleIndices:N0}."));
+            q = (int)declared;
             await Task.Yield();
             var counts = new GeometryNativeCounts(model.Vertices.Count, skin.VertexLookup.Count, skin.TriangleLookup.Count, q, skin.Sections.Count);
             var pair = new GeometrySourceCapsulePair(GeometrySourceCapsuleCodec.Revision, M2GeometrySkin.InterpretationPolicy,
@@ -193,6 +196,7 @@ internal sealed partial class GeometrySourceClosure
         source.Association.EncodingLookupRevision, source.Association.RootLookupRevision, source.Association.EncodingSelectionPolicy);
     private static bool RequestFailure(string code) => code.Contains("STALE", StringComparison.Ordinal) || code.Contains("SOURCE_CHANGED", StringComparison.Ordinal) ||
         code.Contains("BUSY", StringComparison.Ordinal) || code.EndsWith("CLEANUP_FAILED", StringComparison.Ordinal) || code is "ENGINE_STOPPING" or "INVALID_REQUEST";
+    internal const int MaxSectionTriangleIndices = 131070;
     private static bool OwnMessage(string code) => code is "MODEL_UNSUPPORTED" or "MODEL_INVALID" or "MODEL_LIMIT" or "CREATURE_GEOMETRY_RESOURCE_LIMIT";
     internal static GeometrySourceFailureException Failure(DiscoveryException e, CreatureGeometryDependency dependency, IReadOnlyList<CreatureGeometrySource> reached)
     {
@@ -211,7 +215,7 @@ internal sealed partial class GeometrySourceClosure
         // A limit leads with what tripped it, such as the file's sizes and the caps, in plain words (#111).
         var own = OwnMessage(e.Code) && e.Message.Length is > 0 and <= 400;
         var message = state == CreatureGeometryState.ResourceLimit
-            ? own ? e.Message : "The geometry source is over one of its limits."
+            ? own ? e.Message : NamedLimit(e.Code, dependency, e.Message)
             : "The original geometry source could not be admitted (" + state + ")" + (own ? ": " + e.Message : ".");
         // The source-size refusal already says it is a size limit. Codes mix byte and count caps (memberships, vertices,
         // output bytes), so every other limit says only "a limit", which is true of both.
@@ -219,4 +223,40 @@ internal sealed partial class GeometrySourceClosure
             message += " This is a limit, not a corrupt file.";
         return new(state, dependency, new(e.Code, message, e.Retryable), reached);
     }
+    // A limit with no reader message of its own is named in plain words (#114). A cap on one of the build's own lists
+    // (encoding manifest, install manifest, ROOT, CDN configuration, archive indexes) names that list, not the file being
+    // read. A BLTE cap keeps which BLTE cap it was. Any other code is read as words, e.g. BLTE_FRAME_LIMIT is "the BLTE
+    // frame limit". Capacity codes are shared queues that are full now, not a fixed cap on the file.
+    internal static string NamedLimit(string code, CreatureGeometryDependency dependency, string detail = "")
+    {
+        var file = dependency switch
+        {
+            CreatureGeometryDependency.Model => "model file", CreatureGeometryDependency.Skin => "SKIN file",
+            CreatureGeometryDependency.Texture => "texture file", CreatureGeometryDependency.Artifact => "geometry artifact", _ => "display metadata"
+        };
+        var list = code switch
+        {
+            "EN_LIMIT" or "RESOLVER_LIMIT" => "encoding manifest",
+            "IN_LIMIT" => "install manifest",
+            "ROOT_LIMIT" or "ROOT_SCOPE_LIMIT" or "ASSET_SOURCE_LIMIT" => "ROOT file list",
+            "CONFIG_LIMIT" => "CDN configuration",
+            "ARCHIVE_INDEX_LIMIT" or "CONTENT_LOCATOR_LIMIT" or "BULK_LOCATOR_LIMIT" => "archive index lookup",
+            _ => null
+        };
+        if (list is not null) return $"The build's {list} is over its limit, so the {file} was not read.";
+        if (code == "BLTE_LIMIT") return $"The {file} is over the BLTE {BlteCap(detail)} limit.";
+        var capacity = code.EndsWith("_CAPACITY", StringComparison.Ordinal);
+        var words = code.Split('_', StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => w is "BLTE" or "ROOT" or "CDN" or "DB2" or "TACT" or "M2" or "SKIN" ? w : w.ToLowerInvariant());
+        var name = string.Join(' ', words);
+        return capacity ? $"The {name} is full, so the {file} was not read." : $"The {file} is over the {name}.";
+    }
+    // The BLTE readers' messages are fixed; pick out which cap tripped (BlteDecoder and its projection reader).
+    private static string BlteCap(string detail) =>
+        detail.Contains("chunk count", StringComparison.Ordinal) ? "chunk count"
+        : detail.Contains("chunk-header", StringComparison.Ordinal) || detail.Contains("header exceeds the chunk", StringComparison.Ordinal) ? "chunk header size"
+        : detail.Contains("working-memory", StringComparison.Ordinal) ? "chunk memory"
+        : detail.Contains("sixteen-MiB", StringComparison.Ordinal) ? "chunk size"
+        : detail.Contains("range bound", StringComparison.Ordinal) ? "readable range count"
+        : detail.Contains("object", StringComparison.Ordinal) ? "object size" : "size";
 }
