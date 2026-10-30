@@ -183,6 +183,13 @@
 .desktop-home .iv .effect-evidence summary{cursor:pointer;color:var(--muted)}
 /* A fixed reading block: late names or inputs never move the card or the reader's scroll. */
 .desktop-home .iv .effect-evidence[open]>.effect-evidence-body{block-size:min(18rem,60vh);overflow:auto;overflow-anchor:none;scrollbar-gutter:stable;padding:.466667rem;border:1px solid var(--line-soft)}
+/* Raw inputs are term/value pairs like the card's facts above, the value on its own line (#102). */
+.desktop-home .iv .effect-input-list{margin:.28rem 0 0}
+.desktop-home .iv .effect-input-list .item-fact{padding:.28rem 0;border-bottom:1px solid var(--line-soft)}
+.desktop-home .iv .effect-input-list .item-fact:last-child{border-bottom:0}
+.desktop-home .iv .effect-input-list dt{color:var(--muted)}
+.desktop-home .iv .effect-input-list dd{margin:0;color:var(--muted);overflow-wrap:anywhere}
+.desktop-home .iv .effect-input-list .effect-input-value{color:var(--ink);font-size:var(--fs-m);font-weight:600;font-variant-numeric:tabular-nums}
 
 /* One pane at a time: below 65.33rem of window width (200% text at 1280px), as Tables and Files. */
 .desktop-home.dh-compact .iv-panes{grid-template-columns:minmax(0,1fr)}

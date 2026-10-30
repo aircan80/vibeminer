@@ -119,6 +119,7 @@ Items, with its effects, follows [items view](design/items-view/README.md) with 
 - Use full ARIA patterns or none. Tabs need arrow/Home/End roving focus, otherwise use plain buttons in a labelled group. Don't add tree/grid/listbox roles without their keyboard model.
 - Each row has one selection control. Don't put copy buttons or links inside a row-wide button.
 - Accessible names include the visible identity. Don't override a visible name with "Inspect Item 52".
+- A field label and its value are a `<dt>`/`<dd>` pair with the value on its own line, never adjacent inline text: "column 3" then "0" must not read as "column 30".
 
 ### Dialogs and panels
 
