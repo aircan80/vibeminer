@@ -250,6 +250,22 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
             Execute("INSERT INTO baselines VALUES($p,$r,$g) ON CONFLICT(product,region) DO UPDATE SET generation=$g", transaction,
                 ("$p", product), ("$r", region), ("$g", generation));
         }
+        // #120: a refresh whose documents are byte-identical (same digests and parser revisions) to the ones the build's current
+        // reference names keeps that reference, so the opening source and everything prepared under it stay current.
+        var sameSource = new Dictionary<long, bool>();
+        var documents = attempt.Documents.Select(d => (d.Role, d.Sha256, d.ParserRevision)).OrderBy(d => d.Role, StringComparer.Ordinal).ToArray();
+        bool SameSource(long earlier)
+        {
+            if (sameSource.TryGetValue(earlier, out var same)) return same;
+            var saved = new List<(string, string, string)>(documents.Length + 1);
+            using (var command = Command("SELECT role,sha256,parser_revision FROM documents WHERE generation=$g ORDER BY role LIMIT $n", transaction,
+                ("$g", earlier), ("$n", documents.Length + 1)))
+            using (var reader = command.ExecuteReader())
+                while (reader.Read()) saved.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+            same = documents.Length > 0 && saved.SequenceEqual(documents);
+            sameSource[earlier] = same; return same;
+        }
+        long? Current(string sql, params (string, object?)[] values) => Scalar(sql, transaction, values) is long value ? value : null;
         foreach (var row in attempt.Observations)
         {
             token.ThrowIfCancellationRequested();
@@ -261,18 +277,31 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
                 ("$g", generation), ("$ordinal", row.VersionsOrdinal), ("$region", row.Region), ("$id", row.Identity.Id),
                 ("$cdn", row.CdnsOrdinal), ("$fields", Serialize(row.OriginalFields)),
                 ("$route", row.RouteFields is null ? null : Serialize(row.RouteFields)), ("$config", cdnConfig));
-            Execute("""
-                INSERT INTO build_regions VALUES($id,$region,$g,$ordinal,$cdn)
-                ON CONFLICT(build_id,region) DO UPDATE SET generation=$g,ordinal=$ordinal,cdns_ordinal=$cdn
-                    WHERE build_regions.generation<$g OR (build_regions.generation=$g AND build_regions.ordinal>$ordinal)
-                """, transaction, ("$id", row.Identity.Id), ("$region", row.Region), ("$g", generation),
-                ("$ordinal", row.VersionsOrdinal), ("$cdn", row.CdnsOrdinal));
-            Execute("""
-                INSERT INTO build_cdn_config_regions VALUES($id,$config,$region,$g,$ordinal)
-                ON CONFLICT(build_id,cdn_config,region) DO UPDATE SET generation=$g,ordinal=$ordinal
-                    WHERE build_cdn_config_regions.generation<$g OR (build_cdn_config_regions.generation=$g AND build_cdn_config_regions.ordinal>$ordinal)
-                """, transaction, ("$id", row.Identity.Id), ("$config", cdnConfig), ("$region", row.Region), ("$g", generation),
-                ("$ordinal", row.VersionsOrdinal));
+            var region = Current("SELECT generation FROM build_regions WHERE build_id=$id AND region=$region", ("$id", row.Identity.Id), ("$region", row.Region));
+            var keep = false;
+            if (region is { } kept && kept < generation && SameSource(kept))
+            {
+                // The CDN configuration row is kept only while it is the one the kept reference names; a configuration seen again
+                // after another one replaced it moves to this generation, so the newest-first choice stays right.
+                var config = Current("SELECT generation FROM build_cdn_config_regions WHERE build_id=$id AND cdn_config=$config AND region=$region",
+                    ("$id", row.Identity.Id), ("$config", cdnConfig), ("$region", row.Region));
+                keep = config == kept;
+            }
+            if (!keep)
+            {
+                Execute("""
+                    INSERT INTO build_regions VALUES($id,$region,$g,$ordinal,$cdn)
+                    ON CONFLICT(build_id,region) DO UPDATE SET generation=$g,ordinal=$ordinal,cdns_ordinal=$cdn
+                        WHERE build_regions.generation<$g OR (build_regions.generation=$g AND build_regions.ordinal>$ordinal)
+                    """, transaction, ("$id", row.Identity.Id), ("$region", row.Region), ("$g", generation),
+                    ("$ordinal", row.VersionsOrdinal), ("$cdn", row.CdnsOrdinal));
+                Execute("""
+                    INSERT INTO build_cdn_config_regions VALUES($id,$config,$region,$g,$ordinal)
+                    ON CONFLICT(build_id,cdn_config,region) DO UPDATE SET generation=$g,ordinal=$ordinal
+                        WHERE build_cdn_config_regions.generation<$g OR (build_cdn_config_regions.generation=$g AND build_cdn_config_regions.ordinal>$ordinal)
+                    """, transaction, ("$id", row.Identity.Id), ("$config", cdnConfig), ("$region", row.Region), ("$g", generation),
+                    ("$ordinal", row.VersionsOrdinal));
+            }
             Execute("INSERT OR IGNORE INTO advertisements VALUES($p,$r,$id,$route,$g,$config)", transaction,
                 ("$p", product), ("$r", row.Region), ("$id", row.Identity.Id), ("$route", row.CdnsOrdinal is null ? 0 : 1), ("$g", generation),
                 ("$config", cdnConfig));

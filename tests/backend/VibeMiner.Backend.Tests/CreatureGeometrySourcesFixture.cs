@@ -70,8 +70,8 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
         Http.Responses[InventoryFixture.Url("config", buildKey)] = build; Http.Responses[InventoryFixture.Url("config", cdnKey)] = cdn;
         foreach (var item in new[] { model, skin, table, root, encoding, texture }.Concat(high is null ? [] : [high])) Http.Responses[InventoryFixture.Url("data", item.EncodingKey)] = item.Encoded;
         Catalog = await DiscoveryCatalog.OpenAsync(Projection.DirectoryPath);
-        var versions = Fixtures.Versions($"us|{buildKey}|{cdnKey}||70448|12.1.5.70448||geometry-authored");
-        var attempt = await Fixtures.Attempt(versions, "Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0\nus|tpr/wow|us.cdn.blizzard.com|https://us.cdn.blizzard.com/\n");
+        versions = Fixtures.Versions($"us|{buildKey}|{cdnKey}||70448|12.1.5.70448||geometry-authored");
+        var attempt = await Fixtures.Attempt(versions, Cdns);
         var generation = await Catalog.BeginRefreshAsync("wow", default); var page = await Catalog.CommitAsync("wow", generation, attempt, Time, default);
         var workspace = new WorkspaceRequest("wow", page.Builds.Single().Id, "us");
         Opening = await Catalog.ResolveOpeningAsync(workspace, default);
@@ -91,7 +91,7 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
             memberships = (await handle.ResolveAsync([ModelId, uint.Parse(CreaturesPolicy.FileDataId), 1108759, 1365368], _ => Task.CompletedTask)).Results.ToDictionary(r => r.FileDataId);
             association = memberships[ModelId].Association;
         }
-        await Catalog.CommitWorkspaceAsync(Opening, association.Configurations, Time, default);
+        await Catalog.CommitWorkspaceAsync(Opening, association.Configurations, Time, default); configurations = association.Configurations;
         var template = await Projection.Binding([new(1, "Authored Creature")]);
         var rowBinding = template.Rows.Binding with { SourceSha256 = content.Sha256 };
         await using var oldRows = new TableRowArtifacts(Projection.Objects); await using var sourceRows = new TableRowArtifacts(Projection.Objects, Resources, null);
@@ -138,6 +138,15 @@ internal sealed class CreatureGeometrySourcesFixture : IAsyncDisposable
         Request = new(context, core.ContentKey, "1", 0);
         Selection = (await Displays.AuthorizeGeometryAsync(Request, default)).Authorization ?? throw new InvalidOperationException("Authored exact C2 chain failed.");
         Fence = new(this); Services = new(Catalog, Projection.Objects, Sessions, Shared, Resources);
+    }
+    private const string Cdns = "Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0\nus|tpr/wow|us.cdn.blizzard.com|https://us.cdn.blizzard.com/\n";
+    private string versions = ""; private IReadOnlyList<ConfigurationReceipt> configurations = [];
+    /// <summary>A later launch: the same discovery documents fetched again, then the build opened again (#120).</summary>
+    internal async Task RelaunchAsync()
+    {
+        var generation = await Catalog.BeginRefreshAsync("wow", default);
+        await Catalog.CommitAsync("wow", generation, await Fixtures.Attempt(versions, Cdns), Time, default);
+        await Catalog.CommitWorkspaceAsync(await Catalog.ResolveOpeningAsync(new("wow", Opening.Build.Id, "us"), default), configurations, Time, default);
     }
     internal async Task<GeometryPreparedSources> PrepareAsync(Func<CreatureGeometryProgress, Task>? progress = null, CancellationToken token = default)
     {

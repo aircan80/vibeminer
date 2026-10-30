@@ -300,6 +300,41 @@ public sealed class CatalogTests
         Assert.Equal((Time1, Time3), (rolledBack.CdnConfigHistory[0].FirstSeenAt, rolledBack.CdnConfigHistory[0].LastSeenAt));
     }
     [Fact]
+    public async Task ByteIdenticalRefreshKeepsTheOpeningReferenceAndAChangedDocumentMovesIt()
+    {
+        // #120: every launch refreshes discovery. Identical documents must not mint a new opening reference, or every
+        // derived admission bound to it is prepared again.
+        using var directory = new TempDirectory();
+        await using var catalog = await DiscoveryCatalog.OpenAsync(directory.Path);
+        var versions = Fixtures.Versions(Fixtures.Row(), Fixtures.Row("eu"));
+        var first = Assert.Single((await Store(catalog, await Fixtures.Attempt(versions))).Builds);
+        WorkspaceRequest Request(string region) => new("wow", first.Id, region);
+        var us = (await catalog.ResolveOpeningAsync(Request("us"), default)).Reference; var eu = (await catalog.ResolveOpeningAsync(Request("eu"), default)).Reference;
+        for (var launch = 0; launch < 2; launch++)
+        {
+            var again = Assert.Single((await Store(catalog, await Fixtures.Attempt(versions), Time2)).Builds);
+            Assert.Equal(us, (await catalog.ResolveOpeningAsync(Request("us"), default)).Reference);
+            Assert.Equal(eu, (await catalog.ResolveOpeningAsync(Request("eu"), default)).Reference);
+            // The check itself is still recorded, and the receipts are the first retrieval of these bytes.
+            Assert.Equal(Time2, again.LastSeenAt); Assert.Equal(first.SourceReceipts, again.SourceReceipts);
+            Assert.Equal(first.CdnConfigHistory[0].SourceReceipts, again.CdnConfigHistory[0].SourceReceipts);
+        }
+        using (var db = OpenDb(directory.Path))
+        {
+            Assert.Equal(6L, Scalar(db, "SELECT count(*) FROM observations"));
+            Assert.Equal(1L, Scalar(db, "SELECT count(DISTINCT generation) FROM build_regions"));
+            Assert.Equal(1L, Scalar(db, "SELECT count(DISTINCT generation) FROM build_cdn_config_regions"));
+        }
+        // Other bytes with the same rows, or other cdns bytes, are a new observation.
+        await Store(catalog, Fixtures.Republished(await Fixtures.Attempt(versions), 1), Time3);
+        var moved = (await catalog.ResolveOpeningAsync(Request("us"), default)).Reference;
+        Assert.NotEqual(us.Generation, moved.Generation); Assert.NotEqual(us.VersionsSha256, moved.VersionsSha256);
+        Assert.Equal(us with { Generation = moved.Generation, VersionsSha256 = moved.VersionsSha256 }, moved);
+        await Store(catalog, await Fixtures.Attempt(Fixtures.Versions(Fixtures.Row(), Fixtures.Row("eu")) + "## republished 1\n", Fixtures.Cdns("eu", "us")), Time3);
+        var cdns = (await catalog.ResolveOpeningAsync(Request("us"), default)).Reference;
+        Assert.NotEqual(moved.Generation, cdns.Generation); Assert.NotEqual(moved.CdnsSha256, cdns.CdnsSha256);
+    }
+    [Fact]
     public async Task CdnConfigHistoryProjectionIsCappedToTheNewestSixteenWithItsTotal()
     {
         using var directory = new TempDirectory();

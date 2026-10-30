@@ -44,7 +44,7 @@ type SourceReceipt = {
 type CdnConfigObservation = {
   cdnConfig: string; firstSeenAt: string; lastSeenAt: string;
   regions: string[]; advertisedRegions: string[];
-  sourceReceipts: SourceReceipt[]; // newest versions-row receipt per region
+  sourceReceipts: SourceReceipt[]; // newest versions-row receipt per region; a byte-identical refresh keeps the earlier one (D112)
 };
 type Build = {
   id: string; productId: string; version: string; buildId: string;

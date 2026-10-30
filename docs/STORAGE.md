@@ -10,6 +10,10 @@ Keep immutable source receipts with URL, observation/retrieval time, original so
 
 Group build displays without merging source observations. Research locale and host OS do not select a game payload platform. Derived artifact identity includes exact source digests, schema/provider and decoder revisions, locale, transformation settings and all dependencies.
 
+### Opening reference across refreshes
+
+A build's opening reference names the discovery generation, region, versions and cdns digests and row ordinals that admitted it, and every admission bound to the opening (tables, Creatures, display and geometry locators, appearances) is fenced on it. A refresh whose documents are byte-identical to the ones the current reference names keeps that reference, so a later launch reuses everything already prepared ([D112](DECISIONS.md)). The check itself is still recorded. Any changed byte moves the reference, and work bound to the old one is prepared again.
+
 ### Timestamps in derived identity
 
 Derived content keys and CAS metadata bytes drop `PreparedAt` and nested receipt `RetrievedAt`/`VerifiedAt`, so re-verification alone never produces a new SHA for the same logical artifact. Descriptors and admissions keep the original full receipts and times.
@@ -191,7 +195,7 @@ Every transaction that can change the rule above appends the EKey to `stored_cha
 
 Report logical build scope, retained encoded coverage, unique physical payload bytes, shared bytes, additional download bytes, database/temporary overhead and reclaimable bytes separately. A complete denominator is required for a retained percentage. Shared bytes are a subset of physical bytes, not an extra copy.
 
-Two things are deleted: one build's file catalog when it is freed ([D085](DECISIONS.md)), which no other build uses, and superseded Creature appearances with the VMA1 files no remaining appearance names ([below](#superseded-creature-appearances)). There is no garbage collection of other shared objects yet ([#65](https://github.com/aircan80/vibeminer/issues/65)). When it arrives, release references first and reclaim only objects unreachable from every retained build, artifact, pin, active job and read lease. No naive per-build directory delete, and freed SQLite pages are not returned filesystem space.
+Two things are deleted: one build's file catalog when it is freed ([D085](DECISIONS.md)), which no other build uses, and superseded Creature appearances with the VMA1 files no remaining appearance names ([below](#superseded-creature-appearances)). There is no garbage collection of other shared objects yet ([#65](https://github.com/aircan80/vibeminer/issues/65)). That includes what profiles gathered before [D112](DECISIONS.md): one Creatures projection, its admission and the table admissions, and a geometry locator and appearance per viewed model, for every launch, all bound to references no longer current. When it arrives, release references first and reclaim only objects unreachable from every retained build, artifact, pin, active job and read lease. No naive per-build directory delete, and freed SQLite pages are not returned filesystem space.
 
 ### Superseded Creature appearances
 

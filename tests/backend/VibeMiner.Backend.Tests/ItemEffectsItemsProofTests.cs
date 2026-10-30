@@ -184,7 +184,7 @@ public sealed class ItemEffectsItemsProofTests
         while (true) { lock (budgetGate) { if (waiters.Count > 0) break; } await Task.Delay(1, timeout.Token); }
         var versions = Fixtures.Versions($"us|{h.Fixture.BuildKey}|{h.Fixture.CdnKey}||70448|12.1.5.70448||items");
         var cdns = Encoding.UTF8.GetString(h.Fixture.Discovery.Documents.Single(d => d.Role == "cdns").Bytes);
-        var attempt = await Fixtures.Attempt(versions, cdns);
+        var attempt = Fixtures.Republished(await Fixtures.Attempt(versions, cdns), 1);
         var generation = await h.Catalog.BeginRefreshAsync("wow", default);
         await h.Catalog.CommitAsync("wow", generation, attempt, Later, default);
         first.Dispose(); second.Dispose();

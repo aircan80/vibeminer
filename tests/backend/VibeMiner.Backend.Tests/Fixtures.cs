@@ -21,10 +21,32 @@ internal static class Fixtures
     public static byte[] Utf8(string value) => Encoding.UTF8.GetBytes(value);
     public static OfficialDiscoverySource Source(string versions, string? cdns = null) => new(new HttpClient(new Handler((request, _) =>
         Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(request.RequestUri!.AbsolutePath.EndsWith("/versions", StringComparison.Ordinal) ? versions : cdns ?? Cdns("us", "eu")) }))));
+    /// <summary>Rows of every table a prepared Creature, display or geometry stands on, and the stored object count (#120).</summary>
+    public static IReadOnlyDictionary<string, long> DerivedRows(string dataDirectory)
+    {
+        using var db = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={System.IO.Path.Combine(dataDirectory, "discovery-v1.sqlite3")};Pooling=False"); db.Open();
+        var rows = new SortedDictionary<string, long>(StringComparer.Ordinal);
+        foreach (var table in new[] { "build_regions", "build_cdn_config_regions", "table_artifacts", "table_admissions", "creatures_artifacts", "creatures_admissions",
+            "geometry_artifacts", "geometry_source_locators", "geometry_appearances" })
+        { using var command = db.CreateCommand(); command.CommandText = $"SELECT count(*) FROM {table}"; rows[table] = (long)command.ExecuteScalar()!; }
+        var objects = System.IO.Path.Combine(dataDirectory, "objects-v1");
+        rows["objects"] = Directory.Exists(objects) ? Directory.EnumerateFiles(objects, "*", SearchOption.AllDirectories).LongCount() : 0;
+        return rows;
+    }
     public static Dictionary<string, string> Fields(string config = A, string unknown = "opaque") => new(StringComparer.Ordinal)
     { ["Region"] = "us", ["BuildConfig"] = config, ["CDNConfig"] = B, ["VersionsName"] = "1.2.3", ["BuildId"] = "000123", ["Opaque"] = unknown };
     public static async Task<DiscoveryAttempt> Attempt(string versions, string? cdns = null)
     { using var source = Source(versions, cdns); return await source.FetchAsync("wow", CancellationToken.None); }
+    /// <summary>The same rows in a versions document with other bytes, so a refresh moves the opening reference (#120).
+    /// A byte-identical refresh keeps it.</summary>
+    public static DiscoveryAttempt Republished(DiscoveryAttempt attempt, int edition) => attempt with
+    {
+        Documents = attempt.Documents.Select(d => d.Role != "versions" ? d : d with
+        {
+            Bytes = [.. d.Bytes, .. Utf8($"## republished {edition}\n")],
+            Sha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData([.. d.Bytes, .. Utf8($"## republished {edition}\n")]))
+        }).ToArray()
+    };
 }
 
 internal sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> action) : HttpMessageHandler

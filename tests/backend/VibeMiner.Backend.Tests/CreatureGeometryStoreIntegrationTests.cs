@@ -58,6 +58,26 @@ public sealed class CreatureGeometryStoreIntegrationTests
         Assert.Equal(ready.Sources,reused.Sources);Assert.Equal(JsonSerializer.Serialize(ready.Manifest,CreaturesPolicy.Json),JsonSerializer.Serialize(reused.Manifest,CreaturesPolicy.Json));Assert.Equal(requests,f.Http.Requests.Count);
     }
     [Fact]
+    public async Task TwoRestartsWithNoChangeReuseTheLocatorAndAppearanceAndAddNoRows()
+    {
+        // #120: a launch refreshes discovery and opens the build again; with the same documents the retained Creature,
+        // locator and appearance stay current, so Prepare reuses them without a download or a new row.
+        await using var f=await CreatureGeometrySourcesFixture.CreateAsync(textured:new(AppearanceModels.Simple(),[new()]));
+        CreatureGeometryResult ready;
+        await using(var store=Store(f)) ready=await store.PrepareAsync(new(f.Request),Progress,default).WaitAsync(Guard);
+        Assert.Equal(CreatureGeometryAppearanceState.Ready,ready.Appearance!.State);
+        var rows=Fixtures.DerivedRows(f.Projection.DirectoryPath);var requests=f.Http.Requests.Count;
+        Assert.Equal((1L,1L,1L),(rows["creatures_admissions"],rows["geometry_source_locators"],rows["geometry_appearances"]));
+        for(var launch=0;launch<2;launch++)
+        {
+            await f.RelaunchAsync();await using var store=Store(f);
+            Assert.Equal(CreatureGeometryState.Ready,(await store.ReadAsync(new(f.Request),default)).State);
+            var again=await store.PrepareAsync(new(f.Request),Progress,default).WaitAsync(Guard);
+            Assert.Equal(JsonSerializer.Serialize(ready,CreaturesPolicy.Json),JsonSerializer.Serialize(again,CreaturesPolicy.Json));
+            Assert.Equal(rows,Fixtures.DerivedRows(f.Projection.DirectoryPath));Assert.Equal(requests,f.Http.Requests.Count);
+        }
+    }
+    [Fact]
     public async Task ParsedZeroDeclaredTrianglesReturnsSourcesButNeverRegistersGeometry()
     {
         await using var f=await CreatureGeometrySourcesFixture.CreateAsync(empty:true);await using var store=Store(f);

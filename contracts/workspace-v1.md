@@ -6,7 +6,7 @@ Historical configuration adapter capability: `home-configurations-v1`. Productio
 
 `workspace.open` takes exactly `{ productId, buildIdentity, sourceRegion }`. The identity is the complete 64-character lowercase digest, not the display build number. Region is an explicit visible choice backed by saved versions/CDN receipts. C# resolves and pins the newest coherent committed observation for that exact product/identity/region before work starts, and verifies the full raw versions row plus corresponding CDN row. Missing requested sources fail rather than fall back to US or another build.
 
-The result echoes `sourceReference`: exact decimal-string generation, region, both document SHA-256 digests and both row ordinals. Identical-byte historical observations may be resolved deterministically to the newest matching observation; the output identifies the one actually used. Renderer-supplied Build objects, URLs, paths, SQL and raw config data are not accepted.
+The result echoes `sourceReference`: exact decimal-string generation, region, both document SHA-256 digests and both row ordinals. A refresh with byte-identical versions and cdns documents keeps the earlier observation as the reference, so a later launch opens the same reference and reuses what was prepared under it ([D112](../docs/DECISIONS.md)); the output identifies the one actually used. Renderer-supplied Build objects, URLs, paths, SQL and raw config data are not accepted.
 
 ## Success and proof boundary
 

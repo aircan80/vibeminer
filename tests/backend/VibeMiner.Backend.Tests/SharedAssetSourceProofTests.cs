@@ -84,10 +84,11 @@ public sealed class SharedAssetSourceProofTests
             fixture.shared = new(new OfficialEncodedObjectProducer(fixture.Catalog, fixture.Objects, fixture.client, resources, fixture.plans));
             fixture.Sessions = new(fixture.Catalog, fixture.Objects, fixture.client, fixture.shared, resources); return fixture;
         }
+        private int refreshes;
         internal async Task RefreshAsync()
         {
             var generation = await Catalog.BeginRefreshAsync("wow", default);
-            await Catalog.CommitAsync("wow", generation, Data.Discovery, DateTimeOffset.UtcNow.ToString("O"), default);
+            await Catalog.CommitAsync("wow", generation, Fixtures.Republished(Data.Discovery, ++refreshes), DateTimeOffset.UtcNow.ToString("O"), default);
         }
         public async ValueTask DisposeAsync()
         {

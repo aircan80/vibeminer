@@ -298,11 +298,12 @@ public sealed class CreatureDisplayCatalogTests
             }
             return h;
         }
+        private int refreshes;
         internal async Task Refresh()
         {
             var versions = Fixtures.Versions($"us|{fixture.BuildKey}|{fixture.CdnKey}||70448|12.1.5.70448||creature-display");
             var cdns = Encoding.UTF8.GetString(fixture.Discovery.Documents.Single(d => d.Role == "cdns").Bytes);
-            var attempt = await Fixtures.Attempt(versions, cdns); var generation = await Catalog.BeginRefreshAsync("wow", default);
+            var attempt = Fixtures.Republished(await Fixtures.Attempt(versions, cdns), ++refreshes); var generation = await Catalog.BeginRefreshAsync("wow", default);
             var page = await Catalog.CommitAsync("wow", generation, attempt, Time, default);
             Opening ??= await Catalog.ResolveOpeningAsync(new("wow", page.Builds.Single().Id, "us"), default);
         }

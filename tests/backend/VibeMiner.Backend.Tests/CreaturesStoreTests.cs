@@ -114,6 +114,22 @@ public sealed class CreaturesStoreTests
         await h.RefreshOpening(); Assert.Equal("CREATURES_STALE", (await Assert.ThrowsAsync<DiscoveryException>(() => h.Catalog.ReauthorizeCreaturesAsync(h.Opening, old, default))).Code);
     }
     [Fact]
+    public async Task TwoRestartsWithNoChangeReuseTheCreatureArtifactAndAddNoRows()
+    {
+        // #120: each launch refreshes discovery and opens the build again. Byte-identical documents keep the opening, so the
+        // saved projection is read back instead of being built, admitted and stored once more.
+        await using var h = await Harness.Create(); var ready = await h.Store.PrepareAsync(h.Context, Progress, default);
+        var rows = Fixtures.DerivedRows(h.Projection.DirectoryPath);
+        for (var launch = 0; launch < 2; launch++)
+        {
+            await h.Store.DisposeAsync(); await h.Relaunch(); h.Store = new(h.Catalog, h.Projection.Objects, h.Tables, h.Resources);
+            Assert.Equal(ready.ArtifactId, (await h.Store.ReadAsync(h.Context, default)).Snapshot?.ArtifactId);
+            Assert.Equal(ready.ArtifactId, (await h.Store.PrepareAsync(h.Context, Progress, default)).ArtifactId);
+            Assert.Equal(rows, Fixtures.DerivedRows(h.Projection.DirectoryPath));
+        }
+        Assert.Empty(h.PreparedTables);
+    }
+    [Fact]
     public async Task ABuildNoDefinitionOpensFailsBeforeAnyCreatureDownloadAndNamesTheSwitch()
     {
         // D101: Creatures starts as Tables does. With fetching off (no fetcher here) and no bundled block on the build's
@@ -341,13 +357,23 @@ public sealed class CreaturesStoreTests
             h.Binding = await h.Source([new(0, "Name"), new(9, "Name", 0), new(4294967295, "")], configs, h.Fixture.PayloadA);
             h.Missing = missing; if (!missing) await h.Publish(); h.Tables = new(new ReadyTables(h)); h.Store = new(h.Catalog, h.Projection.Objects, h.Tables, h.Resources); return h;
         }
+        private int refreshes;
         internal async Task RefreshOpening()
         {
             var versions = Fixtures.Versions($"us|{Fixture.BuildKey}|{Fixture.CdnKey}||{Version.Split('.')[3]}|{Version}||creatures");
             var cdns = Encoding.UTF8.GetString(Fixture.Discovery.Documents.Single(d => d.Role == "cdns").Bytes);
-            var discovery = await Fixtures.Attempt(versions, cdns); var generation = await Catalog.BeginRefreshAsync("wow", default);
+            var discovery = Fixtures.Republished(await Fixtures.Attempt(versions, cdns), ++refreshes); var generation = await Catalog.BeginRefreshAsync("wow", default);
             var page = await Catalog.CommitAsync("wow", generation, discovery, CreaturesProjectionTests.Fixture.Time, default); Context = new("wow", page.Builds.Single().Id, "us", "enUS");
             var current = await Catalog.ResolveOpeningAsync(new("wow", Context.BuildIdentity, "us"), default); if (Opening is null) Opening = current;
+        }
+        /// <summary>A later launch: the same discovery documents fetched again, then the build opened again.</summary>
+        internal async Task Relaunch()
+        {
+            var versions = Fixtures.Versions($"us|{Fixture.BuildKey}|{Fixture.CdnKey}||{Version.Split('.')[3]}|{Version}||creatures");
+            var cdns = Encoding.UTF8.GetString(Fixture.Discovery.Documents.Single(d => d.Role == "cdns").Bytes);
+            var discovery = Fixtures.Republished(await Fixtures.Attempt(versions, cdns), refreshes); var generation = await Catalog.BeginRefreshAsync("wow", default);
+            await Catalog.CommitAsync("wow", generation, discovery, CreaturesProjectionTests.Fixture.Time, default);
+            await Catalog.CommitWorkspaceAsync(await Catalog.ResolveOpeningAsync(new("wow", Context.BuildIdentity, "us"), default), Binding.Configurations, CreaturesProjectionTests.Fixture.Time, default);
         }
         internal async Task AddContext(int ordinal)
         {
