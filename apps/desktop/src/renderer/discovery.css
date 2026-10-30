@@ -202,3 +202,29 @@
 
 /* Settings entry (docs/design/desktop-settings): a plain toolbar button with a sliders icon, always the last toolbar item. */
 .discovery-screen .settings-entry svg{width:.933333rem;height:.933333rem;flex:none;color:var(--dv-muted)}
+/* #9 (D106): community builds get the grey-blue Community badge Files uses for community names. */
+.discovery-screen .dv-pill.community{border-color:#c9cfdc;background:#f3f4f8;color:#4a5670;margin-left:.373333rem}
+.discovery-screen .dv-availability{display:flex;flex-direction:column;gap:.25rem}
+.discovery-screen .dv-avail-detail{color:var(--dv-muted);overflow-wrap:anywhere}
+.discovery-screen .dv-avail-gone{color:var(--dv-err-ink)}
+.discovery-screen .dv-avail-unknown{color:var(--dv-muted)}
+.discovery-screen .dv-avail-partlyAvailable{color:var(--dv-gold-ink)}
+.discovery-screen .dv-avail-available{color:var(--teal)}
+.discovery-screen .dv-avail-error{color:var(--dv-err-ink)}
+.discovery-screen .dv-avail-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.373rem;margin-top:.187rem}
+.discovery-screen .dv-avail-option{display:inline-flex;align-items:center;gap:.25rem;font-size:var(--dv-s)}
+.discovery-screen .dv-avail-progress:empty{display:none}
+.discovery-screen .dv-avail-progress{display:inline-flex;align-items:center;gap:.25rem;min-width:0;overflow-wrap:anywhere}
+/* The running check's dot is the teal the list rows use (#9 UI review). */
+.discovery-screen .dv-avail-progress .dv-pulse{color:var(--teal);margin-left:0}
+.discovery-screen .dv-avail-stopped{color:var(--dv-muted)}
+.discovery-screen .dv-avail-actions .dv-note{flex-basis:100%;margin:0}
+/* #9 usability review: at 600x480 and 200% text a build with no source route (every community build) set the
+   inspector's width from its footer, whose label and "No recorded source route" select can't share one line. The
+   select may shrink and the label wraps above it, and nothing in File availability is wider than its column. */
+.discovery-screen .dv-insp-foot .dv-field{flex-wrap:wrap}
+.discovery-screen .dv-insp-foot .dv-field select{min-width:0;max-width:100%;flex:1 1 8rem}
+/* #9 usability review: at 600x480 and 200% text nothing in File availability may be wider than its column. */
+.discovery-screen .dv-availability>*,.discovery-screen .dv-avail-actions>*{min-width:0;max-width:100%}
+.discovery-screen .dv-avail-actions .dv-btn{white-space:normal;height:auto;min-height:2rem;text-align:center;flex:0 1 auto}
+.discovery-screen .dv-avail-option{flex-wrap:wrap}

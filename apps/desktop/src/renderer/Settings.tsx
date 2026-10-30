@@ -43,7 +43,7 @@ const thrown = { code: 'ENGINE_UNAVAILABLE', message: 'The local engine is unava
 const unchanged = (): Record<SettingSwitch, Change> => ({ communityBuildHistory: { phase: 'idle', savedAt: null }, fetchTableDefinitions: { phase: 'idle', savedAt: null }, communityListfile: { phase: 'idle', savedAt: null } });
 // Each switch's id stem, visible name and what its default means when a saved value can't be used.
 const SWITCH: Record<SettingSwitch, { key: string; title: string; byDefault: string }> = {
-  communityBuildHistory: { key: 'community', title: 'Community build history', byDefault: 'nothing is fetched from the community source' },
+  communityBuildHistory: { key: 'community', title: 'Community build history', byDefault: 'Discovery shows no community builds and nothing is fetched from wago.tools' },
   fetchTableDefinitions: { key: 'fetch', title: 'Fetch newer table definitions', byDefault: 'no table definitions are fetched from WoWDBDefs' },
   communityListfile: { key: 'listfile', title: 'Community file names', byDefault: 'Files shows no community names and nothing is downloaded from wow-listfile' },
 };
@@ -139,7 +139,7 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
 
   const known = reading.phase === 'ready' && !!snapshot;
   const onOff = (value: boolean) => value ? 'On' : 'Off';
-  // An unreadable value is never used: it reads as Off, the default for Community build history (D081).
+  // An unreadable value is never used: it reads as Off, whatever the switch's default (D081, D106).
   const inUse = (c: { value: boolean; defaultValue: boolean }) => c.value === c.defaultValue ? `Using the default, ${onOff(c.value)}.` : locked ? `Using ${onOff(c.value)}.` : `Using ${onOff(c.value)} until you switch it.`; // A locked switch can't be switched here.
   // One switch row's control column, error and note. File-wide problems (a newer or unread file, a read failure) are
   // explained once, at the first row; every switch still says why it can't change.
@@ -209,12 +209,13 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
             <div className="st-setting" id="settings-row-community">
               <div className="st-text">
                 <h3 id="settings-community-name">Community build history <span className="st-opt">(optional)</span></h3>
-                <p id="settings-community-desc">Blizzard’s version service only lists current builds. This adds older builds from one community-kept build list, so you can open builds VibeMiner never saw itself.</p>
+                <p id="settings-community-desc">Blizzard’s version service only lists current builds. This adds older builds from the community-kept wago.tools build list, so you can see builds VibeMiner never saw itself and check whether Blizzard’s CDN still has their files.</p>
                 <dl className="st-effects">
-                  <dt>When on</dt><dd>At each <strong>Refresh builds</strong>, Discovery also reads the build list from the community source. Only the list comes from there: product, version, build number and config hashes. All data still comes from Blizzard’s CDN and is checked against its hash, so a wrong entry can only fail to open. These builds get a <span className="st-pill community">Community</span> badge.</dd>
-                  <dt>When off</dt><dd>Discovery lists only builds seen on Blizzard’s version service, and VibeMiner doesn’t contact the community source. Community builds you haven’t opened are hidden; ones you opened stay, with their badge.</dd>
-                  <dt>Takes effect</dt><dd>At the next Refresh builds. Nothing is fetched when you switch.</dd>
-                  <dt>This version</dt><dd>No community source is connected yet, so nothing changes until one is added.{!locked && ' Your choice is saved now.'}</dd>
+                  <dt>When on</dt><dd><strong>Refresh builds</strong> also reads the build list from wago.tools, at most once a day. Only the list comes from there: product, version, build number and config hashes. <strong>Check availability</strong> asks Blizzard’s CDN for each build’s configs and archive indexes and checks the configs against their hashes, so a wrong entry can only show as Gone. These builds get a <span className="st-pill community">Community</span> badge.</dd>
+                  <dt>When off</dt><dd>Discovery lists only builds seen on Blizzard’s version service, and VibeMiner doesn’t contact wago.tools. Community builds are hidden. The list already read is kept for when you turn it back on.</dd>
+                  <dt>Takes effect</dt><dd>At once: Discovery shows or hides community builds as soon as you switch. wago.tools is asked at the next Refresh builds that is due, never when you switch.</dd>
+                  <dt>This version</dt><dd>Community builds can be checked but not opened yet: Open needs a build seen on Blizzard’s version service.</dd>
+                  <dt>Source</dt><dd>wago.tools, <span className="st-mono">wago.tools/api/builds</span>, read at runtime and never shipped with VibeMiner.</dd>
                 </dl>
               </div>
               {community.control}{community.extra}{community.note}

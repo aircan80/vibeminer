@@ -39,6 +39,14 @@ try
         && Uri.TryCreate(text, UriKind.Absolute, out var parsed) && CommunityListfile.LoopbackOrigin(parsed) ? parsed : null;
     await using var listfile = new CommunityListfile(dataDirectory, listfileClient, settings, testOrigin: listfileOrigin, connections: listfileConnections);
     settings.Changed += (name, value) => { if (name == SettingsService.CommunityListfile) listfile.SettingChanged(value); };
+    // The wago.tools build list (D106): its own client, one request at most a day, only from Refresh builds.
+    using var buildListHandler = WagoBuildList.CreateHandler();
+    using var buildListClient = new HttpClient(buildListHandler) { Timeout = Timeout.InfiniteTimeSpan };
+    // Test runs point it at a loopback origin, so they never reach wago.tools; anything else is ignored.
+    var buildListOrigin = Environment.GetEnvironmentVariable("VIBEMINER_COMMUNITY_BUILDS_ORIGIN") is { Length: > 0 } buildListText
+        && Uri.TryCreate(buildListText, UriKind.Absolute, out var buildListParsed) && CommunityListfile.LoopbackOrigin(buildListParsed) ? buildListParsed : null;
+    var communityBuilds = new CommunityBuildsService(new WagoBuildList(buildListClient, buildListOrigin), catalog, settings);
+    var availability = new BuildAvailabilityService(catalog, new CdnAvailabilityProbe(client, resources));
     await using var tableStore = new TableDataStore(catalog, objects, client, acquisition, resources, definitionSources);
     await using var tableData = new TableDataService(tableStore);
     await using var creaturesStore = new CreaturesStore(catalog, objects, tableData, resources, definitionSources);
@@ -76,12 +84,12 @@ try
     {
         await retention.RestoreAsync();
         storedCoverage.Start(); rootScopes.Start(); fileCatalogs.Start(); appearanceCleanup.Start(); listfile.StartIfKept();
-        var host = new ProtocolHost(new DiscoveryService(source, catalog), workspace, new InventoryService(catalog, listfile),
+        var host = new ProtocolHost(new DiscoveryService(source, catalog, community: communityBuilds), workspace, new InventoryService(catalog, listfile),
             new DownloadService(new DownloadQuery(catalog, objects, resources)), new TablesService(new TablesCatalog(catalog, definitionSources)), tableData, retention, items, itemIcons, iconLeases, itemClassifications, creatures, creatureDisplays, itemEffects: itemEffects,
             creatureGeometry: creatureGeometry, geometryLeases: geometryLeases, settings: settings,
             downloadSummaries: new DownloadSummaryService(catalog),
             referenceText: new TableReferenceTextService(tableStore), follow: new TableFollowService(tableStore),
-            preparedData: new PreparedDataService(catalog), listfile: listfile);
+            preparedData: new PreparedDataService(catalog), listfile: listfile, availability: availability);
         await host.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
     }
     finally { await retention.ShutdownAsync(); }

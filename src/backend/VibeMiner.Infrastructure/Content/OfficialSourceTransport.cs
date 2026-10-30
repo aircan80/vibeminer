@@ -10,6 +10,8 @@ namespace VibeMiner.Infrastructure;
 internal sealed class OfficialSourceTransport(HttpClient client, AcquisitionResources? resources = null,
     IAcquisitionWorkContext? context = null)
 {
+    /// <summary>How long one HEAD may take once it holds its HTTP permit. The wait for the permit isn't counted.</summary>
+    internal TimeSpan HeadTimeout { get; init; } = TimeSpan.FromSeconds(15);
     internal IAcquisitionWorkContext? WorkContext => context;
     internal OfficialSourceTransport WithContext(IAcquisitionWorkContext work) => new(client, resources, work);
     internal async Task DownloadLooseAsync(Uri url, Stream destination, long expectedBytes, string label,
@@ -133,6 +135,36 @@ internal sealed class OfficialSourceTransport(HttpClient client, AcquisitionReso
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         { throw Error("CONTENT_TIMEOUT", "The official configuration request timed out.", true); }
         catch (HttpRequestException) { throw Error("NETWORK_UNAVAILABLE", "The official configuration source could not be reached.", true); }
+    }
+
+    /// <summary>
+    /// One HEAD of an exact official config, data or index object, for an availability check (#9, D106): no body is
+    /// read. 200 is present; 404, or 403 from level3 (which answers a missing object that way), is missing; anything
+    /// else, a redirect, a timeout or no connection is unknown, never missing.
+    /// </summary>
+    internal async Task<CdnPresence> HeadAsync(Uri url, CancellationToken token)
+    {
+        if (Regex.IsMatch(url.AbsolutePath, "/config/", RegexOptions.CultureInvariant)) ValidateConfigurationUri(url); else ValidateUri(url);
+        // Waiting behind a download for a permit isn't the CDN failing to answer, so the timeout starts once it is held.
+        using var permit = resources is null ? null : await resources.EnterHttpAsync(context, token);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(HeadTimeout);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Head, url);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            if (response.RequestMessage?.RequestUri != url) return CdnPresence.Unknown;
+            return response.StatusCode switch
+            {
+                HttpStatusCode.OK => CdnPresence.Present,
+                HttpStatusCode.NotFound => CdnPresence.Missing,
+                HttpStatusCode.Forbidden when url.Host is "level3.blizzard.com" or "level3.ssl.blizzard.com" => CdnPresence.Missing,
+                _ => CdnPresence.Unknown,
+            };
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { return CdnPresence.Unknown; }
+        catch (HttpRequestException) { return CdnPresence.Unknown; }
+        catch (IOException) { return CdnPresence.Unknown; }
     }
 
     private static async Task CopyExactAsync(HttpResponseMessage response, Stream destination, long expected,

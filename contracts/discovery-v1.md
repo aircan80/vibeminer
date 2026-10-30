@@ -26,6 +26,7 @@ Exactly one success/error reply completes a request. Progress includes a positiv
 | `discovery.refresh` | `{ productId }` | `DiscoveryPage` with default first All page after current attempt |
 | `discovery.readAll` | `{ productId?, filter?: "all" \| "local" \| "advertised", limit?: number, cursor?: string }` | `DiscoveryCatalogPage` across every registered product; `productId` narrows it to one; local only |
 | `discovery.refreshAll` | `{}` | `DiscoveryCatalogPage`: first All page across every product after checking every product ([D062](../docs/DECISIONS.md)) |
+| `builds.availability.check` | `{ productId, buildIdentity, archives: boolean }` | `BuildAvailability`: one staged check of a saved build on Blizzard's CDN ([below](#community-builds-and-availability)) |
 | `request.cancel` | `{ requestId }` | `{ requested: boolean }` |
 | `shutdown` | `{}` | `{ stopping: true }`; retire work and exit |
 
@@ -88,6 +89,7 @@ type DiscoveryCatalogPage = {
   builds: Build[]; nextCursor: string | null; // at most 100 builds
   products: ProductDiscoveryStatus[]; // every registered product in registry order, whatever the filter
   refreshProblems: ProductRefreshProblem[]; // always [] from discovery.readAll
+  communityBuilds: CommunityBuildsStatus; // the wago.tools build list (D106)
 };
 ```
 
@@ -100,7 +102,17 @@ type DiscoveryCatalogPage = {
 - **Progress.** One frame before any product starts, then one per finished product, in order: `{ stage: "Checking official metadata", completed, total, unit: "products", region: null }`. `total` is the registry size. There is no percentage, byte count or ETA.
 - **Cancel.** `request.cancel` stops starting products and cancels the running ones. The terminal `CANCELED` reply follows only after the running checks retired. Products that committed before the stop keep their new results, so the desktop reads the saved view again. If every product had already finished, the durable result wins and the reply is a success.
 
-`connection` describes the latest explicit attempt, not a general connectivity probe. Local reads make no HTTP calls. An engine/network failure cannot masquerade as successful empty results. `isLocal` is false for discovery-only observations; Local can be empty until actual preparation exists. Render availability as Not checked, never infer payload readiness or locale.
+## Community builds and availability
+
+Capabilities `community-builds-v1` and `build-availability-v1` ([D106](../docs/DECISIONS.md)). Schemas: `CommunityBuildsStatus`, `CommunityBuildSource`, `BuildAvailability`, `AvailabilityCounts`, `BuildAvailabilityParams`.
+
+- **Community builds.** While the `communityBuildHistory` switch reads as on, `discovery.readAll` with filter `all` lists builds from the wago.tools build list among Blizzard's, in the same order. Such a `Build` has `community: { source: "wago.tools", sourceUrl, createdAt, firstImportedAt, lastImportedAt }`, no regions, routes or receipts, one CDN config history entry, `identityFields` with `BuildConfig`, `BuildId`, `VersionsName` and `ProductConfig` when known, and an identity of its own namespace. `firstSeenAt`/`lastSeenAt` are its first and last import. Blizzard builds have `community` null or absent. A community row Blizzard also advertised (same product, build config and version) is listed once, as Blizzard's. `local` and `advertised` never list community builds. `workspace.open` and every other per-build method answer `BUILD_NOT_FOUND` for a community identity.
+- **The list's state.** `communityBuilds` says `off` (switch off; community builds hidden), `notFetched`, `ready` or `failed` (`problem` has `COMMUNITY_BUILDS_OFFLINE`, `_FAILED`, `_TOO_LARGE`, `_INVALID` or `_STOPPED`; builds from an earlier import stay listed), with the last attempt, the last import, `nextCheckAfter` and how many community builds are listed. `discovery.refreshAll` asks wago.tools alongside the product checks when the switch is on and the last attempt is at least a day old; the list never adds a `refreshProblems` entry. The cursor also binds the list's import generation and the switch, so an import or a switch change refuses an older cursor with `STALE_CURSOR`.
+- **Check availability.** `builds.availability.check` takes any saved build, Blizzard's or a community one, and tests the build's configs (a community build's own, a Blizzard build's newest CDN config) on at most two official HTTPS hosts from the newest saved Blizzard `cdns` document: configs (HEAD, then GET with MD5 and grammar checked), then every archive index the CDN config lists, then, with `archives: true`, every archive (HEAD only). Patch archives are never asked. Progress frames: `{ stage, completed, total, unit: "files", region: null }`. The result's `state` is `available`, `partlyAvailable`, `gone` or `unknown`, with `scope` (the last stage run), each config's state (`verified`, `missing`, `invalid`, `unknown`), counts per stage, the hosts asked and `checkedAt`. A finished check replaces the build's saved one and comes back as `availabilityCheck` on that build in later catalog pages. Errors: `BUILD_NOT_FOUND`, `AVAILABILITY_NO_ROUTE` (no saved Blizzard cdns document yet), `AVAILABILITY_BUSY` (one check at a time) and `CANCELED` (nothing saved).
+
+The engine reads `VIBEMINER_COMMUNITY_BUILDS_ORIGIN` at start. Only a bare loopback `http` or `https` origin is used; anything else is ignored. With one, the list request keeps its path and goes there instead of wago.tools. The e2e config sets it to `http://127.0.0.1:9/`.
+
+`connection` describes the latest explicit attempt, not a general connectivity probe. Local reads make no HTTP calls. An engine/network failure cannot masquerade as successful empty results. `isLocal` is false for discovery-only observations; Local can be empty until actual preparation exists. `Build.availability` stays `unknown`; the dated result of a deliberate check is `availabilityCheck` (above). Never infer payload readiness or locale.
 
 ## Discovery source and identity policy
 

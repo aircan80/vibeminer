@@ -82,7 +82,7 @@ public sealed class GeometryAppearanceCleanupTests
         h.Execute(CatalogMigrationFixture.RemoveV21 + "PRAGMA user_version=20;");
         Assert.Equal(0L, h.Scalar("SELECT count(*) FROM pragma_table_info('geometry_appearances') WHERE name='key_revision'"));
         await using (await DiscoveryCatalog.OpenAsync(h.F.Projection.DirectoryPath)) { }
-        Assert.Equal(21L, h.Scalar("PRAGMA user_version")); Assert.Equal(3, h.Rows);
+        Assert.Equal(22L, h.Scalar("PRAGMA user_version")); Assert.Equal(3, h.Rows);
         Assert.Equal(3L, h.Scalar("SELECT count(*) FROM geometry_appearances WHERE key_revision IS NULL AND artifact_sha256 IS NULL AND artifact_bytes IS NULL"));
         // Still read as before the upgrade: the key reaches the row.
         Assert.Equal(CreatureGeometryAppearanceState.Ready, await h.ReadAsync());

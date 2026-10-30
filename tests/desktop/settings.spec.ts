@@ -50,8 +50,9 @@ test('the real engine saves Community build history in its data folder and it su
       await expect(toolbar.locator('> *').last()).toHaveText('Settings');
       await toolbar.getByRole('button', { name: 'Settings' }).click();
       await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeFocused();
-      await expect(community(page)).toHaveAttribute('aria-checked', 'false');
-      await expect(page.getByText('Default: Off', { exact: true })).toBeVisible();
+      // Owner decision on #9: on by default (D106).
+      await expect(community(page)).toHaveAttribute('aria-checked', 'true');
+      await expect(page.locator('#settings-row-community')).toContainText('Default: On');
       await expect(page.getByText('Never changed')).toBeVisible();
       expect(existsSync(file), 'Reading never writes the settings file.').toBe(false);
       await expect(page.locator('#settings-storage-path')).toHaveText(path.join(data, 'catalog'));
@@ -64,10 +65,10 @@ test('the real engine saves Community build history in its data folder and it su
       await expect(page.getByText('Path copied')).toBeVisible();
       await community(page).focus();
       await page.keyboard.press('Space');
-      await expect(community(page)).toHaveAttribute('aria-checked', 'true');
+      await expect(community(page)).toHaveAttribute('aria-checked', 'false');
       await expect(community(page)).toBeFocused();
       await expect(page.locator('#settings-community-save')).toContainText('Saved');
-      expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({ version: 1, values: { communityBuildHistory: true } });
+      expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({ version: 1, values: { communityBuildHistory: false } });
       // Fetch newer table definitions (#55) is on by default, saves on its own and keeps the other value.
       await expect(fetchSwitch(page)).toHaveAttribute('aria-checked', 'true');
       await expect(page.locator('#settings-row-fetch')).toContainText('Default: On');
@@ -76,7 +77,7 @@ test('the real engine saves Community build history in its data folder and it su
       await page.keyboard.press('Space');
       await expect(fetchSwitch(page)).toHaveAttribute('aria-checked', 'false');
       await expect(page.locator('#settings-fetch-save')).toContainText('Saved');
-      expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({ version: 1, values: { communityBuildHistory: true, fetchTableDefinitions: false } });
+      expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({ version: 1, values: { communityBuildHistory: false, fetchTableDefinitions: false } });
       await fixedWindow(page, app, 'fetch-off');
       await page.keyboard.press('Escape');
       await expect(page.getByRole('heading', { name: 'Builds', level: 1 })).toBeVisible();
@@ -86,19 +87,19 @@ test('the real engine saves Community build history in its data folder and it su
     try {
       await page.keyboard.press('Control+Comma');
       await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeFocused();
-      await expect(community(page)).toHaveAttribute('aria-checked', 'true');
-      await expect(community(page)).toHaveText('On');
+      await expect(community(page)).toHaveAttribute('aria-checked', 'false');
+      await expect(community(page)).toHaveText('Off');
       await expect(fetchSwitch(page)).toHaveAttribute('aria-checked', 'false');
     } finally { await app.close(); }
-    // A value VibeMiner doesn't understand falls back to the default and says so; switching replaces it.
+    // A value VibeMiner doesn't understand reads as Off, not the default On, and says so; switching replaces it.
     await writeFile(file, JSON.stringify({ version: 1, values: { communityBuildHistory: 'yes' } }));
     ({ app, page } = await realEngine(data));
     try {
       await page.keyboard.press('Control+Comma');
       await expect(community(page)).toHaveAttribute('aria-checked', 'false');
-      await expect(page.getByText('Default: Off · in use now')).toBeVisible();
+      await expect(page.getByText('Default: On · Off in use now')).toBeVisible();
       await expect(page.locator('#settings-row-community').getByRole('note')).toContainText('(SETTING_UNREADABLE)');
-      await expect(page.getByText('1 setting is using its default')).toBeVisible();
+      await expect(page.getByText('1 setting is Off until you switch it')).toBeVisible();
       await fixedWindow(page, app, 'unreadable');
       // A failed write leaves the saved file as it was and is never replayed on its own.
       await mkdir(path.join(data, 'catalog', 'settings-v1.json.tmp'));
@@ -124,7 +125,7 @@ test('the real engine saves Community build history in its data folder and it su
     try {
       await page.keyboard.press('Control+Comma');
       await expect(community(page)).toHaveAttribute('aria-disabled', 'true');
-      await expect(page.locator('#settings-row-community').getByRole('note')).toContainText('Saved by a newer VibeMiner. Using the default, Off.');
+      await expect(page.locator('#settings-row-community').getByRole('note')).toContainText('Saved by a newer VibeMiner. Using Off.');
       for (const line of ['#settings-community-save', '#settings-fetch-save']) await expect(page.locator(line)).toHaveText('Can’t be changed here: saved by a newer VibeMiner.');
       await expect(fetchSwitch(page)).toHaveAttribute('aria-disabled', 'true');
       await community(page).click({ force: true });
@@ -140,7 +141,7 @@ test('the real engine saves Community build history in its data folder and it su
     try {
       await page.keyboard.press('Control+Comma');
       await expect(community(page)).toHaveAttribute('aria-disabled', 'true');
-      await expect(page.locator('#settings-row-community').getByRole('note')).toContainText('Settings file not read. Using the default, Off.');
+      await expect(page.locator('#settings-row-community').getByRole('note')).toContainText('Settings file not read. Using Off.');
       await expect(page.locator('.st-side')).toContainText('Not known');
       await expect(page.getByText(/Your choice is saved now/)).toHaveCount(0);
       const again = page.locator('#settings-row-community').getByRole('note').getByRole('button', { name: 'Read again' });
@@ -178,7 +179,7 @@ test('Settings from Home names the area it returns to and gives it back unchange
     await expect(page.getByRole('button', { name: '← Back to Tables' })).toBeVisible();
     await expect(page.locator('.st-statusbar')).toContainText('Open build kept:');
     await expect(page.locator('.st-statusbar')).toContainText('Authored test data');
-    await expect(community(page)).toHaveAttribute('aria-checked', 'false');
+    await expect(community(page)).toHaveAttribute('aria-checked', 'true');
     await fixedWindow(page, app, 'from-home');
     // Tab order: skip link, Back, then the switch; About has no controls.
     await page.getByRole('heading', { name: 'Settings', level: 1 }).focus();

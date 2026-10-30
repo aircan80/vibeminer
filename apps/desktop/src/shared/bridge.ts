@@ -16,6 +16,7 @@ import type { SettingsSnapshot, SettingsSetParams, StorageMeasurement, PreparedD
 import type { RetentionTarget, RetentionSnapshot, RetentionList, DownloadSummaries, DownloadSummariesParams, DownloadChanges, DownloadChangesParams, DownloadCheckParams, DownloadCheckResult } from '../../../../contracts/generated/discovery';
 import type { TableDataParams, TableRowsParams } from './table-data';
 import type { TableReferenceTextPage, TableFollowPage } from '../../../../contracts/generated/discovery';
+import type { BuildAvailability, BuildAvailabilityParams } from '../../../../contracts/generated/discovery';
 import type { TableFollowParams } from './table-follow';
 import type { Product, DiscoveryPage, DiscoveryCatalogPage, EngineProgress, WorkspaceSnapshot, InventoryPage, DownloadPage, TableCatalogPage, TableDefinitionSnapshot, TableDataSnapshot, TableDataReadiness, TableDataPage, InventoryFilesPage, InventoryFileDetail } from '../../../../contracts/generated/discovery';
 import type { TablesCatalogParams, TableDefinitionParams } from './tables';
@@ -26,7 +27,7 @@ export type ReadParams = { productId: string; filter?: DiscoveryFilter; limit?: 
 /** Cross-product read. Without productId it reads every registered product. */
 export type ReadAllParams = { productId?: string; filter?: DiscoveryFilter; limit?: number; cursor?: string };
 export type OpenParams = { productId: string; buildIdentity: string; sourceRegion: string };
-export type RequestMethod = 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'workspace.open' | 'inventory.read' | 'inventory.files' | 'inventory.file' | 'inventory.catalog' | 'inventory.catalogs' | 'inventory.catalog.set' | 'download.read' | 'download.summaries' | 'download.changes' | 'download.check' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'tables.referenceText' | 'tables.follow' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'settings.read' | 'settings.set' | 'settings.listfile.read' | 'settings.listfile.check' | 'settings.storage.measure' | 'settings.storage.builds' | 'settings.storage.free' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.facts' | 'items.labels' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
+export type RequestMethod = 'builds.availability.check' | 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'workspace.open' | 'inventory.read' | 'inventory.files' | 'inventory.file' | 'inventory.catalog' | 'inventory.catalogs' | 'inventory.catalog.set' | 'download.read' | 'download.summaries' | 'download.changes' | 'download.check' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'tables.referenceText' | 'tables.follow' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'settings.read' | 'settings.set' | 'settings.listfile.read' | 'settings.listfile.check' | 'settings.storage.measure' | 'settings.storage.builds' | 'settings.storage.free' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.facts' | 'items.labels' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
 /** An engine failure; definition (D101) says which table no definition could read and how the Settings switch read. */
 export type BridgeReply<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; retryable: boolean; definition?: TableDefinitionProblem } };
 export interface DiscoveryBridge {
@@ -85,6 +86,11 @@ export interface DiscoveryBridge {
    * requestId; cancel it with cancel(requestId). Needs download-check-v1.
    */
   downloadCheck?(params: DownloadCheckParams, requestId: string): Promise<BridgeReply<DownloadCheckResult>>;
+  /**
+   * Tests one saved build on Blizzard's CDN in stages (#9, D106). Reports progress for requestId; cancel it with
+   * cancel(requestId). Needs build-availability-v1.
+   */
+  checkAvailability?(params: BuildAvailabilityParams, requestId: string): Promise<BridgeReply<BuildAvailability>>;
   itemsData(params: ItemsContext): Promise<BridgeReply<ItemsReadiness>>;
   itemsPrepare(params: ItemsContext, requestId: string): Promise<BridgeReply<ItemsSnapshot>>;
   itemsPage(params: ItemsPageParams): Promise<BridgeReply<ItemsPage>>;
@@ -141,7 +147,9 @@ export function catalogPageMatches(value: DiscoveryCatalogPage, params: ReadAllP
   const product = params.productId ?? null, filter = params.filter ?? 'all';
   const ids = new Set(value.builds.map(build => build.id)), statuses = new Set(value.products.map(status => status.productId));
   return value.productId === product && value.filter === filter && value.builds.length <= (params.limit ?? 50) && ids.size === value.builds.length && statuses.size === value.products.length
-    && value.builds.every(build => (product === null || build.productId === product) && statuses.has(build.productId) && (filter !== 'local' || build.isLocal) && (filter !== 'advertised' || build.isAdvertised))
+    && value.builds.every(build => (product === null || build.productId === product) && statuses.has(build.productId) && (filter !== 'local' || build.isLocal) && (filter !== 'advertised' || build.isAdvertised)
+      // A community build (D106) is listed only in All while the list is on, and is never a Blizzard observation.
+      && (!build.community || filter === 'all' && value.communityBuilds.enabled && !build.isAdvertised && !build.isLocal && build.regions.length === 0 && build.sourceReceipts.length === 0))
     && value.refreshProblems.every(problem => statuses.has(problem.productId)) && (value.nextCursor === null || value.builds.length > 0);
 }
 

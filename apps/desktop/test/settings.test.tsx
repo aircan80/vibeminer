@@ -22,8 +22,8 @@ const success = <T,>(value: T): BridgeReply<T> => ({ ok: true, value });
 const refused = (code: string, message: string, retryable = true) => ({ ok: false as const, error: { code, message, retryable } });
 const unavailable = async () => refused('NOT_TESTED', 'Outside this test.', false);
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
-const fresh: SettingsSnapshot = { formatVersion: 1, file: 'absent', problem: null, lastChangedAt: null, communityBuildHistory: { value: false, defaultValue: false, source: 'default', problem: null }, fetchTableDefinitions: { value: true, defaultValue: true, source: 'default', problem: null }, communityListfile: { value: true, defaultValue: true, source: 'default', problem: null }, storage: { dataDirectory: '/authored/profile/engine-v1' }, downloadLimits: { parallelDownloads: 4, backgroundDownloads: 2, bandwidthCapBytesPerSecond: null, adjustable: false } };
-const saved = (value: boolean, at = '2026-10-20T13:14:00.0000000+00:00'): SettingsSnapshot => ({ ...fresh, file: 'read', lastChangedAt: at, communityBuildHistory: { value, defaultValue: false, source: 'saved', problem: null } });
+const fresh: SettingsSnapshot = { formatVersion: 1, file: 'absent', problem: null, lastChangedAt: null, communityBuildHistory: { value: true, defaultValue: true, source: 'default', problem: null }, fetchTableDefinitions: { value: true, defaultValue: true, source: 'default', problem: null }, communityListfile: { value: true, defaultValue: true, source: 'default', problem: null }, storage: { dataDirectory: '/authored/profile/engine-v1' }, downloadLimits: { parallelDownloads: 4, backgroundDownloads: 2, bandwidthCapBytesPerSecond: null, adjustable: false } };
+const saved = (value: boolean, at = '2026-10-20T13:14:00.0000000+00:00'): SettingsSnapshot => ({ ...fresh, file: 'read', lastChangedAt: at, communityBuildHistory: { value, defaultValue: true, source: 'saved', problem: null } });
 const communityNote = () => within(document.getElementById('settings-row-community')!).getByRole('note');
 const measured: StorageMeasurement = { bytes: '51749982208', files: '1204', skipped: '0', startedAt: '2026-10-20T13:12:00.0000000+00:00', measuredAt: '2026-10-20T13:12:04.0000000+00:00' };
 function bridgeMock(settings: Partial<DiscoveryBridge> = {}): DiscoveryBridge {
@@ -66,7 +66,7 @@ describe('settings bridge payloads', () => {
     expect(settingsSnapshotMatches({ ...fresh, communityBuildHistory: { ...fresh.communityBuildHistory, source: 'saved', value: true } })).toBe(false);
     expect(settingsSnapshotMatches({ ...fresh, lastChangedAt: '2026-10-20T13:14:00Z' })).toBe(false);
     expect(settingsSnapshotMatches({ ...fresh, file: 'unreadable', problem: null })).toBe(false);
-    expect(settingsSnapshotMatches({ ...saved(true), communityBuildHistory: { value: true, defaultValue: false, source: 'unreadable', problem: { code: 'SETTING_UNREADABLE', message: 'x', retryable: false } } })).toBe(false);
+    expect(settingsSnapshotMatches({ ...saved(true), communityBuildHistory: { value: true, defaultValue: true, source: 'unreadable', problem: { code: 'SETTING_UNREADABLE', message: 'x', retryable: false } } })).toBe(false);
     expect(settingsSnapshotMatches({ ...fresh, downloadLimits: { ...fresh.downloadLimits, backgroundDownloads: 5 } })).toBe(false);
     expect(settingsSetMatches(saved(true), { name: 'communityBuildHistory', value: true })).toBe(true);
     expect(settingsSetMatches(saved(false), { name: 'communityBuildHistory', value: true })).toBe(false);
@@ -78,7 +78,7 @@ describe('settings bridge payloads', () => {
     const unreadable = { code: 'SETTING_UNREADABLE', message: 'x', retryable: false };
     expect(settingsSnapshotMatches({ ...fresh, file: 'read', lastChangedAt: '2026-10-23T12:00:00Z', fetchTableDefinitions: { value: false, defaultValue: true, source: 'unreadable', problem: unreadable } })).toBe(true);
     expect(settingsSnapshotMatches({ ...fresh, file: 'read', lastChangedAt: '2026-10-23T12:00:00Z', fetchTableDefinitions: { value: true, defaultValue: true, source: 'unreadable', problem: unreadable } })).toBe(false);
-    expect(settingsSnapshotMatches({ ...fresh, file: 'newer', problem: { code: 'SETTINGS_VERSION', message: 'x', retryable: false }, communityBuildHistory: { ...fresh.communityBuildHistory, source: 'unreadable', problem: { code: 'SETTINGS_VERSION', message: 'x', retryable: false } } })).toBe(false);
+    expect(settingsSnapshotMatches({ ...fresh, file: 'newer', problem: { code: 'SETTINGS_VERSION', message: 'x', retryable: false }, communityBuildHistory: { ...fresh.communityBuildHistory, value: false, source: 'unreadable', problem: { code: 'SETTINGS_VERSION', message: 'x', retryable: false } } })).toBe(false);
     expect(storageMeasurementMatches(measured)).toBe(true);
     expect(storageMeasurementMatches({ ...measured, measuredAt: '2026-10-20T13:11:00Z' })).toBe(false);
   });
@@ -160,10 +160,11 @@ describe('Settings view', () => {
     expect(screen.getByText('Reading settings…')).toBeVisible();
     expect(screen.getByText('Not read yet')).toBeVisible();
     await act(async () => { reading.resolve(success(fresh)); });
+    // Owner decision on #9: the wago.tools build list is on by default (D106).
     const toggle = screen.getByRole('switch', { name: /Community build history/ });
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-    expect(toggle).toHaveTextContent('Off');
-    expect(screen.getByText('Default: Off')).toBeVisible();
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(toggle).toHaveTextContent('On');
+    expect(within(document.getElementById('settings-row-community')!).getByText('Default: On')).toBeVisible();
     expect(screen.getByText('Never changed')).toBeVisible();
     expect(screen.getByText('Up to 4 at once, at most 2 of them for background downloads')).toBeVisible();
     expect(screen.getByText('Fixed for now')).toBeVisible();
@@ -174,33 +175,33 @@ describe('Settings view', () => {
     await openFromDiscovery(bridge);
     const toggle = await screen.findByRole('switch', { name: /Community build history/ });
     toggle.focus(); fireEvent.click(toggle);
-    expect(bridge.settingsSet).toHaveBeenCalledWith({ name: 'communityBuildHistory', value: true });
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(bridge.settingsSet).toHaveBeenCalledWith({ name: 'communityBuildHistory', value: false });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
     expect(toggle).toHaveAttribute('aria-disabled', 'true');
-    expect(toggle).toHaveTextContent('Turning on…');
+    expect(toggle).toHaveTextContent('Turning off…');
     expect(screen.getByText('Saving…')).toBeVisible();
     fireEvent.click(toggle);
     expect(bridge.settingsSet).toHaveBeenCalledTimes(1);
-    await act(async () => { commit.resolve(success(saved(true))); });
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
-    expect(toggle).toHaveTextContent('On');
+    await act(async () => { commit.resolve(success(saved(false))); });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).toHaveTextContent('Off');
     expect(toggle).toHaveFocus();
     expect(within(document.getElementById('settings-community-save')!).getByText('Saved')).toBeVisible();
   });
   it('says a failed save left the value as it was, never replays it, and Retry keeps focus on the switch', async () => {
-    const settingsSet = vi.fn().mockResolvedValueOnce(refused('SETTINGS_WRITE_FAILED', 'The engine couldn’t write the settings file. Nothing else changed.')).mockResolvedValueOnce(success(saved(true)));
+    const settingsSet = vi.fn().mockResolvedValueOnce(refused('SETTINGS_WRITE_FAILED', 'The engine couldn’t write the settings file. Nothing else changed.')).mockResolvedValueOnce(success(saved(false)));
     await openFromDiscovery(bridgeMock({ settingsSet }));
     fireEvent.click(await screen.findByRole('switch', { name: /Community build history/ }));
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Couldn’t save Community build history. It’s still Off.');
+    expect(alert).toHaveTextContent('Couldn’t save Community build history. It’s still On.');
     expect(alert).toHaveTextContent('(SETTINGS_WRITE_FAILED)');
-    expect(screen.getByRole('switch', { name: /Community build history/ })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('switch', { name: /Community build history/ })).toHaveAttribute('aria-checked', 'true');
     expect(settingsSet).toHaveBeenCalledTimes(1);
-    const retry = screen.getByRole('button', { name: 'Retry turning on' });
+    const retry = screen.getByRole('button', { name: 'Retry turning off' });
     retry.focus(); fireEvent.click(retry);
     expect(screen.getByRole('switch', { name: /Community build history/ })).toHaveFocus();
-    await waitFor(() => expect(screen.getByRole('switch', { name: /Community build history/ })).toHaveAttribute('aria-checked', 'true'));
-    expect(settingsSet).toHaveBeenNthCalledWith(2, { name: 'communityBuildHistory', value: true });
+    await waitFor(() => expect(screen.getByRole('switch', { name: /Community build history/ })).toHaveAttribute('aria-checked', 'false'));
+    expect(settingsSet).toHaveBeenNthCalledWith(2, { name: 'communityBuildHistory', value: false });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
   it('shows Fetch newer table definitions on by default under Tables and saves it on its own', async () => {
@@ -224,7 +225,7 @@ describe('Settings view', () => {
     expect(toggle).toHaveFocus();
     expect(within(document.getElementById('settings-fetch-save')!).getByText('Saved')).toBeVisible();
     expect(document.getElementById('settings-community-save')).toHaveTextContent('');
-    expect(screen.getByRole('switch', { name: /Community build history/ })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('switch', { name: /Community build history/ })).toHaveAttribute('aria-checked', 'true');
   });
   it('shows Community file names on by default under Files with the copy in use, and saves the switch on its own (D105)', async () => {
     const [ready] = listfileStatuses as CommunityListfileStatus[];
@@ -313,7 +314,7 @@ describe('Settings view', () => {
   });
   it('says each row of a damaged settings file reads as Off, and the About box never calls fetching Off its default', async () => {
     const problem = { code: 'SETTINGS_UNREADABLE', message: 'The settings file isn’t valid JSON.', retryable: false };
-    const damaged: SettingsSnapshot = { ...fresh, file: 'unreadable', problem, communityBuildHistory: { ...fresh.communityBuildHistory, source: 'unreadable', problem }, fetchTableDefinitions: { ...fresh.fetchTableDefinitions, value: false, source: 'unreadable', problem } };
+    const damaged: SettingsSnapshot = { ...fresh, file: 'unreadable', problem, communityBuildHistory: { ...fresh.communityBuildHistory, value: false, source: 'unreadable', problem }, fetchTableDefinitions: { ...fresh.fetchTableDefinitions, value: false, source: 'unreadable', problem } };
     await openFromDiscovery(bridgeMock({ settingsRead: vi.fn(async () => success(damaged)) }));
     const fetch = await screen.findByRole('switch', { name: /Fetch newer table definitions/ });
     expect(fetch).toHaveAttribute('aria-checked', 'false');
@@ -327,12 +328,13 @@ describe('Settings view', () => {
   it('shows an unreadable saved value as the default in use, with its code', async () => {
     await openFromDiscovery(bridgeMock({ settingsRead: vi.fn(async () => success(example as unknown as SettingsSnapshot)) }));
     const toggle = await screen.findByRole('switch', { name: /Community build history/ });
+    // An unreadable value fails closed: Off, not the default On, so nothing is fetched from wago.tools.
     expect(toggle).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByText('Default: Off · in use now')).toBeVisible();
+    expect(screen.getByText('Default: On · Off in use now')).toBeVisible();
     const note = screen.getByRole('note');
-    expect(note).toHaveTextContent('Saved value couldn’t be read. Using the default, Off.');
+    expect(note).toHaveTextContent('Saved value couldn’t be read. Using Off until you switch it.');
     expect(note).toHaveTextContent('(SETTING_UNREADABLE)');
-    expect(screen.getByText('1 setting is using its default')).toBeVisible();
+    expect(screen.getByText('1 setting is Off until you switch it')).toBeVisible();
   });
   it('reports a failed read at the row with Read again and shows nothing as if it were known', async () => {
     const settingsRead = vi.fn().mockResolvedValueOnce(refused('ENGINE_UNAVAILABLE', 'The local engine is unavailable.')).mockResolvedValueOnce(success(fresh));
@@ -347,7 +349,7 @@ describe('Settings view', () => {
   });
   it('locks the switch for a newer settings file, says why, and never offers a change that cannot work', async () => {
     const problem = { code: 'SETTINGS_VERSION', message: 'The settings file is version 2, saved by a newer VibeMiner.', retryable: false };
-    const newer: SettingsSnapshot = { ...fresh, file: 'newer', problem, communityBuildHistory: { ...fresh.communityBuildHistory, source: 'unreadable', problem }, fetchTableDefinitions: { ...fresh.fetchTableDefinitions, value: false, source: 'unreadable', problem } };
+    const newer: SettingsSnapshot = { ...fresh, file: 'newer', problem, communityBuildHistory: { ...fresh.communityBuildHistory, value: false, source: 'unreadable', problem }, fetchTableDefinitions: { ...fresh.fetchTableDefinitions, value: false, source: 'unreadable', problem } };
     const bridge = bridgeMock({ settingsRead: vi.fn(async () => success(newer)) });
     await openFromDiscovery(bridge);
     const toggle = await screen.findByRole('switch', { name: /Community build history/ });
@@ -355,7 +357,7 @@ describe('Settings view', () => {
     fireEvent.click(toggle);
     expect(bridge.settingsSet).not.toHaveBeenCalled();
     for (const row of ['settings-community-save', 'settings-fetch-save']) expect(document.getElementById(row)).toHaveTextContent('Can’t be changed here: saved by a newer VibeMiner.');
-    expect(communityNote()).toHaveTextContent('Saved by a newer VibeMiner. Using the default, Off.');
+    expect(communityNote()).toHaveTextContent('Saved by a newer VibeMiner. Using Off.');
     expect(communityNote()).toHaveTextContent('(SETTINGS_VERSION)');
     expect(within(document.getElementById('settings-row-fetch')!).getByRole('note')).toHaveTextContent('Saved by a newer VibeMiner. Using Off.');
     expect(screen.getByRole('switch', { name: /Fetch newer table definitions/ })).toHaveAccessibleDescription(/Using Off\./);
@@ -366,14 +368,14 @@ describe('Settings view', () => {
   });
   it('locks the switch for a file that was never read and offers Read again only when it can help', async () => {
     const problem = { code: 'SETTINGS_NOT_READ', message: 'The settings file couldn’t be opened. It may be locked or not readable.', retryable: true };
-    const locked: SettingsSnapshot = { ...fresh, file: 'unreadable', problem, communityBuildHistory: { ...fresh.communityBuildHistory, source: 'unreadable', problem }, fetchTableDefinitions: { ...fresh.fetchTableDefinitions, value: false, source: 'unreadable', problem } };
+    const locked: SettingsSnapshot = { ...fresh, file: 'unreadable', problem, communityBuildHistory: { ...fresh.communityBuildHistory, value: false, source: 'unreadable', problem }, fetchTableDefinitions: { ...fresh.fetchTableDefinitions, value: false, source: 'unreadable', problem } };
     const settingsRead = vi.fn().mockResolvedValueOnce(success(locked)).mockResolvedValueOnce(success(fresh)), bridge = bridgeMock({ settingsRead });
     await openFromDiscovery(bridge);
     const toggle = await screen.findByRole('switch', { name: /Community build history/ });
     expect(toggle).toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(toggle);
     expect(bridge.settingsSet).not.toHaveBeenCalled();
-    expect(communityNote()).toHaveTextContent('Settings file not read. Using the default, Off.');
+    expect(communityNote()).toHaveTextContent('Settings file not read. Using Off.');
     expect(screen.getByText('Settings file not read')).toBeVisible();
     const again = screen.getByRole('button', { name: 'Read again' });
     again.focus(); fireEvent.click(again);
@@ -382,7 +384,7 @@ describe('Settings view', () => {
   });
   it('names the file and the next step when this version can never read it, and claims nothing is saved', async () => {
     const problem = { code: 'SETTINGS_NOT_READ', message: 'The settings file is larger than VibeMiner allows, so it wasn’t read.', retryable: false };
-    const oversized: SettingsSnapshot = { ...fresh, file: 'unreadable', problem, communityBuildHistory: { ...fresh.communityBuildHistory, source: 'unreadable', problem }, fetchTableDefinitions: { ...fresh.fetchTableDefinitions, value: false, source: 'unreadable', problem } };
+    const oversized: SettingsSnapshot = { ...fresh, file: 'unreadable', problem, communityBuildHistory: { ...fresh.communityBuildHistory, value: false, source: 'unreadable', problem }, fetchTableDefinitions: { ...fresh.fetchTableDefinitions, value: false, source: 'unreadable', problem } };
     await openFromDiscovery(bridgeMock({ settingsRead: vi.fn(async () => success(oversized)) }));
     const toggle = await screen.findByRole('switch', { name: /Community build history/ });
     expect(toggle).toHaveAttribute('aria-disabled', 'true');

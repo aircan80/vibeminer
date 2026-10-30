@@ -32,6 +32,7 @@ import { useWorkspaceFlow, type Opening } from './useWorkspaceFlow';
 import { PreparationView, HomeView } from './WorkspaceViews';
 import brand from '../../../../branding/vibeminer.svg';
 import { SettingsButton, SettingsProvider, SettingsView, type SettingsOrigin } from './Settings';
+import { AvailabilityRow, useAvailabilityCheck } from './BuildAvailability';
 const stamp = (value: string | null) => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Not checked yet';
 const regions = (values: string[]) => values.length ? values.map(x => x.toUpperCase()).join(', ') : 'None recorded';
 const short = (value: string) => `${value.slice(0, 10)}…${value.slice(-4)}`;
@@ -206,7 +207,7 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
   }).catch(() => { if (!disposed) setProblem('The local engine is unavailable. Restart VibeMiner to reconnect.'); }); return () => { disposed = true; }; }, [bridge]);
   return <SettingsProvider value={settingsApi}><DownloadActivity tasks={tasks} contextKey={activityContext} onInfoAction={(info,action)=>{if(action==='refreshStatus'&&info.key===activityContext&&info.target&&workspace?.download&&info.target.ledgerId===workspace.download.ledgerId&&matches(info.target))retention.refresh(info.target);}} onAction={(key,action)=>{if(action==='view'&&settingsState.current){returning.current=null;setSettings(null);}/* View research leaves Settings for the task's screen. */taskActions.get(key)?.get(action)?.();}}>
     <div className="discovery-screen" data-app-view="" hidden={flow.view !== 'discovery' || !!settings} inert={flow.view !== 'discovery' || !!settings}><a className="skip" href="#builds">Skip to builds</a>
-      <DiscoveryWorkspace active={flow.view === 'discovery' && !settings} products={products} bridge={bridge} acknowledgedBuild={flow.operation?.result?.build} acknowledgedRegion={flow.operation?.result?.sourceReference.region} onAcknowledgedBuild={setCatalogOpenBuild} summariesEnabled={retention.features.includes('download-summary-v1')} downloadNudge={downloadNudge} opening={flow.operation} onShowOpening={() => flow.showActive()} onCancelOpening={() => { void flow.cancel(); }} onOpen={(build, region) => { void flow.open(build, region, products.find(p => p.id === build.productId)?.label || build.productId); }}
+      <DiscoveryWorkspace active={flow.view === 'discovery' && !settings} products={products} bridge={bridge} acknowledgedBuild={flow.operation?.result?.build} acknowledgedRegion={flow.operation?.result?.sourceReference.region} onAcknowledgedBuild={setCatalogOpenBuild} summariesEnabled={retention.features.includes('download-summary-v1')} availabilityEnabled={retention.features.includes('build-availability-v1')} downloadNudge={downloadNudge} opening={flow.operation} onShowOpening={() => flow.showActive()} onCancelOpening={() => { void flow.cancel(); }} onOpen={(build, region) => { void flow.open(build, region, products.find(p => p.id === build.productId)?.label || build.productId); }}
         fixtureLabel={bridge.fixtureLabel ?? undefined} problem={problem}/>
     </div>
     <div className="app-view" data-app-view="" hidden={flow.view === 'discovery' || !!settings} inert={flow.view === 'discovery' || !!settings}>
@@ -287,10 +288,11 @@ export function checkLine(summary: CheckSummary, refreshed: boolean): string | n
   const count = summary.checked.length === summary.total ? `${summary.total}` : `${summary.checked.length} of ${summary.total}`;
   return [`Checked ${count} products`, ...(summary.failed.length ? [`${productNames(summary.failed)} could not be checked`] : []), ...(summary.notChecked.length ? [`${productNames(summary.notChecked)} not checked`] : [])].join(' · ');
 }
-function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabel, problem, summariesEnabled, downloadNudge, opening, onShowOpening, onCancelOpening, onOpen, acknowledgedBuild, acknowledgedRegion, onAcknowledgedBuild }: { active: boolean; products: Product[]; bridge: DiscoveryBridge; fixtureLabel?: string; problem: string; summariesEnabled: boolean; downloadNudge: string; opening: Opening | null; onShowOpening: () => void; onCancelOpening: () => void; acknowledgedBuild?: Build; acknowledgedRegion?: string; onOpen: (build: Build, sourceRegion: string) => void; onAcknowledgedBuild?: (build: Build) => void }) {
+function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabel, problem, summariesEnabled, availabilityEnabled = false, downloadNudge, opening, onShowOpening, onCancelOpening, onOpen, acknowledgedBuild, acknowledgedRegion, onAcknowledgedBuild }: { active: boolean; products: Product[]; bridge: DiscoveryBridge; fixtureLabel?: string; problem: string; summariesEnabled: boolean; availabilityEnabled?: boolean; downloadNudge: string; opening: Opening | null; onShowOpening: () => void; onCancelOpening: () => void; acknowledgedBuild?: Build; acknowledgedRegion?: string; onOpen: (build: Build, sourceRegion: string) => void; onAcknowledgedBuild?: (build: Build) => void }) {
   const [page, setPage] = useState<DiscoveryCatalogPage | null>(null);
   const { summaries, error: summaryProblem, readAt: summariesReadAt } = useDownloadSummaries(bridge, page?.builds ?? [], visibleView, summariesEnabled, downloadNudge);
   const summaryOf = (build: Build) => summaries.get(summaryKey(build.productId, build.id));
+  const availability = useAvailabilityCheck(bridge, availabilityEnabled);
   useEffect(() => {
     if (!acknowledgedBuild) return;
     setPage(previous => {
@@ -426,6 +428,16 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
     void read('all', 'all', undefined, true);
     return () => { disposed.current = true; ++generation.current; off(); if (active.current) void bridge.cancel(active.current).catch(() => {}); };
   }, []);
+  // Turning Community build history on or off in Settings changes which builds the engine lists (D106), so Discovery
+  // reads its view again at once, keeping the selection, instead of showing the old list until the next read.
+  useEffect(() => {
+    const changed = (event: Event) => {
+      if ((event as CustomEvent<{ name?: string }>).detail?.name !== 'communityBuildHistory' || active.current || refusedRead.current) return;
+      void read(latestFilter.current, latestProduct.current, undefined, true);
+    };
+    window.addEventListener('vibeminer-settings-changed', changed);
+    return () => window.removeEventListener('vibeminer-settings-changed', changed);
+  }, []);
   async function cancel() {
     if (!active.current || stopping) return;
     setStopping(true); setMessage('Stopping discovery…');
@@ -502,6 +514,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
     {problems.length > 0 && !refused && <div className={`dv-notice${failedChecks.length ? ' error' : ''}`}><div><strong>{allFailed ? 'Refresh unavailable' : 'Refresh incomplete'}</strong>{anySaved ? `${retainedEvidence(failedStatuses)}${failedStatuses.some(s => s.hasSavedHistory) ? ' A failed check does not remove earlier advertisements.' : ''}` : 'No saved observations are available yet.'} Retry discovery checks every product again.<ul>{shownProblems.map(p => <li key={p.key}>{p.label}: {p.text} <code>({p.code})</code></li>)}</ul>{problems.length > shownProblems.length && <span>{problems.length - shownProblems.length} more problems. Source details lists the problems of the selected build's product.</span>}</div>{!busy && <button className="dv-btn" onClick={() => { refreshButton.current?.focus(); void refresh(); }}>Retry discovery</button>}</div>}
     {!refused && hidden && filtered.length > 0 && (selected || filtersActive) && <div className="dv-notice"><div><strong>Selected build is hidden by these filters</strong>{selected ? `${selected.productId} ${selected.version} is still selected.` : 'The refresh did not reload its details.'} Clear filters to see it in the list.</div><button className="dv-btn" onClick={clearFilters}>Clear filters</button></div>}
     {openingElsewhere && <div className="dv-notice info">{openingBox(openingElsewhere)}</div>}
+    {!refused && page?.communityBuilds?.state === 'failed' && page.communityBuilds.problem && <div className="dv-notice" role="status"><div><strong>Community build history not updated</strong>{page.communityBuilds.problem.message} {page.communityBuilds.fetchedAt ? `Builds from the list read ${stamp(page.communityBuilds.fetchedAt)} are kept.` : 'No community builds are listed yet.'} {page.communityBuilds.nextCheckAfter ? `Refresh builds asks wago.tools again after ${stamp(page.communityBuilds.nextCheckAfter)}.` : ''} <code>({page.communityBuilds.problem.code})</code></div></div>}
   </>;
   const summary = activity_ && activity_.entry && !activity_.expanded ? activity_.summary : null;
   const windowRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLElement>(null), statusRef = useRef<HTMLElement>(null);
@@ -593,7 +606,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
             <div className="dv-cols dv-thead" aria-hidden="true"><span>Product</span><span>Version</span><span>Build</span>{summaryProblem ? <span className="dv-stale-head">Downloaded<span className="dv-stale-tag">not current</span></span> : <span>Downloaded</span>}<span>In VibeMiner</span></div>
             <div role="listbox" id="builds" aria-label="Builds" tabIndex={0} aria-activedescendant={`build-option-${filtered[activeIndex].id}`} onKeyDown={listKey}>{filtered.map(build => <div role="option" key={build.id} id={`build-option-${build.id}`} data-build-id={build.id} data-product-id={build.productId} className={`dv-cols build-row${filtered[activeIndex].id === build.id ? ' active' : ''}${build.isAdvertised ? ' current' : ''}`} aria-selected={selectedId === build.id} onClick={() => select(build)}>
               <span className="dv-product">{build.productId.split('_').map((part, index) => index ? <Fragment key={index}>_<wbr/>{part}</Fragment> : part)}</span>
-              <span className="dv-version">{build.version || 'Version not supplied'}{build.isAdvertised && <span className="dv-pill current">Current</span>}<span className="visually-hidden">, Config {short(build.buildConfig)}, Identity {short(build.id)}</span></span>
+              <span className="dv-version">{build.version || 'Version not supplied'}{build.isAdvertised && <span className="dv-pill current">Current</span>}{build.community && <span className="dv-pill community">Community</span>}<span className="visually-hidden">, Config {short(build.buildConfig)}, Identity {short(build.id)}</span></span>
               <span className="dv-dim"><span className="visually-hidden">Build </span>{build.buildId || 'not supplied'}</span>
               <DownloadedCell summary={summaryOf(build)} stale={!!summaryProblem}/>
               <span>{build.isLocal && <span className="dv-pill">Prepared</span>}{build.isNew && <span className="dv-pill gold">New to VibeMiner</span>}{!build.isLocal && !build.isNew && <span className="dv-dim">—</span>}</span>
@@ -607,7 +620,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
       {!refused && !(nothingSaved && !selected) && <aside className="dv-inspector" id="inspector" aria-labelledby="inspector-heading" inert={!!activity_?.expanded}>{selected ? <>
         <div className="dv-insp-head"><div className="dv-label">Selected build</div><h2 id="inspector-heading" className="dv-selectable" tabIndex={-1}>{selected.version}</h2><p className="inspector-product">World of Warcraft · {label(selected.productId) || selected.productId} · <code>{selected.productId}</code></p>{shared && <button className="dv-btn dv-return" onClick={returnToList}>Return to build list</button>}</div>
         <div className="dv-insp-body">
-          {openingHere ? openingBox(openingHere) : <div className="dv-state"><strong>{selected.isLocal ? 'Prepared locally' : 'Not prepared'}</strong>{selected.isLocal ? summaryOf(selected)?.download?.downloadAll ? 'Local evidence recorded. Download all is on for this build.' : 'Local evidence recorded. Game content downloads on demand.' : 'Opening verifies configs and measures download size.'}</div>}
+          {openingHere ? openingBox(openingHere) : selected.community ? <div className="dv-state"><strong>Community build</strong>From the wago.tools build list, not a Blizzard observation. Check availability asks Blizzard’s CDN whether its files are still there.</div> : <div className="dv-state"><strong>{selected.isLocal ? 'Prepared locally' : 'Not prepared'}</strong>{selected.isLocal ? summaryOf(selected)?.download?.downloadAll ? 'Local evidence recorded. Download all is on for this build.' : 'Local evidence recorded. Game content downloads on demand.' : 'Opening verifies configs and measures download size.'}</div>}
           <div className="dv-label">Identity</div>
           <dl><dt>Product</dt><dd><code>{selected.productId}</code>{label(selected.productId) ? ` · ${label(selected.productId)}` : ''}</dd>
             <dt>Build</dt><dd className="dv-selectable">{selected.buildId || 'Not supplied'}</dd>
@@ -619,11 +632,12 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
           <CdnConfigHint build={selected} open={acknowledgedBuild?.productId === selected.productId && acknowledgedBuild.id === selected.id && acknowledgedRegion ? { cdnConfig: acknowledgedBuild.cdnConfig, region: acknowledgedRegion } : undefined}/>
           <DownloadSection summary={summaryOf(selected)} problem={summaryProblem} readAt={summariesReadAt}/>
           <div className="dv-label">Observation</div>
-          <dl><dt>Publication</dt><dd>{selected.isAdvertised ? `Current: advertised at the last completed check (${stamp(selected.lastSeenAt)})` : 'Not advertised at the last completed check'}{selectedStatus && failedNow(selectedStatus) && ' · latest check failed'}</dd>
+          <dl>{selected.community && <><dt>Source</dt><dd>Community build history from {selected.community.source} (not a Blizzard observation){selected.community.createdAt ? ` · listed there ${stamp(selected.community.createdAt)}` : ''}</dd></>}
+            <dt>Publication</dt><dd>{selected.community ? 'Never seen by VibeMiner on Blizzard’s version service' : selected.isAdvertised ? `Current: advertised at the last completed check (${stamp(selected.lastSeenAt)})` : 'Not advertised at the last completed check'}{!selected.community && selectedStatus && failedNow(selectedStatus) && ' · latest check failed'}</dd>
             <dt>Advertised in</dt><dd>{selected.advertisedRegions.length ? regions(selected.advertisedRegions) : 'None at last check'}</dd>
             <dt>CDN routes</dt><dd><RouteRegions build={selected} status={selectedStatus}/></dd>
-            <dt>Last seen</dt><dd>{stamp(selected.lastSeenAt)}</dd>
-            <dt>File availability</dt><dd>Not checked</dd></dl>
+            <dt>Last seen</dt><dd>{stamp(selected.lastSeenAt)}{selected.community && ' in the wago.tools list'}</dd>
+            <AvailabilityRow build={selected} check={availability}/></dl>
           {selected.identityFields.KeyRing && <p className="dv-note">A key ring reference does not mean its keys are available.</p>}
         </div>
         <BuildOpenAction key={selected.id} build={selected} onOpen={onOpen} onSource={() => setSourceOpen(true)}/>
@@ -645,7 +659,8 @@ function BuildOpenAction({ build, onOpen, onSource }: { build: Build; onOpen: (b
   const eligible = routeRegions(build);
   const [source, setSource] = useState(() => eligible.includes('us') ? 'us' : eligible[0] || '');
   const available = eligible.includes(source);
-  return <div className={`dv-insp-foot${available ? '' : ' blocked'}`}><div className="dv-field"><label htmlFor="opening-source">Download source</label><select id="opening-source" className="dv-control" value={available ? source : ''} onChange={event => setSource(event.target.value)} disabled={!eligible.length}>{!available && <option value="">No recorded source route</option>}{eligible.map(region => <option key={region} value={region}>{region.toUpperCase()}</option>)}</select></div><button className="dv-btn primary dv-open" disabled={!available} aria-describedby="open-reason" onClick={() => { if (available) onOpen(build, source); }}>Open build</button><button className="dv-btn" onClick={onSource}>Source details</button><p className="dv-reason" id="open-reason">{available ? 'Browsing never downloads game content.' : 'Open needs a recorded CDN route. Refresh builds to check again, or inspect Source details.'}</p></div>;
+  const reason = available ? 'Browsing never downloads game content.' : build.community ? 'Opening community builds isn’t supported yet: VibeMiner opens only builds it saw on Blizzard’s version service.' : 'Open needs a recorded CDN route. Refresh builds to check again, or inspect Source details.';
+  return <div className={`dv-insp-foot${available ? '' : ' blocked'}`}><div className="dv-field"><label htmlFor="opening-source">Download source</label><select id="opening-source" className="dv-control" value={available ? source : ''} onChange={event => setSource(event.target.value)} disabled={!eligible.length}>{!available && <option value="">No recorded source route</option>}{eligible.map(region => <option key={region} value={region}>{region.toUpperCase()}</option>)}</select></div><button className="dv-btn primary dv-open" disabled={!available} aria-describedby="open-reason" onClick={() => { if (available) onOpen(build, source); }}>Open build</button><button className="dv-btn" onClick={onSource}>Source details</button><p className="dv-reason" id="open-reason">{reason}</p></div>;
 }
 /**
  * The build's routed regions. Advertised regions without a route are named calmly with the engine's regional note;

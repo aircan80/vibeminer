@@ -1,4 +1,5 @@
 import {GeometryBinaryProtocol} from './geometry-binary-protocol';
+import { validAvailabilityCheck } from '../shared/availability';
 import {GeometryViewController,type GeometryDocumentOwner} from './geometry-view-controller';
 import {authorizedGeometryFetch} from './geometry-provenance';
 import {validGeometryParams,validGeometryRead,validGeometryViewEnter,validGeometryViewOpen,validGeometryBodyRetired,validGeometrySceneDisposal,validGeometryViewRelease} from '../shared/creature-geometry';
@@ -121,6 +122,7 @@ function registerBridge(): void {
       else if (method === 'tables.catalog') { if (!validTablesCatalog(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded definition catalogue query.'); }
       else if (method === 'tables.definition') { if (!validTableDefinition(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact provider table identity.'); }
       else if (method === 'download.read') { if (!validDownloadRead(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded download-object query.'); }
+      else if (method === 'builds.availability.check') { if (!validAvailabilityCheck(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact saved build to check.'); }
       else if (method === 'download.check') { if (!validDownloadCheck(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact measured download ledger.'); }
       else if (method === 'download.summaries') { if (!validSummariesParams(params)) throw new EngineFailure('INVALID_REQUEST', 'Choose one to 100 distinct exact builds.'); }
       else if (method === 'download.changes') { if (!validChangesParams(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Name the summary revision of the last read.'); }

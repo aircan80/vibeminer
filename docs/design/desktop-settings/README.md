@@ -83,7 +83,7 @@ Open [index.html](index.html). All values are authored samples and carry a dashe
 
 ## What the app does differently
 
-- No community source is picked yet ([#9](https://github.com/aircan80/vibeminer/issues/9)), so the app leaves out the sample source name and host and adds a **This version** line to Community build history: nothing changes until a source is added, and the choice is saved now.
+- Community build history ([#9](https://github.com/aircan80/vibeminer/issues/9), [D106](../../DECISIONS.md)) reads the wago.tools build list, so the app names it in place of the sample source and host, adds a **Source** line, and is **On** by default ("Default: On"). Like Fetch newer table definitions, an unreadable value reads as **Off** with "Default: On · Off in use now". Its **This version** line says community builds can be checked but not opened yet, and **When off** says community builds are hidden (none can be opened, so none stay). The failed-save notice and Retry follow the switch's position ("It's still On", **Retry turning off**). It takes effect at once: Discovery reads its builds again when the switch changes, while wago.tools is asked only at a due Refresh builds.
 - Size on disk is the sum of file lengths under the folder, measured when Settings opens. Items the walk couldn't read are named under the size, and a failed measurement offers **Measure again**.
 - A failed read of the settings shows **Couldn’t read settings.** at the row with **Read again**, and no switch.
 - `limits=adjustable` stays a proposal; the app shows the fixed values.

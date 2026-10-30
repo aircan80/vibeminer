@@ -16,6 +16,8 @@ With the Settings switch on (the default), the engine may fetch single WoWDBDefs
 
 The wow-listfile repository has no licence file, so VibeMiner never bundles, commits, ships or uses its listfile in fixtures. With the Settings switch on (the default), each install downloads it from the project's GitHub releases at runtime ([D105](DECISIONS.md)) and keeps it in its own data folder; the names are only shown, never redistributed. The Settings row credits wow-listfile contributors and says where it comes from, and the Files inspector names the release. Tests use small authored listfiles.
 
+The wago.tools build list publishes no terms. With the Settings switch on (the default), Refresh builds reads it at runtime at most once a day ([D106](DECISIONS.md)); the engine keeps only the build index it needs (product, version, config hashes) in its own catalog and never bundles, ships or redistributes the list. Tests use small authored lists.
+
 Three.js is pinned to `0.186.1` for graphics only, under MIT; the exact archive is integrity-locked. Its license and development-only TypeScript declaration attribution are retained in [the dependency notice](third-party/three/README.md), which packaging copies to `resources/legal/third-party/three`. No Three asset loader or development typing dependency implements acquisition or game parsing.
 
 ## Distribution

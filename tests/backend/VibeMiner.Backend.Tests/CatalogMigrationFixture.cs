@@ -4,8 +4,10 @@ internal static class CatalogMigrationFixture
 {
     // Synthetic old-schema cohorts must remove every newer table before setting their
     // historical user_version. Production migration never drops these tables.
+    // The step to version 22 added the community build list and availability checks (D106).
+    internal const string RemoveV22 = "DROP TABLE community_build_list; DROP TABLE community_builds; DROP TABLE build_availability;";
     // The step to version 21 added each retained appearance's key revision and VMA1 file (D103).
-    internal const string RemoveV21 = """
+    internal const string RemoveV21 = RemoveV22 + """
         DROP INDEX geometry_appearances_file; ALTER TABLE geometry_appearances DROP COLUMN artifact_bytes;
         ALTER TABLE geometry_appearances DROP COLUMN artifact_sha256; ALTER TABLE geometry_appearances DROP COLUMN key_revision;
         """;

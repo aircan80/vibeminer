@@ -7,7 +7,7 @@ namespace VibeMiner.Application;
 /// Storage measurement runs one walk at a time inside a time budget.
 /// </summary>
 public sealed class SettingsService(ISettingsStore store, IStorageMeasurer storage, DownloadLimitSettings limits,
-    TimeProvider? clock = null, TimeSpan? measurementBudget = null) : ITableDefinitionFetchPolicy, ICommunityListfilePolicy
+    TimeProvider? clock = null, TimeSpan? measurementBudget = null) : ITableDefinitionFetchPolicy, ICommunityListfilePolicy, ICommunityBuildPolicy
 {
     public const int FormatVersion = 1;
     public const string CommunityBuildHistory = "communityBuildHistory";
@@ -16,7 +16,8 @@ public sealed class SettingsService(ISettingsStore store, IStorageMeasurer stora
     /// <summary>The switches this version knows, in the order they are written.</summary>
     public static readonly IReadOnlyList<string> Switches = [CommunityBuildHistory, FetchTableDefinitions, CommunityListfile];
     public static readonly TimeSpan DefaultMeasurementBudget = TimeSpan.FromMinutes(5);
-    private const bool CommunityBuildHistoryDefault = false;
+    // Owner decision on #9: the wago.tools build list is on until the user turns it off.
+    private const bool CommunityBuildHistoryDefault = true;
     // Owner decision on #55: fetching newer definitions is on until the user turns it off.
     private const bool FetchTableDefinitionsDefault = true;
     // Owner decision on #21: community file names are on until the user turns them off.
@@ -40,6 +41,10 @@ public sealed class SettingsService(ISettingsStore store, IStorageMeasurer stora
     // The same fail-closed reading for the community listfile (D105).
     public async Task<bool> CommunityListfileEnabledAsync(CancellationToken token) =>
         (await ReadAsync(token)).CommunityListfile is { Source: not SettingSource.Unreadable, Value: true };
+
+    // And for the community build list (#9, D106).
+    public async Task<bool> CommunityBuildHistoryEnabledAsync(CancellationToken token) =>
+        (await ReadAsync(token)).CommunityBuildHistory is { Source: not SettingSource.Unreadable, Value: true };
 
     /// <summary>Raised with the switch's name and committed value after a change. Handlers must not block or throw.</summary>
     public event Action<string, bool>? Changed;

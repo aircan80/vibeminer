@@ -75,7 +75,87 @@
           ]
         }
       ],
-      "cdnConfigHistoryCount": 1
+      "cdnConfigHistoryCount": 1,
+      "availabilityCheck": {
+        "state": "available",
+        "checkedAt": "2026-10-19T08:30:00.0000000+00:00",
+        "scope": "indexes",
+        "buildConfig": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "cdnConfig": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "hosts": [
+          "us.cdn.blizzard.com",
+          "level3.ssl.blizzard.com"
+        ],
+        "buildConfigState": "verified",
+        "cdnConfigState": "verified",
+        "indexes": {
+          "total": 1412,
+          "present": 1412,
+          "missing": 0,
+          "unknown": 0
+        },
+        "archives": null,
+        "problem": null
+      },
+      "community": null
+    },
+    {
+      "id": "7777777777777777777777777777777777777777777777777777777777777777",
+      "productId": "wow",
+      "version": "11.2.7.67542",
+      "buildId": "67542",
+      "buildConfig": "11111111111111111111111111111111",
+      "cdnConfig": "22222222222222222222222222222222",
+      "productConfig": null,
+      "identityFields": {
+        "BuildConfig": "11111111111111111111111111111111",
+        "BuildId": "67542",
+        "VersionsName": "11.2.7.67542"
+      },
+      "regions": [],
+      "advertisedRegions": [],
+      "routeRegions": [],
+      "firstSeenAt": "2026-10-18T12:00:01.0000000+00:00",
+      "lastSeenAt": "2026-10-18T12:00:01.0000000+00:00",
+      "isNew": false,
+      "isAdvertised": false,
+      "isLocal": false,
+      "availability": "unknown",
+      "sourceReceipts": [],
+      "cdnConfigHistory": [
+        {
+          "cdnConfig": "22222222222222222222222222222222",
+          "firstSeenAt": "2026-10-18T12:00:01.0000000+00:00",
+          "lastSeenAt": "2026-10-18T12:00:01.0000000+00:00",
+          "regions": [],
+          "advertisedRegions": [],
+          "sourceReceipts": []
+        }
+      ],
+      "cdnConfigHistoryCount": 1,
+      "community": {
+        "source": "wago.tools",
+        "sourceUrl": "https://wago.tools/api/builds",
+        "createdAt": "2025-11-18T17:04:12.0000000+00:00",
+        "firstImportedAt": "2026-10-18T12:00:01.0000000+00:00",
+        "lastImportedAt": "2026-10-18T12:00:01.0000000+00:00"
+      },
+      "availabilityCheck": {
+        "state": "partlyAvailable",
+        "checkedAt": "2026-10-19T08:31:00.0000000+00:00",
+        "scope": "configs",
+        "buildConfig": "11111111111111111111111111111111",
+        "cdnConfig": "22222222222222222222222222222222",
+        "hosts": [
+          "us.cdn.blizzard.com",
+          "level3.ssl.blizzard.com"
+        ],
+        "buildConfigState": "verified",
+        "cdnConfigState": "missing",
+        "indexes": null,
+        "archives": null,
+        "problem": null
+      }
     },
     {
       "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
@@ -300,5 +380,15 @@
       "code": "CATALOG_BUSY",
       "message": "The discovery catalog is busy. Retry this operation."
     }
-  ]
+  ],
+  "communityBuilds": {
+    "enabled": true,
+    "state": "ready",
+    "source": "wago.tools",
+    "lastAttemptAt": "2026-10-18T12:00:00.0000000+00:00",
+    "fetchedAt": "2026-10-18T12:00:01.0000000+00:00",
+    "nextCheckAfter": "2026-10-19T12:00:00.0000000+00:00",
+    "buildCount": 1,
+    "problem": null
+  }
 }

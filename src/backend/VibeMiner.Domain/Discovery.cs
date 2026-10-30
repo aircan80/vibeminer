@@ -73,7 +73,13 @@ public sealed record Build(string Id, string ProductId, string Version, string B
     IReadOnlyList<string> AdvertisedRegions, IReadOnlyList<string> RouteRegions,
     string FirstSeenAt, string LastSeenAt, bool IsNew, bool IsAdvertised, bool IsLocal,
     string Availability, IReadOnlyList<SourceReceipt> SourceReceipts,
-    IReadOnlyList<CdnConfigObservation> CdnConfigHistory, int CdnConfigHistoryCount);
+    IReadOnlyList<CdnConfigObservation> CdnConfigHistory, int CdnConfigHistoryCount)
+{
+    /// <summary>Set only for a build from the community build list (#9, D106): it was never a Blizzard observation.</summary>
+    public CommunityBuildSource? Community { get; init; }
+    /// <summary>The latest availability check of this build on Blizzard's CDN, in discovery pages; null when never checked.</summary>
+    public BuildAvailability? AvailabilityCheck { get; init; }
+}
 /// <summary>
 /// One finding of a discovery check. Severity "problem" means the check did not get everything it asked for, so the
 /// product's check is partial. Severity "note" is a regional fact about the official source that leaves the check
@@ -104,7 +110,11 @@ public sealed record ProductRefreshProblem(string ProductId, string Code, string
 /// RefreshProblems is empty for reads; a cross-product refresh lists the products whose attempt did not complete.
 /// </summary>
 public sealed record DiscoveryCatalogPage(string? ProductId, string Filter, IReadOnlyList<Build> Builds, string? NextCursor,
-    IReadOnlyList<ProductDiscoveryStatus> Products, IReadOnlyList<ProductRefreshProblem> RefreshProblems);
+    IReadOnlyList<ProductDiscoveryStatus> Products, IReadOnlyList<ProductRefreshProblem> RefreshProblems)
+{
+    /// <summary>The community build list's state (#9, D106). Pages read with the community list off say off.</summary>
+    public CommunityBuildsStatus CommunityBuilds { get; init; } = CommunityBuildsStatus.Off;
+}
 /// <summary>Cross-product refresh progress: how many products have finished their check out of the registry total.</summary>
 public sealed record DiscoveryRefreshProgress(int Completed, int Total);
 

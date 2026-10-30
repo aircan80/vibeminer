@@ -388,6 +388,9 @@ export interface DiscoveryContract {
   preparedDataList?: PreparedDataList;
   preparedDataFreeParams?: PreparedDataFreeParams;
   preparedDataFreed?: PreparedDataFreed;
+  buildAvailabilityParams?: BuildAvailabilityParams;
+  buildAvailability?: BuildAvailability;
+  communityBuildsStatus?: CommunityBuildsStatus;
 }
 export interface Product {
   id: string;
@@ -449,6 +452,58 @@ export interface Build {
    * How many CDN configurations the build has in total. When it exceeds cdnConfigHistory's length, the older ones are omitted from this projection but kept in the catalog.
    */
   cdnConfigHistoryCount: number;
+  /**
+   * Set for a build from the community build list: it was never a Blizzard observation and has no regions, routes or receipts.
+   */
+  community?: CommunityBuildSource | null;
+  /**
+   * The build's latest availability check, in discovery catalog pages. Null or absent when never checked.
+   */
+  availabilityCheck?: BuildAvailability | null;
+}
+/**
+ * Where a community build came from (#9, D106). Only the build index came from there; every file still comes from Blizzard's CDN, verified. createdAt is the source's own date for the row, when it gave a readable one.
+ */
+export interface CommunityBuildSource {
+  source: 'wago.tools';
+  sourceUrl: string;
+  createdAt: string | null;
+  firstImportedAt: string;
+  lastImportedAt: string;
+}
+/**
+ * One availability check of a build on Blizzard's CDN (#9, D106), kept with the time it ran. scope is the last stage that ran. gone: the build config is missing on every host. partlyAvailable: the build config is there but the CDN config, an archive index or (when asked) an archive is missing. unknown: a server error, timeout or bad bytes left it undecided.
+ */
+export interface BuildAvailability {
+  state: 'available' | 'partlyAvailable' | 'gone' | 'unknown';
+  checkedAt: string;
+  scope: 'configs' | 'indexes' | 'archives';
+  buildConfig: string;
+  cdnConfig: string;
+  /**
+   * @minItems 1
+   * @maxItems 2
+   */
+  hosts: [string] | [string, string];
+  buildConfigState: 'verified' | 'missing' | 'invalid' | 'unknown';
+  cdnConfigState: 'verified' | 'missing' | 'invalid' | 'unknown';
+  indexes: AvailabilityCounts | null;
+  archives: AvailabilityCounts | null;
+  problem: SettingsProblem | null;
+}
+/**
+ * How many objects of one availability stage were present, missing, or couldn't be told (5xx, timeouts, offline).
+ */
+export interface AvailabilityCounts {
+  total: number;
+  present: number;
+  missing: number;
+  unknown: number;
+}
+export interface SettingsProblem {
+  code: string;
+  message: string;
+  retryable: boolean;
 }
 export interface DiscoveryProblem {
   region: string | null;
@@ -489,7 +544,7 @@ export interface ProductRefreshProblem {
   message: string;
 }
 /**
- * One bounded page of builds across every registered product, ordered by registry product order, then numeric BuildId descending (missing or non-decimal last), then build identity.
+ * One bounded page of builds across every registered product, ordered by registry product order, then numeric BuildId descending (missing or non-decimal last), then build identity. Community builds (#9) are listed in All only, among Blizzard builds in the same order.
  */
 export interface DiscoveryCatalogPage {
   /**
@@ -514,6 +569,20 @@ export interface DiscoveryCatalogPage {
    * @maxItems 100
    */
   refreshProblems: ProductRefreshProblem[];
+  communityBuilds: CommunityBuildsStatus;
+}
+/**
+ * The community build list from wago.tools (#9, D106) as the engine has it. off: the Settings switch reads as off and its builds are hidden. notFetched: on, never asked. ready: the latest attempt imported the list. failed: the latest attempt failed; builds from an earlier import stay. A Refresh builds asks again at most once a day, from nextCheckAfter. buildCount counts builds Blizzard didn't also advertise.
+ */
+export interface CommunityBuildsStatus {
+  enabled: boolean;
+  state: 'off' | 'notFetched' | 'ready' | 'failed';
+  source: 'wago.tools';
+  lastAttemptAt: string | null;
+  fetchedAt: string | null;
+  nextCheckAfter: string | null;
+  buildCount: number;
+  problem: SettingsProblem | null;
 }
 export interface DiscoveryReadAllParams {
   productId?: string;
@@ -620,7 +689,8 @@ export interface EngineRequest1 {
     | 'settings.listfile.check'
     | 'settings.storage.measure'
     | 'settings.storage.builds'
-    | 'settings.storage.free';
+    | 'settings.storage.free'
+    | 'builds.availability.check';
   params: {
     [k: string]: unknown;
   };
@@ -4036,7 +4106,7 @@ export interface SettingsSnapshot {
   lastChangedAt: SettingsTimestamp | null;
   communityBuildHistory: {
     value: boolean;
-    defaultValue: false;
+    defaultValue: true;
     source: 'default' | 'saved' | 'unreadable';
     problem: SettingsProblem | null;
   };
@@ -4067,11 +4137,6 @@ export interface SettingsSnapshot {
     bandwidthCapBytesPerSecond: string | null;
     adjustable: boolean;
   };
-}
-export interface SettingsProblem {
-  code: string;
-  message: string;
-  retryable: boolean;
 }
 export interface SettingsSetParams {
   name: 'communityBuildHistory' | 'fetchTableDefinitions' | 'communityListfile';
@@ -4194,4 +4259,12 @@ export interface PreparedDataFreed {
   freedBytes: string;
   freedFiles: number;
   fileCatalog: PreparedFileCatalog;
+}
+/**
+ * builds.availability.check: test one saved build on Blizzard's CDN (#9, D106). archives also asks for every archive, not just its index. Long-running, with progress (unit files); cancel it with request.cancel. One check runs at a time.
+ */
+export interface BuildAvailabilityParams {
+  productId: string;
+  buildIdentity: string;
+  archives: boolean;
 }

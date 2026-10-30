@@ -59,6 +59,26 @@ test('a cross-product page keeps exact builds, every product status and per-prod
   invalid(value => { value.products[0].errors[0].severity = 'info'; });
   invalid(value => { value.refreshProblems[0].region = 'us'; });
   invalid(value => { value.builds = Array(101).fill(value.builds[0]); });
+  // A community build (D106) names its source, has no Blizzard regions or receipts, and the page says how the list stands.
+  const community = page.builds.find(build => build.community);
+  assert.equal(community.community.source, 'wago.tools');
+  assert.deepEqual([community.regions, community.routeRegions, community.sourceReceipts], [[], [], []]);
+  invalid(value => { delete value.communityBuilds; });
+  invalid(value => { value.communityBuilds.state = 'fetching'; });
+  invalid(value => { value.communityBuilds.source = 'example.com'; });
+  invalid(value => { value.builds[1].community.source = 'blizzard'; });
+  invalid(value => { value.builds[1].community.extra = true; });
+  invalid(value => { value.builds[0].availabilityCheck.state = 'missing'; });
+  invalid(value => { value.builds[0].availabilityCheck.scope = 'everything'; });
+  invalid(value => { value.builds[0].availabilityCheck.hosts = []; });
+  invalid(value => { value.builds[0].availabilityCheck.indexes.present = -1; });
+  invalid(value => { value.builds[0].availabilityCheck.buildConfigState = 'present'; });
+  validate('DiscoveryCatalogPage', { ...page, builds: page.builds.map(({ community: _c, availabilityCheck: _a, ...build }) => build) });
+  const check = { productId: 'wow', buildIdentity: community.id, archives: false };
+  validate('EngineRequest', { protocolVersion: 1, id: 'check', method: 'builds.availability.check', params: check });
+  for (const params of [{ ...check, archives: 'no' }, { productId: 'wow', buildIdentity: community.id }, { ...check, sourceRegion: 'us' }, { ...check, buildIdentity: 'x' }])
+    assert.equal(validator('EngineRequest')({ protocolVersion: 1, id: 'check', method: 'builds.availability.check', params }), false, JSON.stringify(params));
+  validate('BuildAvailability', community.availabilityCheck);
   const request = (method, params) => ({ protocolVersion: 1, id: 'all', method, params });
   validate('EngineRequest', request('discovery.readAll', {}));
   validate('EngineRequest', request('discovery.readAll', { productId: 'wow_classic', filter: 'advertised', limit: 100, cursor: 'opaque' }));
@@ -144,6 +164,13 @@ test('e2e runs point the engine\'s listfile requests at a loopback port, never G
   assert.match(config, /^process\.env\.VIBEMINER_LISTFILE_ORIGIN = 'http:\/\/127\.0\.0\.1:9\/';$/m);
   const program = await readFile(path.join(root, 'src/backend/VibeMiner.Host/Program.cs'), 'utf8');
   assert.match(program, /GetEnvironmentVariable\("VIBEMINER_LISTFILE_ORIGIN"\)/);
+});
+
+test('e2e runs point the engine\'s community build list request at a loopback port, never wago.tools (D106)', async () => {
+  const config = await readFile(path.join(root, 'tests/desktop/playwright.config.ts'), 'utf8');
+  assert.match(config, /^process\.env\.VIBEMINER_COMMUNITY_BUILDS_ORIGIN = 'http:\/\/127\.0\.0\.1:9\/';$/m);
+  const program = await readFile(path.join(root, 'src/backend/VibeMiner.Host/Program.cs'), 'utf8');
+  assert.match(program, /GetEnvironmentVariable\("VIBEMINER_COMMUNITY_BUILDS_ORIGIN"\)/);
 });
 
 test('The community listfile status keeps exact byte counts and only its fixed source (D105)', async () => {
@@ -447,10 +474,10 @@ test('Retention separates historical receipts, dated presence, progress and dura
 test('Settings keep unreadable values apart from saved ones and take only a known switch', async () => {
   const snapshot = JSON.parse(await readFile(path.join(root, 'contracts/examples/settings-snapshot.json'), 'utf8'));
   validate('SettingsSnapshot', snapshot);
-  validate('SettingsSnapshot', { ...snapshot, file: 'absent', lastChangedAt: null, communityBuildHistory: { value: false, defaultValue: false, source: 'default', problem: null } });
+  validate('SettingsSnapshot', { ...snapshot, file: 'absent', lastChangedAt: null, communityBuildHistory: { value: true, defaultValue: true, source: 'default', problem: null } });
   const community = snapshot.communityBuildHistory;
   for (const patch of [{ file: 'missing' }, { formatVersion: 2 }, { lastChangedAt: '2026-10-18 12:02' }, { lastChangedAt: '2026-10-18T12:02:00' },
-    { communityBuildHistory: { ...community, source: 'guessed' } }, { communityBuildHistory: { ...community, defaultValue: true } },
+    { communityBuildHistory: { ...community, source: 'guessed' } }, { communityBuildHistory: { ...community, defaultValue: false } },
     { communityBuildHistory: { ...community, value: 'false' } }, { storage: { dataDirectory: '' } }, { storage: { dataDirectory: '/x', size: '1' } },
     { downloadLimits: { ...snapshot.downloadLimits, bandwidthCapBytesPerSecond: 1024 } }, { downloadLimits: { ...snapshot.downloadLimits, parallelDownloads: 0 } }, { extra: true },
     { fetchTableDefinitions: undefined }, { fetchTableDefinitions: { ...snapshot.fetchTableDefinitions, defaultValue: false } },
@@ -756,7 +783,7 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   let diagnostics = '';
   const child = spawn(dotnet, [assembly, '--data-dir', data], {
     cwd: root, stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' },
+    env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1', VIBEMINER_COMMUNITY_BUILDS_ORIGIN: 'http://127.0.0.1:9/' },
   });
   const exited = once(child, 'exit');
   child.stderr.setEncoding('utf8');
@@ -813,6 +840,7 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.equal(changes.result.revision, summaries.result.revision);
   // D093: a Check needs an admitted measured ledger; a page read from a key is refused together with an ordinal cursor.
   assert.ok(hello.result.capabilities.includes('download-check-v1'));
+  assert.ok(hello.result.capabilities.includes('community-builds-v1') && hello.result.capabilities.includes('build-availability-v1'));
   const checkQuery = { productId: 'wow', buildIdentity: 'a'.repeat(64), sourceRegion: 'us', ledgerId: 'e'.repeat(64) };
   assert.equal((await request('download.check', checkQuery)).error?.code, 'DOWNLOAD_NOT_READY');
   assert.equal((await request('download.check', { ...checkQuery, limit: 1 })).error?.code, 'INVALID_REQUEST');
@@ -946,6 +974,9 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.equal(allProducts.result.productId, null);
   assert.deepEqual(allProducts.result.products.map(status => status.productId), products.result.products.map(product => product.id), 'every registered product reports a status in registry order');
   assert.ok(allProducts.result.products.every(status => status.connection === 'notChecked' && status.lastCheckedAt === null && !status.hasSavedHistory));
+  // The community build list is on by default but asked only by Refresh builds, so a fresh engine hasn't asked it (D106).
+  assert.deepEqual([allProducts.result.communityBuilds.enabled, allProducts.result.communityBuilds.state, allProducts.result.communityBuilds.lastAttemptAt], [true, 'notFetched', null]);
+  assert.equal((await request('builds.availability.check', { productId: 'wow', buildIdentity: 'f'.repeat(64), archives: false })).error?.code, 'BUILD_NOT_FOUND');
   const oneProduct = await request('discovery.readAll', { productId: 'wowt', filter: 'advertised', limit: 10 });
   validate('DiscoveryCatalogPage', oneProduct.result);
   assert.equal(oneProduct.result.productId, 'wowt'); assert.equal(oneProduct.result.filter, 'advertised');

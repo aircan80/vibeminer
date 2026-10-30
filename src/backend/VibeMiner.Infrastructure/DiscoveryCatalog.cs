@@ -41,9 +41,10 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
     /// Catalog schema version. Version 16 is the first with per-ledger stored coverage (D065), version 17 the first with
     /// the Files columns and indexes (D068), version 18 the first with file catalogs prepared after Open (D071), version 19
     /// the first with retained Creature appearances (D088), version 20 the first with saved Checks of files Open did not
-    /// assess (D093). Version-16 to version-19 catalogs upgrade in place.
+    /// assess (D093), version 22 the first with the community build list and availability checks (D106). Version-16 to
+    /// version-21 catalogs upgrade in place.
     /// </summary>
-    internal const int CatalogVersion = 21;
+    internal const int CatalogVersion = 22;
     /// <summary>
     /// Written once when a fresh catalog is created. Older catalogs (build-identity-v2 at version 15, or none at all)
     /// never have it and are refused, never migrated.
@@ -73,7 +74,7 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         Action[] steps = [UpgradeWorkspace, UpgradeInventory, UpgradeInventoryCheckpoints, UpgradeDownloads, UpgradeTablesData,
             UpgradeEncodedReceipts, UpgradeRetention, UpgradeItemIcons, UpgradeItemClassifications, UpgradeCreatures,
             UpgradeItemEffects, UpgradeCreatureGeometry, UpgradeStoredCoverage, CompleteStoredCoverage, UpgradeInventoryFiles, UpgradeFileCatalogs, UpgradeCreatureGeometryAppearance,
-            UpgradeDownloadChecks, UpgradeGeometryAppearanceCleanup];
+            UpgradeDownloadChecks, UpgradeGeometryAppearanceCleanup, UpgradeCommunityBuilds];
         for (var current = Math.Max(version, 2); current < CatalogVersion; current++) steps[current - 2]();
     }
     /// <summary>Read-only recognition: returns the version, or refuses a catalog this engine must not read or change.</summary>
@@ -234,6 +235,7 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
                 """, transaction, ("$id", identity.Id), ("$p", product), ("$canonical", identity.Canonical),
                 ("$fields", Serialize(identity.Fields)), ("$time", completedAt), ("$g", generation),
                 ("$new", group.Any(row => priorBaselines.Contains(row.Region)) ? 1 : 0));
+            LinkCommunityBuild(identity, transaction);
             // A republished CDN configuration joins the same build's history instead of making a new build.
             foreach (var cdnConfig in group.Select(row => row.CdnConfig).Distinct(StringComparer.Ordinal))
                 Execute("""
@@ -343,7 +345,11 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
     private const int MaxBuildPageBytes = 750_000;
     /// <summary>Serialized builds plus product statuses one cross-product page may carry, well inside the 1 MiB frame.</summary>
     internal const int MaxCatalogPageBytes = 900_000;
-    private sealed record BuildRecord(string Id, string Product, string Canonical, string Fields, string First, string Last, bool New);
+    private sealed record BuildRecord(string Id, string Product, string Canonical, string Fields, string First, string Last, bool New)
+    {
+        /// <summary>A row of the community build list (D106), projected from its own table.</summary>
+        public bool Community { get; init; }
+    }
     private static string FilterPredicate(string filter) => filter switch
     {
         "local" => " AND (EXISTS(SELECT 1 FROM inventory_generations i WHERE i.build_id=b.id AND i.state='ready') OR EXISTS(SELECT 1 FROM download_admissions d JOIN workspace_admissions a ON a.id=d.admission_id WHERE a.build_id=b.id AND a.profile='home-download-v1' AND d.artifact_sha256 IS NOT NULL))",
@@ -351,7 +357,7 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         _ => ""
     };
     /// <summary>Project up to limit records, stopping before the page would exceed its byte budget.</summary>
-    private List<Build> ProjectBuilds(IReadOnlyList<BuildRecord> records, int limit, int budget, CancellationToken token)
+    private List<Build> ProjectBuilds(IReadOnlyList<BuildRecord> records, int limit, int budget, CancellationToken token, bool withAvailability = false)
     {
         var builds = new List<Build>();
         var verified = new HashSet<string>(StringComparer.Ordinal);
@@ -359,7 +365,8 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         foreach (var row in records.Take(limit))
         {
             token.ThrowIfCancellationRequested();
-            var build = ProjectBuild(row, verified, token);
+            var build = row.Community ? ProjectCommunityBuild(row.Id, token) : ProjectBuild(row, verified, token);
+            if (withAvailability) build = build with { AvailabilityCheck = ReadAvailability(row.Id) };
             var bytes = JsonSerializer.SerializeToUtf8Bytes(build, Json).Length;
             if (size + bytes > budget)
             {
@@ -416,11 +423,14 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
     /// Cross-product cursor. It binds the product filter, the visibility filter and the number of committed checks, so
     /// paging never mixes builds from before and after any product's commit. Starting a refresh does not change it.
     /// </summary>
-    private sealed record CatalogCursor(string Scope, string? Product, string Filter, long Commits, int Ordinal, long Number, string After);
+    /// Community is the community list's import generation when its builds are listed, or -1 when they aren't (D106).
+    private sealed record CatalogCursor(string Scope, string? Product, string Filter, long Commits, int Ordinal, long Number, string After, long Community = -1);
     private const string CatalogScope = "allProducts";
     public Task<DiscoveryCatalogPage> ReadAllAsync(string? product, string filter, int limit, string? cursor, CancellationToken token) =>
-        Schedule(() => ReadAllCore(product, filter, limit, cursor, token), token);
-    private DiscoveryCatalogPage ReadAllCore(string? product, string filter, int limit, string? cursor, CancellationToken token)
+        Schedule(() => ReadAllCore(product, filter, limit, cursor, false, token), token);
+    public Task<DiscoveryCatalogPage> ReadAllAsync(string? product, string filter, int limit, string? cursor, bool community, CancellationToken token) =>
+        Schedule(() => ReadAllCore(product, filter, limit, cursor, community, token), token);
+    private DiscoveryCatalogPage ReadAllCore(string? product, string filter, int limit, string? cursor, bool community, CancellationToken token)
     {
         if (product is not null) ProductRegistry.Validate(product);
         if (filter is not ("all" or "local" or "advertised") || limit is < 1 or > 100)
@@ -428,6 +438,9 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         var statuses = ProductRegistry.Products.Select(entry => ReadProductStatus(entry.Id)).ToArray();
         // Events are only ever inserted, one per committed check of any product.
         var commits = Convert.ToInt64(Scalar("SELECT count(*) FROM events"));
+        // Community builds are listed only in All: they are never prepared or advertised.
+        var listCommunity = community && filter == "all";
+        var communityGeneration = listCommunity ? CommunityGeneration() : -1;
         (int Ordinal, long Number, string After)? position = null;
         if (cursor is not null)
         {
@@ -439,7 +452,8 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
             }
             catch (Exception ex) when (ex is FormatException or JsonException)
             { throw new DiscoveryException("INVALID_CURSOR", "The discovery cursor is invalid."); }
-            if (decoded is null || decoded.Scope != CatalogScope || decoded.Product != product || decoded.Filter != filter || decoded.Commits != commits)
+            if (decoded is null || decoded.Scope != CatalogScope || decoded.Product != product || decoded.Filter != filter || decoded.Commits != commits ||
+                decoded.Community != communityGeneration)
                 throw new DiscoveryException("STALE_CURSOR", "Discovery changed. Read the first page again.", true);
             if (decoded.After is not { Length: 64 } key || !key.All(Uri.IsHexDigit) || decoded.Ordinal < 0 ||
                 decoded.Ordinal >= ProductRegistry.Products.Count || decoded.Number < -1)
@@ -449,20 +463,28 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
         // Registry product order, then the raw BuildId read as a number (newest first; missing or non-decimal last), then identity.
         var parameters = new List<(string, object?)> { ("$product", product), ("$start", position is null ? 1 : 0),
             ("$o", position?.Ordinal ?? 0), ("$n", position?.Number ?? 0), ("$after", position?.After ?? ""), ("$limit", limit + 1) };
-        var ordinal = new StringBuilder("CASE b.product");
+        var ordinal = new StringBuilder("CASE {0}.product");
         for (var i = 0; i < ProductRegistry.Products.Count; i++)
         { ordinal.Append(" WHEN $p").Append(i).Append(" THEN ").Append(i); parameters.Add(($"$p{i}", ProductRegistry.Products[i].Id)); }
         ordinal.Append(" END");
+        string Ordinal(string alias) => ordinal.ToString().Replace("{0}", alias, StringComparison.Ordinal);
+        // A community row Blizzard also advertised is linked to that build and listed once, as the Blizzard build.
+        var communityRows = listCommunity ? $"""
+             UNION ALL
+                SELECT c.id,c.product,'','',c.first_imported,c.last_imported,0,{Ordinal("c")},c.build_number,1
+                    FROM community_builds c WHERE c.official_build IS NULL
+            """ : "";
         const string buildId = "json_extract(b.identity_fields,'$.BuildId')";
         const string number = $"CASE WHEN json_valid(b.identity_fields) AND typeof({buildId})='text' AND length({buildId}) BETWEEN 1 AND 18 " +
             $"AND {buildId} NOT GLOB '*[^0-9]*' THEN CAST({buildId} AS INTEGER) ELSE -1 END";
         var records = new List<(BuildRecord Record, int Ordinal, long Number)>();
         using (var command = Command($"""
-            SELECT id,product,canonical,identity_fields,first_seen,last_seen,fresh,ord,number FROM (
+            SELECT id,product,canonical,identity_fields,first_seen,last_seen,fresh,ord,number,community FROM (
                 SELECT b.id,b.product,b.canonical,b.identity_fields,b.first_seen,b.last_seen,
                     b.is_new AND NOT EXISTS(SELECT 1 FROM open_acknowledgements o WHERE o.build_id=b.id) AS fresh,
-                    {ordinal} AS ord,{number} AS number FROM builds b) b
-            WHERE ord IS NOT NULL AND ($product IS NULL OR product=$product){FilterPredicate(filter)}
+                    {Ordinal("b")} AS ord,{number} AS number,0 AS community FROM builds b WHERE 1=1{FilterPredicate(filter)}
+                {communityRows}) b
+            WHERE ord IS NOT NULL AND ($product IS NULL OR product=$product)
                 AND ($start=1 OR ord>$o OR (ord=$o AND (number<$n OR (number=$n AND id>$after))))
             ORDER BY ord,number DESC,id LIMIT $limit
             """, null, parameters.ToArray()))
@@ -471,19 +493,19 @@ public sealed partial class DiscoveryCatalog : IDiscoveryCatalog, IWorkspaceCata
             {
                 token.ThrowIfCancellationRequested();
                 records.Add((new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
-                    reader.GetString(5), reader.GetBoolean(6)), reader.GetInt32(7), reader.GetInt64(8)));
+                    reader.GetString(5), reader.GetBoolean(6)) { Community = reader.GetInt32(9) == 1 }, reader.GetInt32(7), reader.GetInt64(8)));
             }
         var budget = Math.Min(MaxBuildPageBytes, MaxCatalogPageBytes - JsonSerializer.SerializeToUtf8Bytes(statuses, Json).Length);
         if (budget <= 0) throw new DiscoveryException("RESULT_LIMIT", "Saved product statuses exceed the protocol limit.");
-        var builds = ProjectBuilds(records.Select(record => record.Record).ToArray(), limit, budget, token);
+        var builds = ProjectBuilds(records.Select(record => record.Record).ToArray(), limit, budget, token, withAvailability: true);
         string? next = null;
         if (records.Count > builds.Count && builds.Count > 0)
         {
             var last = records[builds.Count - 1];
             next = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(
-                new CatalogCursor(CatalogScope, product, filter, commits, last.Ordinal, last.Number, last.Record.Id), Json));
+                new CatalogCursor(CatalogScope, product, filter, commits, last.Ordinal, last.Number, last.Record.Id, communityGeneration), Json));
         }
-        return new DiscoveryCatalogPage(product, filter, builds, next, statuses, []);
+        return new DiscoveryCatalogPage(product, filter, builds, next, statuses, []) { CommunityBuilds = CommunityBuildsService.Status(community, ReadCommunityState()) };
     }
 
     private List<SourceReceipt> ReadReceipts(string buildId, HashSet<string> verified, CancellationToken token)

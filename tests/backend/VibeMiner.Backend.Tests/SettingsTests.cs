@@ -24,7 +24,9 @@ public sealed class SettingsTests
         var snapshot = await Service(directory.Path).ReadAsync();
         Assert.Equal(SettingsFileState.Absent, snapshot.File);
         Assert.Null(snapshot.Problem); Assert.Null(snapshot.LastChangedAt);
-        Assert.Equal(new BooleanSetting(false, false, SettingSource.Default, null), snapshot.CommunityBuildHistory);
+        // Owner decision on #9: the community build list is on by default (D106).
+        Assert.Equal(new BooleanSetting(true, true, SettingSource.Default, null), snapshot.CommunityBuildHistory);
+        Assert.True(await Service(directory.Path).CommunityBuildHistoryEnabledAsync(default));
         Assert.Equal(Path.GetFullPath(directory.Path), snapshot.DataDirectory);
         Assert.Equal(Limits, snapshot.DownloadLimits);
         Assert.False(File.Exists(SettingsFile(directory)), "Reading never writes a settings file.");
@@ -35,7 +37,7 @@ public sealed class SettingsTests
     {
         using var directory = new TempDirectory(); Directory.CreateDirectory(directory.Path);
         var committed = await Service(directory.Path).SetAsync(SettingsService.CommunityBuildHistory, true);
-        Assert.Equal(new BooleanSetting(true, false, SettingSource.Saved, null), committed.CommunityBuildHistory);
+        Assert.Equal(new BooleanSetting(true, true, SettingSource.Saved, null), committed.CommunityBuildHistory);
         Assert.Equal(SettingsFileState.Read, committed.File);
         Assert.NotNull(committed.LastChangedAt);
         Assert.Equal(TimeSpan.Zero, committed.LastChangedAt!.Value.Offset);
@@ -46,7 +48,7 @@ public sealed class SettingsTests
         Assert.Equal(1, saved.RootElement.GetProperty("version").GetInt32());
         Assert.True(saved.RootElement.GetProperty("values").GetProperty("communityBuildHistory").GetBoolean());
         var off = await Service(directory.Path).SetAsync(SettingsService.CommunityBuildHistory, false);
-        Assert.Equal(new BooleanSetting(false, false, SettingSource.Saved, null), off.CommunityBuildHistory);
+        Assert.Equal(new BooleanSetting(false, true, SettingSource.Saved, null), off.CommunityBuildHistory);
     }
 
     [Theory]
@@ -66,11 +68,13 @@ public sealed class SettingsTests
         var snapshot = await service.ReadAsync();
         Assert.Equal(SettingsFileState.Unreadable, snapshot.File);
         Assert.Equal("SETTINGS_UNREADABLE", snapshot.Problem?.Code);
+        // Fails closed like D081: an unreadable file reads as off, so nothing is fetched from wago.tools.
         Assert.False(snapshot.CommunityBuildHistory.Value);
         Assert.Equal(SettingSource.Unreadable, snapshot.CommunityBuildHistory.Source);
+        Assert.False(await service.CommunityBuildHistoryEnabledAsync(default));
         var committed = await service.SetAsync(SettingsService.CommunityBuildHistory, true);
         Assert.Equal(SettingsFileState.Read, committed.File);
-        Assert.Equal(new BooleanSetting(true, false, SettingSource.Saved, null), committed.CommunityBuildHistory);
+        Assert.Equal(new BooleanSetting(true, true, SettingSource.Saved, null), committed.CommunityBuildHistory);
     }
 
     [Fact]
@@ -234,7 +238,7 @@ public sealed class SettingsTests
         byte[] bom = [0xEF, 0xBB, 0xBF];
         await File.WriteAllBytesAsync(SettingsFile(directory), [.. bom, .. Fixtures.Utf8("{\"version\":1,\"values\":{\"communityBuildHistory\":true}}")]);
         var read = await Service(directory.Path).ReadAsync();
-        Assert.Equal(new BooleanSetting(true, false, SettingSource.Saved, null), read.CommunityBuildHistory);
+        Assert.Equal(new BooleanSetting(true, true, SettingSource.Saved, null), read.CommunityBuildHistory);
         byte[] newer = [.. bom, .. Fixtures.Utf8("{\"version\":2,\"values\":{}}")];
         await File.WriteAllBytesAsync(SettingsFile(directory), newer);
         var service = Service(directory.Path);
@@ -359,7 +363,7 @@ public sealed class SettingsTests
         var snapshot = await service.ReadAsync();
         Assert.Equal(SettingsFileState.Newer, snapshot.File);
         Assert.Equal("SETTINGS_VERSION", snapshot.Problem?.Code);
-        Assert.Equal(new BooleanSetting(false, false, SettingSource.Unreadable, snapshot.Problem), snapshot.CommunityBuildHistory);
+        Assert.Equal(new BooleanSetting(false, true, SettingSource.Unreadable, snapshot.Problem), snapshot.CommunityBuildHistory);
         var refused = await Assert.ThrowsAsync<DiscoveryException>(() => service.SetAsync(SettingsService.CommunityBuildHistory, false));
         Assert.Equal("SETTINGS_VERSION", refused.Code);
         Assert.Equal(newer, await File.ReadAllTextAsync(SettingsFile(directory)));
@@ -378,7 +382,7 @@ public sealed class SettingsTests
         Assert.Equal("SETTINGS_WRITE_FAILED", failure.Code);
         Assert.True(failure.Retryable);
         Assert.Equal(before, await File.ReadAllBytesAsync(SettingsFile(directory)));
-        Assert.Equal(new BooleanSetting(false, false, SettingSource.Saved, null), (await service.ReadAsync()).CommunityBuildHistory);
+        Assert.Equal(new BooleanSetting(false, true, SettingSource.Saved, null), (await service.ReadAsync()).CommunityBuildHistory);
         Directory.Delete(Path.Combine(directory.Path, JsonSettingsStore.TemporaryFileName));
         Assert.True((await service.SetAsync(SettingsService.CommunityBuildHistory, true)).CommunityBuildHistory.Value);
     }
@@ -493,8 +497,8 @@ public sealed class SettingsTests
         Assert.Equal(JsonValueKind.Null, read.GetProperty("problem").ValueKind);
         Assert.Equal(JsonValueKind.Null, read.GetProperty("lastChangedAt").ValueKind);
         var community = read.GetProperty("communityBuildHistory");
-        Assert.False(community.GetProperty("value").GetBoolean());
-        Assert.False(community.GetProperty("defaultValue").GetBoolean());
+        Assert.True(community.GetProperty("value").GetBoolean());
+        Assert.True(community.GetProperty("defaultValue").GetBoolean());
         Assert.Equal("default", community.GetProperty("source").GetString());
         var fetch = read.GetProperty("fetchTableDefinitions");
         Assert.True(fetch.GetProperty("value").GetBoolean());

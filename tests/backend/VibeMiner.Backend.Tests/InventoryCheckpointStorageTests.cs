@@ -18,7 +18,7 @@ public sealed class InventoryCheckpointStorageTests
         await h.Catalog.DisposeAsync();
         await h.Execute(CatalogMigrationFixture.RemoveV9 + "DROP TABLE encoded_objects; DROP TABLE content_locators; DROP TABLE table_admissions; DROP TABLE table_artifacts; DROP TABLE content_objects; DROP TABLE resolver_artifacts; DROP TABLE download_admissions; DROP TABLE download_artifact_sources; DROP TABLE download_artifacts; DROP INDEX IF EXISTS inventory_reference; DROP TABLE inventory_resolution_cursor; DROP TABLE inventory_merge_state; DROP TABLE inventory_merge_results; DROP TABLE inventory_checkpoints; PRAGMA user_version=4");
         h.Catalog = await DiscoveryCatalog.OpenAsync(h.Directory);
-        Assert.Equal(21, await h.Scalar("PRAGMA user_version"));
+        Assert.Equal(22, await h.Scalar("PRAGMA user_version"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM en_content"));
         Assert.Equal(1, await h.Scalar("SELECT COUNT(*) FROM inventory_generations"));
         Assert.Equal(0, await h.Scalar("SELECT COUNT(*) FROM inventory_checkpoints"));

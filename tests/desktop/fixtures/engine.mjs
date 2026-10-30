@@ -119,11 +119,27 @@ function checkedPage(productId) {
   }
   return page;
 }
+// D106 (#9): VIBEMINER_FIXTURE_COMMUNITY=1 lists one authored community build (wow 11.2.7.67542) in All and offers
+// builds.availability.check. Control files: community-failed (the list's last attempt failed), hold-availability (the
+// check waits after its first progress until release-availability; request.cancel stops it), availability-gone.
+const communityEnabled = process.env.VIBEMINER_FIXTURE_COMMUNITY === '1';
+const communitySeed = JSON.parse(readFileSync(path.join(root, 'contracts/examples/discovery-catalog-page.json'), 'utf8')).builds.find(build => build.community);
+const availabilityChecks = new Map();
+const communityOff = { enabled: false, state: 'off', source: 'wago.tools', lastAttemptAt: null, fetchedAt: null, nextCheckAfter: null, buildCount: 0, problem: null };
+// The authored engine honours the Community build history switch like the real one: off hides community builds.
+const communityOn = () => communityEnabled && settingsSnapshot().communityBuildHistory.value;
+function communityStatus() {
+  if (!communityOn()) return communityOff;
+  const base = { enabled: true, state: 'ready', source: 'wago.tools', lastAttemptAt: '2026-10-18T12:00:00.0000000+00:00', fetchedAt: '2026-10-18T12:00:01.0000000+00:00', nextCheckAfter: '2026-10-19T12:00:00.0000000+00:00', buildCount: 1, problem: null };
+  return existsSync(path.join(directory, 'community-failed')) ? { ...base, state: 'failed', problem: { code: 'COMMUNITY_BUILDS_OFFLINE', message: 'VibeMiner couldn’t reach wago.tools to get the community build list.', retryable: true } } : base;
+}
+const withChecks = build => availabilityChecks.has(build.id) ? { ...build, availabilityCheck: availabilityChecks.get(build.id) } : build;
 /** Cross-product page over the authored products in registry order; the authored pages fit one page. */
 function catalogFor(productId = null, filter = 'all', limit = 50) {
   const products = fixtureProducts.map(product => { const page = pageFor(product.id); return { productId: product.id, lastCheckedAt: page.lastCheckedAt, checkedRegions: page.checkedRegions, errors: page.errors, hasSavedHistory: page.hasSavedHistory, connection: page.connection }; });
-  const builds = fixtureProducts.filter(product => !productId || product.id === productId).flatMap(product => pageFor(product.id, filter, 100).builds).slice(0, limit);
-  return { productId, filter, builds, nextCursor: null, products, refreshProblems: [] };
+  const community = communityOn() && filter === 'all' && (!productId || productId === 'wow') ? [{ ...structuredClone(communitySeed), availabilityCheck: null }] : [];
+  const builds = [...fixtureProducts.filter(product => !productId || product.id === productId).flatMap(product => pageFor(product.id, filter, 100).builds), ...community].map(withChecks).slice(0, limit);
+  return { productId, filter, builds, nextCursor: null, products, refreshProblems: [], communityBuilds: communityStatus() };
 }
 function waitForRelease(name, signal) {
   return new Promise((resolve, reject) => {
@@ -208,13 +224,13 @@ function settingsSnapshot() {
   const saved = name => stored?.values?.[name] ?? (name === 'communityBuildHistory' ? stored?.value : undefined);
   const value = (name, defaultValue) => ({ value: saved(name) ?? defaultValue, defaultValue, source: saved(name) === undefined ? 'default' : 'saved', problem: null });
   return { formatVersion: 1, file: stored ? 'read' : 'absent', problem: null, lastChangedAt: stored?.changedAt ?? null,
-    communityBuildHistory: value('communityBuildHistory', false), fetchTableDefinitions: value('fetchTableDefinitions', true), communityListfile: value('communityListfile', true),
+    communityBuildHistory: value('communityBuildHistory', true), fetchTableDefinitions: value('fetchTableDefinitions', true), communityListfile: value('communityListfile', true),
     storage: { dataDirectory: path.join(directory, 'catalog') }, downloadLimits: { parallelDownloads: 4, backgroundDownloads: 2, bandwidthCapBytesPerSecond: null, adjustable: false } };
 }
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', ...(listfileEnabled ? ['community-listfile-v1'] : []), 'download-summary-v1', 'download-check-v1', 'inventory-files-v1',...(fileCatalogEnabled?['file-catalog-v1']:[]),...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1',...(process.env.VIBEMINER_FIXTURE_FACTS==='0'?[]:['item-facts-v1'])]:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(geometryEnabled?['creature-source-geometry-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', ...(listfileEnabled ? ['community-listfile-v1'] : []), 'download-summary-v1', 'download-check-v1', ...(communityEnabled ? ['community-builds-v1', 'build-availability-v1'] : []), 'inventory-files-v1',...(fileCatalogEnabled?['file-catalog-v1']:[]),...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1',...(process.env.VIBEMINER_FIXTURE_FACTS==='0'?[]:['item-facts-v1'])]:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1']:[]),...(geometryEnabled?['creature-source-geometry-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
   if(geometryEnabled&&method==='creatures.geometry.close'){geometryLeases.delete(params.leaseId);return reply(id,{closed:true});}
   if(creaturesEnabled&&method.startsWith('creatures.')){
     const context={productId:params.productId,buildIdentity:params.buildIdentity,sourceRegion:params.sourceRegion,researchLocale:params.researchLocale},key=`${params.productId}|${params.buildIdentity}|${params.sourceRegion}`;
@@ -520,6 +536,24 @@ async function dispatch(request) {
     return reply(id, { productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion, ledgerId: params.ledgerId,
       assessedAt: snapshot.download.assessedAt, entries, totalCount: String(total), nextCursor: after + entries.length < total && entries.length ? entries.at(-1).id : null,
       manifestLedgerId: snapshot.download.ledgerId, lastCheck: measured && downloadCheck ? { checkedAt: downloadCheck.checkedAt, checkedObjects: String(rootOnlyKeys().length), verifiedObjects: '1', notStoredObjects: String(rootOnlyKeys().length - 2), missingObjects: '1', corruptObjects: '0' } : null });
+  }
+  if (method === 'builds.availability.check' && communityEnabled) {
+    const build = catalogFor().builds.find(value => value.productId === params.productId && value.id === params.buildIdentity);
+    if (!build) return fail(id, 'BUILD_NOT_FOUND', 'This exact saved build is unavailable. Refresh discovery and select it again.');
+    const controller = new AbortController(); active.set(id, controller);
+    try {
+      send({ type: 'progress', requestId: id, sequence: 1, stage: 'Checking build and CDN configs', region: null, completed: 2, total: 2, unit: 'files' });
+      send({ type: 'progress', requestId: id, sequence: 2, stage: 'Checking archive indexes', region: null, completed: 350, total: 1412, unit: 'files' });
+      if (existsSync(path.join(directory, 'hold-availability'))) { writeFileSync(path.join(directory, 'waiting-availability'), id); await waitForRelease('release-availability', controller.signal); }
+      if (controller.signal.aborted) throw new Error('canceled');
+      const gone = existsSync(path.join(directory, 'availability-gone'));
+      const counts = { total: 1412, present: 1412, missing: 0, unknown: 0 };
+      const value = { state: gone ? 'gone' : 'available', checkedAt: new Date().toISOString(), scope: gone ? 'configs' : params.archives ? 'archives' : 'indexes', buildConfig: build.buildConfig, cdnConfig: build.cdnConfig,
+        hosts: ['us.cdn.blizzard.com', 'level3.ssl.blizzard.com'], buildConfigState: gone ? 'missing' : 'verified', cdnConfigState: gone ? 'missing' : 'verified', indexes: gone ? null : counts, archives: !gone && params.archives ? counts : null, problem: null };
+      availabilityChecks.set(build.id, value);
+      return reply(id, value);
+    } catch { return fail(id, 'CANCELED', 'Availability check stopped. Nothing new was saved; an earlier check stays as it was.', true); }
+    finally { active.delete(id); }
   }
   if (method === 'download.check') {
     // One authored Check of the five files outside the manifest: the first is verified, the second missing, the rest not

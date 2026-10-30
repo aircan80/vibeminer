@@ -15,7 +15,8 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
     CreatureGeometryService? creatureGeometry = null, CreatureGeometryLeases? geometryLeases = null,
     SettingsService? settings = null,
     DownloadSummaryService? downloadSummaries = null, TableReferenceTextService? referenceText = null, TableFollowService? follow = null,
-    PreparedDataService? preparedData = null, ICommunityListfileControl? listfile = null)
+    PreparedDataService? preparedData = null, ICommunityListfileControl? listfile = null,
+    BuildAvailabilityService? availability = null)
 {
     public const int MaxFrameBytes = 1024 * 1024;
     public const int MaxClassificationFrameBytes = 512 * 1024;
@@ -172,6 +173,8 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     if (settings is not null) capabilities.Add("settings-v1");
                     if (settings is not null && listfile is not null) capabilities.Add("community-listfile-v1");
                     if (preparedData is not null) capabilities.Add("prepared-data-v1");
+                    if (service.HasCommunityBuilds) capabilities.Add("community-builds-v1");
+                    if (availability is not null) capabilities.Add("build-availability-v1");
                     if (downloadSummaries is not null) capabilities.Add("download-summary-v1");
                     if (downloads is not null) capabilities.Add("download-check-v1");
                     if (items is not null) { capabilities.Add("items-v1"); capabilities.Add("item-facts-v1"); }
@@ -362,6 +365,20 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                         protocolVersion = 1, type = "progress", requestId = id, sequence = Interlocked.Increment(ref checkSequence),
                         stage = "Checking files not checked at Open", region = check.SourceRegion, completed = progress.Completed, total = progress.Total, unit = "objects"
                     }), request.Cancellation.Token);
+                    break;
+                case "builds.availability.check":
+                    RequireOnly(parameters, "productId", "buildIdentity", "archives");
+                    if (availability is null) throw new DiscoveryException("AVAILABILITY_UNAVAILABLE", "This engine can’t check build availability.");
+                    if (!parameters.TryGetProperty("archives", out var archivesValue) || archivesValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        throw new DiscoveryException("INVALID_REQUEST", "Say whether to check every archive.");
+                    long availabilitySequence = 0;
+                    var availabilityProduct = RequiredString(parameters, "productId");
+                    result = await availability.CheckAsync(availabilityProduct, RequiredString(parameters, "buildIdentity"), archivesValue.GetBoolean(),
+                        progress => WriteAsync(output, new
+                        {
+                            protocolVersion = 1, type = "progress", requestId = id, sequence = Interlocked.Increment(ref availabilitySequence),
+                            stage = progress.Stage, region = (string?)null, completed = progress.Completed, total = progress.Total, unit = "files"
+                        }), request.Cancellation.Token);
                     break;
                 case "download.summaries":
                     RequireOnly(parameters, "builds");
@@ -709,7 +726,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
             await ReplyAsync(output, id, result, maximumBytes, frameKind);
             pendingGeometryLease = null; // Opaque ownership transfers only after actual terminal Flush.
         }
-        catch (OperationCanceledException) { await TryErrorAsync(output, id, "CANCELED", method == "workspace.open" ? "Opening canceled." : method == "discovery.refreshAll" ? "Discovery canceled. Products checked before stopping keep their new results." : method == "tables.prepare" ? "Table loading canceled." : method == "download.check" ? "Check stopped. Nothing new was recorded; an earlier check stays as it was." : "Operation canceled.", true, maximumBytes, frameKind); }
+        catch (OperationCanceledException) { await TryErrorAsync(output, id, "CANCELED", method == "workspace.open" ? "Opening canceled." : method == "discovery.refreshAll" ? "Discovery canceled. Products checked before stopping keep their new results." : method == "tables.prepare" ? "Table loading canceled." : method == "download.check" ? "Check stopped. Nothing new was recorded; an earlier check stays as it was." : method == "builds.availability.check" ? "Availability check stopped. Nothing new was saved; an earlier check stays as it was." : "Operation canceled.", true, maximumBytes, frameKind); }
         catch (DiscoveryException ex) { await TryErrorAsync(output, id, ex.Code, ex.Message, ex.Retryable, maximumBytes, frameKind, ex.Definition); }
         catch (Exception ex)
         {

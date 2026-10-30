@@ -65,7 +65,7 @@ The short version:
 - Preserve exact build/locale/source identity. Missing, unknown, unsupported, encrypted, corrupt, partial and absent are different states.
 - Verify before publishing or marking anything ready.
 - New behaviour gets meaningful tests and every fix gets a regression test. See [docs/TESTING.md](docs/TESTING.md).
-- Official CDN sources and app-owned storage only. Never read game installs, Battle.net directories or game caches. No game content or credentials in source, fixtures, logs or packages. The only other sources are WoWDBDefs table definitions ([D081](docs/DECISIONS.md)) and the wow-listfile file names ([D105](docs/DECISIONS.md)), each behind its own Settings switch and never game data.
+- Official CDN sources and app-owned storage only. Never read game installs, Battle.net directories or game caches. No game content or credentials in source, fixtures, logs or packages. The only other sources are WoWDBDefs table definitions ([D081](docs/DECISIONS.md)), the wow-listfile file names ([D105](docs/DECISIONS.md)) and the wago.tools build list ([D106](docs/DECISIONS.md)), each behind its own Settings switch and never game data.
 - Record decisions in [docs/DECISIONS.md](docs/DECISIONS.md). Supersede old rows; don't silently rewrite them.
 - Run the relevant checks before handoff and report actual results, including checks you didn't run. Never invent build or test commands; see [BUILDING.md](BUILDING.md) and `package.json`.
 

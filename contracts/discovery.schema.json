@@ -405,6 +405,15 @@
     },
     "preparedDataFreed": {
       "$ref": "#/definitions/PreparedDataFreed"
+    },
+    "buildAvailabilityParams": {
+      "$ref": "#/definitions/BuildAvailabilityParams"
+    },
+    "buildAvailability": {
+      "$ref": "#/definitions/BuildAvailability"
+    },
+    "communityBuildsStatus": {
+      "$ref": "#/definitions/CommunityBuildsStatus"
     }
   },
   "required": [
@@ -656,6 +665,28 @@
           "description": "How many CDN configurations the build has in total. When it exceeds cdnConfigHistory's length, the older ones are omitted from this projection but kept in the catalog.",
           "type": "integer",
           "minimum": 1
+        },
+        "community": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CommunityBuildSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set for a build from the community build list: it was never a Blizzard observation and has no regions, routes or receipts."
+        },
+        "availabilityCheck": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BuildAvailability"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The build's latest availability check, in discovery catalog pages. Null or absent when never checked."
         }
       },
       "required": [
@@ -851,7 +882,7 @@
     },
     "DiscoveryCatalogPage": {
       "title": "DiscoveryCatalogPage",
-      "description": "One bounded page of builds across every registered product, ordered by registry product order, then numeric BuildId descending (missing or non-decimal last), then build identity.",
+      "description": "One bounded page of builds across every registered product, ordered by registry product order, then numeric BuildId descending (missing or non-decimal last), then build identity. Community builds (#9) are listed in All only, among Blizzard builds in the same order.",
       "type": "object",
       "properties": {
         "productId": {
@@ -901,6 +932,9 @@
           "items": {
             "$ref": "#/definitions/ProductRefreshProblem"
           }
+        },
+        "communityBuilds": {
+          "$ref": "#/definitions/CommunityBuildsStatus"
         }
       },
       "required": [
@@ -909,7 +943,8 @@
         "builds",
         "nextCursor",
         "products",
-        "refreshProblems"
+        "refreshProblems",
+        "communityBuilds"
       ],
       "additionalProperties": false
     },
@@ -1189,7 +1224,8 @@
             "settings.listfile.check",
             "settings.storage.measure",
             "settings.storage.builds",
-            "settings.storage.free"
+            "settings.storage.free",
+            "builds.availability.check"
           ]
         },
         "params": {
@@ -1745,6 +1781,22 @@
             "properties": {
               "params": {
                 "$ref": "#/definitions/FileCatalogSetParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "builds.availability.check"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/BuildAvailabilityParams"
               }
             }
           }
@@ -20055,7 +20107,7 @@
               "type": "boolean"
             },
             "defaultValue": {
-              "const": false
+              "const": true
             },
             "source": {
               "enum": [
@@ -20709,6 +20761,292 @@
         "completed",
         "total",
         "checkedAt",
+        "problem"
+      ],
+      "additionalProperties": false
+    },
+    "CommunityBuildSource": {
+      "title": "CommunityBuildSource",
+      "description": "Where a community build came from (#9, D106). Only the build index came from there; every file still comes from Blizzard's CDN, verified. createdAt is the source's own date for the row, when it gave a readable one.",
+      "type": "object",
+      "properties": {
+        "source": {
+          "const": "wago.tools"
+        },
+        "sourceUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "firstImportedAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "lastImportedAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "source",
+        "sourceUrl",
+        "createdAt",
+        "firstImportedAt",
+        "lastImportedAt"
+      ],
+      "additionalProperties": false
+    },
+    "AvailabilityCounts": {
+      "title": "AvailabilityCounts",
+      "description": "How many objects of one availability stage were present, missing, or couldn't be told (5xx, timeouts, offline).",
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "present": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "total",
+        "present",
+        "missing",
+        "unknown"
+      ],
+      "additionalProperties": false
+    },
+    "BuildAvailability": {
+      "title": "BuildAvailability",
+      "description": "One availability check of a build on Blizzard's CDN (#9, D106), kept with the time it ran. scope is the last stage that ran. gone: the build config is missing on every host. partlyAvailable: the build config is there but the CDN config, an archive index or (when asked) an archive is missing. unknown: a server error, timeout or bad bytes left it undecided.",
+      "type": "object",
+      "properties": {
+        "state": {
+          "enum": [
+            "available",
+            "partlyAvailable",
+            "gone",
+            "unknown"
+          ]
+        },
+        "checkedAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "scope": {
+          "enum": [
+            "configs",
+            "indexes",
+            "archives"
+          ]
+        },
+        "buildConfig": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "cdnConfig": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "hosts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253
+          }
+        },
+        "buildConfigState": {
+          "enum": [
+            "verified",
+            "missing",
+            "invalid",
+            "unknown"
+          ]
+        },
+        "cdnConfigState": {
+          "enum": [
+            "verified",
+            "missing",
+            "invalid",
+            "unknown"
+          ]
+        },
+        "indexes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AvailabilityCounts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "archives": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AvailabilityCounts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SettingsProblem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "checkedAt",
+        "scope",
+        "buildConfig",
+        "cdnConfig",
+        "hosts",
+        "buildConfigState",
+        "cdnConfigState",
+        "indexes",
+        "archives",
+        "problem"
+      ],
+      "additionalProperties": false
+    },
+    "BuildAvailabilityParams": {
+      "title": "BuildAvailabilityParams",
+      "description": "builds.availability.check: test one saved build on Blizzard's CDN (#9, D106). archives also asks for every archive, not just its index. Long-running, with progress (unit files); cancel it with request.cancel. One check runs at a time.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "buildIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "archives": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "productId",
+        "buildIdentity",
+        "archives"
+      ],
+      "additionalProperties": false
+    },
+    "CommunityBuildsStatus": {
+      "title": "CommunityBuildsStatus",
+      "description": "The community build list from wago.tools (#9, D106) as the engine has it. off: the Settings switch reads as off and its builds are hidden. notFetched: on, never asked. ready: the latest attempt imported the list. failed: the latest attempt failed; builds from an earlier import stay. A Refresh builds asks again at most once a day, from nextCheckAfter. buildCount counts builds Blizzard didn't also advertise.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "state": {
+          "enum": [
+            "off",
+            "notFetched",
+            "ready",
+            "failed"
+          ]
+        },
+        "source": {
+          "const": "wago.tools"
+        },
+        "lastAttemptAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fetchedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextCheckAfter": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "buildCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SettingsProblem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "state",
+        "source",
+        "lastAttemptAt",
+        "fetchedAt",
+        "nextCheckAfter",
+        "buildCount",
         "problem"
       ],
       "additionalProperties": false

@@ -168,7 +168,7 @@ public sealed class ConfigurationWorkspacePreparer(IWorkspaceCatalog catalog, Ve
         }
         throw new DiscoveryException("SOURCE_UNSUPPORTED", "No advertised supported official HTTPS configuration server is available.");
     }
-    private static bool SupportedHost(string host) => host is "level3.blizzard.com" or "level3.ssl.blizzard.com" ||
+    internal static bool SupportedHost(string host) => host is "level3.blizzard.com" or "level3.ssl.blizzard.com" ||
         Regex.IsMatch(host, "^[a-z]{2,8}\\.cdn\\.blizzard\\.com$", RegexOptions.CultureInvariant);
     internal static void ValidateReceipt(StoredConfiguration saved)
     {

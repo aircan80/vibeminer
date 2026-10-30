@@ -1,4 +1,6 @@
-import type { DiscoveryCatalogPage, DiscoveryPage, ProductDiscoveryStatus } from '../../../contracts/generated/discovery';
+import type { CommunityBuildsStatus, DiscoveryCatalogPage, DiscoveryPage, ProductDiscoveryStatus } from '../../../contracts/generated/discovery';
+/** The community build list as a page states it while the switch is off (D106). */
+export const communityOff: CommunityBuildsStatus = { enabled: false, state: 'off', source: 'wago.tools', lastAttemptAt: null, fetchedAt: null, nextCheckAfter: null, buildCount: 0, problem: null };
 /** Authored registry order used by the renderer tests. */
 export const testProducts = [{ id: 'wow', label: 'Retail', description: 'World of Warcraft' }, { id: 'wowt', label: 'PTR', description: 'Public test' }];
 export const notChecked = (productId: string): ProductDiscoveryStatus => ({ productId, lastCheckedAt: null, checkedRegions: [], errors: [], hasSavedHistory: false, connection: 'notChecked' });
@@ -7,5 +9,5 @@ export const statusOf = (page: DiscoveryPage): ProductDiscoveryStatus => ({ prod
 /** A cross-product page holding a single-product page's builds and status; the other test products were never checked. */
 export function catalog(page: DiscoveryPage, patch: Partial<DiscoveryCatalogPage> = {}, statuses: ProductDiscoveryStatus[] = []): DiscoveryCatalogPage {
   const products = testProducts.map(product => statuses.find(status => status.productId === product.id) ?? (product.id === page.productId ? statusOf(page) : notChecked(product.id)));
-  return { productId: null, filter: 'all', builds: page.builds, nextCursor: page.nextCursor, products, refreshProblems: [], ...patch };
+  return { productId: null, filter: 'all', builds: page.builds, nextCursor: page.nextCursor, products, refreshProblems: [], communityBuilds: communityOff, ...patch };
 }
