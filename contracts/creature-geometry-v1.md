@@ -46,7 +46,7 @@ Each source record: `role`, `fileDataId`, `contentKey`, `encodingKey`, `encodedS
 | `notPrepared` | No retained artifact; no problem. May include metadata already reached. |
 | `metadataNotResolved` | The slot→CDI→CMD chain stops (zero/negative slot, missing or ambiguous target, metadata not prepared). Mirrors display metadata; no sources. |
 | `ready` | Positive full chain, both sources verified, VMG1 manifest present. |
-| `noDeclaredTriangles` | Same verified pair as ready, but the SKIN's sections declare zero triangle indices. No VMG1 file, no bounds, not cached as a negative. |
+| `noDeclaredTriangles` | Same verified pair as ready, but the SKIN's sections declare zero triangle indices. No VMG1 file, no bounds, not cached as a negative. `problem` is null; the desktop names the state itself ("Nothing to draw"). Retail and Classic Era FileDataID 124640 has a 64-byte main SKIN with every count zero. |
 | `missingMembership` | The model or SKIN FDID has no ROOT membership. |
 | `ambiguousVariants` | ROOT memberships for the FDID disagree on the CKey. |
 | `encodingUnresolved` | The CKey has no ENCODING entry. |
@@ -54,7 +54,7 @@ Each source record: `role`, `fileDataId`, `contentKey`, `encodingKey`, `encodedS
 | `unsupported` | Model/SKIN outside the reader's finite profile, or an external skeleton/bone dependency. For `MODEL_UNSUPPORTED` the problem message names the feature (version and container, `SKID`, `BFID`). |
 | `unavailable` | CDN unavailable. |
 | `corrupt` | Hash, key, grammar or receipt conflict. |
-| `resourceLimit` | A size, count or reservation limit was exceeded. |
+| `resourceLimit` | A size, count or reservation limit was exceeded. A model or SKIN over the source caps is refused before acquisition; the message names its decoded and encoded sizes and the caps. A limit that is not retryable says it is not a corrupt file (D110). |
 
 Busy, stale authority, deadline and cleanup failure are request errors, not states: `CREATURE_GEOMETRY_BUSY`, `CREATURE_GEOMETRY_STALE`, `CREATURE_GEOMETRY_DEADLINE_EXCEEDED`, `CREATURE_GEOMETRY_CLEANUP_FAILED`, `CREATURES_BUSY`, `CREATURES_QUERY_BUSY`. Cancellation and busy outcomes are never cached.
 

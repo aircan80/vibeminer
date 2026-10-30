@@ -60,8 +60,7 @@ internal static class GeometrySourceVerification
     {
         var expected = result.Expectation ?? throw GeometrySourceCapsuleCodec.Invalid();
         var texture = dependency == CreatureGeometryDependency.Texture;
-        if (expected.Role != "asset" || expected.EncodedBytes < 9 || expected.EncodedBytes > (texture ? 16 << 20 : 4 << 20) ||
-            expected.DecodedBytes < 1 || expected.DecodedBytes > (texture ? 16 << 20 : 8 << 20)) throw GeometrySourceCapsuleCodec.Limit();
+        RequireSourceSize(expected, dependency);
         var stage = dependency switch { CreatureGeometryDependency.Model => "model", CreatureGeometryDependency.Skin => "skin", CreatureGeometryDependency.Texture => "texture", _ => throw GeometrySourceCapsuleCodec.Invalid() };
         var physical = await services.Shared.AcquireAsync(new(expected.EncodingKey, expected.EncodedBytes), context,
             AcquisitionPriority.Interactive, p => progress(new(stage + "Acquisition", "Acquiring original " + stage + " source", p.Unit, p.Completed, p.Total, dependency)), token);
@@ -103,6 +102,21 @@ internal static class GeometrySourceVerification
             if (!transferred) await owner.DisposeAsync();
         }
     }
+    /// <summary>The finite source sizes, checked before any payload demand. A source over them is refused with its
+    /// own and the allowed sizes, so a large real file is never mistaken for a corrupt one (#98).</summary>
+    internal static void RequireSourceSize(MetadataExpectation expected, CreatureGeometryDependency dependency)
+    {
+        var texture = dependency == CreatureGeometryDependency.Texture;
+        long encodedLimit = texture ? 16 << 20 : 4 << 20, decodedLimit = texture ? 16 << 20 : 8 << 20;
+        if (expected.Role != "asset" || expected.EncodedBytes < 9 || expected.DecodedBytes < 1) throw GeometrySourceCapsuleCodec.Limit();
+        if (expected.EncodedBytes <= encodedLimit && expected.DecodedBytes <= decodedLimit) return;
+        var role = dependency switch { CreatureGeometryDependency.Model => "model", CreatureGeometryDependency.Skin => "SKIN", _ => "texture" };
+        throw new DiscoveryException("CREATURE_GEOMETRY_RESOURCE_LIMIT", string.Create(CultureInfo.InvariantCulture,
+            $"The {role} file is {Mib(expected.DecodedBytes)} decoded and {Mib(expected.EncodedBytes)} encoded; geometry reads at most {Mib(decodedLimit)} decoded and {Mib(encodedLimit)} encoded."));
+    }
+    // Rounded up, so a file just over a limit never reads as equal to it.
+    private static string Mib(long bytes) => (bytes % (1 << 20) == 0 ? (bytes >> 20).ToString(CultureInfo.InvariantCulture)
+        : (Math.Ceiling(bytes / 104857.6) / 10).ToString("0.0", CultureInfo.InvariantCulture)) + " MiB";
     internal static DiscoveryException Cleanup() => new("CREATURE_GEOMETRY_CLEANUP_FAILED", "Geometry source cleanup failed; its reservation remains charged.");
 }
 

@@ -160,7 +160,8 @@ internal sealed partial class GeometrySourceClosure
         }
         var association = await GeometrySourceCapsuleCodec.SnapshotAssociationAsync(result.Association, budget, token);
         var expected = result.Expectation;
-        if (expected is null || expected.Role != "asset" || expected.EncodedBytes is < 9 or > (4 << 20) || expected.DecodedBytes is < 1 or > (8 << 20)) throw GeometrySourceCapsuleCodec.Limit();
+        if (expected is null) throw GeometrySourceCapsuleCodec.Limit();
+        GeometrySourceVerification.RequireSourceSize(expected, dependency);
         if (association.Request != context.Request || association.SourceReference != context.Opening || association.ResearchLocale != context.ResearchLocale ||
             association.Configurations[0].Key != context.BuildConfigurationKey || association.Configurations[0].Sha256 != context.BuildConfigurationSha256 ||
             association.Configurations[1].Key != context.CdnConfigurationKey || association.Configurations[1].Sha256 != context.CdnConfigurationSha256 ||
@@ -192,6 +193,7 @@ internal sealed partial class GeometrySourceClosure
         source.Association.EncodingLookupRevision, source.Association.RootLookupRevision, source.Association.EncodingSelectionPolicy);
     private static bool RequestFailure(string code) => code.Contains("STALE", StringComparison.Ordinal) || code.Contains("SOURCE_CHANGED", StringComparison.Ordinal) ||
         code.Contains("BUSY", StringComparison.Ordinal) || code.EndsWith("CLEANUP_FAILED", StringComparison.Ordinal) || code is "ENGINE_STOPPING" or "INVALID_REQUEST";
+    private static bool OwnMessage(string code) => code is "MODEL_UNSUPPORTED" or "MODEL_INVALID" or "MODEL_LIMIT" or "CREATURE_GEOMETRY_RESOURCE_LIMIT";
     private static GeometrySourceFailureException Failure(DiscoveryException e, CreatureGeometryDependency dependency, IReadOnlyList<CreatureGeometrySource> reached)
     {
         var state = e.Code switch
@@ -205,9 +207,10 @@ internal sealed partial class GeometrySourceClosure
             _ when e.Code.Contains("UNAVAILABLE", StringComparison.Ordinal) || e.Code == "LOCAL_OBJECT_MISSING" => CreatureGeometryState.Unavailable,
             _ => CreatureGeometryState.Corrupt
         };
-        // Our own readers name the model or SKIN feature outside the profile in a short fixed message (#75); keep it.
+        // Our own readers and size checks name the feature, malformation or limit in a short fixed message (#75, #98); keep it.
         var message = "The original geometry source could not be admitted (" + state + ")";
-        message = e.Code == "MODEL_UNSUPPORTED" && e.Message.Length is > 0 and <= 400 ? message + ": " + e.Message : message + ".";
+        message = OwnMessage(e.Code) && e.Message.Length is > 0 and <= 400 ? message + ": " + e.Message : message + ".";
+        if (state == CreatureGeometryState.ResourceLimit && !e.Retryable) message += " This is a size limit, not a corrupt file.";
         return new(state, dependency, new(e.Code, message, e.Retryable), reached);
     }
 }

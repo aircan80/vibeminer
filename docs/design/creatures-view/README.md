@@ -38,7 +38,7 @@ Every field the Creature layout has, number first: Name_lang, NameAlt_lang, Titl
 - A reserved 8.5rem square at the left of each resolved card (above the facts when the detail is narrower than 34rem).
 - **On request:** **Show model** prepares that display's geometry through the shared pipeline at interactive priority, with **Stop loading model** while it runs. A model kept from an earlier look draws by itself.
 - **Drawn:** unposed geometry in the geometry view's own renderer, no controls, with an "Unposed" tag. The square and **Open geometry view** open the full #59 view for that slot; its Return comes back to the same button.
-- **No preview** when the chain stops before a model file (Ambiguous, Missing, Unknown, ModelID 0, FileDataID 0): "The chain stops before a model file." **Encrypted model** (`MODEL_ENCRYPTED`, the key named) and **Unsupported model** (`MODEL_UNSUPPORTED`, the reader's reason) appear only after Show model, because the engine finds them when it reads the file.
+- **No preview** when the chain stops before a model file (Ambiguous, Missing, Unknown, ModelID 0, FileDataID 0): "The chain stops before a model file." **Encrypted model** (`MODEL_ENCRYPTED`, the key named) and **Unsupported model** (`MODEL_UNSUPPORTED`, the reader's reason) appear only after Show model, because the engine finds them when it reads the file. So do **Nothing to draw** (`noDeclaredTriangles`: the main SKIN declares no triangles; the state is named because it has no problem code) and **Model too large** (`resourceLimit`, the sizes and caps named, not corrupt). Any other outcome without a problem code shows its state name, never a bare "Model not drawn" (#98).
 - One preview per card; they never start by themselves while the selection moves.
 
 ## States

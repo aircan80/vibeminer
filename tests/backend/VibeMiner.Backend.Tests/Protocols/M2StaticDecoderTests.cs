@@ -148,6 +148,32 @@ public sealed class M2StaticDecoderTests
         bytes = Model(); F(bytes, Base(bytes) + 184, -1); await Throws("MODEL_INVALID", () => ReadModel(bytes));
     }
 
+    // #98: Retail 274 models without a collision mesh declare the empty collision box: minimum +1e7, maximum -1e7, radius 0.
+    private static byte[] EmptyCollisionBox(float radius = 0, float maximumX = -1e7f)
+    {
+        var bytes = Model(); var at = Base(bytes) + 188;
+        F(bytes, at, 1e7f); F(bytes, at + 4, 1e7f); F(bytes, at + 8, 1e7f);
+        F(bytes, at + 12, maximumX); F(bytes, at + 16, -1e7f); F(bytes, at + 20, -1e7f); F(bytes, at + 24, radius);
+        return bytes;
+    }
+
+    [Fact]
+    public async Task Empty_collision_box_is_admitted_only_without_collision_vertices()
+    {
+        var model = await ReadModel(EmptyCollisionBox());
+        Assert.Equal(4, model.Vertices.Count); Assert.Equal(274u, model.Version);
+        // Any other inverted collision box is still malformed: a radius, one axis in order, or declared collision vertices.
+        await Throws("MODEL_INVALID", () => ReadModel(EmptyCollisionBox(radius: 1)));
+        await Throws("MODEL_INVALID", () => ReadModel(EmptyCollisionBox(maximumX: 2e7f)));
+        var withVertices = EmptyCollisionBox(); var b = Base(withVertices);
+        U32(withVertices, b + 224, 1); U32(withVertices, b + 228, U32(withVertices, b + 64));
+        await Throws("MODEL_INVALID", () => ReadModel(withVertices));
+        // The main bounding box never gets the empty exception.
+        var main = Model(); b = Base(main);
+        F(main, b + 160, 1e7f); F(main, b + 164, 1e7f); F(main, b + 168, 1e7f); F(main, b + 172, -1e7f); F(main, b + 176, -1e7f); F(main, b + 180, -1e7f); F(main, b + 184, 0);
+        await Throws("MODEL_INVALID", () => ReadModel(main));
+    }
+
     [Theory]
     [InlineData(0, float.NaN)][InlineData(4, float.PositiveInfinity)][InlineData(20, float.NegativeInfinity)]
     [InlineData(32, float.NaN)][InlineData(40, float.PositiveInfinity)]

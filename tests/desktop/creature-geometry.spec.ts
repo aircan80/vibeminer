@@ -95,6 +95,20 @@ test('An unsupported source is a clear textual outcome with no canvas or body re
  await expect(card(page).locator('canvas')).toHaveCount(0);await capture(page,s.app,'unsupported',card(page),true);
  expect((await methods(s.data)).some(r=>r.method==='creatures.geometry.open')).toBe(false);
 }finally{await s.close();}});
+test('A model with no triangles names its state instead of a bare "Model not drawn" (#98)',async()=>{test.setTimeout(90000);const s=await opened('noDeclaredTriangles');try{
+ const{page}=s;await show(page).click();
+ await expect(card(page).getByRole('img',{name:'Nothing to draw',exact:true})).toBeVisible({timeout:20000});
+ await expect(card(page)).toContainText('noDeclaredTriangles');await expect(card(page)).toContainText('The main SKIN declares no triangles, so this model has no surface to draw. The file is not corrupt.');
+ await expect(card(page)).not.toContainText('Model not drawn');await expect(card(page).locator('canvas')).toHaveCount(0);
+ await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);await capture(page,s.app,'no-triangles',card(page),true);
+ expect((await methods(s.data)).some(r=>r.method==='creatures.geometry.open')).toBe(false);
+}finally{await s.close();}});
+test('A model over a size limit says so with its code (#98)',async()=>{test.setTimeout(90000);const s=await opened('resourceLimit');try{
+ const{page}=s;await show(page).click();
+ await expect(card(page).getByRole('img',{name:'Model too large',exact:true})).toBeVisible({timeout:20000});
+ await expect(card(page)).toContainText('AUTHORED_RESOURCE_LIMIT');await expect(card(page)).not.toContainText('Model not drawn');
+ await capture(page,s.app,'too-large',card(page),true);
+}finally{await s.close();}});
 test('Switching builds closes the open view lease, and no geometry block is left above the panes',async()=>{test.setTimeout(120000);const s=await opened();try{
  const{page}=s,closes=async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length;
  const switchTo=async(row:number)=>{await page.getByRole('button',{name:/Choose build/}).click();await page.locator('.build-row').nth(row).click();await page.getByRole('button',{name:'Open build',exact:true}).click();await expect(page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();};

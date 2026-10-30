@@ -80,6 +80,8 @@ Vertex, 48 bytes: position (3 f32), 4 bone weights (u8 each), 4 bone indices (u8
 
 Collision triangles are never used as visible geometry.
 
+The bounding box and the collision box must each have minimum ≤ maximum on every axis and radius ≥ 0. One exception (#98): when the model declares no collision vertices, the collision box may be the empty box, minimum above maximum on every axis and radius 0. Retail writes `+1e7`/`−1e7` there for a model without a collision mesh (Retail 12.1.5.70575 FileDataID 7456394). Any other inverted box is `MODEL_INVALID`.
+
 ## SKIN
 
 | Offset | Field |

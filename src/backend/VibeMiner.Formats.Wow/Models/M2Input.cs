@@ -84,11 +84,14 @@ internal sealed class M2Input
     }
     internal static Vector3 V3(ReadOnlySpan<byte> data, int at = 0) => new(F(data, at), F(data, at + 4), F(data, at + 8));
     internal static Vector2 V2(ReadOnlySpan<byte> data, int at = 0) => new(F(data, at), F(data, at + 4));
-    internal static M2Bounds Bounds(ReadOnlySpan<byte> data, int at)
+    internal static M2Bounds Bounds(ReadOnlySpan<byte> data, int at, bool emptyAllowed = false)
     {
         var min = V3(data, at); var max = V3(data, at + 12); var radius = F(data, at + 24);
-        if (min.X > max.X || min.Y > max.Y || min.Z > max.Z || radius < 0)
-            throw Error("INVALID", "A declared model bound is inverted or has negative radius.");
+        if (radius < 0) throw Error("INVALID", "A declared model bound has a negative radius.");
+        // The empty box: minimum above maximum on every axis, radius 0. Retail writes it for a model with no collision mesh (#98).
+        if (emptyAllowed && min.X > max.X && min.Y > max.Y && min.Z > max.Z && radius == 0) return new(min, max, radius);
+        if (min.X > max.X || min.Y > max.Y || min.Z > max.Z)
+            throw Error("INVALID", emptyAllowed ? "The declared collision bound is inverted but not empty." : "A declared model bound is inverted.");
         return new(min, max, radius);
     }
 }

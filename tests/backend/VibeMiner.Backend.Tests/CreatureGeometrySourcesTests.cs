@@ -173,6 +173,14 @@ public sealed class CreatureGeometrySourcesTests
         var requests = fixture.Http.Requests.Count;
         var failure = await Assert.ThrowsAsync<GeometrySourceFailureException>(() => fixture.PrepareAsync().WaitAsync(Deadline));
         Assert.Equal(ambiguous ? CreatureGeometryState.AmbiguousVariants : CreatureGeometryState.ResourceLimit, failure.State);
+        // #98: the refusal names the size that tripped and the allowed one, and says it is not corruption.
+        if (!ambiguous)
+        {
+            Assert.Equal("CREATURE_GEOMETRY_RESOURCE_LIMIT", failure.Problem.Code);
+            Assert.Contains("4.1 MiB encoded; geometry reads at most 8 MiB decoded and 4 MiB encoded.", failure.Problem.Message);
+            Assert.EndsWith("This is a size limit, not a corrupt file.", failure.Problem.Message);
+            Assert.InRange(failure.Problem.Message.Length, 1, 512);
+        }
         Assert.Empty(failure.Sources); Assert.Equal(requests, fixture.Http.Requests.Count); Assert.Equal(0, fixture.Payload.ReservedBytes);
     }
     [Theory]
