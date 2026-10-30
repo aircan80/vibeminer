@@ -12,7 +12,7 @@ const textured=(value:Validated|null):value is ValidatedAppearance=>!!value&&(va
 /** Ready geometry whose display appearance was never prepared (or was not retained) still needs one Prepare. */
 const needsAppearance=(r:CreatureGeometryResult)=>r.state==='ready'&&r.appearance?.state==='notPrepared';
 function gate<T>(){let resolve!:(value:T)=>void;return{promise:new Promise<T>(r=>{resolve=r;}),resolve};}
-type View={intent:GeometryIntent;request:number;generation:number;revoked:boolean;abort:AbortController;left:ReturnType<typeof gate<void>>;icons:ReturnType<typeof gate<void>>;canvas:ReturnType<typeof gate<void>>;work:Promise<void>;retiring:Promise<void>|null;entered:{viewId:string;viewGeneration:number}|null;enterAttempted:boolean;openAttempted:boolean;observedToken:string|null|undefined;grant:GeometryBodyGrant|null;identity:GeometrySceneIdentity|null;validated:Validated|null;ack:GeometryBodyRetired|null;owner:GeometrySceneOwner|null;confirmed:boolean;mounted:boolean;sceneStatus:GeometrySceneStatus|null;inSceneCall:boolean;debt:boolean;responseDebt:Response|null;iconsCommitted:boolean;pendingCanvas:HTMLCanvasElement|null;mountedCanvas:HTMLCanvasElement|null;canvasTicket:number;canvasWork:Promise<void>|null;canvasDirty:boolean};
+type View={intent:GeometryIntent;localOnly:boolean;request:number;generation:number;revoked:boolean;abort:AbortController;left:ReturnType<typeof gate<void>>;icons:ReturnType<typeof gate<void>>;canvas:ReturnType<typeof gate<void>>;work:Promise<void>;retiring:Promise<void>|null;entered:{viewId:string;viewGeneration:number}|null;enterAttempted:boolean;openAttempted:boolean;observedToken:string|null|undefined;grant:GeometryBodyGrant|null;identity:GeometrySceneIdentity|null;validated:Validated|null;ack:GeometryBodyRetired|null;owner:GeometrySceneOwner|null;confirmed:boolean;mounted:boolean;sceneStatus:GeometrySceneStatus|null;inSceneCall:boolean;debt:boolean;responseDebt:Response|null;iconsCommitted:boolean;pendingCanvas:HTMLCanvasElement|null;mountedCanvas:HTMLCanvasElement|null;canvasTicket:number;canvasWork:Promise<void>|null;canvasDirty:boolean};
 type Operation={snapshot:GeometryOperation;result:CreatureGeometryResult|null;promise:Promise<void>;cancellation:Promise<void>|null};
 type Decision={kind:'stopped'|'failed';error:GeometryFailure|null};
 export interface GeometrySessionDependencies{
@@ -20,6 +20,8 @@ export interface GeometrySessionDependencies{
 }
 const unavailable:GeometryFailure=Object.freeze({code:'ENGINE_UNAVAILABLE',message:'Geometry could not finish. Retained source metadata remains usable.',retryable:true});
 const failure=(code:string,message:string,retryable=false):GeometryFailure=>Object.freeze({code,message,retryable});
+/** The engine's bounded read or preparation capacity was full: retryable, and never an outcome of the source. */
+export const geometryBusy=(error:{code:string;retryable?:boolean}|null|undefined)=>!!error&&error.retryable!==false&&/(^|_)BUSY$/.test(error.code);
 /** Displayed canvas size × devicePixelRatio; an unlaid-out canvas keeps the original default. */
 function backingSize(canvas:HTMLCanvasElement){const r=canvas.getBoundingClientRect();return geometryBackingSize(r.width,r.height,canvas.ownerDocument.defaultView?.devicePixelRatio??1);}
 function unwrap<T>(reply:BridgeReply<T>):T{if(!reply.ok)throw reply.error;return reply.value;}
@@ -34,6 +36,8 @@ export class GeometrySession{
  private readonly listeners=new Set<()=>void>();
  private readonly decisions=new Map<string,Decision>();
  private desired:GeometryIntent|null=null;
+ /** The desired view only shows geometry this build already keeps: it never prepares or downloads (Creatures preview, #62). */
+ private desiredLocal=false;
  private active:View|null=null;
  private operation:Operation|null=null;
  private generation=0;
@@ -70,19 +74,26 @@ export class GeometrySession{
  private detachIfIdle(){if(this.listeners.size||this.active||this.operation&&['pending','stopping'].includes(this.operation.snapshot.status))return;this.offProgress?.();this.offProgress=null;this.offRetirement?.();this.offRetirement=null;}
  updateAdmission(admission:GeometryLongAdmission){const changed=admission.revision!==this.admission.revision;this.admission=admission;if(changed){const old=this.capacity;this.capacity=gate<void>();old.resolve();}}
  private progress(progress:EngineProgress){const op=this.operation;if(!op||!['pending','stopping'].includes(op.snapshot.status)||progress.requestId!==op.snapshot.id||progress.sequence<=(op.snapshot.progress?.sequence??0)||!validGeometryProgress(progress))return;op.snapshot=Object.freeze({...op.snapshot,progress:ownGeometryValue(progress)});this.publish({operation:op.snapshot});const v=this.active;if(v&&!v.revoked&&geometryIntentKey(v.intent)===geometryIntentKey(op.snapshot.intent))this.viewState(v,{message:progress.stage});}
- enter(input:GeometryIntent):void{
+ enter(input:GeometryIntent,options?:{localOnly?:boolean;fresh?:boolean}):void{
   if(this.closing)return;let intent:GeometryIntent;try{intent=ownGeometryIntent(input);}catch{ return; }
+  const localOnly=options?.localOnly===true;
+  // A fresh entry is a deliberate new request (Show model, #62): it starts again instead of replaying a remembered Stop or failure.
+  if(options?.fresh===true&&!localOnly)this.decisions.delete(geometryIntentKey(intent));
+  // A deliberate entry replaces a local-only look at the same selection, so it can prepare.
+  if(!localOnly&&this.active&&!this.active.revoked&&this.active.localOnly&&geometryIntentKey(this.active.intent)===geometryIntentKey(intent)){const previous=this.active;this.request++;this.desired=intent;this.desiredLocal=false;void this.retire(previous);this.publish({view:Object.freeze({intent,generation:++this.generation,phase:'waiting',message:'Waiting for the previous geometry view to close',result:null,error:null,canMount:false,sections:[],sectionOffset:0})});return;}
   if(this.active&&!this.active.revoked&&geometryIntentKey(this.active.intent)===geometryIntentKey(intent)&&this.desired){
    if(sameGeometryAnchor(this.active.intent.anchor,intent.anchor))return;
    const previous=this.active,error=failure('GEOMETRY_SOURCE_CHANGED','The selected display evidence changed. Reassess metadata before entering geometry.',true);this.request++;this.desired=intent;this.failView(previous,error);void this.retire(previous);return;
   }
-  this.request++;this.desired=intent;const previous=this.active;
+  this.request++;this.desired=intent;this.desiredLocal=localOnly;const previous=this.active;
   if(previous){void this.retire(previous);this.publish({view:Object.freeze({intent,generation:++this.generation,phase:'waiting',message:'Waiting for the previous geometry view to close',result:null,error:null,canMount:false,sections:[],sectionOffset:0})});return;}
   this.startDesired();
  }
  private startDesired(){
   const intent=this.desired;if(!intent||this.active||this.closing)return;
   const decision=this.decisions.get(geometryIntentKey(intent));
+  // A local-only look never replays a remembered Stop or failure: it only says nothing is drawn, and Show model decides (#62).
+  if(decision&&this.desiredLocal){this.publish({view:Object.freeze({intent,generation:++this.generation,phase:'outcome',message:'Geometry is not kept for this display',result:null,error:null,canMount:false,sections:[],sectionOffset:0})});return;}
   if(decision||this.decisions.size>=256){const error=decision?.error??(decision?null:failure('GEOMETRY_CONTROL_RESOURCE_LIMIT','The session limit for remembered stopped or failed geometry requests was reached. Existing decisions are preserved.',false));this.publish({view:Object.freeze({intent,generation:++this.generation,phase:'outcome',message:decision?.kind==='stopped'?'Geometry preparation stopped':'Geometry needs attention',result:null,error,canMount:false,sections:[],sectionOffset:0})});return;}
   const previous=this.operation;
   if(previous&&geometryIntentKey(previous.snapshot.intent)===geometryIntentKey(intent)&&previous.snapshot.status==='succeeded'&&previous.result&&previous.result.state!=='ready'){
@@ -91,7 +102,7 @@ export class GeometrySession{
    }
    this.publish({view:Object.freeze({intent,generation:++this.generation,phase:'outcome',message:geometryOutcome[previous.result.state],result:previous.result,error:previous.result.problem,canMount:false,sections:[],sectionOffset:0})});return;
   }
-  this.connect();const v:View={intent,request:this.request,generation:++this.generation,revoked:false,abort:new AbortController(),left:gate<void>(),icons:gate<void>(),canvas:gate<void>(),work:Promise.resolve(),retiring:null,entered:null,enterAttempted:false,openAttempted:false,observedToken:undefined,grant:null,identity:null,validated:null,ack:null,owner:null,confirmed:false,mounted:false,sceneStatus:null,inSceneCall:false,debt:false,responseDebt:null,iconsCommitted:false,pendingCanvas:null,mountedCanvas:null,canvasTicket:0,canvasWork:null,canvasDirty:false};
+  this.connect();const v:View={intent,localOnly:this.desiredLocal,request:this.request,generation:++this.generation,revoked:false,abort:new AbortController(),left:gate<void>(),icons:gate<void>(),canvas:gate<void>(),work:Promise.resolve(),retiring:null,entered:null,enterAttempted:false,openAttempted:false,observedToken:undefined,grant:null,identity:null,validated:null,ack:null,owner:null,confirmed:false,mounted:false,sceneStatus:null,inSceneCall:false,debt:false,responseDebt:null,iconsCommitted:false,pendingCanvas:null,mountedCanvas:null,canvasTicket:0,canvasWork:null,canvasDirty:false};
   this.active=v;this.publish({iconsSuspended:true,view:Object.freeze({intent,generation:v.generation,phase:'entering',message:'Opening geometry view',result:null,error:null,canMount:false,sections:[],sectionOffset:0})});
   // Install the owned promise before invoking any external port, including synchronous callbacks.
   v.work=Promise.resolve().then(()=>this.run(v)).catch(e=>{if(!v.revoked)this.failView(v,errorValue(e));}).finally(()=>{if(!v.mounted||v.revoked)void this.retire(v);});
@@ -109,7 +120,9 @@ export class GeometrySession{
   if(!validGeometryToken(v.entered.viewId)||v.entered.viewGeneration!==v.generation)throw failure('GEOMETRY_RESULT_INVALID','The entered geometry view did not match this presentation.');
   this.requireCurrent(v);this.viewState(v,{phase:'checking',message:'Checking retained geometry'});
   let result=this.accept(v,unwrap(await this.bridge.creatureGeometryRead!(v.intent.selection)));this.requireCurrent(v);
-  if(result.state==='notPrepared'||needsAppearance(result)){
+  // A local-only look stops here when nothing is kept, and draws kept lines without preparing textures.
+  if(v.localOnly&&result.state==='notPrepared'){this.viewState(v,{phase:'outcome',message:'Geometry is not kept for this display',result,error:null,canMount:false});return;}
+  if(!v.localOnly&&(result.state==='notPrepared'||needsAppearance(result))){
    // Ready lines stay drawable when only the texture Prepare fails; a Stop is still a stop.
    const fallback=needsAppearance(result)?result:null;
    let op=this.operation;
@@ -137,7 +150,7 @@ export class GeometrySession{
   this.requireCurrent(v);result=this.accept(v,result);this.viewState(v,{result,message:geometryOutcome[result.state],phase:'outcome'});
   if(result.state!=='ready'){
    if(result.state==='notPrepared')throw failure('GEOMETRY_NOT_PREPARED','Geometry remains unprepared after the requested preparation. Retry explicitly after reviewing this source.',true);
-   if(result.problem)this.remember(v.intent,{kind:'failed',error:result.problem});return;
+   if(result.problem&&!v.localOnly)this.remember(v.intent,{kind:'failed',error:result.problem});return;
   }
   // A ready display appearance is drawn instead of the line geometry; any other appearance state keeps the untextured lines.
   const surfaces=result.appearance?.state==='ready'?result.appearance.manifest:null,body=surfaces??result.manifest!;
@@ -190,7 +203,11 @@ export class GeometrySession{
  }
  private sameIdentity(a:GeometrySceneIdentity,b:GeometrySceneIdentity){return a.viewId===b.viewId&&a.viewGeneration===b.viewGeneration&&a.operationToken===b.operationToken&&a.geometryArtifactId===b.geometryArtifactId;}
  private remember(intent:GeometryIntent,decision:Decision){const key=geometryIntentKey(intent);if(this.decisions.has(key)||this.decisions.size<256)this.decisions.set(key,decision);}
- private failView(v:View,error:GeometryFailure){this.remember(v.intent,{kind:'failed',error});this.viewState(v,{phase:'outcome',message:error.code==='CANCELED'?'Geometry preparation stopped':'Geometry needs attention',error,canMount:false});}
+ private failView(v:View,error:GeometryFailure){
+  // A local-only look that can't read is simply "not looked": nothing is remembered and nothing claims a failure (#62 QA).
+  if(v.localOnly){this.viewState(v,{phase:'outcome',message:'Geometry is not kept for this display',result:null,error:null,canMount:false});return;}
+  // A busy engine isn't a decision either: the same selection may ask again at once.
+  if(!geometryBusy(error))this.remember(v.intent,{kind:'failed',error});this.viewState(v,{phase:'outcome',message:error.code==='CANCELED'?'Geometry preparation stopped':'Geometry needs attention',error,canMount:false});}
  iconsHiddenCommitted(generation:number){const v=this.active;if(v?.generation===generation&&!v.revoked){v.iconsCommitted=true;v.icons.resolve();}}
  attachCanvas(generation:number,canvas:HTMLCanvasElement):()=>void{
   const v=this.active;if(!v||v.generation!==generation||!this.current(v)||!v.iconsCommitted||!v.validated||!v.ack||!v.identity)return()=>{};

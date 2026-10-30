@@ -187,6 +187,12 @@
     "creatureDisplayMetadataResult": {
       "$ref": "#/definitions/CreatureDisplayMetadataResult"
     },
+    "creatureDisplayFactsResult": {
+      "$ref": "#/definitions/CreatureDisplayFactsResult"
+    },
+    "creatureLabelLists": {
+      "$ref": "#/definitions/CreatureLabelLists"
+    },
     "ItemEffectsSourceRole": {
       "$ref": "#/definitions/ItemEffectsSourceRole"
     },
@@ -1207,6 +1213,8 @@
             "creatures.inspect",
             "creatures.display.read",
             "creatures.display.prepare",
+            "creatures.display.facts",
+            "creatures.labels",
             "items.effects.data",
             "items.effects.prepare",
             "items.effects.page",
@@ -10739,6 +10747,192 @@
         "artifactId",
         "creatureId",
         "slot"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureDisplayFactCell": {
+      "title": "CreatureDisplayFactCell",
+      "type": "object",
+      "properties": {
+        "column": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "columnIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 511
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 65536
+        }
+      },
+      "required": [
+        "column",
+        "columnIndex",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureDisplayFact": {
+      "title": "CreatureDisplayFact",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "model",
+            "scale",
+            "textureVariations",
+            "file"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "value",
+            "unsupported"
+          ]
+        },
+        "cells": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CreatureDisplayFactCell"
+          },
+          "minItems": 0,
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "key",
+        "state",
+        "cells"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureDisplayRecordFacts": {
+      "title": "CreatureDisplayRecordFacts",
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "display",
+            "model"
+          ]
+        },
+        "tableId": {
+          "type": "string",
+          "enum": [
+            "bfdaf9f1",
+            "7f695fa5"
+          ]
+        },
+        "table": {
+          "type": "string",
+          "enum": [
+            "CreatureDisplayInfo",
+            "CreatureModelData"
+          ]
+        },
+        "recordId": {
+          "$ref": "#/definitions/CreatureId"
+        },
+        "facts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CreatureDisplayFact"
+          },
+          "minItems": 2,
+          "maxItems": 3
+        },
+        "raw": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CreatureDisplayFactCell"
+          },
+          "minItems": 0,
+          "maxItems": 512
+        }
+      },
+      "required": [
+        "role",
+        "tableId",
+        "table",
+        "recordId",
+        "facts",
+        "raw"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureDisplayFactsResult": {
+      "title": "CreatureDisplayFactsResult",
+      "type": "object",
+      "description": "creatures.display.facts (creature-display-facts-v1): the local display chain plus the reviewed facts of each uniquely matched row, display before model.",
+      "properties": {
+        "metadata": {
+          "$ref": "#/definitions/CreatureDisplayMetadataResult"
+        },
+        "factsRevision": {
+          "const": "creature-display-facts-v1"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CreatureDisplayRecordFacts"
+          },
+          "minItems": 0,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "metadata",
+        "factsRevision",
+        "records"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureLabel": {
+      "title": "CreatureLabel",
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,2})$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "CreatureLabelLists": {
+      "title": "CreatureLabelLists",
+      "type": "object",
+      "properties": {
+        "labelRevision": {
+          "const": "creature-labels-v1"
+        },
+        "classification": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CreatureLabel"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "labelRevision",
+        "classification"
       ],
       "additionalProperties": false
     },

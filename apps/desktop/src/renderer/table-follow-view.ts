@@ -9,7 +9,8 @@ export type DataPosition = { artifactId: string; cursor?: string; history: (stri
 /** Whether a declared reference can be followed: to a bundled table, to Files (FileData.ID), or not at all. */
 export type FollowTarget = { kind: 'table'; tableId: string } | { kind: 'files' } | { kind: 'checking' } | { kind: 'none'; reason: string };
 /** A followed value that left Tables for Files, with the record to return to. */
-export type FileTarget = { fileDataId: string; table: string; recordId: string; seq: number };
+/** `from: 'creatures'` when a Creatures model file opened Files (#62); its return goes back to the Creatures selection. */
+export type FileTarget = { fileDataId: string; table: string; recordId: string; seq: number; from?: 'creatures' };
 
 export const isFileDataReference = (reference: TableReference) => reference.table === 'FileData' && reference.column === 'ID';
 /** The action's name in the grid title and the record inspector, or null when this value can't be followed. */

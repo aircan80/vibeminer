@@ -25,6 +25,16 @@ internal static class CreatureDisplayWire
             target = value.Problem.Target is { } target ? Name(target) : null
         }
     };
+    internal static object Facts(CreatureDisplayFactsResult value) => new
+    {
+        metadata = Result(value.Metadata), value.FactsRevision,
+        records = value.Records.Select(record => new
+        {
+            role = Name(record.Role), record.TableId, record.Table, record.RecordId,
+            facts = record.Facts.Select(fact => new { fact.Key, state = Name(fact.State), fact.Cells }),
+            record.Raw
+        })
+    };
     private static string Name<T>(T value) where T : struct, Enum => Enum.IsDefined(value)
         ? JsonNamingPolicy.CamelCase.ConvertName(value.ToString())
         : throw new DiscoveryException("CREATURE_DISPLAY_STATE_INVALID", "The display metadata outcome is inconsistent.");

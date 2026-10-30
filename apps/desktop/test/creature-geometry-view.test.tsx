@@ -5,7 +5,6 @@ import readyJson from '../../../contracts/examples/creature-geometry-ready.json'
 import texturedJson from '../../../contracts/examples/creature-geometry-textured.json';
 import type {CreatureGeometryResult} from '../../../contracts/generated/discovery';
 import {CreatureGeometryView} from '../src/renderer/CreatureGeometryView';
-import {CreatureGeometryActivity} from '../src/renderer/CreatureGeometryActivity';
 import {captureGeometryAnchor,type GeometryViewState} from '../src/renderer/geometry-state';
 import type {GeometryFlow} from '../src/renderer/useCreatureGeometry';
 const result=readyJson as CreatureGeometryResult;
@@ -42,10 +41,6 @@ it('gives Q0 and empty-source failure useful metadata without fabricated manifes
  expect(container.querySelector('canvas')).toBeNull();expect(screen.queryByText('Declared section evidence')).not.toBeInTheDocument();expect(screen.queryByText('Declared geometry')).not.toBeInTheDocument();expect(screen.getByText('Model · full verified source')).toBeVisible();
  rerender(<CreatureGeometryView flow={{...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:{...q0,state:'protected',sources:[],problem:{code:'PROTECTED',message:'Authored protected source',retryable:false,dependency:'skin',target:null}},canMount:false}}}} onReturn={()=>{}}/>);
  expect(screen.queryByText(/full verified source/)).not.toBeInTheDocument();expect(screen.getByText('Model FileDataID · source value')).toBeVisible();
-});
-it('keeps original-context closing/blocked activity and no misleading dismiss or retry through debt',()=>{
- const {flow,view}=fixture();render(<CreatureGeometryActivity flow={{...flow,snapshot:{...flow.snapshot,view:null,retirement:{intent:view.intent,phase:'blocked',error:{code:'CLEANUP_FAILED',message:'Authored uncertain close',retryable:false}}}}}/>);
- expect(screen.getByRole('region',{name:'Geometry activity'})).toHaveTextContent('wow · build Authored build · source US');expect(screen.getByText('Geometry cleanup needs attention')).toBeVisible();expect(screen.getByText(/Icons are paused/)).toBeVisible();expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });
 it('does not offer empty early section inspection, then preserves the focused pager at both boundaries',async()=>{
  const {flow,session}=fixture('validating'),extended={...result,manifest:{...result.manifest!,sectionCount:33}},initial={...flow,snapshot:{...flow.snapshot,view:{...flow.snapshot.view!,result:extended}}};

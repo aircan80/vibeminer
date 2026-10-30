@@ -361,7 +361,7 @@ public sealed class FetchedDefinitionTests
     public async Task Every_bundled_definition_fits_the_layout_and_selection_bounds()
     {
         var provider = await TablesCatalog.Provider.Value;
-        Assert.Equal(12, provider.Definitions.Count);
+        Assert.Equal(14, provider.Definitions.Count);
         Assert.NotNull(DbdDefinitionReader.Parse(ItemWith("9A2A4834", "77.0.0.100")));
     }
 

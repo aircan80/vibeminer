@@ -263,7 +263,7 @@ export function FilesFrame({ active, pane, onPane, headingRef, sub, head, notice
   useEffect(() => { if (!active) onPane('list'); }, [active]);
   return <section className="dh-files" data-pane={pane} aria-label="Files" hidden={!active}>
     <div className="dh-pane-switch"><div className="dh-segmented" role="group" aria-label="Show pane"><button aria-pressed={pane === 'list'} onClick={() => onPane('list')}>Files list</button><button aria-pressed={pane === 'inspector'} onClick={() => onPane('inspector')}>{selectedLabel}</button></div></div>
-    <section className="dh-pane dh-list" aria-labelledby="files-heading"><div className="dh-pane-head dh-files-filters">{head ?? <><h1 ref={headingRef} id="files-heading" tabIndex={-1}>Files</h1><span className="dh-sub">{sub}</span></>}</div>{notices}{list}<div className="dh-pane-foot">{fileTarget && onReturnToTable && <button className="dh-btn return-table" onClick={onReturnToTable}>← Return to {fileTarget.table} record {fileTarget.recordId}</button>}{foot}</div></section>
+    <section className="dh-pane dh-list" aria-labelledby="files-heading"><div className="dh-pane-head dh-files-filters">{head ?? <><h1 ref={headingRef} id="files-heading" tabIndex={-1}>Files</h1><span className="dh-sub">{sub}</span></>}</div>{notices}{list}<div className="dh-pane-foot">{fileTarget && onReturnToTable && <button className="dh-btn return-table" onClick={onReturnToTable}>{fileTarget.from === 'creatures' ? '← Return to Creatures selection' : `← Return to ${fileTarget.table} record ${fileTarget.recordId}`}</button>}{foot}</div></section>
     <aside className="dh-inspector" aria-labelledby="files-inspector-heading" inert={covered}>{inspector}</aside>
   </section>;
 }

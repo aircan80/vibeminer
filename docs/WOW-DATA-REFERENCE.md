@@ -134,9 +134,9 @@ Pinned revision `b9a63096cdd99b26967f17f9515377ae62cadfd7`. The bundled manifest
 | With a DB2 FileDataID (all distinct) | 1,270 |
 | Without a DB2 FileDataID | 76 |
 | Also carrying a DBC FileDataID | 378 |
-| Definitions bundled | 12 |
+| Definitions bundled | 14 |
 
-The 12 bundled definitions: Creature, CreatureDisplayInfo, CreatureModelData, Item, ItemClass, ItemEffect, ItemGroupSounds, ItemSparse, ItemSubClass, ItemXItemEffect, Material, SpellName. They are unmodified upstream bytes with recorded SHA-256 and length.
+The 14 bundled definitions: Creature, CreatureDisplayInfo, CreatureFamily, CreatureModelData, CreatureType, Item, ItemClass, ItemEffect, ItemGroupSounds, ItemSparse, ItemSubClass, ItemXItemEffect, Material, SpellName. They are unmodified upstream bytes with recorded SHA-256 and length.
 
 - **License:** definitions and manifest are CC BY-SA 4.0; WoWDBDefs code is BSD-3-Clause. Keep contributor attribution, revision, digests and modification status. See [LICENSING.md](LICENSING.md).
 - **It is community metadata, not a per-build inventory.** The manifest lists known tables; names can be provisional. Which tables a build actually contains comes only from authenticated ROOT/ENCODING. ROOT carries FDIDs and CKeys, not paths, so "every DB2 in this build" cannot be derived from ROOT alone.
@@ -163,16 +163,18 @@ Table relationship rules (Tables explorer):
 
 ## Reference text columns
 
-The Tables grid shows `value · text` for a declared reference only when its target is on this reviewed allowlist ([#17](https://github.com/aircan80/vibeminer/issues/17), [TableReferenceTextService.cs](../src/backend/VibeMiner.Application/TableReferenceTextService.cs)). Every other reference shows the number only. Nothing is inferred from column names or matching numbers.
+The Tables grid shows `value · text` for a declared reference only when its target is on this reviewed allowlist ([#17](https://github.com/aircan80/vibeminer/issues/17); CreatureType and CreatureFamily added on [#62](https://github.com/aircan80/vibeminer/issues/62), where the Creatures view shows them too; [TableReferenceTextService.cs](../src/backend/VibeMiner.Application/TableReferenceTextService.cs)). Every other reference shows the number only. Nothing is inferred from column names or matching numbers.
 
 | Declared target | Text from | Matched on | Key domain | Encoded size | Loads |
 | --- | --- | --- | --- | ---: | --- |
 | `ItemClass::ClassID` | `ItemClass.ClassName_lang` | `ItemClass.ClassID`, not `ItemClass.ID` | signed8, -128 to 127 | 453 B | automatically |
 | `Creature::ID` | `Creature.Name_lang` | record ID | uint32 | 340,038 B | automatically |
+| `CreatureType::ID` | `CreatureType.Name_lang` | record ID | uint32 | 326 B ¹ | automatically |
+| `CreatureFamily::ID` | `CreatureFamily.Name_lang` | record ID | uint32 | 2,196 B ¹ | automatically |
 | `Spell::ID` | `SpellName.Name_lang` (Spell isn't bundled; same ID) | record ID | uint32 | 2,754,982 B | on Load text |
 | `Item::ID` | `ItemSparse.Display_lang` (same ID) | record ID | uint32 | 7,988,612 B | on Load text |
 
-Encoded sizes are the text tables' encoded objects on Retail `12.1.5.70448`, measured on 2026-10-21. A text table of at most 1 MiB (1,048,576 bytes) encoded loads automatically when a page needs it; a larger one shows the number plus **Load text (≈N MB)**, which loads it at interactive priority through the normal table preparation. Other builds can differ a little, hence the ≈.
+Encoded sizes are the text tables' encoded objects on Retail `12.1.5.70448`, measured on 2026-10-21; ¹ CreatureType and CreatureFamily on Retail `12.1.5.70575`, measured on 2026-10-29 (15 and 85 rows). A text table of at most 1 MiB (1,048,576 bytes) encoded loads automatically when a page needs it; a larger one shows the number plus **Load text (≈N MB)**, which loads it at interactive priority through the normal table preparation. Other builds can differ a little, hence the ≈.
 
 - Exact values only. A source value outside the key domain is a miss (`keyOutOfRange`), never wrapped: Item.ClassID 300 or -129 matches nothing, a negative ID never becomes 4294967295. Zero is a real lookup.
 - `Item.SubclassID` declares no reference, so it gets no ItemSubClass text.

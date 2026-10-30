@@ -86,6 +86,18 @@
       "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/SpellName.dbd",
       "sha256": "d48ae2eb0455a30451cadda1c63627b9ad4ad4e9c4e473cd3444def1981fa667",
       "byteLength": 23534
+    },
+    {
+      "path": "definitions/CreatureType.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/CreatureType.dbd",
+      "sha256": "9ce11380b21c914d52901468386fbe66abaf3ccdad3fabdf4553c9b681194e49",
+      "byteLength": 25015
+    },
+    {
+      "path": "definitions/CreatureFamily.dbd",
+      "sourceUrl": "https://raw.githubusercontent.com/wowdev/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/CreatureFamily.dbd",
+      "sha256": "da9a578d08b3d2c97283ca272e8b5cbe4fc7036517e584053aaab3bb3495db90",
+      "byteLength": 26932
     }
   ]
 }

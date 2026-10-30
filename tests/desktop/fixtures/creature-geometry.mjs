@@ -22,7 +22,9 @@ export function geometryArtifact(){
  return {bytes,manifest};
 }
 /** A geometry result over the exact display metadata the fixture returned for the same slot. */
-export function creatureGeometry(display,state,manifest){
+export function creatureGeometry(display,requested,manifest){
+ // 'encrypted' is the protected outcome whose TACT key isn't available (BLTE_KEY_UNAVAILABLE); every other name is the state itself.
+ const encrypted=requested==='encrypted',state=encrypted?'protected':requested;
  const v=structuredClone(template),targets=display.sources.map(t=>({role:t.role,tableId:t.row?.source.tableId??(t.role==='display'?'bfdaf9f1':'7f695fa5'),artifactId:t.snapshot.artifactId,coverage:t.snapshot.coverage,matchCount:t.matchCount,row:t.row}));
  Object.assign(v,{context:display.context,artifactId:display.artifactId,creatureId:display.creatureId,slot:display.slot,opening:display.opening,state,problem:null,
   metadata:{state:display.state,creatureSource:display.creatureSource,creatureCoverage:display.creatureCoverage,selected:display.selected,targets,absence:display.absence,modelId:display.modelId,modelFileDataId:display.modelFileDataId,requiredTableId:display.requiredTableId,appearance:'notEvaluated'}});
@@ -31,6 +33,7 @@ export function creatureGeometry(display,state,manifest){
  if(!['ready','noDeclaredTriangles'].includes(state))v.sources=[];
  if(state==='notPrepared')v.problem=null;
  else if(!['ready','noDeclaredTriangles'].includes(state))v.problem={code:'AUTHORED_'+state.replace(/[A-Z]/g,c=>'_'+c).toUpperCase(),message:'Authored geometry outcome.',retryable:false,dependency:'skin',target:null};
+ if(encrypted)v.problem={code:'BLTE_KEY_UNAVAILABLE',message:'Authored encrypted model: TACT key 0123456789ABCDEF isn\'t available.',retryable:false,dependency:'model',target:null};
  return v;
 }
 // Authored VMA1 v2 textured appearance over the same octahedron. Not game data. Layout follows contracts/geometry-vma1-v2.md.

@@ -21,7 +21,6 @@ async function opened(...options: Parameters<typeof launch>) {
   await expect(session.page.getByRole('heading', { name: 'Build overview', exact: true })).toBeFocused();
   return session;
 }
-const paneTop = (page: Page) => page.locator('.dh-area-scroll:visible').evaluate(el => el.scrollTop);
 
 // Areas scroll inside their own pane, so returns restore that pane, never the window.
 test('Items and Creatures restore their own pane scroll after a source return and an area round trip', async () => {
@@ -42,12 +41,14 @@ test('Items and Creatures restore their own pane scroll after a source return an
     const after = await tops(); expect(Math.abs(after[0] - before[0])).toBeLessThan(2); expect(Math.abs(after[1] - before[1])).toBeLessThan(2);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
     await nav.getByRole('button', { name: 'Creatures', exact: true }).click();
-    await expect(page.locator('.creatures-browser tbody tr')).toHaveCount(50);
-    await page.getByRole('button', { name: /^Inspect Creature 40:/ }).scrollIntoViewIfNeeded();
-    await page.waitForTimeout(150); const saved = await paneTop(page); expect(saved).toBeGreaterThan(0);
+    // Creatures has the same two scrollers (docs/design/creatures-view).
+    await expect(page.locator('.cv-option')).toHaveCount(50);
+    await page.locator('#cv-opt-40').scrollIntoViewIfNeeded();
+    const list = () => page.evaluate(() => document.querySelector('.cv .iv-list-scroll')!.scrollTop);
+    await page.waitForTimeout(150); const saved = await list(); expect(saved).toBeGreaterThan(0);
     await nav.getByRole('button', { name: 'Home', exact: true }).click(); await nav.getByRole('button', { name: 'Creatures', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Creatures Client records', exact: true })).toBeFocused();
-    expect(Math.abs(await paneTop(page) - saved)).toBeLessThan(2);
+    await expect(page.getByRole('heading', { name: 'Creatures', exact: true, level: 1 })).toBeFocused();
+    expect(Math.abs(await list() - saved)).toBeLessThan(2);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
   } finally { await session.close(); }
 });

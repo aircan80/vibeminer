@@ -75,14 +75,25 @@ public sealed class CreatureDisplayMetadataService(ICreatureDisplayMetadataStore
         }
     }
 
+    public const string FactsRevision = "creature-display-facts-v1", LabelRevision = "creature-labels-v1";
+    // Reviewed on #62 (WoW review): Creature.Classification is signed8; values outside 0–6 have no label.
+    private static readonly CreatureLabelLists ReviewedLabels = new(LabelRevision, Array.AsReadOnly<CreatureLabel>(
+    [
+        new("0", "Normal"), new("1", "Elite"), new("2", "Rare elite"), new("3", "World boss"), new("4", "Rare"), new("5", "Trivial"), new("6", "Minus")
+    ]));
+    public static CreatureLabelLists Labels() => ReviewedLabels;
     public Task<CreatureDisplayMetadataResult> ReadDisplayAsync(CreatureDisplayMetadataRequest request,
-        CancellationToken token = default) => ExecuteAsync(request, false, null, token);
+        CancellationToken token = default) => ExecuteAsync(request, false, null, (r, t) => store.ReadDisplayAsync(r, t), token);
     public Task<CreatureDisplayMetadataResult> PrepareDisplayAsync(CreatureDisplayMetadataRequest request,
         Func<CreaturesPreparationProgress, Task>? progress = null, CancellationToken token = default) =>
-        ExecuteAsync(request, true, progress, token);
+        ExecuteAsync<CreatureDisplayMetadataResult>(request, true, progress, null, token);
+    /// <summary>Shares the two local read credits with ReadDisplayAsync; never prepares or downloads.</summary>
+    public Task<CreatureDisplayFactsResult> ReadFactsAsync(CreatureDisplayMetadataRequest request, CancellationToken token = default) =>
+        ExecuteAsync(request, false, null, (r, t) => store.ReadFactsAsync(r, t), token);
 
-    private async Task<CreatureDisplayMetadataResult> ExecuteAsync(CreatureDisplayMetadataRequest request,
-        bool prepare, Func<CreaturesPreparationProgress, Task>? progress, CancellationToken token)
+    private async Task<T> ExecuteAsync<T>(CreatureDisplayMetadataRequest request,
+        bool prepare, Func<CreaturesPreparationProgress, Task>? progress, Func<CreatureDisplayMetadataRequest, CancellationToken, Task<T>>? read, CancellationToken token)
+        where T : class
     {
         Validate(request); token.ThrowIfCancellationRequested();
         request = request with { Context = request.Context with { } };
@@ -103,8 +114,8 @@ public sealed class CreatureDisplayMetadataService(ICreatureDisplayMetadataStore
         try
         {
             var result = prepare
-                ? await store.PrepareDisplayAsync(request, value => { ValidateProgress(value); operation.Observer?.Post(value); return Task.CompletedTask; }, operation.Cancellation.Token)
-                : await store.ReadDisplayAsync(request, operation.Cancellation.Token);
+                ? (T)(object)await store.PrepareDisplayAsync(request, value => { ValidateProgress(value); operation.Observer?.Post(value); return Task.CompletedTask; }, operation.Cancellation.Token)
+                : await read!(request, operation.Cancellation.Token);
             token.ThrowIfCancellationRequested();
             return result;
         }

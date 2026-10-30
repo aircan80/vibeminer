@@ -196,3 +196,52 @@ it.each(['fetch','validator','bodyAck'] as const)('observes late rejected %s bef
 it.each(['geometryViewSceneDisposed','geometryViewRelease'] as const)('keeps the presentation reservation blocked on actual %s failure',async port=>{
  const h=setup();h.expectDebt();vi.mocked(h.bridge[port]!).mockResolvedValue({ok:false,error:{code:'GEOMETRY_CLEANUP_FAILED',message:'Authored main retirement uncertainty',retryable:false}});h.start();await mount(h);await expect(h.session.leave('return')).rejects.toMatchObject({code:'GEOMETRY_CLEANUP_FAILED'});expect(h.session.snapshot().retirement?.phase).toBe('blocked');expect(h.session.snapshot().iconsSuspended).toBe(true);expect(h.owner.disposeView).toHaveBeenCalledTimes(1);h.start();await Promise.resolve();expect(h.bridge.geometryViewEnter).toHaveBeenCalledTimes(1);
 });
+// #62: the Creatures preview may look at kept geometry without preparing it; a deliberate entry on the same selection then prepares.
+it('a local-only entry never prepares, stops at not kept, and a later deliberate entry on the same selection prepares',async()=>{
+ const h=setup();vi.mocked(h.bridge.creatureGeometryRead!).mockImplementation(async()=>ok(h.missing));
+ h.session.enter(h.intent,{localOnly:true});h.session.iconsHiddenCommitted(h.session.snapshot().view!.generation);
+ await until(h.session,()=>h.session.snapshot().view?.phase==='outcome'&&!h.session.snapshot().retirement);
+ const v=h.session.snapshot().view!;expect(v.result?.state).toBe('notPrepared');expect(v.error).toBeNull();expect(v.canMount).toBe(false);
+ expect(h.bridge.creatureGeometryPrepare).not.toHaveBeenCalled();expect(h.reserve).not.toHaveBeenCalled();
+ // Still not kept: the deliberate entry prepares it, once.
+ h.session.enter(h.intent);const first=h.session.snapshot().view!.generation;
+ await until(h.session,()=>h.session.snapshot().view!.generation!==first);h.session.iconsHiddenCommitted(h.session.snapshot().view!.generation);
+ await until(h.session,()=>!!h.session.snapshot().view?.canMount);
+ expect(h.session.snapshot().view?.result?.state).toBe('ready');expect(h.bridge.creatureGeometryPrepare).toHaveBeenCalledTimes(1);expect(h.reserve).toHaveBeenCalledTimes(1);
+});
+it('a local-only entry of kept geometry draws it without asking for anything else',async()=>{
+ const h=setup();h.session.enter(h.intent,{localOnly:true});h.session.iconsHiddenCommitted(h.session.snapshot().view!.generation);
+ await until(h.session,()=>!!h.session.snapshot().view?.canMount);expect(h.bridge.creatureGeometryPrepare).not.toHaveBeenCalled();
+});
+
+// #62 QA: a busy engine is never an outcome. A local-only look that can't read is just "not looked", and nothing is remembered,
+// so Show model right after can ask again instead of replaying the failure.
+it('a busy read during a local-only look leaves no outcome or decision, and a deliberate entry then draws',async()=>{
+ const h=setup();vi.mocked(h.bridge.creatureGeometryRead!).mockResolvedValueOnce({ok:false,error:{code:'CREATURES_QUERY_BUSY',message:'Local Creature display reads are at their bounded capacity or retiring.',retryable:true}});
+ h.session.enter(h.intent,{localOnly:true});h.session.iconsHiddenCommitted(h.session.snapshot().view!.generation);
+ await until(h.session,()=>h.session.snapshot().view?.phase==='outcome'&&!h.session.snapshot().retirement);
+ expect(h.session.snapshot().view!.error).toBeNull();expect(h.session.snapshot().view!.result).toBeNull();
+ h.session.enter(h.intent);const waiting=h.session.snapshot().view!.generation;await until(h.session,()=>h.session.snapshot().view!.generation!==waiting);
+ h.session.iconsHiddenCommitted(h.session.snapshot().view!.generation);await until(h.session,()=>!!h.session.snapshot().view?.canMount);
+ expect(h.bridge.creatureGeometryPrepare).not.toHaveBeenCalled();
+});
+it('a busy read on a deliberate entry is a retryable outcome that Retry asks again, not a remembered failure',async()=>{
+ const h=setup();vi.mocked(h.bridge.creatureGeometryRead!).mockResolvedValueOnce({ok:false,error:{code:'CREATURES_QUERY_BUSY',message:'Busy.',retryable:true}});
+ h.start();await until(h.session,()=>h.session.snapshot().view?.phase==='outcome'&&!h.session.snapshot().retirement);
+ expect(h.session.snapshot().view!.error?.code).toBe('CREATURES_QUERY_BUSY');
+ // Entering again (not only Retry) asks again: no decision replays the busy reply.
+ h.session.leave('navigation');await until(h.session,()=>!h.session.snapshot().retirement);h.start();
+ await until(h.session,()=>!!h.session.snapshot().view?.canMount);expect(h.bridge.creatureGeometryRead).toHaveBeenCalledTimes(2);
+});
+
+it('a local-only look never replays a remembered Stop: it reads as not drawn and leaves the decision for Show model',async()=>{
+ const h=setup();vi.mocked(h.bridge.creatureGeometryRead!).mockImplementation(async()=>ok(h.missing));const held=defer<BridgeReply<CreatureGeometryResult>>();vi.mocked(h.bridge.creatureGeometryPrepare!).mockReturnValueOnce(held.promise);
+ h.start();await until(h.session,()=>h.session.snapshot().operation?.status==='pending');h.session.stopPreparation(h.session.snapshot().operation!.id);held.resolve({ok:false,error:{code:'CANCELED',message:'Stopped.',retryable:true}});
+ await until(h.session,()=>h.session.snapshot().view?.phase==='outcome'&&!h.session.snapshot().retirement);expect(h.session.snapshot().view!.message).toBe('Geometry preparation stopped');
+ await h.session.leave('navigation');h.session.enter(h.intent,{localOnly:true});
+ const v=h.session.snapshot().view!;expect(v.phase).toBe('outcome');expect(v.error).toBeNull();expect(v.result).toBeNull();expect(v.message).not.toBe('Geometry preparation stopped');
+ // Show model is a fresh, deliberate request: it prepares again instead of replaying the Stop.
+ await until(h.session,()=>!h.session.snapshot().retirement);vi.mocked(h.bridge.creatureGeometryPrepare!).mockResolvedValueOnce(ok(h.result));vi.mocked(h.bridge.creatureGeometryRead!).mockImplementation(async()=>ok(h.result));
+ h.session.enter(h.intent,{fresh:true});await until(h.session,()=>h.session.snapshot().view?.phase!=='outcome');expect(h.session.snapshot().view!.message).not.toBe('Geometry preparation stopped');
+ h.session.iconsHiddenCommitted(h.session.snapshot().view!.generation);await until(h.session,()=>!!h.session.snapshot().view?.canMount);
+});

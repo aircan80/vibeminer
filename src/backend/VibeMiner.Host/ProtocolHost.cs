@@ -151,7 +151,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
     {
         var frameKind = method is "creatures.geometry.read" or "creatures.geometry.prepare" or "creatures.geometry.open" ? FrameKind.CreatureGeometry :
             method.StartsWith("items.effects.", StringComparison.Ordinal) ? FrameKind.ItemEffects :
-            method is "creatures.data" or "creatures.prepare" or "creatures.page" or "creatures.inspect" or "creatures.display.read" or "creatures.display.prepare" ? FrameKind.Creatures :
+            method is "creatures.data" or "creatures.prepare" or "creatures.page" or "creatures.inspect" or "creatures.display.read" or "creatures.display.prepare" or "creatures.display.facts" ? FrameKind.Creatures :
             method == "items.classifications" ? FrameKind.Classifications : FrameKind.General;
         var maximumBytes = frameKind == FrameKind.CreatureGeometry ? MaxCreatureGeometryFrameBytes : frameKind == FrameKind.General ? MaxFrameBytes : MaxItemEffectsFrameBytes;
         string? pendingGeometryLease = null;
@@ -182,7 +182,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     if (itemClassifications is not null) capabilities.Add("item-classifications-v1");
                     if (itemClassifications?.SupportsSubclassLabels == true) capabilities.Add("item-subclass-labels-v1");
                     if (creatures is not null) capabilities.Add("creatures-v1");
-                    if (creatures is not null && creatureDisplays is not null) capabilities.Add("creature-display-metadata-v1");
+                    if (creatures is not null && creatureDisplays is not null) { capabilities.Add("creature-display-metadata-v1"); capabilities.Add("creature-display-facts-v1"); }
                     if (creatures is not null && creatureDisplays is not null && creatureGeometry is not null && geometryLeases is not null)
                         capabilities.Add("creature-source-geometry-v1");
                     // Ordinary Program has no effects service until all three real phases qualify.
@@ -559,6 +559,25 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                             sequence = Interlocked.Increment(ref displaySequence), stage = progress.Stage,
                             region = displayRequest.Context.SourceRegion, completed = progress.Completed, total = progress.Total, unit = progress.Unit
                         }), request.Cancellation.Token));
+                    break;
+                case "creatures.display.facts":
+                    RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "researchLocale", "artifactId", "creatureId", "slot");
+                    if (creatures is null || creatureDisplays is null)
+                        throw new DiscoveryException("CREATURE_DISPLAY_UNAVAILABLE", "Selected Creature display metadata is unavailable.");
+                    if (!parameters.TryGetProperty("slot", out var factsSlotValue) || factsSlotValue.ValueKind != JsonValueKind.Number || !factsSlotValue.TryGetInt32(out var factsSlot))
+                        throw new DiscoveryException("INVALID_REQUEST", "An integer Creature display slot is required.");
+                    var factsRequest = new CreatureDisplayMetadataRequest(CreaturesContextOf(parameters), RequiredString(parameters, "artifactId"),
+                        RequiredString(parameters, "creatureId"), factsSlot);
+                    CreatureDisplayMetadataService.Validate(factsRequest);
+                    if (!await creaturesPublication.WaitAsync(0)) throw CreaturesQueryBusy();
+                    creaturesPublicationHeld = true;
+                    result = CreatureDisplayWire.Facts(await creatureDisplays.ReadFactsAsync(factsRequest, request.Cancellation.Token));
+                    break;
+                case "creatures.labels":
+                    RequireOnly(parameters);
+                    if (creatures is null || creatureDisplays is null)
+                        throw new DiscoveryException("CREATURE_DISPLAY_UNAVAILABLE", "Selected Creature display metadata is unavailable.");
+                    result = CreatureDisplayMetadataService.Labels();
                     break;
                 case "creatures.data":
                 case "creatures.prepare":

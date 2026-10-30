@@ -7,92 +7,169 @@ const methods=async(data:string)=>(await readFile(path.join(data,'requests.ndjso
 async function opened(state='ready',textured=false){
  const s=await launch(true,false,false,true,false,false,true,true,false,false,false,false,true);
  try{
+  await size(s.app,1280,800);
   const{page}=s;await page.locator('.build-row').first().click();await page.getByRole('button',{name:'Open build',exact:true}).click();await writeFile(path.join(s.data,'release-open'),'release');
   await expect(page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();
   await writeFile(path.join(s.data,'cached-creatures'),'cached');await writeFile(path.join(s.data,'cached-display'),'cached');await writeFile(path.join(s.data,'geometry-state.json'),JSON.stringify({state,textured}));
-  await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Creatures',exact:true}).click();await expect(page.locator('.creatures-browser tbody tr')).toHaveCount(50);
-  await page.getByRole('button',{name:/^Inspect Creature 0:/}).click();await page.getByRole('button',{name:'Inspect metadata for display 100 from slot 0',exact:true}).click();
-  await expect(page.getByText('Display metadata resolved',{exact:true})).toBeVisible();return s;
+  await displays(page);return s;
  }catch(error){await s.close();throw error;}
 }
-async function capture(page:Page,app:ElectronApplication,name:string,anchor:Locator){const out=path.join(root,'artifacts/creature-geometry');await mkdir(out,{recursive:true});for(const[width,height]of[[1280,800],[1440,1100]]){await app.evaluate(({BrowserWindow},size)=>BrowserWindow.getAllWindows()[0].setContentSize(size.width,size.height),{width,height});await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(width);for(const scale of[1,2]){await page.evaluate(f=>document.documentElement.style.fontSize=`${f}px`,15*scale);await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));await anchor.scrollIntoViewIfNeeded();await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));expect(await page.evaluate(()=>document.documentElement.scrollWidth>document.documentElement.clientWidth+1)).toBe(false);await page.screenshot({path:path.join(out,`${name}-${width}x${height}-${scale*100}.png`)});}}await page.evaluate(()=>document.documentElement.style.fontSize='15px');}
-test('Geometry step prepares, receives and draws the verified mesh, then Return restores the invoker and releases the lease',async()=>{test.setTimeout(120000);const s=await opened();try{
+// #62: the geometry view opens from the model preview in the Creatures view's display card.
+async function displays(page:Page){await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Creatures',exact:true}).click();await expect(page.locator('.cv-option')).toHaveCount(50);
+ await page.getByRole('option',{name:/^Authored creature 0/}).click();await expect(card(page)).toContainText('FileDataID 123456');}
+const card=(page:Page)=>page.getByRole('article',{name:/^Slot 0 · Display 100/});
+const show=(page:Page)=>card(page).getByRole('button',{name:'Show model preview for display 100',exact:true});
+const openView=(page:Page)=>card(page).getByRole('button',{name:'Open geometry view',exact:true});
+async function capture(page:Page,app:ElectronApplication,name:string,anchor:Locator,detail=false){const out=path.join(root,'artifacts/creature-geometry');await mkdir(out,{recursive:true});for(const[width,height]of[[1280,800],[1440,1100]]){await app.evaluate(({BrowserWindow},size)=>BrowserWindow.getAllWindows()[0].setContentSize(size.width,size.height),{width,height});await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(width);for(const scale of[1,2]){await page.evaluate(f=>document.documentElement.style.fontSize=`${f}px`,15*scale);await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));if(detail){const pane=page.getByRole('button',{name:'Selected creature',exact:true});if(await pane.isVisible())await pane.click();}await anchor.scrollIntoViewIfNeeded();await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));expect(await page.evaluate(()=>document.documentElement.scrollWidth>document.documentElement.clientWidth+1)).toBe(false);await page.screenshot({path:path.join(out,`${name}-${width}x${height}-${scale*100}.png`)});}}await page.evaluate(()=>document.documentElement.style.fontSize='15px');}
+test('Show model prepares and draws the preview, Open geometry view shows the full view, and Return draws the kept model again',async()=>{test.setTimeout(120000);const s=await opened();try{
  const{page}=s;await writeFile(path.join(s.data,'hold-geometry-prepare'),'hold');
- const enter=page.getByRole('button',{name:'View geometry for display 100',exact:true});await expect(page.getByText(/Diagnostic geometry: the model's source edges, or its textured surfaces/)).toBeVisible();
- await enter.focus();await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{name:'Diagnostic source geometry',exact:true})).toBeFocused();await expect(page.locator('.creatures-browser')).toBeHidden();
- await expect(page.getByRole('status').filter({hasText:'Acquiring model source'})).toBeVisible();await expect(page.getByRole('button',{name:'Stop preparing geometry',exact:true})).toBeVisible();
+ // Nothing is kept yet: the preview looked locally and asks before preparing anything.
+ await expect(show(page)).toBeVisible();expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(0);
+ await show(page).click();const stop=card(page).getByRole('button',{name:'Stop loading model',exact:true});await expect(stop).toBeFocused();
+ await expect(card(page).getByRole('status')).toContainText('Loading model');
  await writeFile(path.join(s.data,'release-geometry-prepare'),'release');
+ await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});await expect(openView(page)).toBeFocused();
+ await capture(page,s.app,'preview',card(page),true);
+ await openView(page).click();
+ await expect(page.getByRole('heading',{name:'Diagnostic source geometry',exact:true})).toBeFocused();await expect(page.locator('.creatures-browser')).toBeHidden();
  await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toBeVisible({timeout:20000});
  await expect(page.locator('.creature-geometry canvas')).toHaveCount(1);await expect(page.getByText('Unposed source edges · appearance not evaluated',{exact:true})).toBeVisible();
  await expect(page.getByText('Original vertices',{exact:true}).locator('xpath=following-sibling::dd[1]')).toHaveText('6');await expect(page.getByText('Emitted edge pairs',{exact:true}).locator('xpath=following-sibling::dd[1]')).toHaveText('24');
- // Something was actually drawn: rotating the camera changes the canvas pixels.
  const canvas=page.locator('.creature-geometry canvas'),before=await canvas.screenshot();
  await page.getByRole('button',{name:'Rotate left',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toBeVisible();
  await expect.poll(async()=>Buffer.compare(before,await canvas.screenshot())).not.toBe(0);
  await capture(page,s.app,'ready',canvas);
- await page.getByRole('button',{name:'Return to selected display metadata',exact:true}).click();
- await expect(enter).toBeFocused();await expect(page.locator('.creature-geometry')).toHaveCount(0);
- // Main closes the engine lease once it has copied the body, before the GPU upload.
- await expect.poll(async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length).toBe(1);
- let calls=await methods(s.data);expect(calls.filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(1);expect(calls.filter(r=>r.method==='creatures.geometry.open')).toHaveLength(1);
- // A second entry reuses the retained artifact: read is ready, no second Prepare.
- await enter.click();await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toBeVisible({timeout:20000});
- calls=await methods(s.data);expect(calls.filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(1);expect(calls.filter(r=>r.method==='creatures.geometry.open')).toHaveLength(2);
- await expect.poll(async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length).toBe(2);
- // Leaving the area closes the view; main releases it, so a new entry is admitted and draws again.
+ await page.getByRole('button',{name:'← Return to Creatures selection',exact:true}).click();
+ await expect(page.locator('.creature-geometry')).toHaveCount(0);await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});await expect(openView(page)).toBeFocused();
+ // One Prepare for the whole round trip; every view's lease is closed once main has the body.
+ let calls=await methods(s.data);expect(calls.filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(1);
+ await expect.poll(async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length).toBe(3);
+ // Leaving the area closes the preview; coming back, the kept model draws by itself without preparing.
  await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Home',exact:true}).click();
- await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Creatures',exact:true}).click();await expect(page.locator('.creature-geometry')).toHaveCount(0);
- await enter.click();await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toBeVisible({timeout:20000});
+ await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Creatures',exact:true}).click();
+ await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ calls=await methods(s.data);expect(calls.filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(1);
+}finally{await s.close();}});
+test('A kept model draws by itself for the first resolved display',async()=>{test.setTimeout(90000);const s=await opened();try{
+ const{page}=s;await writeFile(path.join(s.data,'cached-geometry'),'cached');
+ await page.getByRole('option',{name:/^Authored creature 6/}).click();await page.getByRole('option',{name:/^Authored creature 0/}).click();
+ await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(0);
+}finally{await s.close();}});
+test('Show model on a kept model that wasn\'t drawn by itself moves focus to Open geometry view (usability review on #62)',async()=>{test.setTimeout(90000);const s=await opened();try{
+ const{page}=s;await writeFile(path.join(s.data,'cached-geometry'),'cached');
+ await page.getByRole('option',{name:/^Authored creature 6/}).click();await page.getByRole('option',{name:/^Authored creature 0/}).click();
+ await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ const second=page.getByRole('article',{name:/^Slot 1 · Display 100/});const show1=second.getByRole('button',{name:'Show model preview for display 100',exact:true});
+ await show1.focus();await page.keyboard.press('Enter');
+ await expect(second.getByRole('button',{name:'Open geometry view',exact:true})).toBeFocused({timeout:20000});
+ expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(0);
+}finally{await s.close();}});
+test('An encrypted model says so with its code, keeps the facts and draws nothing',async()=>{test.setTimeout(90000);const s=await opened('encrypted');try{
+ const{page}=s;await show(page).click();
+ await expect(card(page)).toContainText('Encrypted model',{timeout:20000});await expect(card(page)).toContainText('BLTE_KEY_UNAVAILABLE');await expect(card(page)).toContainText('FileDataID 123456');
+ await expect(card(page).locator('canvas')).toHaveCount(0);await capture(page,s.app,'encrypted',card(page),true);
+ expect((await methods(s.data)).some(r=>r.method==='creatures.geometry.open')).toBe(false);
+}finally{await s.close();}});
+test('Opening the geometry view from a scrolled-down detail starts at its top with the heading focused and Return in view',async()=>{test.setTimeout(90000);const s=await opened();try{
+ const{page}=s;await size(s.app,1280,800);await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(1280);
+ const second=page.getByRole('article',{name:/^Slot 1 · Display 100/});await second.getByRole('button',{name:'Show model preview for display 100',exact:true}).click();
+ const open=second.getByRole('button',{name:'Open geometry view',exact:true});await expect(open).toBeVisible({timeout:20000});
+ const body=page.locator('.cv .iv-dbody');await body.evaluate(e=>{e.scrollTop=e.scrollHeight;});await open.scrollIntoViewIfNeeded();expect(await body.evaluate(e=>e.scrollTop)).toBeGreaterThan(100);
+ await writeFile(path.join(s.data,'hold-geometry-open'),'hold');
+ await open.click();const heading=page.getByRole('heading',{name:'Diagnostic source geometry',exact:true});await expect(heading).toBeFocused();
+ await expect.poll(async()=>(await readFile(path.join(s.data,'waiting-geometry-open'),'utf8').catch(()=>''))).not.toBe('');
+ const back=page.getByRole('button',{name:'← Return to Creatures selection',exact:true});
+ const visible=async(target:Locator)=>target.evaluate(el=>{const r=el.getBoundingClientRect();return r.top>=-1&&r.bottom<=innerHeight+1;});
+ for(const target of[heading,back,page.locator('.geometry-status [role=status]')])expect(await visible(target)).toBe(true);
+ await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toHaveCount(0);
+ await writeFile(path.join(s.data,'release-geometry-open'),'release');
+ await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toBeVisible({timeout:20000});
+ // Finishing never moves the scroll or the focus the user now owns.
+ const pane=page.locator('.cv-geometry');const before=await pane.evaluate(e=>e.scrollTop);await expect(heading).toBeFocused();expect(await pane.evaluate(e=>e.scrollTop)).toBe(before);expect(await page.evaluate(()=>scrollY)).toBe(0);
+ await capture(page,s.app,'entered-scrolled',heading);
 }finally{await s.close();}});
 test('An unsupported source is a clear textual outcome with no canvas or body request',async()=>{test.setTimeout(90000);const s=await opened('unsupported');try{
- const{page}=s;await page.getByRole('button',{name:'View geometry for display 100',exact:true}).click();
- await expect(page.getByRole('status').filter({hasText:'This source geometry is unsupported'})).toBeVisible();await expect(page.getByText('AUTHORED_UNSUPPORTED: Authored geometry outcome.')).toBeVisible();
- await expect(page.locator('.creature-geometry canvas')).toHaveCount(0);await capture(page,s.app,'unsupported',page.locator('.geometry-status'));
- const calls=await methods(s.data);expect(calls.some(r=>r.method==='creatures.geometry.open')).toBe(false);
- await page.getByRole('button',{name:'Return to selected display metadata',exact:true}).click();await expect(page.getByRole('button',{name:'View geometry for display 100',exact:true})).toBeFocused();
+ const{page}=s;await show(page).click();
+ await expect(card(page)).toContainText('Unsupported model',{timeout:20000});await expect(card(page)).toContainText('AUTHORED_UNSUPPORTED');
+ await expect(card(page).locator('canvas')).toHaveCount(0);await capture(page,s.app,'unsupported',card(page),true);
+ expect((await methods(s.data)).some(r=>r.method==='creatures.geometry.open')).toBe(false);
 }finally{await s.close();}});
-test('Switching builds closes the open view lease, and another build\'s Prepare offers Stop but no View',async()=>{test.setTimeout(120000);const s=await opened();try{
+test('Switching builds closes the open view lease, and no geometry block is left above the panes',async()=>{test.setTimeout(120000);const s=await opened();try{
  const{page}=s,closes=async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length;
- const metadata=async()=>{await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Creatures',exact:true}).click();await expect(page.locator('.creatures-browser tbody tr')).toHaveCount(50);await page.getByRole('button',{name:/^Inspect Creature 0:/}).click();await page.getByRole('button',{name:'Inspect metadata for display 100 from slot 0',exact:true}).click();await expect(page.getByText('Display metadata resolved',{exact:true})).toBeVisible();};
  const switchTo=async(row:number)=>{await page.getByRole('button',{name:/Choose build/}).click();await page.locator('.build-row').nth(row).click();await page.getByRole('button',{name:'Open build',exact:true}).click();await expect(page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();};
- // Hold the engine open so the lease is still opening when the user switches builds.
- await writeFile(path.join(s.data,'hold-geometry-open'),'hold');
- await page.getByRole('button',{name:'View geometry for display 100',exact:true}).click();
+ await expect(show(page)).toBeVisible();await writeFile(path.join(s.data,'hold-geometry-open'),'hold');await writeFile(path.join(s.data,'cached-geometry'),'cached');
+ await show(page).click();
  await expect.poll(async()=>(await readFile(path.join(s.data,'waiting-geometry-open'),'utf8').catch(()=>''))).not.toBe('');
  await switchTo(1);expect(await closes()).toBe(0);
  await writeFile(path.join(s.data,'release-geometry-open'),'release');
- // The late lease belongs to a view that was left: main closes it.
  await expect.poll(closes).toBe(1);expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.open')).toHaveLength(1);
- // On the second build, start a held Prepare and leave it running by switching back.
- await metadata();await writeFile(path.join(s.data,'hold-geometry-prepare'),'hold');
- await page.getByRole('button',{name:'View geometry for display 100',exact:true}).click();await expect(page.getByRole('button',{name:'Stop preparing geometry',exact:true})).toBeVisible();
- await switchTo(0);await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Creatures',exact:true}).click();
- const strip=page.getByRole('region',{name:'Geometry activity'});await expect(strip).toContainText('Geometry · Creature 0 · slot 0');
- await expect(strip.getByRole('button',{name:/^View Creature .* geometry$/})).toHaveCount(0);await capture(page,s.app,'other-build-activity',strip);
- await strip.getByRole('button',{name:'Stop preparing geometry',exact:true}).click();
- await expect.poll(async()=>(await methods(s.data)).some(r=>r.method==='request.cancel')).toBe(true);await expect(strip.getByRole('status')).toHaveText('Geometry preparation stopped');
- expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.open')).toHaveLength(1);
- // Main released both earlier views: this build admits a new entry and draws.
- await unlink(path.join(s.data,'hold-geometry-prepare'));await strip.getByRole('button',{name:'Dismiss geometry activity',exact:true}).click();
- await metadata();await page.getByRole('button',{name:'View geometry for display 100',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toBeVisible({timeout:20000});
+ await unlink(path.join(s.data,'hold-geometry-open'));await displays(page);
+ // QA on #62: the panes sit right under the build header; nothing names another creature or build above them.
+ await expect(page.locator('.geometry-activity')).toHaveCount(0);await expect(page.getByText(/Dismiss geometry activity/)).toHaveCount(0);
+ const top=async()=>page.evaluate(()=>document.querySelector('.cv .iv-panes')!.getBoundingClientRect().top-document.querySelector('.dh-toolbar')!.getBoundingClientRect().bottom);
+ expect(await top()).toBeLessThan(4);
 }finally{await s.close();}});
-test('Entering from a scrolled-down browser opens the view at its top with the focused heading, Return and Stop visible',async()=>{test.setTimeout(90000);const s=await opened();try{
- const{page}=s;await s.app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1280,800));await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(1280);
- await writeFile(path.join(s.data,'hold-geometry-prepare'),'hold');
- const pane=page.locator('.dh-area-scroll:not([hidden])'),enter=page.getByRole('button',{name:'View geometry for display 100',exact:true});
- await pane.evaluate(e=>{e.scrollTop=e.scrollHeight;});await enter.scrollIntoViewIfNeeded();expect(await pane.evaluate(e=>e.scrollTop)).toBeGreaterThan(200);
- await enter.click();const heading=page.getByRole('heading',{name:'Diagnostic source geometry',exact:true});await expect(heading).toBeFocused();
- const stop=page.getByRole('button',{name:'Stop preparing geometry',exact:true});await expect(stop).toBeVisible();
- const inPane=async(target:Locator)=>target.evaluate((el,box)=>{const r=el.getBoundingClientRect(),p=(document.querySelector(box) as HTMLElement).getBoundingClientRect();return r.top>=p.top-1&&r.bottom<=p.bottom+1;},'.dh-area-scroll:not([hidden])');
- for(const target of[heading,page.getByRole('button',{name:'Return to selected display metadata',exact:true}),page.locator('.geometry-status [role=status]'),stop])expect(await inPane(target)).toBe(true);
- await capture(page,s.app,'entered-scrolled',heading);
- await writeFile(path.join(s.data,'release-geometry-prepare'),'release');await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toBeVisible({timeout:20000});
- // Async completion never moves the scroll or focus the user now owns.
- const before=await pane.evaluate(e=>e.scrollTop);await expect(heading).toBeFocused();expect(await pane.evaluate(e=>e.scrollTop)).toBe(before);
+test('Show model on another creature waits for the model already loading, which it can stop, and nothing is left above the panes',async()=>{test.setTimeout(120000);const s=await opened();try{
+ const{page}=s;await writeFile(path.join(s.data,'hold-geometry-prepare'),'hold');
+ await show(page).click();await expect(card(page).getByRole('button',{name:'Stop loading model',exact:true})).toBeVisible();
+ await page.locator('#cv-opt-2').click();await expect(page.getByRole('heading',{level:2,name:'Authored creature 2'})).toBeVisible();await expect(card(page)).toContainText('FileDataID 123456');
+ await expect(page.locator('.geometry-activity')).toHaveCount(0);
+ await unlink(path.join(s.data,'hold-geometry-prepare'));
+ await show(page).click();await expect(card(page)).toContainText('Waiting for another model');await expect(card(page)).toContainText('Creature 0 · slot 0 is loading first');
+ await capture(page,s.app,'waiting-other',card(page),true);
+ await card(page).getByRole('button',{name:'Stop that model',exact:true}).click();
+ await expect.poll(async()=>(await methods(s.data)).some(r=>r.method==='request.cancel')).toBe(true);
+ await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ // Back on creature 0, its stopped preparation isn't called finished.
+ await page.locator('#cv-opt-0').click();await expect(page.getByRole('heading',{level:2,name:'Authored creature 0'})).toBeVisible();
+ await expect(page.getByText(/preparation finished/)).toHaveCount(0);
+}finally{await s.close();}});
+test('A kept model draws by itself again after Home and back and after Return from Tables (QA on #62)',async()=>{test.setTimeout(120000);const s=await opened();try{
+ const{page}=s;await writeFile(path.join(s.data,'cached-geometry'),'cached');
+ await page.locator('#cv-opt-6').click();await page.locator('#cv-opt-0').click();await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ const nav=page.getByRole('navigation',{name:'Build areas'});
+ await nav.getByRole('button',{name:'Home',exact:true}).click();await nav.getByRole('button',{name:'Creatures',exact:true}).click();
+ await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ await card(page).getByRole('button',{name:/^CreatureModelScale/}).click();await page.getByRole('button',{name:'← Return to Creatures selection',exact:true}).click();
+ await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(0);
+}finally{await s.close();}});
+test('A busy engine is never "Model not drawn": the automatic look leaves Show model, and Show model waits and asks again (QA on #62)',async()=>{test.setTimeout(120000);const s=await opened();try{
+ const{page}=s;await writeFile(path.join(s.data,'cached-geometry'),'cached');
+ await page.locator('#cv-opt-6').click();await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ await writeFile(path.join(s.data,'geometry-read-busy'),'1');await page.locator('#cv-opt-0').click();
+ await expect(show(page)).toBeVisible({timeout:20000});await expect(card(page)).not.toContainText('Model not drawn');await expect(card(page)).not.toContainText('CREATURES_QUERY_BUSY');
+ await writeFile(path.join(s.data,'geometry-read-busy'),'2');await show(page).click();
+ await expect(card(page)).toContainText('Waiting for the engine');await expect(card(page)).not.toContainText('Model not drawn');
+ await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});await expect(openView(page)).toBeFocused();
+ expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(0);
+}finally{await s.close();}});
+test('A model stopped after leaving and coming back keeps keyboard focus in its card (usability review on #62)',async()=>{test.setTimeout(120000);const s=await opened();try{
+ const{page}=s;await writeFile(path.join(s.data,'hold-geometry-prepare'),'hold');
+ await show(page).click();await expect(card(page).getByRole('button',{name:'Stop loading model',exact:true})).toBeVisible();
+ await page.locator('#cv-opt-2').click();await expect(page.getByRole('heading',{level:2,name:'Authored creature 2'})).toBeVisible();
+ await page.locator('#cv-opt-0').click();const stop=card(page).getByRole('button',{name:'Stop loading model',exact:true});await expect(stop).toBeVisible();
+ await stop.focus();await page.keyboard.press('Enter');
+ await expect.poll(()=>page.evaluate(()=>{const a=document.activeElement;return !!a&&a!==document.body&&!!a.closest('article.cv-display');})).toBe(true);
+ await expect(card(page).getByRole('button',{name:/^(Show model preview for display 100|Retry model)$/})).toBeFocused({timeout:20000});
+ // Show model after that stop starts a new load at once; it never replays the Stop (usability review on #62).
+ const before=(await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare').length;
+ await page.locator('#cv-opt-2').click();await page.locator('#cv-opt-0').click();await show(page).click();
+ await expect(card(page).getByRole('button',{name:'Stop loading model',exact:true})).toBeVisible();await expect(card(page)).not.toContainText('Loading stopped');
+ await expect.poll(async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare').length).toBe(before+1);
+}finally{await s.close();}});
+test('After its tries a busy engine reads "Engine still busy" with Retry model, which draws once the engine answers',async()=>{test.setTimeout(120000);const s=await opened();try{
+ const{page}=s;await writeFile(path.join(s.data,'cached-geometry'),'cached');await page.locator('#cv-opt-6').click();await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ await page.locator('#cv-opt-0').click();await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
+ await page.locator('#cv-opt-6').click();await writeFile(path.join(s.data,'geometry-read-busy'),'100');await page.locator('#cv-opt-0').click();
+ await show(page).click();await expect(card(page)).toContainText('Waiting for the engine');
+ await expect(card(page)).toContainText('Engine still busy',{timeout:60000});await expect(card(page)).toContainText('CREATURES_QUERY_BUSY');await expect(card(page)).not.toContainText('Model not drawn');
+ await writeFile(path.join(s.data,'geometry-read-busy'),'0');await card(page).getByRole('button',{name:'Retry model',exact:true}).click();
+ await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
 }finally{await s.close();}});
 test('A ready display appearance draws the textured surfaces from its verified VMA1 body and shows the texture chain (#63)',async()=>{test.setTimeout(120000);const s=await opened('ready',true);try{
- const{page}=s;await page.getByRole('button',{name:'View geometry for display 100',exact:true}).click();
+ const{page}=s;await show(page).click();await expect(openView(page)).toBeVisible({timeout:20000});await openView(page).click();
  await expect(page.getByRole('status').filter({hasText:'Unposed textured surfaces drawn'})).toBeVisible({timeout:20000});
  await expect(page.getByText('Unposed textured surfaces · bind pose, unlit',{exact:true})).toBeVisible();
  const chain=page.getByRole('region',{name:'Texture chain'});await expect(chain).toContainText('Textured');
@@ -117,7 +194,7 @@ test('A ready display appearance draws the textured surfaces from its verified V
  for(const row of await chain.locator('li').allTextContents())expect(row.match(/\u00a0→ /g)?.length,row).toBe(2);
  expect(await page.locator('.geometry-inspector').evaluate(e=>e.scrollWidth-e.clientWidth)).toBeLessThanOrEqual(0);
  await text(page,1);
- const opens=(await methods(s.data)).filter(r=>r.method==='creatures.geometry.open');expect(opens).toHaveLength(1);expect(opens[0].params.geometryArtifactId).not.toBe(opens[0].params.artifactId);
- await page.getByRole('button',{name:'Return to selected display metadata',exact:true}).click();
- await expect.poll(async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length).toBe(1);
+ const opens=(await methods(s.data)).filter(r=>r.method==='creatures.geometry.open');expect(opens.length).toBeGreaterThanOrEqual(2);expect(opens.at(-1)!.params.geometryArtifactId).not.toBe(opens[0].params.artifactId);
+ await page.getByRole('button',{name:'← Return to Creatures selection',exact:true}).click();
+ await expect.poll(async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length).toBeGreaterThanOrEqual(2);
 }finally{await s.close();}});

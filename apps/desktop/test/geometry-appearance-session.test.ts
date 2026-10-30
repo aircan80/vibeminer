@@ -62,6 +62,12 @@ describe('textured appearance presentation',()=>{
   expect(h.validate).toHaveBeenCalledTimes(1);expect(h.session.snapshot().view?.result?.appearance?.state).toBe('multiTexture');
   expect(h.session.snapshot().view?.message).toBe('Unposed source edges drawn');
  });
+ // #62: the Creatures preview looks at kept geometry only; it never prepares textures that weren't kept.
+ it('a local-only entry draws the kept lines without preparing the missing textures',async()=>{
+  const h=setup('notPrepared');h.session.enter(h.intent,{localOnly:true});h.session.iconsHiddenCommitted(h.session.snapshot().view!.generation);await drawn(h);
+  expect(h.bridge.creatureGeometryPrepare).not.toHaveBeenCalled();
+  expect(h.session.snapshot().view?.result?.appearance?.state).toBe('notPrepared');expect(h.session.snapshot().view?.message).toBe('Unposed source edges drawn');
+ });
  it('still draws the retained lines when only the texture Prepare fails',async()=>{
   const h=setup('notPrepared');vi.mocked(h.bridge.creatureGeometryPrepare!).mockResolvedValue({ok:false,error:{code:'NETWORK_UNAVAILABLE',message:'Offline.',retryable:true}});
   h.start();await drawn(h);

@@ -27,9 +27,9 @@ public sealed class TablesCatalogTests
         } while (after is not null);
         Assert.Equal(1346, result.Count); Assert.Equal(1346, result.Select(entry => entry.TableId).Distinct().Count());
         Assert.Equal(1270, result.Count(entry => entry.Db2FileDataId is not null));
-        Assert.Equal(12, result.Count(entry => entry.DefinitionState == "bundled"));
-        Assert.Equal(["Creature", "CreatureDisplayInfo", "CreatureModelData", "Item", "ItemClass", "ItemEffect", "ItemGroupSounds",
-            "ItemSparse", "ItemSubClass", "ItemXItemEffect", "Material", "SpellName"], result.Take(12).Select(entry => entry.Name));
+        Assert.Equal(14, result.Count(entry => entry.DefinitionState == "bundled"));
+        Assert.Equal(["Creature", "CreatureDisplayInfo", "CreatureFamily", "CreatureModelData", "CreatureType", "Item", "ItemClass", "ItemEffect", "ItemGroupSounds",
+            "ItemSparse", "ItemSubClass", "ItemXItemEffect", "Material", "SpellName"], result.Take(14).Select(entry => entry.Name));
         Assert.All(result, entry => { Assert.Equal("notChecked", entry.SourceState); Assert.Equal("notPrepared", entry.RowsState); });
         Assert.False(Directory.Exists(Path.Combine(h.Directory, "objects-v1")));
     }

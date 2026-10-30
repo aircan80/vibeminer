@@ -5,6 +5,8 @@ import type { TableRowsParams } from './table-data';
 export const referenceTextRules: Readonly<Record<string,{table:string;tableId:string;textColumn:string;matchColumn:string}>> = Object.freeze({
  'ItemClass.ClassID':{table:'ItemClass',tableId:'b977271e',textColumn:'ClassName_lang',matchColumn:'ClassID'},
  'Creature.ID':{table:'Creature',tableId:'c9d6b6b3',textColumn:'Name_lang',matchColumn:'ID'},
+ 'CreatureType.ID':{table:'CreatureType',tableId:'1f80ad3f',textColumn:'Name_lang',matchColumn:'ID'},
+ 'CreatureFamily.ID':{table:'CreatureFamily',tableId:'369f469f',textColumn:'Name_lang',matchColumn:'ID'},
  'Spell.ID':{table:'SpellName',tableId:'46c66698',textColumn:'Name_lang',matchColumn:'ID'},
  'Item.ID':{table:'ItemSparse',tableId:'919be54e',textColumn:'Display_lang',matchColumn:'ID'},
 });

@@ -49,3 +49,5 @@ Production build opening and bounded object pages use [download-size Home](downl
 [Table follow](table-follow-v1.md) lists the target rows of one declared reference by exact target column value.
 
 [Item facts](item-facts-v1.md) is the reviewed, source-attributed projection of one item's Item and ItemSparse rows (`items.facts`) and its label lists (`items.labels`).
+
+[Creature display facts](creature-display-facts-v1.md) is the reviewed, source-attributed projection of one selected slot's CreatureDisplayInfo and CreatureModelData rows (`creatures.display.facts`) and the Creature Classification label list (`creatures.labels`).

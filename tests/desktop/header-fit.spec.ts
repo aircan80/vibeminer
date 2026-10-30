@@ -97,7 +97,7 @@ test('area tabs and header actions never overlap or clip at 600x480, 1280x800 an
     const chipWidth = () => header.locator('.dv-chip').evaluate(el => el.getBoundingClientRect().width);
     const busy = await height(), wide = await chipWidth();
     await writeFile(path.join(session.data, 'release-creatures'), 'release');
-    await expect(page.locator('.creatures-browser tbody tr')).toHaveCount(50);
+    await expect(page.locator('.cv-option')).toHaveCount(50);
     await expect(header.locator('.dv-chip .dv-count')).toHaveCount(0);
     expect(Math.abs(await chipWidth() - wide), 'entry width after its task finished').toBeLessThan(1);
     expect(Math.abs(await height() - busy), 'header height after the entry narrowed').toBeLessThan(1);
@@ -113,9 +113,11 @@ test('area tabs and header actions never overlap or clip at 600x480, 1280x800 an
     expect(reached.inArea, 'Tab after Settings reaches the area').toBe(true);
     expect(reached.visible, 'focused area control scrolled into view').toBe(true);
     expect(reached.scrolled, 'the shell scrolled, not the window').toBeGreaterThan(0); expect(reached.window).toBe(0);
-    await area.evaluate(el => el.scrollIntoView({ block: 'nearest' }));
-    const inView = await area.evaluate(el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: r.height, rem: parseFloat(getComputedStyle(document.documentElement).fontSize) }; });
-    expect(inView.top).toBeGreaterThanOrEqual(-1); expect(inView.bottom).toBeLessThanOrEqual(481); expect(inView.height).toBeGreaterThanOrEqual(10 * inView.rem - 1);
+    // Creatures takes its natural height here as Items does (D092, #62): its top comes into view and its list keeps its own scroller.
+    await area.evaluate(el => el.scrollIntoView({ block: 'start' }));
+    const inView = await area.evaluate(el => { const r = el.getBoundingClientRect(), list = document.querySelector('.cv .iv-list-scroll')!.getBoundingClientRect(); return { top: r.top, height: r.height, list: list.height, rem: parseFloat(getComputedStyle(document.documentElement).fontSize) }; });
+    expect(inView.top).toBeGreaterThanOrEqual(-1); expect(inView.top).toBeLessThan(481); expect(inView.height).toBeGreaterThanOrEqual(10 * inView.rem - 1);
+    expect(inView.list).toBeLessThanOrEqual(481);
     await page.screenshot({ path: path.join(root, 'artifacts/header-fit/shell-scrolled-600x480-200.png') });
     // While the shell scrolls, the open panel is fixed to the window: from the top to the status bar's height above the bottom, within the
     // shell's inner width. Opening it never moves the shell.

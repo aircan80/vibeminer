@@ -23,3 +23,15 @@ public sealed record CreatureDisplayMetadataResult(CreaturesContext Context, str
     CreatureDisplayAppearance Appearance, IReadOnlyList<CreatureDisplayTarget> Sources,
     CreatureDisplayAbsence? Absence = null, string? ModelId = null, string? ModelFileDataId = null,
     string? RequiredTableId = null, CreatureDisplayMetadataProblem? Problem = null);
+/// <summary>A reviewed fact of one admitted CreatureDisplayInfo or CreatureModelData row (creature-display-facts-v1).</summary>
+public enum CreatureDisplayFactState { Value, Unsupported }
+/// <summary>One exact source cell: the flattened column name, its index in the target snapshot's columns and the value as read.</summary>
+public sealed record CreatureDisplayFactCell(string Column, int ColumnIndex, string Value);
+public sealed record CreatureDisplayFact(string Key, CreatureDisplayFactState State, IReadOnlyList<CreatureDisplayFactCell> Cells);
+/// <summary>The uniquely matched row of one chain role: its reviewed facts in fixed order, then every other column as read.</summary>
+public sealed record CreatureDisplayRecordFacts(CreatureDisplayTargetRole Role, string TableId, string Table, string RecordId,
+    IReadOnlyList<CreatureDisplayFact> Facts, IReadOnlyList<CreatureDisplayFactCell> Raw);
+public sealed record CreatureDisplayFactsResult(CreatureDisplayMetadataResult Metadata, string FactsRevision,
+    IReadOnlyList<CreatureDisplayRecordFacts> Records);
+public sealed record CreatureLabel(string Value, string Label);
+public sealed record CreatureLabelLists(string LabelRevision, IReadOnlyList<CreatureLabel> Classification);

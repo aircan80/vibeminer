@@ -19,6 +19,8 @@ internal sealed class BundledTableDefinitions
         new("c9d6b6b3", "Creature", "3644a603aae0eed595de31933c49e7bd8abea32bc1a1c32f9d754afbfb8f5682"),
         new("bfdaf9f1", "CreatureDisplayInfo", "64f98132c6acae55be7bb27696d11778e5dd6654e8647ea539cad075dfb3c425"),
         new("7f695fa5", "CreatureModelData", "ace9dfbb1acdec0eae7899273a4e983d851d2de8d6471fd8eb95ac8e70584e2a"),
+        new("1f80ad3f", "CreatureType", "9ce11380b21c914d52901468386fbe66abaf3ccdad3fabdf4553c9b681194e49"),
+        new("369f469f", "CreatureFamily", "da9a578d08b3d2c97283ca272e8b5cbe4fc7036517e584053aaab3bb3495db90"),
         new("50238ec2", "Item", "076ea4c7e80c891b399cc77f285c807071080c0fed95701e447f7c98024ae120"),
         new("919be54e", "ItemSparse", "8664c3b5862dfe4c3a4322941b48b032c57b90412c070deb2028f3e448cf674a"),
         new("b977271e", "ItemClass", "6e0517e1ae17d3528aefe3eac6ad2b417ae7361d8d5ad77d0c743ffd4d126151"),

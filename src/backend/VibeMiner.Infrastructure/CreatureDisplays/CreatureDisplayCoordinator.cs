@@ -5,7 +5,7 @@ namespace VibeMiner.Infrastructure;
 
 internal sealed record CreatureDisplayProbe(CreatureDisplayTarget Target, CreatureDisplayCatalogBinding Binding,
     string? Edge, CreatureDisplayMetadataState? Failure = null, CreatureDisplayMetadataProblem? Problem = null,
-    CreatureDisplayTextureEvidence? Textures = null);
+    CreatureDisplayTextureEvidence? Textures = null, IReadOnlyList<string>? Values = null);
 /// <summary>The same admitted CreatureDisplayInfo row's texture fields, read with its ModelID edge. Values are canonical
 /// signed32 decimal strings; all four variation positions are kept, zeros included. Null when the row cannot supply them.</summary>
 internal sealed record CreatureDisplayTextureEvidence(int ExtendedColumn, string ExtendedDisplayInfoId,
@@ -91,6 +91,9 @@ internal sealed partial class CreatureDisplayCoordinator(ICreatureDisplaySources
     }
     internal Task<CreatureDisplayMetadataResult> ReadAsync(CreatureDisplayMetadataRequest request, CancellationToken token) =>
         ExecuteLocalAsync(request, token, static (_, result) => result);
+    /// <summary>The same local chain, projected with the rows its probes read (creature-display-facts-v1).</summary>
+    internal Task<CreatureDisplayFactsResult> ReadFactsAsync(CreatureDisplayMetadataRequest request, CancellationToken token) =>
+        ExecuteLocalAsync(request, token, static (consumer, result) => CreatureDisplayFacts.Project(result, consumer.Delivered));
     private async Task<T> ExecuteLocalAsync<T>(CreatureDisplayMetadataRequest request, CancellationToken token,
         Func<Consumer, CreatureDisplayMetadataResult, T> project)
     {

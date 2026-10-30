@@ -1,0 +1,33 @@
+{
+  "labelRevision": "creature-labels-v1",
+  "classification": [
+    {
+      "value": "0",
+      "label": "Normal"
+    },
+    {
+      "value": "1",
+      "label": "Elite"
+    },
+    {
+      "value": "2",
+      "label": "Rare elite"
+    },
+    {
+      "value": "3",
+      "label": "World boss"
+    },
+    {
+      "value": "4",
+      "label": "Rare"
+    },
+    {
+      "value": "5",
+      "label": "Trivial"
+    },
+    {
+      "value": "6",
+      "label": "Minus"
+    }
+  ]
+}

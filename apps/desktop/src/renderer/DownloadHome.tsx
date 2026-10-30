@@ -2,7 +2,7 @@ import type { DownloadCheckController } from './useDownloadCheck';
 import type {ItemEffectsLoading} from './useItemEffects';
 import type {CreatureDisplays} from './useCreatureDisplay';
 import type {GeometryFlow} from './useCreatureGeometry';
-import {CreaturesBrowser} from './CreaturesBrowser';
+import {CreaturesBrowser,type CreatureFileTarget} from './CreaturesBrowser';
 import type {CreaturesLoading} from './useCreaturesLoading';
 import type {Classifications} from './useClassifications';
 import type {IconsLoading} from './useIconsLoading';
@@ -93,7 +93,9 @@ export function DownloadHome({ filesViews = noViews, downloadCheck, catalogTasks
   // A FileDataID followed from Tables (#19) opens Files with the way back to that record.
   const [fileTarget, setFileTarget] = useState<FileTarget | null>(null), fileSeq = useRef(0);
   const openFile = useCallback((target: Omit<FileTarget, 'seq'>) => { setFileTarget({ ...target, seq: ++fileSeq.current }); setFromHome(false); setPane('files'); }, []);
-  const returnToTable = () => { setFileTarget(null); setPane('tables'); };
+  // Files opened from a Creatures model file returns to the Creatures selection, with focus back on its link (#62).
+  const returnToTable = () => { const from = fileTarget?.from; setFileTarget(null); if (from === 'creatures') itemSource.returnFrom('creatures'); else setPane('tables'); };
+  const openCreatureFile = (target: CreatureFileTarget) => { itemSource.remember(); openFile({ ...target, from: 'creatures' }); };
   // Build overview's line about files not checked at Open opens Download objects with focus on the Check.
   const outsideFiles = summary && measured && measured !== 'pending' ? BigInt(measured.objectCount) - BigInt(summary.objectCount) : 0n;
   const [checkFocus, setCheckFocus] = useState(0);
@@ -129,7 +131,7 @@ export function DownloadHome({ filesViews = noViews, downloadCheck, catalogTasks
       : summary ? <DownloadObjects key={`${snapshot.build.id}:${summary.ledgerId}:${summary.assessedAt}`} snapshot={snapshot} summary={summary} measured={measured} measuring={measuring} checkAvailable={features.includes('download-check-v1')} checker={downloadCheck} focusCheck={checkFocus} onCheckFocused={() => setCheckFocus(0)} viewSwitch={viewSwitch} onLedger={setListed} bridge={bridge} active={pane === 'files'} onReopen={onReopen} onReturn={fromHome ? returnHome : undefined} catalog={choice === 'objects' && catalogView ? { ...catalogView, onShow: undefined } : catalogView} fileTarget={fileTarget} onReturnToTable={returnToTable}/>
       : <FilesUnavailable snapshot={snapshot} active={pane === 'files'} onReturn={fromHome ? returnHome : undefined} onReopen={onReopen} catalog={catalogView} fileTarget={fileTarget} onReturnToTable={returnToTable}/>}
     {items&&<div className="dh-items-area" hidden={pane!=='items'}><ItemsBrowser effectsLoading={effectsLoading} effectsAvailable={effectsAvailable} effectsSource={itemSource} classificationsLoading={classificationsLoading} classificationsAvailable={classificationsAvailable} subclassAvailable={subclassAvailable} iconsLoading={iconsLoading} iconsAvailable={iconsAvailable} factsAvailable={factsAvailable} key={`items:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}`} workspace={snapshot} bridge={bridge} active={pane==='items'} flow={itemsLoading!} focusRequest={itemsLoading!.viewRequest} onSource={(source,recordId,columnIndex)=>itemSource.open(source,recordId,'items',columnIndex)} onOpenTable={openTable}/></div>}
-    {creatures&&<div className="dh-area-scroll" hidden={pane!=='creatures'}><CreaturesBrowser displays={creatureDisplays} displayAvailable={creatureDisplayAvailable} geometry={creatureGeometry} key={`creatures:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}`} workspace={snapshot} bridge={bridge} active={pane==='creatures'} flow={creaturesLoading!} focusRequest={creaturesLoading!.viewRequest} onSource={(source,id)=>itemSource.open(source,id,'creatures')}/></div>}
+    {creatures&&<div className="dh-items-area" hidden={pane!=='creatures'}><CreaturesBrowser displays={creatureDisplays} displayAvailable={creatureDisplayAvailable} factsAvailable={creatureDisplayAvailable&&features.includes('creature-display-facts-v1')&&!!bridge.creatureDisplayFacts&&!!bridge.creatureLabels} geometry={creatureGeometry} tableLoading={tableLoading} key={`creatures:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}`} workspace={snapshot} bridge={bridge} active={pane==='creatures'} flow={creaturesLoading!} focusRequest={creaturesLoading!.viewRequest} onSource={(source,id,columnIndex)=>itemSource.open(source,id,'creatures',columnIndex)} onOpenTable={openTable} onFile={openCreatureFile}/></div>}
     <TablesExplorer key={`tables:${snapshot.build.productId}:${snapshot.build.id}:${snapshot.sourceReference.region}:${snapshot.sourceReference.generation}`} snapshot={snapshot} bridge={bridge} active={pane === 'tables'} tableLoading={tableLoading} sourceRecord={itemSource.request} onReturnToItems={itemSource.returnToItems} onOpenFile={openFile} tableRequest={tableRequest}/>
   </HomeShell>;
 }

@@ -1,4 +1,4 @@
-import type {CreaturesContext,CreaturesSnapshot,CreatureSummary,CreatureDisplayMetadataResult,CreatureDisplayTarget,OpeningSourceReference} from '../../../../contracts/generated/discovery';
+import type {CreaturesContext,CreaturesSnapshot,CreatureSummary,CreatureDisplayMetadataResult,CreatureDisplayTarget,OpeningSourceReference,CreatureDisplayFactsResult,CreatureDisplayFactCell,CreatureLabelLists} from '../../../../contracts/generated/discovery';
 import {validCreatureContext,creatureKey,validCreatureProbability} from './creatures';
 import {validRecordId,tableDataMatches,isPartialSource,reviewedDefinition,reviewedRevision} from './table-data';
 export type CreatureDisplayParams=CreaturesContext&{artifactId:string;creatureId:string;slot:number};
@@ -36,3 +36,35 @@ export function creatureDisplayMatches(v:CreatureDisplayMetadataResult,p:Creatur
  if(v.state!=='notPrepared'&&v.requiredTableId!==null)return false;
  switch(v.state){case'creatureNotFoundInAdmittedScope':return selected===null&&v.sources.length===0;case'noDeclaredDisplay':return selected?.state==='noDeclaredDisplay'&&v.sources.length===0;case'invalidDisplayReference':return selected?.state==='invalidDisplayReference'&&v.sources.length===0;case'notPrepared':return selected?.state==='declared'&&(v.sources.length===0?v.requiredTableId===profiles[0].table:v.sources.length===1&&positiveEdge&&v.requiredTableId===profiles[1].table);case'displayMissingInAdmittedScope':return d?.matchCount==='0'&&v.sources.length===1;case'displayAmbiguous':return !!d&&BigInt(d.matchCount??'0')>1n&&v.sources.length===1;case'noDeclaredModel':return edge==='0'&&v.sources.length===1;case'modelMissingInAdmittedScope':return positiveEdge&&m?.matchCount==='0';case'modelAmbiguous':return positiveEdge&&!!m&&BigInt(m.matchCount??'0')>1n;case'noDeclaredModelFile':return positiveEdge&&file==='0';case'metadataResolved':return positiveEdge&&file!==null&&BigInt(file)>0n;default:return false;}
  }catch{return false;}}
+// creature-display-facts-v1 (#62): the reviewed facts of the rows a local display chain matched exactly once, and the
+// Classification label list. The engine picks the cells; this only checks that each cell is the exact column it names.
+const FACT_KEYS={display:['model','scale','textureVariations'],model:['file','scale']} as const;
+const FACT_FIELDS:Record<string,string>={'display:model':'ModelID','display:scale':'CreatureModelScale','display:textureVariations':'TextureVariationFileDataID','model:file':'FileDataID','model:scale':'ModelScale'};
+const baseName=(column:string)=>{const i=column.indexOf('[');return i<0?column:column.slice(0,i);};
+export function creatureDisplayFactsMatches(v:CreatureDisplayFactsResult,p:CreatureDisplayParams,authority?:DisplayAuthority):boolean{try{
+ if(v.factsRevision!=='creature-display-facts-v1'||!creatureDisplayMatches(v.metadata,p,authority)||utf8.encode(JSON.stringify(v)).byteLength>512*1024)return false;
+ const rowed=v.metadata.sources.filter(t=>t.row!==null);
+ if(v.records.length>rowed.length)return false;
+ let at=0;
+ for(const r of v.records){
+  while(at<rowed.length&&rowed[at].role!==r.role)at++;
+  const t=rowed[at++];if(!t||!t.row)return false;
+  const columns=t.snapshot.columns,expectedTable=r.role==='display'?['bfdaf9f1','CreatureDisplayInfo']:['7f695fa5','CreatureModelData'];
+  if(r.tableId!==expectedTable[0]||r.table!==expectedTable[1]||r.tableId!==t.snapshot.tableId||r.recordId!==t.row.source.rowId)return false;
+  const keys=FACT_KEYS[r.role];if(r.facts.length!==keys.length||r.facts.some((f,i)=>f.key!==keys[i]))return false;
+  const seen=new Set<number>();
+  const cellOk=(c:CreatureDisplayFactCell)=>Number.isInteger(c.columnIndex)&&c.columnIndex>=0&&c.columnIndex<columns.length&&columns[c.columnIndex].name===c.column&&!columns[c.columnIndex].isId&&typeof c.value==='string'&&!seen.has(c.columnIndex)&&(seen.add(c.columnIndex),true);
+  for(const f of r.facts){
+   if(f.state==='unsupported'?f.cells.length!==0:f.state!=='value'||f.cells.length===0)return false;
+   if(!f.cells.every(c=>cellOk(c)&&baseName(c.column)===FACT_FIELDS[`${r.role}:${f.key}`]))return false;
+   if(f.state==='unsupported'&&columns.some(c=>!c.isId&&baseName(c.name)===FACT_FIELDS[`${r.role}:${f.key}`]))return false;
+  }
+  if(!r.raw.every(cellOk)||r.raw.some((c,i)=>i>0&&c.columnIndex<=r.raw[i-1].columnIndex))return false;
+  // The edge the chain followed is the same cell the model/file fact shows.
+  const edge=r.facts[0].cells;if(edge.length!==1||edge[0].columnIndex!==t.row.edgeValue.columnIndex||edge[0].value!==t.row.edgeValue.value)return false;
+ }
+ return true;
+ }catch{return false;}}
+export function creatureLabelListsMatches(v:CreatureLabelLists):boolean{
+ return !!v&&v.labelRevision==='creature-labels-v1'&&Array.isArray(v.classification)&&v.classification.length<=64&&v.classification.every((l,i,a)=>/^(0|[1-9][0-9]{0,2})$/.test(l.value)&&typeof l.label==='string'&&l.label.length>0&&l.label.length<=64&&(i===0||Number(a[i-1].value)<Number(l.value)));
+}

@@ -727,6 +727,20 @@ test('Creature core schema preserves partial names, four direct slots and exact 
   assert.equal(validator('EngineRequest')(request('creatures.display.prepare',params)),false);
 });
 
+test('Creature display facts keep exact target cells, closed keys and the reviewed Classification list (creature-display-facts-v1)', async () => {
+  const facts=JSON.parse(await readFile(path.join(root,'contracts/examples/creature-display-facts.json'),'utf8'));
+  const labels=JSON.parse(await readFile(path.join(root,'contracts/examples/creature-labels.json'),'utf8'));
+  validate('CreatureDisplayFactsResult',facts); validate('CreatureLabelLists',labels);
+  assert.deepEqual(labels.classification.map(l=>`${l.value} ${l.label}`),['0 Normal','1 Elite','2 Rare elite','3 World boss','4 Rare','5 Trivial','6 Minus']);
+  for(const mutate of [v=>v.factsRevision='creature-display-facts-v2',v=>v.records.push(v.records[0],v.records[1]),v=>v.records[0].role='spell',
+    v=>v.records[0].tableId='c9d6b6b3',v=>v.records[0].facts[0].key='name',v=>v.records[0].facts[0].state='zero',v=>v.records[0].facts=[v.records[0].facts[0]],
+    v=>v.records[0].facts[0].cells[0].columnIndex=512,v=>v.records[0].facts[0].cells[0].value=19,v=>v.records[0].raw[0].extra=true,v=>delete v.metadata]) {
+    const changed=structuredClone(facts); mutate(changed); assert.equal(validator('CreatureDisplayFactsResult')(changed),false);
+  }
+  for(const patch of [{labelRevision:'creature-labels-v2'},{classification:[{value:'-1',label:'Minus'}]},{classification:[{value:'1',label:''}]},{extra:[]}])
+    assert.equal(validator('CreatureLabelLists')({...labels,...patch}),false);
+});
+
 test('Selected Creature metadata keeps distinct role proofs and never claims model appearance', async () => {
   const result=JSON.parse(await readFile(path.join(root,'contracts/examples/creature-display-metadata.json'),'utf8'));
   const clone=value=>structuredClone(value), display=result.sources[0], model=result.sources[1];
@@ -853,6 +867,15 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.ok(hello.result.capabilities.includes('item-subclass-labels-v1'));
   assert.ok(hello.result.capabilities.includes('creatures-v1'));
   assert.ok(hello.result.capabilities.includes('creature-display-metadata-v1'));
+  assert.ok(hello.result.capabilities.includes('creature-display-facts-v1'));
+  const creatureLabels=await request('creatures.labels',{}); validate('CreatureLabelLists',creatureLabels.result);
+  assert.equal(creatureLabels.result.classification[3].label,'World boss');
+  assert.equal((await request('creatures.labels',{slot:0})).error?.code,'INVALID_REQUEST');
+  const factsQuery={productId:'wow',buildIdentity:'a'.repeat(64),sourceRegion:'us',researchLocale:'enUS',artifactId:'b'.repeat(64),creatureId:'7',slot:0};
+  const displayFacts=await request('creatures.display.facts',factsQuery);
+  assert.ok(displayFacts.error,'A fresh catalog cannot fabricate display facts.');
+  assert.ok(!['INVALID_REQUEST','UNKNOWN_METHOD','CREATURE_DISPLAY_UNAVAILABLE','CREATURE_DISPLAY_FACTS_UNAVAILABLE'].includes(displayFacts.error.code));
+  assert.equal((await request('creatures.display.facts',{...factsQuery,displayId:'23'})).error?.code,'INVALID_REQUEST');
   assert.ok(hello.result.capabilities.includes('tables-reference-text-v1'));
   assert.ok(hello.result.capabilities.includes('tables-follow-v1'));
   const textQuery={productId:'wow',buildIdentity:'a'.repeat(64),sourceRegion:'us',tableId:'50238ec2',researchLocale:'enUS',artifactId:'b'.repeat(64)};

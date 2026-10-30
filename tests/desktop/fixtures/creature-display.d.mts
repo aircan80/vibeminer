@@ -2,3 +2,5 @@ import type {CreaturesSnapshot,CreatureSummary,OpeningSourceReference,CreatureDi
 export function creatureDisplay(core:CreaturesSnapshot,summary:CreatureSummary,slot:number,opening:OpeningSourceReference,state?:CreatureDisplayMetadataResult['state']):CreatureDisplayMetadataResult;
 import type {CreatureDisplayTarget,TableDefinitionSnapshot}from '../../../contracts/generated/discovery';
 export function displayDefinition(target:CreatureDisplayTarget,buildVersion:string):Promise<TableDefinitionSnapshot>;
+import type {CreatureDisplayFactsResult}from '../../../contracts/generated/discovery';
+export function creatureDisplayFacts(metadata:CreatureDisplayMetadataResult):CreatureDisplayFactsResult;

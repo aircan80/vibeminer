@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeMiner · Creatures view</title>
+<link rel="icon" type="image/svg+xml" href="../../../branding/vibeminer.svg">
+<style>
+/* Tokens, type scale and chrome copied from ../desktop-home/. Type scale: 11 / 13 / 14 / 19px at 100%. */
+:root{--bg:#f5f3ed;--paper:#fffefa;--ink:#243b3a;--muted:#586a64;--line:#dce2d9;--line-soft:#e9ece5;--teal:#176e66;--mint:#e4f1e9;--hover:#eef4ef;--pill:#b9d5c8;--gold-ink:#7d561b;--gold-line:#e4cfa5;--gold-bg:#fbf5e8;--warn-bg:#fbf3e4;--warn-line:#e7c98f;--err-bg:#fbeeea;--err-line:#e3b5a8;--focus:#e6ad46;--toolbar:#fbfaf6;--status:#eceae2;--side:#f9f8f3;
+  --fs-s:.786rem;--fs-m:.929rem;--fs-l:1.357rem;--pane-head:3.43rem;--thead:2rem;--side-w:clamp(18rem,26.5rem,40%);--preview:8.5rem;
+
+ */
+
+  font-size:14px}
+:root[data-text="200"]{font-size:28px}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:1rem/1.45 system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.mono{font-family:ui-monospace,monospace}
+.selectable{user-select:text;-webkit-user-select:text;cursor:text}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip{position:absolute;left:.5rem;top:-3rem;z-index:20;background:var(--paper);padding:.3rem .6rem;border-radius:6px}
+.skip:focus{top:.5rem}
+.dim{color:var(--muted)}
+.spacer{flex:1}
+
+/* Window: fixed chrome, only panes scroll. */
+.app{height:100vh;container:window/inline-size;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+
+/* Build header (simplified copy of desktop-home; its popovers live there). */
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.43rem .86rem;padding:.43rem .86rem 0;background:var(--toolbar);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:.6rem;font-weight:700;font-size:1.214rem;letter-spacing:-.01em;white-space:nowrap;flex:none}
+.brand img{width:2rem;height:2rem;display:block;flex:none}
+.brand .word span{color:var(--teal)}
+.divider{width:1px;align-self:stretch;background:var(--line);margin:.15rem 0;flex:none}
+.idfields{display:flex;align-items:center;gap:.4rem 1.15rem;margin:0;min-width:0;flex-wrap:wrap}
+.idf{display:flex;flex-direction:column;min-width:0}
+.idf dt{font-size:var(--fs-s);color:var(--muted);font-weight:600;line-height:1.25;white-space:nowrap}
+.idf dd{margin:0;font-weight:600;line-height:1.35;white-space:nowrap;height:1.4rem;display:flex;align-items:center}
+.idf .pid{font-family:ui-monospace,monospace;font-size:var(--fs-m);color:var(--muted);font-weight:400}
+.hgroup{display:flex;align-items:center;gap:.86rem;margin-left:auto;flex:none;min-height:2.3rem}
+.btn{height:2.15rem;display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .8rem;cursor:pointer;white-space:nowrap;flex:none}
+.btn:hover:not(:disabled){background:var(--hover);border-color:#c5d3cb}
+.btn.primary{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+.btn.primary:hover:not(:disabled){background:#125b54}
+.btn.small{height:1.9rem;font-size:var(--fs-m);padding:0 .65rem}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.55;cursor:default}
+.switch{display:inline-flex;align-items:center;gap:.45rem;border:0;background:none;padding:0 .3rem;margin:0 -.3rem;border-radius:4px;font-weight:600;cursor:pointer;line-height:inherit;white-space:nowrap}
+.switch .track{position:relative;width:1.85rem;height:1.05rem;border-radius:999px;background:#c9d2cc;flex:none}
+.switch .track::after{content:"";position:absolute;top:.15rem;left:.15rem;width:.75rem;height:.75rem;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch[aria-checked="true"] .track{background:var(--teal)}
+.switch[aria-checked="true"] .track::after{left:auto;right:.15rem}
+.activity-chip{display:inline-flex;align-items:center;gap:.5rem;height:2.15rem;padding:0 .75rem;border:1px solid var(--pill);border-radius:6px;background:var(--mint);color:var(--teal);font-weight:600;cursor:pointer;white-space:nowrap;flex:none}
+.chip-short{display:none}
+.activity-chip .count{min-width:1.3rem;height:1.3rem;border-radius:999px;background:var(--teal);color:#fff;font-size:var(--fs-s);display:grid;place-items:center;padding:0 .3rem}
+.activity-chip[aria-expanded="true"]{box-shadow:inset 0 0 0 1px currentColor}
+.pulse{width:.5rem;height:.5rem;border-radius:50%;background:currentColor;animation:pulse 1.6s ease-in-out infinite;flex:none}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+/* Area navigation wraps instead of scrolling; the group separator hides when it would end or start a line (D086). */
+.areas{order:9;flex:1 1 100%;display:flex;flex-wrap:wrap;align-items:stretch;gap:0 .2rem;min-height:2.45rem;margin:0 -.86rem;padding:0 .5rem;border-top:1px solid var(--line)}
+.area-group{display:flex;align-items:stretch;gap:.2rem;flex-wrap:wrap}
+.area-sep{align-self:center;width:1px;height:1.3rem;background:var(--line);margin:0 .45rem;flex:none}
+.area-sep.dangling{display:none}
+.areas button{border:0;background:none;padding:0 .75rem;min-height:2.45rem;font-size:var(--fs-m);font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;box-shadow:inset 0 -3px 0 transparent}
+.areas button:hover{color:var(--ink);background:var(--hover)}
+.areas button[aria-current="page"]{color:var(--teal);font-weight:700;box-shadow:inset 0 -3px 0 var(--teal)}
+.areas button:focus-visible{outline-offset:-3px}
+
+/* Shared pane parts (desktop-home). Scroll containers are positioned so nothing inside them sizes the window. */
+.pane{position:relative;display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--paper);overflow:auto}
+.pane>*{flex:none}
+.pane>.pane-scroll{flex:1 1 auto}
+.pane-scroll{position:relative;overflow:auto;min-height:0}
+.pane-head{display:flex;align-items:center;gap:.6rem;min-height:var(--pane-head);padding:.43rem .86rem;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--bg)}
+.pane-head h1,.pane-head h2{font-size:1rem;margin:0 .3rem 0 0;font-weight:700;white-space:nowrap}
+.label{font-size:var(--fs-s);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.control{height:2.15rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .65rem;min-width:0}
+.control[aria-invalid="true"]{border-color:#c0644a;box-shadow:inset 0 0 0 1px #c0644a}
+.control:disabled{opacity:.55}
+.segmented{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper);flex:none}
+.segmented button{border:0;background:none;height:2.05rem;padding:0 .75rem;cursor:pointer;white-space:nowrap}
+.segmented button+button{border-left:1px solid var(--line)}
+.segmented button[aria-pressed="true"]{background:var(--mint);color:var(--teal);font-weight:600}
+.segmented button:focus-visible{outline-offset:-3px}
+.segmented button:disabled{opacity:.55;cursor:default}
+.pill{display:inline-block;padding:0 .4rem;border-radius:4px;border:1px solid var(--pill);background:var(--paper);color:var(--teal);font-size:var(--fs-s);font-weight:600;line-height:1.5;white-space:nowrap}
+.pill.sample{border:1px dashed var(--muted);background:none;color:var(--muted)}
+.notice{margin:.6rem .86rem 0;padding:.55rem .75rem;border-radius:6px;border:1px solid var(--warn-line);background:var(--warn-bg);font-size:var(--fs-m);display:flex;gap:.8rem;align-items:flex-start}
+.notice.calm{border-color:var(--line);background:var(--bg)}
+.notice .text{flex:1;min-width:0}
+.notice strong{display:block}
+.state-box{border:1px solid #cfe2d6;background:var(--mint);border-radius:6px;padding:.55rem .7rem;font-size:var(--fs-m)}
+.state-box.error{border-color:var(--err-line);background:var(--err-bg)}
+.state-box.plain{border-color:var(--line);background:var(--bg)}
+.state-box strong{display:block}
+.state-box p{margin:.15rem 0 0}
+.state-box .row{display:flex;gap:.4rem;margin-top:.45rem;flex-wrap:wrap}
+.state-box code{font-size:var(--fs-s)}
+.reason{margin:0;font-size:var(--fs-s);color:var(--muted)}
+.pane-foot{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;padding:.5rem .86rem;border-top:1px solid var(--line);background:var(--paper);font-size:var(--fs-s);color:var(--muted)}
+.pane-foot .btn{height:1.75rem;font-size:var(--fs-s);padding:0 .55rem}
+.pane-switch{display:none}
+.loading-line{display:inline-flex;align-items:center;gap:.4rem;color:var(--teal);font-weight:600}
+
+/* ---------- Items: list | creature detail ---------- */
+.creatures{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:1px;background:var(--line);min-height:0}
+.clist{background:var(--side)}
+.list-head{row-gap:.45rem;padding-bottom:.55rem}
+.search-row{display:flex;align-items:center;gap:.5rem;flex:1 1 100%;margin:0}
+.search-row .control{flex:1 1 9rem;width:100%}
+.search-err{margin:0;padding:.35rem .86rem;font-size:var(--fs-s);color:#8a3b25;background:var(--err-bg);border-bottom:1px solid var(--err-line)}
+.applied{display:flex;align-items:center;gap:.4rem .6rem;flex-wrap:wrap;padding:.35rem .86rem;font-size:var(--fs-s);color:var(--muted);border-bottom:1px solid var(--line-soft);background:var(--paper)}
+.applied b{color:var(--ink);font-weight:600}
+.linkbtn{border:0;background:none;padding:0;color:var(--teal);text-decoration:underline;cursor:pointer;font-size:var(--fs-s)}
+.list-scroll{position:relative;flex:1 1 auto;overflow:auto;min-height:6rem;background:var(--paper);scroll-padding-top:var(--thead)}
+.ccols{display:grid;grid-template-columns:minmax(0,1fr) 5.2rem;align-items:center;column-gap:.7rem;padding:0 .86rem}
+.cthead{position:sticky;top:0;z-index:1;height:var(--thead);background:var(--toolbar);border-bottom:1px solid var(--line);font-size:var(--fs-s);font-weight:600;color:var(--muted);white-space:nowrap}
+.cthead>:last-child{text-align:right}
+[role="listbox"]:focus-visible{outline:none}
+.clist [role="option"]{position:relative;min-height:3.1rem;padding-top:.35rem;padding-bottom:.35rem;border-bottom:1px solid var(--line-soft);cursor:default}
+.clist [role="option"]:hover{background:var(--hover)}
+.clist [role="option"][aria-selected="true"]{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal)}
+[role="listbox"]:focus-visible [role="option"].active{outline:3px solid var(--focus);outline-offset:-3px}
+.cname{min-width:0}
+.cname b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cname small{display:block;font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* A row without a readable name keeps its whole reason: it wraps instead of eliding. */
+.cname b.nameless,.cname small.why{white-space:normal;overflow:visible}
+.cdisp{text-align:right;font-variant-numeric:tabular-nums;font-size:var(--fs-m);white-space:nowrap}
+.cdisp .nv{font-size:var(--fs-s)}
+.disp-inline{display:none}
+.wait{margin:.86rem;display:flex;flex-direction:column;gap:.6rem}
+.prereq{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.2rem .7rem;margin:.45rem 0 0;font-size:var(--fs-m)}
+.prereq dt{font-weight:600}
+.prereq dd{margin:0;color:var(--muted)}
+.empty{margin:1rem .86rem;max-width:30rem}
+
+.detail{container:detail/inline-size}
+.dhead{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"title rec";column-gap:.8rem;padding:.7rem 1rem .65rem;border-bottom:1px solid var(--line);background:var(--paper)}
+.dtitle{grid-area:title;min-width:0}
+.drec{grid-area:rec;display:flex;gap:.4rem;flex-wrap:wrap;justify-content:flex-end;align-self:start}
+.dtitle h2{margin:0;font-size:var(--fs-l);line-height:1.25;font-weight:700;overflow-wrap:anywhere}
+.dtitle h2:focus-visible{outline-offset:3px}
+.dline{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .55rem;margin-top:.15rem;font-size:var(--fs-m);color:var(--muted)}
+.dline .sep{color:var(--line)}
+.dline .sep.dangling{display:none}
+.dline b{color:var(--ink);font-weight:600}
+@container detail (max-width:40rem){
+  .dhead{grid-template-columns:minmax(0,1fr);grid-template-areas:"title" "rec"}
+  .drec{justify-content:flex-start;margin-top:.45rem}
+}
+.dbody{position:relative;flex:1 1 auto;min-height:0;overflow:auto;background:var(--paper)}
+.rove-tip{margin:0;padding:.35rem 1rem;font-size:var(--fs-s);color:var(--muted);border-bottom:1px solid var(--line);background:var(--paper)}
+.dbody{display:flex;flex-direction:column}
+.dbody>.dgrid{flex:1 0 auto}
+.dgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:1px;background:var(--line)}
+.dgrid.two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.dcol{display:flex;flex-direction:column;min-width:0;background:var(--paper)}
+.dsec{background:var(--paper);padding:.6rem 1rem .75rem;min-width:0;border-bottom:1px solid var(--line)}
+.dsec.full{grid-column:1/-1}
+.dsec-head{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem}
+.dsec-head h3{margin:0;font-size:1rem;font-weight:700}
+.dsec-head .scope{margin-left:auto;font-size:var(--fs-s);color:var(--muted)}
+/* One fact: label, then its source links beside it when they fit and under it when they don't; the value below. */
+.fact{padding:.38rem 0;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m)}
+.fact:last-child{border-bottom:0}
+.fhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:0 .9rem}
+.fact .fl{color:var(--muted)}
+.fact .srcs{display:flex;gap:0 .7rem;flex-wrap:wrap;min-width:0}
+.fact .fv{display:block;font-size:1rem;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.fact .fsub{font-weight:400;color:var(--muted);font-size:var(--fs-m)}
+.fact .fnote{display:block;font-size:var(--fs-s);color:var(--muted)}
+/* Source link: the Tables reference-cell style (13px, 600, teal, dotted underline). */
+.src{border:0;background:none;padding:0;color:var(--teal);font:600 var(--fs-m)/1.45 system-ui,sans-serif;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer;overflow-wrap:anywhere;text-align:left}
+.src:hover{text-decoration-style:solid}
+.src:focus-visible{outline-offset:1px}
+.nosrc{font-size:var(--fs-s);color:var(--muted)}
+/* Values that aren't values: always words, never 0 or blank. */
+.nv{color:var(--muted);font-weight:700}
+.ld{color:var(--teal);font-weight:600}
+.conflict{color:var(--gold-ink);font-weight:600}
+.sec-note{margin:.15rem 0 .3rem;font-size:var(--fs-s);color:var(--muted)}
+.sec-state{margin:.35rem 0 .2rem}
+.esrc{display:flex;flex-wrap:wrap;gap:.1rem .8rem;padding-top:.35rem;border-top:1px solid var(--line-soft)}
+details.more{margin-top:.2rem}
+details.more summary{cursor:pointer;font-size:var(--fs-m);font-weight:600;padding:.25rem 0}
+details.more summary:focus-visible{outline-offset:0}
+.legend-note{margin:.5rem 0 0;font-size:var(--fs-s);color:var(--muted)}
+.placeholder{display:grid;place-items:center;text-align:center;color:var(--muted);padding:2rem;background:var(--paper);flex:1}
+.placeholder div{border:1px dashed var(--line);border-radius:6px;padding:1.2rem 1.6rem;max-width:30rem}
+.placeholder h2{font-size:1rem;color:var(--ink);margin:0 0 .3rem}
+.placeholder p{margin:0;font-size:var(--fs-m)}
+.placeholder .btn{margin-top:.8rem}
+
+/* Activity panel: nonmodal, covers exactly the creature detail (whole area when compact; a sheet over everything when the shell scrolls). */
+.activity-panel{position:fixed;right:0;background:var(--paper);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(36,59,58,.08);display:flex;flex-direction:column;z-index:3;white-space:normal;font-weight:400;color:var(--ink);text-align:left}
+.activity-panel header{display:flex;align-items:center;justify-content:space-between;padding:.6rem 1rem;border-bottom:1px solid var(--line)}
+.activity-panel h2{margin:0;font-size:1rem}
+.activity-panel .rows{overflow:auto;padding:.4rem 1rem .8rem;flex:1}
+.activity-panel .label{margin:.6rem 0 .4rem}
+.task{border:1px solid var(--line);border-radius:6px;padding:.6rem .7rem;margin-bottom:.6rem;font-size:var(--fs-m);max-width:40rem}
+.task.failed{border-color:var(--err-line);background:var(--err-bg)}
+.task .t{font-weight:600}
+.task .s{color:var(--muted)}
+.task code{font-size:var(--fs-s)}
+.bar{height:.36rem;background:var(--line-soft);border-radius:999px;margin:.45rem 0 .3rem;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--teal);border-radius:999px}
+.task .row{display:flex;gap:.4rem;margin-top:.45rem;flex-wrap:wrap}
+.task .btn{height:1.9rem;font-size:var(--fs-m)}
+
+/* Status bar: always one line. */
+.statusbar{display:flex;align-items:center;gap:1.1rem;height:1.75rem;padding:0 .86rem;background:var(--status);border-top:1px solid var(--line);font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden}
+.statusbar strong{color:var(--ink);font-weight:600}
+.statusbar .busy{display:inline-flex;align-items:center;gap:.4rem;color:var(--teal);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.statusbar .warn{color:var(--gold-ink);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+
+/* Medium window: the activity entry uses its short label. */
+@container window (max-width:84rem){.chip-long{display:none}.chip-short{display:inline}}
+/* Enlarged text or narrow window (below 70rem): desktop-home's two-row header grid, one pane at a time. */
+@container window (max-width:70rem){
+  .toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"brand ids ids" "areas areas actions";column-gap:.7rem;row-gap:.43rem}
+  .brand{grid-area:brand}
+  .idfields{grid-area:ids;gap:.3rem .9rem}
+  .brand .word,.toolbar .divider{display:none}
+  .idf{flex-direction:row;align-items:center;gap:.35rem}
+  .idf dt{font-size:var(--fs-m)}
+  .idf.named dt{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .idf.moved{display:none}
+  .areas{grid-area:areas;align-self:stretch;min-width:0;margin:0 -.7rem 0 -.86rem}
+  .hgroup{grid-area:actions;align-self:stretch;margin:0 -.86rem 0 0;padding:.3rem .86rem .3rem .7rem;border-top:1px solid var(--line);flex-wrap:wrap;gap:.4rem .6rem;justify-content:flex-end}
+  .creatures{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  /* The list keeps its rows in view: the switcher names the pane, search and mode share one row, no column header. */
+  .list-head h1,.applied.browse{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);padding:0;border:0}
+  .list-head .spacer{display:none}
+  .list-head{padding:.45rem .86rem;min-height:0}
+  .list-head .search-row{flex:1 1 14rem}
+  .cthead{display:none}
+  .list-scroll{scroll-padding-top:0}
+  .ccols{grid-template-columns:minmax(0,1fr)}
+  .ccols>.cdisp{display:none}
+  .disp-inline{display:inline}
+  .pane-switch{display:flex;align-items:center;gap:.6rem;padding:.35rem .86rem;background:var(--bg);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .creatures>.clist,.creatures>.detail{display:none}
+  .creatures[data-pane="list"]>.clist,.creatures[data-pane="detail"]>.detail{display:flex}
+  .statusbar .secondary{display:none}
+  /* The creature head scrolls with the facts. */
+  .creatures>.detail{overflow:auto}
+  .detail>.dbody{flex:none;overflow:visible}
+  .dhead{padding:.6rem .86rem}
+  .dsec{padding:.55rem .86rem .7rem}
+}
+/* Very narrow (600×480 at 200%): logo and identity share row 1, the area bar gets row 2, the actions row 3. */
+@container window (max-width:36rem){
+  .toolbar{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"brand ids" "areas areas" "actions actions"}
+  .areas{margin:0 -.86rem}
+  .hgroup{margin:0 -.86rem}
+  .list-head .search-row{flex-basis:100%}
+}
+/* Window too short for the header and a 10rem area (600×480 at 200%): the shell scrolls as a whole (D086, D092). */
+.app.shell-scroll{height:auto;min-height:100vh;grid-template-rows:auto auto auto}
+body.shell-scroll{overflow-y:auto}
+.app.shell-scroll .creatures{min-height:10rem}
+.app.shell-scroll .pane{overflow:visible}
+.app.shell-scroll .list-scroll{max-height:calc(100vh - 1.75rem);flex:none}
+.app.shell-scroll .dbody{overflow:visible}
+.app.shell-scroll .statusbar{position:sticky;bottom:0;z-index:2}
+/* Native focus scrolling (Tab) also stops above the sticky status bar. */
+html:has(body.shell-scroll){scroll-padding-bottom:calc(1.75rem + 6px)}
+
+/* Mockup-only state control and hand-off note. Not part of the design. */
+.mock{position:fixed;left:.6rem;bottom:2.3rem;z-index:10;max-width:calc(100vw - 1.2rem);background:#243b3a;color:#fff;border-radius:6px;padding:.35rem .5rem;font:12px/1.6 system-ui,sans-serif;display:flex;flex-wrap:wrap;gap:.2rem;align-items:center;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.mock a{color:#cde7dc;text-decoration:none;padding:0 .35rem;border-radius:4px}
+.mock a[aria-current="true"]{background:#176e66;color:#fff}
+.mock .sep{opacity:.5}
+.mock-note{position:fixed;left:50%;transform:translateX(-50%);top:.6rem;z-index:11;max-width:min(40rem,calc(100vw - 1.2rem));background:#243b3a;color:#fff;border-radius:6px;padding:.5rem .7rem;font:13px/1.5 system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.mock-note a{color:#cde7dc}
+.mock-note button{margin-left:.5rem;font:inherit;background:#176e66;color:#fff;border:0;border-radius:4px;padding:.1rem .5rem;cursor:pointer}
+
+/* ---------- Creatures: list | creature detail ---------- */
+.cname b.nameless{color:var(--muted);font-style:italic}
+.cdisp b{font-weight:600}
+.subname{color:var(--muted)}
+.subname::before{content:"‹"}.subname::after{content:"›"}
+.dgrid.two{grid-template-columns:minmax(15rem,1fr) minmax(0,2fr)}
+/* One display per declared slot: its preview, then the chain Creature slot → CreatureDisplayInfo → CreatureModelData → model file. */
+.display{border:1px solid var(--line);border-radius:6px;margin-top:.55rem;background:var(--paper);min-width:0}
+.disp-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.15rem .7rem;padding:.45rem .7rem;border-bottom:1px solid var(--line-soft);background:var(--side);border-radius:6px 6px 0 0}
+.disp-head h4{margin:0;font-size:1rem;font-weight:700}
+.disp-head .prob{font-size:var(--fs-m);font-variant-numeric:tabular-nums}
+.disp-head .prob b{font-weight:600}
+.disp-head .srcs{display:flex;flex-wrap:wrap;gap:0 .7rem;margin-left:auto}
+.disp-body{display:grid;grid-template-columns:var(--preview) minmax(0,1fr);gap:.4rem .9rem;padding:.55rem .7rem .4rem}
+.chain{min-width:0}
+.link-block+.link-block{margin-top:.45rem;padding-top:.35rem;border-top:1px dashed var(--line)}
+.lb-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .6rem;font-size:var(--fs-m)}
+.lb-head b{font-weight:700}
+.lb-head .src{margin-left:0}
+.display .fact{padding:.28rem 0}
+.display details.more{padding:0 .7rem .35rem;border-top:1px solid var(--line-soft)}
+.slot-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:.1rem .7rem;padding:.4rem .7rem;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m)}
+.slot-line:last-child{border-bottom:0}
+.slot-line b{font-weight:700}
+.slot-line .srcs{display:flex;gap:0 .7rem;flex-wrap:wrap;margin-left:auto}
+.dup{color:var(--gold-ink);font-weight:600}
+.group-src{display:flex;flex-wrap:wrap;gap:.1rem .7rem;align-items:baseline;margin-top:.35rem;font-size:var(--fs-s);color:var(--muted)}
+/* Inline model preview: a reserved square; the drawing is an authored placeholder, not game art. */
+.preview{display:flex;flex-direction:column;gap:.35rem;min-width:0}
+.pbox{width:var(--preview);height:var(--preview);border-radius:6px;background:#24323a;color:#cfe0d8;display:grid;place-items:center;position:relative;overflow:hidden;border:0;padding:0;cursor:pointer}
+.pbox svg{width:86%;height:86%;display:block}
+.pbox .ptag{position:absolute;left:.35rem;bottom:.3rem;font-size:var(--fs-s);color:#cfe0d8;opacity:.85}
+.pbox.idle,.pbox.off,.pbox.pending{background:var(--bg);border:1px dashed #b9c4be;color:var(--muted);cursor:default;font-size:var(--fs-s);text-align:center;padding:.4rem;line-height:1.35}
+.pbox.pending{color:var(--teal);font-weight:600;border-style:solid;border-color:var(--line)}
+.preview .btn{justify-content:center;white-space:normal;height:auto;min-height:1.9rem;padding:.2rem .5rem;text-align:center;line-height:1.25}
+.pnote{margin:0;font-size:var(--fs-s);color:var(--muted)}
+.pnote code{font-size:var(--fs-s)}
+@container detail (max-width:34rem){
+  .disp-body{grid-template-columns:minmax(0,1fr)}
+  .preview{flex-direction:row;flex-wrap:wrap;align-items:flex-start}
+  .preview .pnote,.preview .btn{flex:1 1 9rem}
+}
+</style></head>
+<body>
+<a class="skip" href="#area">Skip to content</a>
+<div class="app" id="app">
+  <header class="toolbar" id="toolbar">
+    <div class="brand" id="brand"><img src="../../../branding/vibeminer.svg" alt="VibeMiner"><span class="word" aria-hidden="true">Vibe<span>Miner</span></span></div>
+    <div class="divider"></div>
+    <dl class="idfields" id="idfields" aria-label="Open build"></dl>
+    <div class="hgroup"><span id="activity-slot"></span><button class="btn primary" id="choose">← Choose build</button></div>
+    <nav class="areas" id="areas" aria-label="Build areas"></nav>
+  </header>
+  <main id="area" tabindex="-1" style="display:grid;min-height:0;outline:none"></main>
+  <footer class="statusbar" id="statusbar"></footer>
+</div>
+<nav class="mock" aria-label="Mockup state (not part of the design)" id="mock"></nav>
+
+<script>
+const p=new URLSearchParams(location.search);
+const STATES=['ready','loading','preparing','failed','ambiguous','missing','unknown','none','encrypted','unsupported'];
+const state=STATES.includes(p.get('state'))?p.get('state'):'ready';
+if(p.get('text')==='200')document.documentElement.dataset.text='200';
+if(p.get('chrome')==='0')document.getElementById('mock').remove();
+let panelOpen=p.get('panel')==='open';
+let mode=p.get('mode')==='id'?'id':'name';   // search mode: Name contains / Exact Creature ID
+let applied=p.get('q')||'';
+let draft=applied, inputError='';
+let pane=p.get('pane')==='detail'?'detail':'list';
+const validId=v=>/^(0|[1-9][0-9]{0,9})$/.test(v)&&+v<=4294967295;
+const ID_ERROR='Enter a whole Creature ID from 0 to 4294967295, without signs or leading zeros. The last results stay.';
+if(mode==='id'&&applied&&!validId(applied)){inputError=ID_ERROR;applied='';}
+
+/* ---------- Environment per fixture state ---------- */
+const env={
+  prep:state==='preparing', prepFailed:state==='failed',
+  displaysLoading:state==='loading',              // Creature ready; CreatureDisplayInfo and CreatureModelData still downloading
+  downloading:state==='loading'||state==='preparing',
+  displayPartial:state==='unknown'};              // CreatureDisplayInfo readable rows · Partial
+const coreReady=!env.prep&&!env.prepFailed;
+
+const n=v=>Number(v).toLocaleString('en-US');
+const esc=v=>String(v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const rand=s=>{let x=(s*2654435761)>>>0;return ()=>{x=(x*1103515245+12345)>>>0;return x>>>16;};};
+const hex=seed=>{let h='',x=(seed*2654435761)>>>0;for(let i=0;i<32;i++){x=(x*1103515245+12345)>>>0;h+='0123456789abcdef'[x>>>28];}return h;};
+const build={product:'wow',label:'Retail',version:'12.1.5.70448',source:'US'};
+const counts={rows:231804,named:229962,declared:244118};
+
+/* ---------- Reviewed labels (proposed, app-owned, versioned). Number first; the label follows it. ---------- */
+// Classification is a reviewed enum (signed8, 0–6); other values have no label.
+const CLASSIFICATION={0:'Normal',1:'Elite',2:'Rare elite',3:'World boss',4:'Rare',5:'Trivial',6:'Minus'};
+const lab=(list,v)=>list[v]??'no reviewed label';
+// CreatureType and CreatureFamily text comes from those tables' Name_lang for this build, joined on ID, as Items reads ItemClass.
+// The text here is authored; the row IDs match the values. A value with no row reads "no CreatureType row has ID n".
+const TYPE_TEXT={1:'Authored type A',3:'Authored type B',4:'Authored type C',6:'Authored type D',7:'Authored type E',8:'Authored type F',9:'Authored type G'};
+const FAMILY_TEXT={7:'Authored family A',24:'Authored family B'};
+const typeText=v=>env.displaysLoading?null:TYPE_TEXT[v]??null;
+
+/* ---------- Authored Creature page: 50 rows, ascending Creature ID. Names and numbers are invented. ---------- */
+const PRE=['Brindle','Mossback','Quarry','Tallow','Fen','Cinder','Marrow','Thistle','Gorse','Pebble','Rook','Wicker','Hollow','Saltmarsh','Dun','Briar','Ember','Lantern','Silt','Bramble','Copper','Ash','Reed','Tumble','Gloam'];
+const NOUN=['Wader','Snapper','Hauler','Matron','Watcher','Skulker','Grazer','Tinker','Strider','Gnawer','Keeper','Prowler','Drifter','Courier','Burrower','Shade','Warden','Hopper','Lurker','Peddler','Mender','Crawler','Scout','Tender','Moth'];
+const TITLES=['Marsh Warden','Lantern Keeper','Quartermaster','Stable Hand','Cartographer','','','','',''];
+const CREATURES=Array.from({length:50},(_,i)=>{
+  const g=rand(i+71),id=700001+i,d=51000+i*3;
+  const two=g()%3===0;
+  return {i,id,name:`${PRE[i%PRE.length]} ${NOUN[(i*7+i%4)%NOUN.length]}`,nameState:'valid',nameAlt:'',title:TITLES[g()%TITLES.length],titleAlt:'',
+    cls:[0,0,1,0,4,0,2,0,0,3][i%10],type:[7,1,8,4,7,9,6,1,3,7][i%10],family:[0,24,0,0,0,0,0,7,0,0][i%10],anim:0,always:[0,0,0],always:[0,0,0],
+    slots:[{d,p:'1'},{d:two?d+1:0,p:two?'1':'0'},{d:0,p:'0'},{d:0,p:'0'}]};});
+const byId=id=>CREATURES.find(x=>x.id===id);
+// Showcase rows. Their facts hold in every state; the state only changes the environment.
+Object.assign(byId(700003),{name:'Brindle Fenwatcher',title:'Marsh Warden',cls:1,type:7,family:0,slots:[{d:51006,p:'1'},{d:51007,p:'1'},{d:0,p:'0'},{d:0,p:'0'}]});
+Object.assign(byId(700005),{name:'Pebble Gnawer',title:'',cls:5,type:8,slots:[{d:0,p:'0'},{d:0,p:'0'},{d:0,p:'0'},{d:0,p:'0'}]});            // declares no display
+Object.assign(byId(700006),{name:'Cinder Skulker',slots:[{d:51015,p:'0.5'},{d:51015,p:'0'},{d:51016,p:'0.5'},{d:0,p:'0'}]});             // duplicate display, zero probability
+Object.assign(byId(700008),{name:'Gorse Strider',title:'Courier',slots:[{d:51021,p:'1'},{d:51022,p:'1'},{d:0,p:'0'},{d:0,p:'0'}]});     // ambiguous display / model
+Object.assign(byId(700011),{name:'Hollow Courier',slots:[{d:51099,p:'1'},{d:0,p:'0'},{d:0,p:'0'},{d:0,p:'0'}]});                         // display missing from complete CDI
+Object.assign(byId(700013),{name:'Dun Mender',slots:[{d:51036,p:'1'},{d:51037,p:'1'},{d:-5,p:'1'},{d:0,p:'0'}]});                       // ModelID 0, FileDataID 0, negative display
+Object.assign(byId(700014),{name:'Briar Prowler',title:'Beast Tamer',type:1,family:24,always:[910042,0,0],slots:[{d:51039,p:'1'},{d:0,p:'0'},{d:0,p:'0'},{d:0,p:'0'}]}); // encrypted model file
+Object.assign(byId(700016),{name:'Lantern Hopper',slots:[{d:51045,p:'1'},{d:0,p:'0'},{d:0,p:'0'},{d:0,p:'0'}]});                        // unsupported model
+Object.assign(byId(700017),{name:'Silt Lurker',slots:[{d:51048,p:'1'},{d:0,p:'0'},{d:0,p:'0'},{d:0,p:'0'}]});                           // outside readable CDI rows when Partial
+Object.assign(byId(700021),{nameState:'empty',name:''});
+Object.assign(byId(700022),{nameState:'invalid',name:''});
+Object.assign(byId(700019),{type:17,cls:9});                                                                                               // no CreatureType row 17; classification with no reviewed label
+
+/* ---------- CreatureDisplayInfo and CreatureModelData (authored). ---------- */
+function displayRow(d){
+  const g=rand(d);
+  const r={rows:1,model:3000+(d-51000),scale:[1,1,1.1,0.9,1.25,0.8][g()%6],alpha:255,size:g()%3,ext:0,tex:[4100000+d,0,0,0],sound:g()%900+10,flags:0,partial:false};
+  if(d===51099)r.rows=0;
+  if(d===51048&&env.displayPartial)r.partial=true;
+  if(d===51021)r.rows=2;                          // two CreatureDisplayInfo rows have this ID; none is picked
+  if(d===51036)r.model=0;                         // no model declared
+  if(d===51006){r.scale=1.1;r.tex=[4100606,4100607,0,0];}
+  if(d===51007){r.scale=0.9;}
+  return r;}
+function modelRow(m){
+  const g=rand(m+7);
+  const r={rows:1,file:3200000+m,scale:1,coll:[1.2,2.4],geo:0,file_state:'ready'};
+  if(m===3022)r.rows=2;                           // model ambiguous (display 51022)
+  if(m===3037)r.file=0;                           // no model file declared
+  if(m===3039)r.file_state='encrypted';
+  if(m===3045)r.file_state='unsupported';
+  if(m===3006)r.scale=1;
+  return r;}
+
+const SHOW={ready:700003,loading:700003,ambiguous:700008,missing:700011,unknown:700017,none:700005,encrypted:700014,unsupported:700016};
+let selId=+(p.get('creature')||SHOW[state]||700003);
+if(!byId(selId))selId=700003;
+// Previews: one drawn model per display, on request. A model already kept from an earlier look draws by itself (slot 0 of 700003 in Ready).
+const preview={};
+const previewKey=(cid,slot)=>`${cid}:${slot}`;
+if(state==='ready'&&p.get('preview')!=='0')preview[previewKey(700003,0)]='ready';
+// Encrypted and unsupported models are only known once a preview is asked for.
+if(state==='encrypted')preview[previewKey(700014,0)]='tried';
+if(state==='unsupported')preview[previewKey(700016,0)]='tried';
+
+/* ---------- Search (primary Name_lang, literal ordinal case-insensitive contains, or exact ID) ---------- */
+function results(){
+  if(!applied)return CREATURES;
+  if(mode==='id')return CREATURES.filter(c=>String(c.id)===applied);
+  const q=applied.toLowerCase();
+  return CREATURES.filter(c=>c.nameState==='valid'&&c.name.toLowerCase().includes(q));
+}
+
+/* ---------- Small renderers ---------- */
+const nameHtml=c=>c.nameState==='valid'?`<b>${esc(c.name)}</b>`:c.nameState==='empty'?'<b class="nameless">Empty source name</b>':'<b class="nameless">Name unavailable · invalid source text</b>';
+const declared=c=>c.slots.filter(s=>s.d>0).length;
+// Inside a display card each block names its table, so a link shows the field only; its accessible name keeps the table.
+const src=(t,id,f,txt)=>`<button class="src" data-src="${t}|${id}|${f||''}" aria-describedby="rove-hint">${txt||`${t}.${f}`}<span class="visually-hidden">${txt&&f&&!txt.startsWith(t)?` (${t}.${f})`:''}, open ${t} record ${id} in Tables</span></button>`;
+const files=fd=>`<button class="src" data-files="${fd}" aria-describedby="rove-hint">Find FileDataID ${fd} in Files</button>`;
+const nosrc=t=>`<span class="nosrc">${t}</span>`;
+function fact(label,value,srcs,note){
+  return `<div class="fact"><div class="fhead"><span class="fl">${label}</span>${srcs?`<span class="srcs">${srcs}</span>`:''}</div><span class="fv selectable">${value}</span>${note?`<span class="fnote">${note}</span>`:''}</div>`;}
+const val=(v,sub)=>`${esc(v)}${sub?` <span class="fsub">· ${sub}</span>`:''}`;
+const nv=(word,why)=>`<span class="nv">${word}</span> <span class="fsub">· ${why}</span>`;
+const text=v=>v===''?'<span class="fsub">Empty string</span>':esc(v);
+const loading=t=>`<span class="ld">…</span> <span class="fsub">${t} loading</span>`;
+// Text from a small table read with the definition Tables chooses. While it loads: "… CreatureType loading". No definition: the number only.
+const refText=(t,v,texts)=>env.displaysLoading?loading(t):texts[v]?`<span class="fsub">· ${texts[v]}</span>`:`<span class="fsub">· no ${t} row has ID ${v}</span>`;
+// Authored wireframe: a placeholder shape, never game art.
+const WIRE=s=>`<svg viewBox="0 0 100 100" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" opacity=".9"><path d="M50 10 L68 30 L62 58 L50 66 L38 58 L32 30 Z"/><path d="M50 10 L50 66 M32 30 L68 30 M38 58 L62 58 M32 30 L50 44 L68 30 M38 58 L50 44 L62 58"/><path d="M38 58 L30 88 M62 58 L70 88 M30 88 L42 88 M70 88 L58 88 M50 66 L44 88 M50 66 L56 88"/><path d="M32 30 L16 ${46+s} M68 30 L84 ${46-s} M16 ${46+s} L22 ${54+s} M84 ${46-s} L78 ${54-s}"/></g></svg>`;
+
+/* ---------- Header, activity, areas, status ---------- */
+function renderHeader(){
+  const on=env.downloading;
+  document.getElementById('idfields').innerHTML=`
+    <div class="idf named"><dt>Product</dt><dd>${build.label}&nbsp;<span class="pid">${build.product}</span></dd></div>
+    <div class="idf named"><dt>Build</dt><dd class="selectable">${build.version}</dd></div>
+    <div class="idf moved"><dt>Source</dt><dd>${build.source}</dd></div>
+    <div class="idf moved"><dt>Locale</dt><dd>English · enUS</dd></div>
+    <div class="idf"><dt>Status</dt><dd>Partial</dd></div>
+    <div class="idf"><dt id="mode-label">Download mode</dt><dd><button class="switch" role="switch" aria-checked="${on}" aria-labelledby="mode-label mode-value"><span class="track" aria-hidden="true"></span><span id="mode-value">${on?'Download all':'On demand'}</span></button></dd></div>`;
+}
+const tasks=[];
+if(env.prep)tasks.push('creatures');
+if(env.displaysLoading)tasks.push('displays');
+if(env.prepFailed)tasks.push('failed');
+if(env.downloading)tasks.push('download');
+function taskHtml(t){
+  if(t==='creatures')return `<div class="task"><div class="t">Creatures · Creature table data · enUS</div><div class="s"><span aria-hidden="true">[2/4] </span>Downloading encoded object · ${build.source}<span class="visually-hidden">Stage 2 of 4.</span></div><div class="bar" aria-hidden="true"><i style="width:44%"></i></div><div class="s">4.6 of 10.4 MiB · 44% of current stage</div><div class="s">Needed by Creatures. Goes ahead of Download all.</div><div class="row"><button class="btn">Stop preparing Creatures</button><button class="btn" data-close>View</button></div></div>`;
+  if(t==='displays')return `<div class="task"><div class="t">Creature 700003 displays · CreatureDisplayInfo table data · enUS</div><div class="s"><span aria-hidden="true">[2/4] </span>Downloading encoded object · ${build.source}<span class="visually-hidden">Stage 2 of 4.</span></div><div class="bar" aria-hidden="true"><i style="width:58%"></i></div><div class="s">3.9 of 6.7 MiB · 58% of current stage</div><div class="s">Then CreatureModelData. Goes ahead of Download all.</div><div class="row"><button class="btn">Stop loading displays</button><button class="btn" data-close>View</button></div></div>`;
+  if(t==='failed')return `<div class="task failed"><div class="t">Creatures · Creature table data · enUS</div><div class="s">Failed at [2/4] Downloading encoded object · ${build.source}</div><div class="s">CDN returned 404 for 1 archive <code>(ARCHIVE_NOT_FOUND)</code></div><div class="s">Retry is a deliberate new request, from Creatures.</div><div class="row"><button class="btn" data-close>View</button><button class="btn">Dismiss outcome</button></div></div>`;
+  return `<div class="task"><div class="t">${build.version} · Download all</div><div class="s"><span aria-hidden="true">[2/3] </span>Downloading encoded content · ${build.source}<span class="visually-hidden">Stage 2 of 3.</span></div><div class="bar" aria-hidden="true"><i style="width:25%"></i></div><div class="s">28.6 of 114.2 GiB · 25% of current stage</div><div class="s">Uses what research requests leave free.</div><div class="row"><button class="btn">Pause build download</button><button class="btn">On demand</button></div></div>`;
+}
+function renderActivity(){
+  const slot=document.getElementById('activity-slot');
+  if(!tasks.length){slot.innerHTML='';return;}
+  const research=tasks.filter(t=>t==='creatures'||t==='displays'),attention=tasks.includes('failed');
+  const badge=tasks.length;
+  slot.innerHTML=`<button class="activity-chip" id="chip" aria-expanded="${panelOpen}" aria-controls="activity">${env.downloading||research.length?'<span class="pulse" aria-hidden="true"></span>':''}<span class="chip-long">${attention?'Needs attention':'Downloads &amp; activity'}</span><span class="chip-short">${attention?'Attention':'Activity'}</span><span class="count" aria-label="${badge} ${badge===1?'item':'items'}">${badge}</span></button>${panelOpen?`<section class="activity-panel" id="activity" aria-labelledby="act-title"><header><h2 id="act-title" tabindex="-1">Downloads &amp; activity</h2><button class="btn small" id="activity-close">Close</button></header><div class="rows">${research.length?`<div class="label">Needed by your research</div>${research.map(taskHtml).join('')}`:''}${attention?`<div class="label">Needs attention</div>${taskHtml('failed')}`:''}${env.downloading?`<div class="label">Build downloads</div>${taskHtml('download')}`:''}</div></section>`:''}`;
+  document.getElementById('chip').onclick=()=>{panelOpen=!panelOpen;renderActivity();place();if(panelOpen)document.getElementById('act-title').focus();};
+  const close=()=>{panelOpen=false;renderActivity();place();document.getElementById('chip').focus();};
+  const c=document.getElementById('activity-close');if(c)c.onclick=close;
+  slot.querySelectorAll('[data-close]').forEach(b=>b.onclick=close);
+}
+function renderAreas(){
+  const btn=([id,l])=>`<button data-area="${id}"${id==='creatures'?' aria-current="page"':''}>${l}</button>`;
+  document.getElementById('areas').innerHTML=btn(['home','Home'])+`<span class="area-group" role="group" aria-label="Source data">${btn(['tables','Tables'])}${btn(['files','Files'])}</span><span class="area-sep" aria-hidden="true"></span><span class="area-group" role="group" aria-label="Game data">${btn(['items','Items'])}${btn(['creatures','Creatures'])}</span>`;
+  document.querySelectorAll('#areas [data-area]').forEach(b=>b.onclick=()=>{const a=b.dataset.area;if(a==='creatures'){document.getElementById('creatures-title')?.focus();return;}
+    location.href=a==='items'?`../items-view/index.html${p.get('text')==='200'?'?text=200':''}`:`../desktop-home/index.html?area=${a}${p.get('text')==='200'?'&text=200':''}`;});
+}
+function renderStatus(){
+  const busy=panelOpen?'':env.prep?'<span class="busy"><span class="pulse" aria-hidden="true"></span>Creatures · Preparing Creature · [2/4]</span>'
+    :env.displaysLoading?'<span class="busy"><span class="pulse" aria-hidden="true"></span>Creature 700003 displays · [2/4] · Download all 25% of current stage</span>'
+    :env.prepFailed?'<span class="warn">1 needs attention · Creatures preparation failed</span>':'';
+  const scope=!coreReady?'<span class="secondary">Creatures not prepared</span>'
+    :`<span class="secondary">Creatures · <strong>${n(counts.rows)}</strong> rows · ${n(counts.named)} named · ${n(counts.declared)} declared displays${env.displayPartial?' · CreatureDisplayInfo Partial':''}</span>`;
+  document.getElementById('statusbar').innerHTML=`<span><strong>${build.product} ${build.version}</strong> · ${build.source} · enUS</span>${scope}<span class="secondary"><span class="pill sample">Sample data</span></span><span class="spacer"></span>${busy}`;
+}
+const sheet=()=>document.getElementById('app').classList.contains('shell-scroll');
+function place(){
+  const panel=document.getElementById('activity'),area=document.getElementById('area'),detail=document.querySelector('.creatures>.detail');
+  const covered=[area,detail,document.getElementById('brand'),document.getElementById('idfields'),document.getElementById('choose'),document.getElementById('areas'),document.getElementById('chip')];
+  covered.forEach(el=>{if(el)el.inert=false;});
+  if(!panel)return;
+  const bottom=document.getElementById('statusbar').offsetHeight;
+  panel.style.bottom=bottom+'px';
+  if(sheet()){panel.style.top='0';panel.style.left='0';covered.forEach(el=>{if(el)el.inert=true;});return;}
+  panel.style.top=document.getElementById('toolbar').getBoundingClientRect().bottom+'px';
+  if(compact()||!detail){panel.style.left='0';area.inert=true;return;}
+  panel.style.left=detail.getBoundingClientRect().left+'px';detail.inert=true;
+}
+function fixSep(){
+  const seps=[...document.querySelectorAll('.area-sep,.dline .sep')];
+  seps.forEach(s=>s.classList.remove('dangling'));
+  const r=e=>e.getBoundingClientRect(),same=(a,b)=>r(a).top<r(b).bottom&&r(b).top<r(a).bottom;
+  for(const sep of seps){const a=sep.previousElementSibling,b=sep.nextElementSibling;
+    if(!r(sep).width&&!r(sep).height)continue;
+    if(!a||!b||!same(sep,a)||!same(sep,b))sep.classList.add('dangling');}
+}
+function fitShell(){
+  const app=document.getElementById('app'),rem=parseFloat(getComputedStyle(document.documentElement).fontSize);
+  fixSep();
+  app.classList.remove('shell-scroll');document.body.classList.remove('shell-scroll');
+  const need=document.getElementById('toolbar').offsetHeight+document.getElementById('statusbar').offsetHeight+10*rem;
+  if(need>innerHeight){app.classList.add('shell-scroll');document.body.classList.add('shell-scroll');}
+}
+const compact=()=>innerWidth/parseFloat(getComputedStyle(document.documentElement).fontSize)<70;
+
+/* ---------- Creatures list pane ---------- */
+function listHtml(){
+  const rows=coreReady?results():[];
+  const disabled=!coreReady;
+  const modeSeg=`<div class="segmented" role="group" aria-label="Search by"><button data-mode="name" aria-pressed="${mode==='name'}"${disabled?' disabled':''}>Name</button><button data-mode="id" aria-pressed="${mode==='id'}"${disabled?' disabled':''}>Creature ID</button></div>`;
+  const head=`<div class="pane-head list-head"><h1 id="creatures-title" tabindex="-1">Creatures</h1><span class="spacer"></span>${modeSeg}
+    <form class="search-row" id="search-form" role="search" aria-label="Search Creatures"><input class="control" id="creature-search" type="search" value="${esc(draft)}" placeholder="${mode==='id'?'Exact Creature ID, e.g. 700003':'Name contains…'}" aria-label="${mode==='id'?'Exact Creature ID':'Name contains'}" aria-keyshortcuts="Control+F"${mode==='id'?' inputmode="numeric"':''}${inputError?' aria-invalid="true" aria-describedby="search-err"':''}${disabled?' disabled aria-describedby="search-reason"':''}><button class="btn small" type="submit"${disabled?' disabled':''}>Search</button></form></div>
+    ${inputError?`<p class="search-err" id="search-err" role="alert">${inputError}</p>`:''}`;
+  if(env.prep)return head+`<div class="pane-scroll"><div class="wait"><div class="state-box" role="status"><strong>Preparing Creatures…</strong><p><span aria-hidden="true">[2/4] </span><span class="visually-hidden">Stage 2 of 4. </span>Downloading Creature table data · ${build.source}</p>
+      <dl class="prereq"><dt>Creature</dt><dd>Not ready yet · needed by Creatures, at interactive priority</dd></dl>
+      <div class="row"><button class="btn small">Stop preparing Creatures</button><button class="btn small" data-open-panel>View task</button></div></div>
+      <p class="reason" id="search-reason">Search and the list work once the Creature table is ready. Display tables load when you open a creature.</p></div></div>`;
+  if(env.prepFailed)return head+`<div class="pane-scroll"><div class="wait"><div class="state-box error" role="alert"><strong>Creatures need attention</strong><p><code>ARCHIVE_NOT_FOUND</code> The Creature table couldn't be downloaded: the CDN returned 404 for 1 archive.</p><div class="row"><button class="btn small">Retry Creatures preparation</button><button class="btn small" data-open-panel>View task</button></div></div><p class="reason" id="search-reason">Search and the list work once the Creature table is ready.</p></div></div>`;
+  const sel=byId(selId),hidden=!rows.some(r=>r.id===selId);
+  const appliedLine=applied?`<div class="applied" role="status"><span>${mode==='id'?`Exact Creature ID <b class="mono">${esc(applied)}</b>`:`Name contains <b>“${esc(applied)}”</b>`} · ${rows.length} on this page</span><span class="spacer"></span><button class="linkbtn" id="clear-search">Clear search</button></div>`
+    :`<div class="applied browse" role="status"><span>All admitted Creatures · ascending Creature ID</span></div>`;
+  const hiddenNote=hidden&&sel?`<div class="notice calm" style="margin-bottom:.6rem"><div class="text">Selected creature ${sel.id} is outside these results. Its details stay open.</div></div>`:'';
+  const listbox=rows.length?`<div class="list-scroll" id="creature-list"><div class="cthead ccols" aria-hidden="true"><span>Creature</span><span>Displays</span></div>
+    <div role="listbox" id="creatures-lb" tabindex="0" aria-label="Creatures on this page"${rows.some(r=>r.id===selId)?` aria-activedescendant="copt-${selId}"`:''}>${rows.map(c=>{const on=c.id===selId,k=declared(c);
+      const sub=c.title?`<span class="subname">${esc(c.title)}</span>`:`Type ${c.type}${TYPE_TEXT[c.type]?` · ${TYPE_TEXT[c.type]}`:''}`;
+      const line=c.nameState==='valid'?`<small>${c.id} · ${sub}<span class="disp-inline"> · ${k===1?'1 display':`${k} displays`}</span></small>`:`<small class="why">${c.id} · ${c.nameState==='empty'?'Name_lang is an empty string':'Name_lang bytes aren’t valid UTF-8'}<span class="disp-inline"> · ${k===1?'1 display':`${k} displays`}</span></small>`;
+      return `<div role="option" id="copt-${c.id}" class="ccols${on?' active':''}" aria-selected="${on}" data-id="${c.id}"><span class="cname">${nameHtml(c)}${line}</span><span class="cdisp">${k?`<b>${k}</b>`:'<span class="nv">None</span>'}</span></div>`;}).join('')}</div></div>`
+    :`<div class="pane-scroll"><div class="empty"><div class="state-box plain"><strong>No match</strong><p>${mode==='id'?`No Creature row in this build's admitted Creatures has ID ${esc(applied)}.`:`No admitted creature name contains “${esc(applied)}”. Search reads Name_lang only: titles, alternative names and rows without a readable name don't match.`}</p><div class="row"><button class="btn small" id="clear-search">Clear search</button></div></div></div></div>`;
+  const foot=`<div class="pane-foot" role="group" aria-label="Creatures pages"><span class="count">${rows.length?`${applied?'Results':'Creatures'} 1–${rows.length}${applied?'':' · more after'}`:'No results'}</span><span class="spacer"></span><button class="btn" aria-disabled="true" aria-label="First page of Creatures">First</button><button class="btn" aria-disabled="true" aria-label="Previous page of Creatures">Previous</button><button class="btn"${applied||!rows.length?' aria-disabled="true"':''} aria-label="Next page of Creatures">Next</button></div>`;
+  return head+appliedLine+hiddenNote+listbox+foot;
+}
+
+/* ---------- One display slot ---------- */
+function previewHtml(c,k,m){
+  const key=previewKey(c.id,k),st=preview[key]||'idle';
+  if(env.displaysLoading)return `<div class="preview"><div class="pbox off" role="img" aria-label="Model preview waits for the display tables">Preview after CreatureModelData</div></div>`;
+  if(m.file_state==='encrypted'&&st!=='idle')return `<div class="preview"><div class="pbox off" role="img" aria-label="Encrypted model">Encrypted model</div><p class="pnote">TACT key ${hex(39).slice(0,16).toUpperCase()} isn't available. <code>MODEL_ENCRYPTED</code></p></div>`;
+  if(m.file_state==='unsupported'&&st!=='idle')return `<div class="preview"><div class="pbox off" role="img" aria-label="Unsupported model">Unsupported model</div><p class="pnote">MD21 version 264 isn't read. <code>MODEL_UNSUPPORTED</code></p></div>`;
+  if(st==='loading')return `<div class="preview"><div class="pbox pending" role="status"><span><span class="pulse" aria-hidden="true"></span> Loading model<br><span aria-hidden="true">[1/3]</span><span class="visually-hidden">Stage 1 of 3.</span> M2 file</span></div><button class="btn small" data-stop-preview="${key}">Stop loading model</button></div>`;
+  if(st==='ready')return `<div class="preview"><button class="pbox" data-geometry="${key}" aria-label="Model preview for display ${c.slots[k].d}. Open geometry view">${WIRE(k*4)}<span class="ptag" aria-hidden="true">Unposed</span></button><button class="btn small" data-geometry="${key}">Open geometry view</button></div>`;
+  return `<div class="preview"><div class="pbox idle" aria-hidden="true">No preview yet</div><button class="btn small" data-show-preview="${key}" aria-label="Show model preview for display ${c.slots[k].d}">Show model</button></div>`;
+}
+function slotHtml(c,k,cards){
+  const s=c.slots[k],cs=src('Creature',c.id,`DisplayID[${k}]`,`DisplayID[${k}]`)+src('Creature',c.id,`DisplayProbability[${k}]`,`DisplayProbability[${k}]`);
+  const dupOf=c.slots.findIndex((o,j)=>j<k&&o.d===s.d&&s.d>0);
+  if(s.d===0)return `<div class="slot-line" data-rove><b>Slot ${k}</b><span>DisplayID 0 · <span class="nv">No display declared</span></span><span class="fsub">Probability ${esc(s.p)}</span><span class="srcs">${cs}</span></div>`;
+  if(s.d<0)return `<div class="slot-line" data-rove><b>Slot ${k}</b><span>DisplayID ${s.d} · <span class="nv">Invalid reference</span> <span class="fsub">· a negative value can't name a CreatureDisplayInfo row; nothing is looked up</span></span><span class="fsub">Probability ${esc(s.p)}</span><span class="srcs">${cs}</span></div>`;
+  const d=displayRow(s.d),m=d.rows===1&&d.model>0&&!d.partial?modelRow(d.model):null;
+  const probNote=s.p==='0'?' <span class="fsub">· 0 as read</span>':'';
+  const head=`<div class="disp-head"><h4 id="dh-${k}">Slot ${k} · Display ${s.d}</h4><span class="prob">Probability <b>${esc(s.p)}</b>${probNote}</span>${dupOf>=0?`<span class="dup">Same display as slot ${dupOf}</span>`:''}<span class="srcs">${cs}</span></div>`;
+  let chain,raw='';
+  const dSrc=(f,t)=>src('CreatureDisplayInfo',s.d,f,t||f),mSrc=(f,t)=>src('CreatureModelData',d.model,f,t||f);
+  if(env.displaysLoading)chain=`<div class="link-block"><div class="lb-head"><b>CreatureDisplayInfo</b>${nosrc('loading')}</div>${fact('Model ID',loading('CreatureDisplayInfo'))}${fact('Scale',loading('CreatureDisplayInfo'))}</div><div class="link-block"><div class="lb-head"><b>CreatureModelData</b>${nosrc('loads after CreatureDisplayInfo')}</div>${fact('Model file','<span class="ld">…</span> <span class="fsub">loads after CreatureDisplayInfo</span>')}</div>`;
+  else if(d.partial)chain=`<div class="state-box plain sec-state"><strong>Unknown</strong><p>Display ${s.d} isn't in the readable CreatureDisplayInfo rows. It may be in an encrypted section; nothing is inferred.</p></div>`;
+  else if(d.rows===0)chain=`<div class="state-box plain sec-state"><strong>Missing</strong><p>CreatureDisplayInfo, complete in this build, has no row ${s.d}.</p></div>`;
+  else if(d.rows>1)chain=`<div class="state-box plain sec-state"><strong>Ambiguous</strong><p>${d.rows} CreatureDisplayInfo rows have ID ${s.d}; none is picked, so no model is looked up.</p></div><div class="group-src"><span>Rows:</span>${src('CreatureDisplayInfo',s.d,'','CreatureDisplayInfo #'+s.d+' (row 1)')}${src('CreatureDisplayInfo',s.d,'','CreatureDisplayInfo #'+s.d+' (copy)')}</div>`;
+  else{
+    const dBlock=`<div class="link-block"><div class="lb-head"><b>CreatureDisplayInfo</b>${src('CreatureDisplayInfo',s.d,'','CreatureDisplayInfo #'+s.d)}</div>
+      ${fact('Model ID',d.model===0?`0 <span class="fsub">· no model declared</span>`:val(d.model),dSrc('ModelID'))}
+      ${fact('Scale',val(d.scale,'CreatureModelScale, as read'),dSrc('CreatureModelScale'))}
+      ${fact('Texture variations',`[${d.tex.join(', ')}] <span class="fsub">· FileDataIDs</span>`,dSrc('TextureVariationFileDataID[0]','TextureVariationFileDataID[0–3]'))}</div>`;
+    let mBlock;
+    if(d.model===0)mBlock=`<div class="link-block"><div class="lb-head"><b>CreatureModelData</b>${nosrc('not looked up')}</div><p class="sec-note">ModelID is 0, so this display names no model.</p></div>`;
+    else if(m.rows>1)mBlock=`<div class="link-block"><div class="lb-head"><b>CreatureModelData</b>${nosrc('ambiguous')}</div><div class="state-box plain sec-state"><strong>Ambiguous</strong><p>${m.rows} CreatureModelData rows have ID ${d.model}; none is picked, so there's no model file.</p></div></div>`;
+    else mBlock=`<div class="link-block"><div class="lb-head"><b>CreatureModelData</b>${src('CreatureModelData',d.model,'','CreatureModelData #'+d.model)}</div>
+      ${fact('Model file',m.file===0?`0 <span class="fsub">· no model file declared</span>`:`FileDataID ${m.file}`,mSrc('FileDataID')+(m.file?files(m.file):''))}
+      ${fact('Model scale',val(m.scale,'ModelScale, as read'),mSrc('ModelScale'))}</div>`;
+    chain=dBlock+mBlock;
+    raw=`<details class="more"><summary>Display and model inputs · raw</summary><p class="sec-note">Fields without a reviewed meaning, as read.</p>
+      ${fact('CreatureModelAlpha',val(d.alpha),dSrc('CreatureModelAlpha'))}${fact('SizeClass',val(d.size),dSrc('SizeClass'))}${fact('ExtendedDisplayInfoID',val(d.ext),dSrc('ExtendedDisplayInfoID'))}${fact('SoundID',val(d.sound),dSrc('SoundID'))}${fact('Flags',val(d.flags),dSrc('Flags'))}${m&&m.rows===1?fact('CollisionWidth, CollisionHeight',`[${m.coll.join(', ')}]`,mSrc('CollisionWidth')+mSrc('CollisionHeight'))+fact('CreatureGeosetDataID',val(m.geo),mSrc('CreatureGeosetDataID')):''}</details>`;}
+  const resolved=!env.displaysLoading&&d.rows===1&&!d.partial&&m&&m.rows===1&&m.file>0;
+  const pv=resolved||env.displaysLoading?previewHtml(c,k,m||{}):`<div class="preview"><div class="pbox off" role="img" aria-label="No model preview">No model file</div><p class="pnote">The chain stops before a model file.</p></div>`;
+  return `<article class="display" aria-labelledby="dh-${k}" data-rove>${head}<div class="disp-body">${pv}<div class="chain">${chain}</div></div>${raw}</article>`;
+}
+
+/* ---------- Creature detail pane ---------- */
+function detailHtml(){
+  if(!coreReady)return `<div class="placeholder"><div><h2 id="detail-title" tabindex="-1">No creature selected</h2><p>Creature details appear when the Creature table is ready.</p>${env.prepFailed?'':'<button class="btn small" data-src="Creature||">Open Creature in Tables</button>'}</div></div>`;
+  const c=byId(selId),k=declared(c);
+  const cr=f=>src('Creature',c.id,f,`Creature.${f}`);
+  const title=c.nameState==='valid'?esc(c.name):`<span class="nv">${c.nameState==='empty'?'Empty source name':'Name unavailable'}</span>`;
+  const head=`<div class="dhead"><div class="dtitle"><h2 id="detail-title" tabindex="-1" class="selectable">${title}</h2>
+    <div class="dline"><span class="mono selectable">Creature ${c.id}</span>${c.title?`<span class="sep" aria-hidden="true">|</span><span class="subname selectable">${esc(c.title)}</span>`:''}<span class="sep" aria-hidden="true">|</span><span>${TYPE_TEXT[c.type]??`Type ${c.type}`}</span><span class="sep" aria-hidden="true">|</span><span>${lab(CLASSIFICATION,c.cls)==='no reviewed label'?`Classification ${c.cls}`:lab(CLASSIFICATION,c.cls)}</span><span class="sep" aria-hidden="true">|</span><span>${k===0?'No display declared':k===1?'1 display':`${k} displays`}</span></div></div>
+    <div class="drec">${src('Creature',c.id,'','Creature #'+c.id).replace('class="src"','class="btn small"').replace(' aria-describedby="rove-hint"','')}</div></div>`;
+  const nameValue=c.nameState==='valid'?esc(c.name):c.nameState==='empty'?'<span class="fsub">Empty string</span>':nv('Invalid text','the source bytes aren’t valid UTF-8; the raw bytes are in Tables');
+  const secCreature=`<section class="dsec" aria-labelledby="h-creature" data-rove><div class="dsec-head"><h3 id="h-creature">Creature</h3><span class="scope">Creature</span></div>
+    ${fact('Name',nameValue,cr('Name_lang'))}
+    ${fact('Alternative name',text(c.nameAlt),cr('NameAlt_lang'))}
+    ${fact('Title',text(c.title),cr('Title_lang'),c.title?'Shown under the name in game.':'')}
+    ${fact('Alternative title',text(c.titleAlt),cr('TitleAlt_lang'))}
+    ${fact('Classification',`${c.cls} <span class="fsub">· ${lab(CLASSIFICATION,c.cls)}</span>`,cr('Classification'))}
+    ${fact('Type',`${c.type} ${refText('CreatureType',c.type,TYPE_TEXT)}`,cr('CreatureType')+(TYPE_TEXT[c.type]&&!env.displaysLoading?src('CreatureType',c.type,'Name_lang','CreatureType.Name_lang'):''))}
+    ${fact('Family',`${c.family} ${refText('CreatureFamily',c.family,FAMILY_TEXT)}`,cr('CreatureFamily')+(FAMILY_TEXT[c.family]&&!env.displaysLoading?src('CreatureFamily',c.family,'Name_lang','CreatureFamily.Name_lang'):''))}
+    ${fact('Start animation state',val(c.anim,'raw'),cr('StartAnimState'))}
+    ${fact('Always items',`[${c.always.join(', ')}] <span class="fsub">· raw Item IDs</span>`,cr('AlwaysItem[0]').replace('>Creature.AlwaysItem[0]<','>Creature.AlwaysItem[0–2]<'))}
+    <p class="legend-note">The number is the source value. Text after · is CreatureType or CreatureFamily text from this build, or VibeMiner's reviewed Classification list. This is the client Creature record: no spawns, locations, loot or level.</p></section>`;
+  /* Displays: Creature slot → CreatureDisplayInfo → CreatureModelData → model file */
+  const dHead=`<div class="dsec-head"><h3 id="h-disp" tabindex="-1">Displays</h3><span class="scope">Creature → CreatureDisplayInfo → CreatureModelData</span></div>`;
+  const status=env.displaysLoading?`<div class="state-box sec-state" role="status"><strong><span class="loading-line"><span class="pulse" aria-hidden="true"></span>Loading displays…</span></strong><p><span aria-hidden="true">[2/4] </span><span class="visually-hidden">Stage 2 of 4. </span>Downloading CreatureDisplayInfo table data, then CreatureModelData. The slots below are already known from Creature.</p><div class="row"><button class="btn small">Stop loading displays</button><button class="btn small" data-open-panel>View task</button></div></div>`:'';
+  const note=k===0?`<div class="state-box plain sec-state"><strong>No display declared</strong><p>All four Creature.DisplayID slots are 0. The four slots stay listed below.</p></div>`
+    :`<p class="sec-note">Each declared slot, in slot order. Probabilities are as read: no share is worked out and no display is picked. ${env.displaysLoading?'':env.displayPartial?'CreatureDisplayInfo readable rows · Partial (encrypted sections not loaded).':'CreatureDisplayInfo and CreatureModelData complete.'}</p>`;
+  const cards=c.slots.map((s,i)=>s.d>0?slotHtml(c,i):'').join('');
+  const lines=c.slots.map((s,i)=>s.d<=0?slotHtml(c,i):'').join('');
+  const secDisp=`<section class="dsec" aria-labelledby="h-disp">${dHead}${status}${note}${cards}${lines?`<div style="margin-top:.5rem">${lines}</div>`:''}<p class="legend-note">A preview is unposed geometry, not the in-game look. Open geometry view for the evidence and controls.</p></section>`;
+  const body=compact()?`<div class="dgrid">${secDisp}${secCreature}</div>`:`<div class="dgrid two"><div class="dcol">${secCreature}</div><div class="dcol">${secDisp}</div></div>`;
+  const tip=`<p class="rove-tip" id="rove-hint">Tab moves between sections and displays; arrow keys move between their links.</p>`;
+  return head+`<div class="dbody" id="dbody">${tip}${body}</div>`;
+}
+
+/* ---------- Area ---------- */
+let wasCompact=null;
+function renderArea(keep){
+  const el=document.getElementById('area');
+  const sc=document.getElementById('creature-list')?.scrollTop||0,ds=document.getElementById('dbody')?.scrollTop||0;
+  const sel=byId(selId);wasCompact=compact();
+  const sw=`<div class="pane-switch"><div class="segmented" role="group" aria-label="Show pane"><button data-pane="list" aria-pressed="${pane==='list'}">Creatures list</button><button data-pane="detail" aria-pressed="${pane==='detail'}">Selected creature</button></div>${coreReady&&sel?`<span class="reason">${esc(sel.nameState==='valid'?sel.name:'Creature '+sel.id)}</span>`:''}</div>`;
+  el.innerHTML=`<section class="creatures" data-pane="${pane}" aria-label="Creatures">${sw}<section class="pane clist" aria-labelledby="creatures-title">${listHtml()}</section><section class="pane detail" aria-labelledby="detail-title">${detailHtml()}</section></section>`;
+  if(keep){const l=document.getElementById('creature-list');if(l)l.scrollTop=sc;const b=document.getElementById('dbody');if(b)b.scrollTop=keep==='list'?0:ds;}
+  wire();rove();fixSep();place();
+}
+const reachable=g=>[...g.querySelectorAll('.src')].filter(l=>!l.closest('details:not([open])')&&l.getClientRects().length);
+function rove(){
+  document.querySelectorAll('[data-rove]').forEach(g=>{
+    g.querySelectorAll('.src').forEach(l=>l.tabIndex=-1);
+    const vis=reachable(g);
+    (vis.find(l=>l.dataset.cur)||vis[0])?.setAttribute('tabindex','0');});
+}
+function inList(id){
+  const l=document.getElementById('creature-list'),o=document.getElementById('copt-'+id);if(!l||!o)return;
+  const head=l.querySelector('.cthead')?.offsetHeight||0,top=o.offsetTop-head,bottom=o.offsetTop+o.offsetHeight-l.clientHeight;
+  if(l.scrollTop>top)l.scrollTop=top;else if(l.scrollTop<bottom)l.scrollTop=bottom;
+}
+function select(id,how){
+  selId=id;renderArea('list');
+  const lb=document.getElementById('creatures-lb');
+  if(how==='open'&&compact()){pane='detail';renderArea('list');document.getElementById('detail-title').focus({preventScroll:true});return;}
+  if(lb){lb.focus({preventScroll:true});inList(id);aboveStatus(id);}
+}
+function aboveStatus(id){
+  const o=document.getElementById('copt-'+id);if(!o||!sheet())return;
+  const pad=6,r=o.getBoundingClientRect(),limit=innerHeight-document.getElementById('statusbar').offsetHeight-pad;
+  if(r.bottom>limit)scrollBy(0,r.bottom-limit);else if(r.top<pad)scrollBy(0,r.top-pad);
+}
+function wire(){
+  const el=document.getElementById('area');
+  el.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;draft='';inputError='';renderArea();el.querySelector(`[data-mode="${mode}"]`).focus();});
+  const f=document.getElementById('search-form');
+  if(f)f.onsubmit=e=>{e.preventDefault();const v=document.getElementById('creature-search').value;
+    if(mode==='id'&&v&&!validId(v)){inputError=ID_ERROR;draft=v;renderArea();document.getElementById('creature-search').focus();return;}
+    if([...v].length>128){inputError='Use at most 128 characters. The last results stay.';draft=v;renderArea();document.getElementById('creature-search').focus();return;}
+    inputError='';applied=v;draft=v;renderArea();document.getElementById('creature-search').focus();};
+  const s=document.getElementById('creature-search');if(s)s.oninput=()=>{draft=s.value;};
+  el.querySelectorAll('#clear-search').forEach(b=>b.onclick=()=>{applied='';draft='';inputError='';renderArea();document.getElementById('creature-search').focus();});
+  const lb=document.getElementById('creatures-lb');
+  if(lb){const ids=[...lb.querySelectorAll('[role=option]')].map(o=>+o.dataset.id);
+    lb.querySelectorAll('[role=option]').forEach(o=>o.onclick=()=>select(+o.dataset.id,'open'));
+    lb.onkeydown=e=>{let i=ids.indexOf(selId);
+      const t={ArrowDown:i+1,ArrowUp:i-1,Home:0,End:ids.length-1,PageDown:i+10,PageUp:i-10}[e.key];
+      if(t!==undefined){e.preventDefault();select(ids[Math.max(0,Math.min(ids.length-1,t))]);}
+      else if(e.key==='Enter'&&i>=0){e.preventDefault();select(selId,'open');}};}
+  el.querySelectorAll('.pane-switch [data-pane]').forEach(b=>b.onclick=()=>{const to=b.dataset.pane;pane=to;renderArea();
+    if(to==='list'&&document.getElementById('creatures-lb')){document.getElementById('creatures-lb').focus({preventScroll:true});inList(selId);}
+    else el.querySelector(`.pane-switch [data-pane="${to}"]`).focus();});
+  el.querySelectorAll('[data-src],[data-files],[data-geometry]').forEach(b=>b.onclick=()=>handoff(b));
+  el.querySelectorAll('[data-open-panel]').forEach(b=>b.onclick=()=>document.getElementById('chip')?.click());
+  el.querySelectorAll('[data-show-preview]').forEach(b=>b.onclick=()=>{const key=b.dataset.showPreview;preview[key]='loading';renderArea('keep');
+    document.querySelector(`[data-stop-preview="${key}"]`)?.focus();
+    setTimeout(()=>{if(preview[key]!=='loading')return;preview[key]='ready';const had=document.activeElement?.dataset?.stopPreview===key;renderArea('keep');if(had)document.querySelector(`button.btn[data-geometry="${key}"]`)?.focus();},1400);});
+  el.querySelectorAll('[data-stop-preview]').forEach(b=>b.onclick=()=>{const key=b.dataset.stopPreview;delete preview[key];renderArea('keep');document.querySelector(`[data-show-preview="${key}"]`)?.focus();});
+  el.querySelectorAll('details').forEach(d=>d.ontoggle=rove);
+}
+document.addEventListener('keydown',e=>{
+  const l=e.target.closest?.('.src');const g=l?.closest('[data-rove]');
+  if(!g||!['ArrowRight','ArrowDown','ArrowLeft','ArrowUp','Home','End'].includes(e.key))return;
+  const vis=reachable(g),i=vis.indexOf(l);
+  const j={ArrowRight:i+1,ArrowDown:i+1,ArrowLeft:i-1,ArrowUp:i-1,Home:0,End:vis.length-1}[e.key];
+  const next=vis[Math.max(0,Math.min(vis.length-1,j))];if(!next||next===l)return;
+  e.preventDefault();g.querySelectorAll('.src').forEach(x=>{x.tabIndex=-1;delete x.dataset.cur;});next.tabIndex=0;next.dataset.cur='1';next.focus();
+});
+// Mockup only: Tables, Files and the geometry view are drawn by their own references.
+function handoff(b){
+  document.querySelector('.mock-note')?.remove();
+  let what;
+  if(b.dataset.geometry){const [cid,slot]=b.dataset.geometry.split(':');what=`the geometry view (#59) for Creature <b>${cid}</b> slot <b>${slot}</b>, with <b>← Return to Creatures selection</b>`;}
+  else if(b.dataset.files)what=`Files searching FileDataID <b>${b.dataset.files}</b>, with <b>← Return to Creatures selection</b>`;
+  else{const [st,id,f]=b.dataset.src.split('|');what=`Tables at <b>${st}</b>${id?` record <b>${id}</b>`:''}${f?`, field <b>${f}</b> selected`:''}, same build, source and locale, with <b>← Return to Creatures selection</b>`;}
+  const note=document.createElement('div');note.className='mock-note';note.setAttribute('role','status');
+  note.innerHTML=`Mockup: opens ${what}. Return puts focus back on this control.<button type="button">OK</button>`;
+  document.body.append(note);
+  note.querySelector('button').onclick=()=>{note.remove();b.focus();};
+}
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'){const note=document.querySelector('.mock-note');if(note){note.querySelector('button').click();return;}if(panelOpen){document.getElementById('activity-close')?.click();}}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'){e.preventDefault();if(compact()&&pane!=='list'){pane='list';renderArea();}document.getElementById('creature-search')?.focus();}
+});
+addEventListener('resize',()=>{if(compact()!==wasCompact)renderArea('keep');fitShell();place();});
+
+/* ---------- Mockup control ---------- */
+function renderMock(){
+  const mock=document.getElementById('mock');if(!mock)return;
+  const cur=new URLSearchParams(location.search);
+  const link=(k,v,label,def,reset=[])=>{const q=new URLSearchParams(cur);q.set(k,v);for(const r of reset)q.delete(r);const on=(cur.get(k)||def)===v;return `<a href="?${q}" aria-current="${on}">${label}</a>`;};
+  const sep='<span class="sep">|</span>';
+  mock.innerHTML='<strong style="margin-right:.2rem">Mockup</strong>'
+    +[['ready','Ready'],['loading','Loading while downloading'],['preparing','Preparing'],['failed','Failed']].map(([v,l])=>link('state',v,l,'ready',['creature','panel'])).join('')+sep
+    +[['ambiguous','Ambiguous'],['missing','Missing'],['unknown','Unknown'],['none','No display'],['encrypted','Encrypted model'],['unsupported','Unsupported model']].map(([v,l])=>link('state',v,l,'ready',['creature','panel'])).join('')+sep
+    +link('creature','700006','Duplicate slots','')+link('creature','700019','No type row','')+link('creature','700013','Zero model / file, negative ID','')+link('creature','700022','Invalid name','')+sep
+    +link('q','zz','No match','')+`<a href="?${(()=>{const q=new URLSearchParams(cur);q.set('mode','id');q.set('q','12a');return q;})()}" aria-current="${cur.get('q')==='12a'}">Bad ID</a>`+sep
+    +link('text','100','100%','100')+link('text','200','200%','100')+(tasks.length?sep+link('panel','open','Panel open',''):'');
+}
+
+renderHeader();renderActivity();renderAreas();fitShell();renderArea();renderStatus();renderMock();fitShell();place();
+inList(selId);
+</script>
+</body></html>

@@ -199,13 +199,13 @@ public sealed class TableReferenceTextTests
     }
 
     [Fact]
-    public void Allowlist_is_exactly_the_reviewed_four_rules()
+    public void Allowlist_is_exactly_the_reviewed_six_rules()
     {
-        Assert.Equal(["ItemClass::ClassID>ItemClass.ClassName_lang@ClassID", "Creature::ID>Creature.Name_lang@ID", "Spell::ID>SpellName.Name_lang@ID", "Item::ID>ItemSparse.Display_lang@ID"],
+        Assert.Equal(["ItemClass::ClassID>ItemClass.ClassName_lang@ClassID", "Creature::ID>Creature.Name_lang@ID", "CreatureType::ID>CreatureType.Name_lang@ID", "CreatureFamily::ID>CreatureFamily.Name_lang@ID", "Spell::ID>SpellName.Name_lang@ID", "Item::ID>ItemSparse.Display_lang@ID"],
             TableReferenceTextRules.Allowlist.Select(r => $"{r.Table}::{r.Column}>{r.TextTable}.{r.TextColumn}@{r.MatchColumn}"));
         Assert.Equal((-128L, 127L, false), (TableReferenceTextRules.Allowlist[0].Minimum, TableReferenceTextRules.Allowlist[0].Maximum, TableReferenceTextRules.Allowlist[0].MatchesRecordId));
         // Small text tables load automatically; SpellName and ItemSparse wait for Load text.
-        Assert.Equal(["ItemClass:automatic", "Creature:automatic", "SpellName:onRequest", "ItemSparse:onRequest"],
+        Assert.Equal(["ItemClass:automatic", "Creature:automatic", "CreatureType:automatic", "CreatureFamily:automatic", "SpellName:onRequest", "ItemSparse:onRequest"],
             TableReferenceTextRules.Allowlist.Select(r => $"{r.TextTable}:{r.LoadPolicy}"));
         Assert.Equal(1_048_576, TableReferenceTextRules.AutomaticLoadMaximumEncodedBytes);
         Assert.Equal("automatic", (TableReferenceTextRules.Allowlist[0] with { MeasuredEncodedBytes = 1_048_576 }).LoadPolicy);

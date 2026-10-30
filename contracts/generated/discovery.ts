@@ -315,6 +315,8 @@ export interface DiscoveryContract {
   creaturesPage?: CreaturesPage;
   creatureInspectResult?: CreatureInspectResult;
   creatureDisplayMetadataResult?: CreatureDisplayMetadataResult;
+  creatureDisplayFactsResult?: CreatureDisplayFactsResult;
+  creatureLabelLists?: CreatureLabelLists;
   ItemEffectsSourceRole?: ItemEffectsSourceRole;
   ItemEffectsSourceState?: ItemEffectsSourceState;
   ItemEffectsReadinessState?: ItemEffectsReadinessState;
@@ -672,6 +674,8 @@ export interface EngineRequest1 {
     | 'creatures.inspect'
     | 'creatures.display.read'
     | 'creatures.display.prepare'
+    | 'creatures.display.facts'
+    | 'creatures.labels'
     | 'items.effects.data'
     | 'items.effects.prepare'
     | 'items.effects.page'
@@ -2487,6 +2491,215 @@ export interface CreatureDisplayMetadataProblem {
   message: string;
   retryable: boolean;
   target: ('display' | 'model') | null;
+}
+/**
+ * creatures.display.facts (creature-display-facts-v1): the local display chain plus the reviewed facts of each uniquely matched row, display before model.
+ */
+export interface CreatureDisplayFactsResult {
+  metadata: CreatureDisplayMetadataResult;
+  factsRevision: 'creature-display-facts-v1';
+  /**
+   * @minItems 0
+   * @maxItems 2
+   */
+  records: [] | [CreatureDisplayRecordFacts] | [CreatureDisplayRecordFacts, CreatureDisplayRecordFacts];
+}
+export interface CreatureDisplayRecordFacts {
+  role: 'display' | 'model';
+  tableId: 'bfdaf9f1' | '7f695fa5';
+  table: 'CreatureDisplayInfo' | 'CreatureModelData';
+  recordId: CreatureId;
+  /**
+   * @minItems 2
+   * @maxItems 3
+   */
+  facts: [CreatureDisplayFact, CreatureDisplayFact] | [CreatureDisplayFact, CreatureDisplayFact, CreatureDisplayFact];
+  /**
+   * @minItems 0
+   * @maxItems 512
+   */
+  raw: CreatureDisplayFactCell[];
+}
+export interface CreatureDisplayFact {
+  key: 'model' | 'scale' | 'textureVariations' | 'file';
+  state: 'value' | 'unsupported';
+  /**
+   * @minItems 0
+   * @maxItems 16
+   */
+  cells:
+    | []
+    | [CreatureDisplayFactCell]
+    | [CreatureDisplayFactCell, CreatureDisplayFactCell]
+    | [CreatureDisplayFactCell, CreatureDisplayFactCell, CreatureDisplayFactCell]
+    | [CreatureDisplayFactCell, CreatureDisplayFactCell, CreatureDisplayFactCell, CreatureDisplayFactCell]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ]
+    | [
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell,
+        CreatureDisplayFactCell
+      ];
+}
+export interface CreatureDisplayFactCell {
+  column: string;
+  columnIndex: number;
+  value: string;
+}
+export interface CreatureLabelLists {
+  labelRevision: 'creature-labels-v1';
+  /**
+   * @minItems 0
+   * @maxItems 64
+   */
+  classification: CreatureLabel[];
+}
+export interface CreatureLabel {
+  value: string;
+  label: string;
 }
 export interface ItemEffectsSelection {
   context: ItemsContext;

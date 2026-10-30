@@ -49,6 +49,27 @@ public sealed class CreatureDisplayHostTests
         Assert.Equal(1, target.Reads); Assert.Equal(0, target.Prepares + coreStore.Prepares);
     }
 
+    [Fact]
+    public async Task Facts_and_labels_are_advertised_with_metadata_and_keep_the_wire_shape_of_the_example()
+    {
+        var facts = Fixture<CreatureDisplayFactsResult>("creature-display-facts.json");
+        var target = new DisplayStore { Facts = _ => facts }; await using var core = new CreaturesService(new CoreStore()); await using var metadata = new CreatureDisplayMetadataService(target);
+        await using var session = await Session.Start(core, metadata);
+        await session.Send("hello", "hello", new { });
+        Assert.Contains((await session.Receive()).GetProperty("result").GetProperty("capabilities").EnumerateArray(), value => value.GetString() == "creature-display-facts-v1");
+        await session.Send("facts", "creatures.display.facts", Scope()); var result = (await session.Receive()).GetProperty("result");
+        using var expected = JsonDocument.Parse(File.ReadAllText(FixturePath("creature-display-facts.json")));
+        // The wire writes absent optionals as null; the example leaves them out.
+        Assert.True(JsonElement.DeepEquals(WithoutNulls(expected.RootElement), WithoutNulls(result)), result.GetRawText());
+        await session.Send("labels", "creatures.labels", new { }); var labels = (await session.Receive()).GetProperty("result");
+        using var expectedLabels = JsonDocument.Parse(File.ReadAllText(FixturePath("creature-labels.json")));
+        Assert.True(JsonElement.DeepEquals(expectedLabels.RootElement, labels), labels.GetRawText());
+        var extra = Scope(); extra["displayId"] = "23";
+        await session.Send("extra", "creatures.display.facts", extra); Assert.Equal("INVALID_REQUEST", (await session.Receive()).GetProperty("error").GetProperty("code").GetString());
+        await session.Send("labels-extra", "creatures.labels", new { slot = 0 }); Assert.Equal("INVALID_REQUEST", (await session.Receive()).GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(0, target.Prepares);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -58,8 +79,11 @@ public sealed class CreatureDisplayHostTests
         await using var core = new CreaturesService(new CoreStore()); await using var metadata = new CreatureDisplayMetadataService(new DisplayStore());
         await using var session = await Session.Start(haveCore ? core : null, haveMetadata ? metadata : null);
         await session.Send("hello", "hello", new { });
-        Assert.DoesNotContain((await session.Receive()).GetProperty("result").GetProperty("capabilities").EnumerateArray(), value => value.GetString() == "creature-display-metadata-v1");
+        var advertised = (await session.Receive()).GetProperty("result").GetProperty("capabilities").EnumerateArray().Select(v => v.GetString()).ToArray();
+        Assert.DoesNotContain("creature-display-metadata-v1", advertised); Assert.DoesNotContain("creature-display-facts-v1", advertised);
         await session.Send("read", "creatures.display.read", Scope()); Assert.Equal("CREATURE_DISPLAY_UNAVAILABLE", (await session.Receive()).GetProperty("error").GetProperty("code").GetString());
+        await session.Send("facts", "creatures.display.facts", Scope()); Assert.Equal("CREATURE_DISPLAY_UNAVAILABLE", (await session.Receive()).GetProperty("error").GetProperty("code").GetString());
+        await session.Send("labels", "creatures.labels", new { }); Assert.Equal("CREATURE_DISPLAY_UNAVAILABLE", (await session.Receive()).GetProperty("error").GetProperty("code").GetString());
     }
 
     [Theory]
@@ -220,16 +244,33 @@ public sealed class CreatureDisplayHostTests
         target.Read = _ => Result(); await session.Send("after", "creatures.display.read", Scope()); Assert.Equal("metadataResolved", (await session.Receive()).GetProperty("result").GetProperty("state").GetString());
     }
 
+    private static JsonElement WithoutNulls(JsonElement value)
+    {
+        static System.Text.Json.Nodes.JsonNode? Strip(System.Text.Json.Nodes.JsonNode? node)
+        {
+            if (node is System.Text.Json.Nodes.JsonObject o) { foreach (var key in o.Where(p => p.Value is null).Select(p => p.Key).ToArray()) o.Remove(key); foreach (var p in o) Strip(p.Value); }
+            if (node is System.Text.Json.Nodes.JsonArray a) foreach (var item in a) Strip(item);
+            return node;
+        }
+        return JsonSerializer.SerializeToElement(Strip(System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText())));
+    }
     private static CreatureDisplayMetadataResult NotPrepared() => Result() with { State = CreatureDisplayMetadataState.NotPrepared, Sources = [], ModelId = null, ModelFileDataId = null, RequiredTableId = "bfdaf9f1" };
     private static JsonElement Reply(IEnumerable<JsonElement> frames, string id) => Assert.Single(frames, frame => frame.TryGetProperty("id", out var value) && value.GetString() == id);
     private static JsonElement[] Frames(byte[] bytes) => Encoding.UTF8.GetString(bytes).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => { using var doc = JsonDocument.Parse(line); return doc.RootElement.Clone(); }).ToArray();
-    private sealed class DisplayStore : ICreatureDisplayMetadataStore
+    private sealed class DisplayStore : ICreatureDisplayMetadataStore, ICreatureDisplayMetadataStoreDefaults
     {
         internal int Reads, Prepares;
         internal Func<CreatureDisplayMetadataRequest, CreatureDisplayMetadataResult> Read = _ => Result();
         internal Func<CreatureDisplayMetadataRequest, Func<CreaturesPreparationProgress, Task>, CancellationToken, Task<CreatureDisplayMetadataResult>>? Prepare;
         public Task<CreatureDisplayMetadataResult> ReadDisplayAsync(CreatureDisplayMetadataRequest request, CancellationToken token) { Reads++; return Task.FromResult(Read(request)); }
         public Task<CreatureDisplayMetadataResult> PrepareDisplayAsync(CreatureDisplayMetadataRequest request, Func<CreaturesPreparationProgress, Task> progress, CancellationToken token) { Prepares++; return Prepare is null ? Task.FromResult(Result()) : Prepare(request, progress, token); }
+        internal Func<CreatureDisplayMetadataRequest, CreatureDisplayFactsResult>? Facts;
+        public Task<CreatureDisplayFactsResult> ReadFactsAsync(CreatureDisplayMetadataRequest request, CancellationToken token)
+        { Reads++; return Facts is null ? ((ICreatureDisplayMetadataStoreDefaults)this).Unavailable() : Task.FromResult(Facts(request)); }
+    }
+    private interface ICreatureDisplayMetadataStoreDefaults
+    {
+        Task<CreatureDisplayFactsResult> Unavailable() => throw new DiscoveryException("CREATURE_DISPLAY_FACTS_UNAVAILABLE", "Creature display facts aren't available from this engine.");
     }
     private sealed class CoreStore : ICreaturesStore
     {

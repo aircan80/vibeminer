@@ -6,3 +6,4 @@ export function creaturesPage(s:CreaturesSnapshot,p:Record<string,unknown>):Crea
 export function creatureInspect(s:CreaturesSnapshot,p:{creatureId:string}):CreatureInspectResult;
 
 export function creatureDefinition(s:CreaturesSnapshot,buildVersion:string):TableDefinitionSnapshot;
+export const creatureTypeText:Record<string,string>,creatureFamilyText:Record<string,string>;

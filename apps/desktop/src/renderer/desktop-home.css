@@ -471,7 +471,7 @@
    pager on the right) can scroll above the entry too. The room is there whenever there is an activity entry (the header's compact
    entry or the floating one), not only while it floats: the entry starts floating once the header has scrolled away, and room added
    only then came too late for a pager already at the shell's end (#60). */
-:root:has(.dv-chip,.download-activity-floating) .desktop-home.dh-shell-scroll:is([data-area="home"],[data-area="tables"],[data-area="files"],[data-area="items"]) .dh-area{padding-bottom:calc(2.9rem + 2px)}
+:root:has(.dv-chip,.download-activity-floating) .desktop-home.dh-shell-scroll:is([data-area="home"],[data-area="tables"],[data-area="files"],[data-area="items"],[data-area="creatures"]) .dh-area{padding-bottom:calc(2.9rem + 2px)}
 
 /* Activity panel docked after the entry: below the header, above the status bar, over the side column or inspector. */
 .desktop-home aside.download-activity-panel{top:var(--dh-panel-top,5.5rem);bottom:var(--dh-panel-bottom,1.633333rem);right:var(--dh-panel-right,0);left:auto;width:var(--panel-w);border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:-8px 0 24px rgba(36,59,58,.08);font-size:var(--fs-m);z-index:3}

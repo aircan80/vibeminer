@@ -1,8 +1,67 @@
-.creatures-browser .items-heading h1 small{display:block;font-size:.8rem;letter-spacing:normal;font-weight:500;color:#697b72;margin-top:.3rem}.creatures-browser .items-list td{white-space:normal;min-inline-size:8rem}.creatures-browser .items-list th:first-child{min-inline-size:12rem}.creature-declarations>section{border-top:1px solid #dce2d9;margin-top:1rem;padding-top:.5rem}.creature-declarations h4{font-size:.933333333rem;margin:.5rem 0}.creature-declarations .item-fact b{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.creature-declarations .item-fact p{margin:.35rem 0}
-
-.creatures-browser .creature-selected-title{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.creature-selected-title small{display:block;font-size:.866666667rem;font-weight:500;letter-spacing:normal;color:#697b72}.creature-full-name{margin-block:1rem}.creature-full-name pre{white-space:pre-wrap;overflow-wrap:anywhere;max-block-size:16rem;overflow:auto;font:inherit}
-.creature-metadata{border-block-start:1px solid #dce2d9;margin-block:1.5rem;padding-block-start:1rem}.creature-metadata>h3{font-size:1.066666667rem;overflow-wrap:anywhere}.creature-metadata-target{border-block-start:1px solid #dce2d9;margin-block-start:1rem;padding-block-start:.5rem}.creature-metadata pre{max-block-size:16rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8rem}.creature-metadata progress{accent-color:#176e66;max-inline-size:100%}
-
-.creature-declarations>section.selected{background:#e6f1e8}
-/* D101: the definition notice shares the edges of the source scope box under it. */
-.creatures-browser .feature-definition,.desktop-home .creatures-browser .dh-notice.feature-definition{margin-inline:0}
+/* Creatures view (docs/design/creatures-view, #62). It reuses the Items view's panes, facts and links (items.css, iv-*); these rules
+   are what Creatures adds: a list without icons, the subname, display cards with their preview square, and the one-line slots.
+   Mockup rem values are scaled by 14/15 for the app's 15px root. */
+.desktop-home .cv{--preview:7.933333rem}
+.desktop-home .cv .cv-cols{grid-template-columns:minmax(0,1fr) 4.853333rem}
+.desktop-home .cv .cv-option{min-height:2.893333rem;padding-top:.326667rem;padding-bottom:.326667rem}
+.desktop-home .cv .iv-name b.iv-nameless{color:var(--muted);font-style:italic}
+.desktop-home .cv-subname::before{content:"‹"}
+.desktop-home .cv-subname::after{content:"›"}
+.desktop-home .cv .iv-grid.cv-two{grid-template-columns:minmax(14rem,1fr) minmax(0,2fr)}
+.desktop-home .cv .iv-dhead{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"title rec"}
+@container iv-detail (max-width:37.333333rem){
+  .desktop-home .cv .iv-dhead{grid-template-columns:minmax(0,1fr);grid-template-areas:"title" "rec"}
+}
+.desktop-home .cv .iv-dbody>.iv-dhead{flex:none}
+/* One card per declared slot: its preview, then CreatureDisplayInfo and CreatureModelData. */
+.desktop-home .cv-display{border:1px solid var(--line);border-radius:6px;margin-top:.513333rem;background:var(--paper);min-width:0}
+.desktop-home .cv-disp-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.14rem .653333rem;padding:.42rem .653333rem;border-bottom:1px solid var(--line-soft);background:var(--side);border-radius:6px 6px 0 0}
+.desktop-home .cv-disp-head h4{margin:0;font-size:.933333rem;font-weight:700}
+.desktop-home .cv-prob{font-size:var(--fs-m);font-variant-numeric:tabular-nums}
+.desktop-home .cv-prob b{font-weight:600}
+.desktop-home .cv-disp-head .iv-srcs{margin-left:auto}
+.desktop-home .cv-disp-body{display:grid;grid-template-columns:var(--preview) minmax(0,1fr);gap:.373333rem .84rem;padding:.513333rem .653333rem .373333rem}
+.desktop-home .cv-chain{min-width:0}
+.desktop-home .cv-block+.cv-block{margin-top:.42rem;padding-top:.326667rem;border-top:1px dashed var(--line)}
+.desktop-home .cv-block-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .56rem;font-size:var(--fs-m)}
+.desktop-home .cv-block-head b{font-weight:700}
+.desktop-home .cv-display .iv-fact{padding:.261333rem 0}
+.desktop-home .cv-display .cv-raw{padding:0 .653333rem .326667rem;border-top:1px solid var(--line-soft)}
+.desktop-home .cv-lines{margin-top:.466667rem}
+.desktop-home .cv-slot-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:.093333rem .653333rem;padding:.373333rem .653333rem;border-bottom:1px solid var(--line-soft);font-size:var(--fs-m)}
+.desktop-home .cv-slot-line:last-child{border-bottom:0}
+.desktop-home .cv-slot-line b{font-weight:700}
+.desktop-home .cv-slot-line .iv-srcs{margin-left:auto}
+/* Inline model preview: a reserved square, so a late drawing never moves the facts. */
+.desktop-home .cv-preview{display:flex;flex-direction:column;gap:.326667rem;min-width:0}
+.desktop-home .cv-pbox{width:var(--preview);height:var(--preview);border-radius:6px;display:grid;place-items:center;position:relative;overflow:hidden;background:var(--bg);border:1px dashed #b9c4be;color:var(--muted);font-size:var(--fs-s);text-align:center;padding:.373333rem;line-height:1.35}
+.desktop-home .cv-pbox.cv-pending{color:var(--teal);font-weight:600;border-style:solid;border-color:var(--line)}
+.desktop-home .cv-pbox.cv-drawn{background:var(--paper);border:1px solid var(--line);padding:0}
+.desktop-home .cv-pbox canvas{width:100%;height:100%;display:block}
+.desktop-home .cv-ptag{position:absolute;left:.326667rem;bottom:.28rem;font-size:var(--fs-s);color:var(--muted)}
+.desktop-home .cv-pstage{font-weight:400;font-size:var(--fs-s)}
+.desktop-home .cv-preview .dh-btn{justify-content:center;white-space:normal;height:auto;min-height:1.773333rem;padding:.186667rem .466667rem;text-align:center;line-height:1.25}
+.desktop-home .cv-pnote{margin:0;font-size:var(--fs-s);color:var(--muted);overflow-wrap:anywhere}
+.desktop-home .cv-pnote code{font-size:var(--fs-s)}
+@container iv-detail (max-width:31.733333rem){
+  .desktop-home .cv-disp-body{grid-template-columns:minmax(0,1fr)}
+  .desktop-home .cv-preview{flex-direction:row;flex-wrap:wrap;align-items:flex-start}
+  .desktop-home .cv-preview .cv-pnote,.desktop-home .cv-preview .dh-btn{flex:1 1 8.4rem}
+}
+/* The full geometry view (#59) opened from a preview covers the Creatures area and scrolls on its own. */
+.desktop-home .cv-geometry{overflow:auto;padding:1.12rem 1.373333rem;background:var(--bg);min-height:0}
+/* D101: the definition notice shares the edges of the notices under it. */
+.desktop-home .cv .dh-notice.feature-definition{margin-inline:.802667rem}
+/* The Creatures area also holds the geometry activity strip and the full geometry view above or instead of the panes. */
+.desktop-home .dh-items-area:not([hidden]):has(>.cv){display:flex;flex-direction:column}
+.desktop-home .dh-items-area>.cv:not([hidden]){flex:1 1 auto;min-height:0}
+.desktop-home .dh-items-area>:not(.cv){flex:none}
+.desktop-home .dh-items-area>.cv-geometry{flex:1 1 auto}
+/* Without a preview (no geometry support) the facts take the whole card. */
+.desktop-home .cv-disp-body.cv-no-preview{grid-template-columns:minmax(0,1fr)}
+.desktop-home .cv-refresh .iv-wait{margin:.56rem .802667rem 0}
+.desktop-home .cv-exact{font-family:ui-monospace,monospace;font-weight:400;font-size:var(--fs-m);white-space:pre-wrap}
+.desktop-home .cv-text{white-space:pre-wrap}
+.desktop-home .cv-status:focus-visible{outline-offset:2px}
+/* The mockup's loading line: the pulse dot and its words, never touching. */
+.desktop-home .cv .dh-loading-line{display:inline-flex;align-items:center;gap:.373333rem;color:var(--teal);font-weight:600}

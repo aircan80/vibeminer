@@ -15,7 +15,7 @@
 .geometry-sections{grid-column:1/-1;min-width:0;border-top:1px solid var(--line,#dce4df);padding-top:1rem}.geometry-sections summary{cursor:pointer;font-weight:600}
 .geometry-section-scroll{overflow:auto;max-width:100%;margin:.75rem 0}.geometry-section-scroll table{border-collapse:collapse;min-width:52rem;width:100%;font-variant-numeric:tabular-nums}
 .geometry-section-scroll th,.geometry-section-scroll td{padding:.5rem;text-align:start;border-bottom:1px solid var(--line,#dce4df)}.geometry-sections nav{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}
-.geometry-activity{margin:0 0 1rem}.geometry-activity button{margin:.5rem .5rem 0 0}.geometry-activity small{display:block}.geometry-activity>div{min-width:0}.geometry-activity code{overflow-wrap:anywhere}
+
 .geometry-layout-text{grid-template-columns:minmax(0,1fr)}.geometry-layout-text .geometry-inspector{max-width:44rem}
 @container geometry (max-width:62rem){.geometry-layout{grid-template-columns:minmax(0,1fr)}.geometry-inspector{max-width:44rem}.geometry-drawing{min-height:0}.geometry-controls{min-height:0}}
 .geometry-texture-chain{margin:.5rem 0;padding-inline-start:1.1rem}.geometry-texture-chain li{margin:.3rem 0;overflow-wrap:anywhere}.geometry-appearance{border-top:1px solid var(--line,#dce4df);padding:.75rem 0}

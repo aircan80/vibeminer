@@ -30,6 +30,10 @@ public static class TableReferenceTextRules
     [
         new("ItemClass", "ClassID", "ItemClass", "b977271e", "ClassName_lang", "ClassID", false, sbyte.MinValue, sbyte.MaxValue, 453),
         new("Creature", "ID", "Creature", "c9d6b6b3", "Name_lang", "ID", true, 0, uint.MaxValue, 340_038),
+        // Reviewed on #62: Creature.CreatureType and Creature.CreatureFamily name these rows; the text is their Name_lang. Their sizes were
+        // measured on Retail 12.1.5.70575 (the newest Retail build then), not 12.1.5.70448.
+        new("CreatureType", "ID", "CreatureType", "1f80ad3f", "Name_lang", "ID", true, 0, uint.MaxValue, 326),
+        new("CreatureFamily", "ID", "CreatureFamily", "369f469f", "Name_lang", "ID", true, 0, uint.MaxValue, 2_196),
         new("Spell", "ID", "SpellName", "46c66698", "Name_lang", "ID", true, 0, uint.MaxValue, 2_754_982),
         new("Item", "ID", "ItemSparse", "919be54e", "Display_lang", "ID", true, 0, uint.MaxValue, 7_988_612),
     ];

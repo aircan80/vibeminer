@@ -3,7 +3,7 @@
 .desktop-home .dh-items-area:not([hidden]){display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;min-width:0}
 .desktop-home .iv:not([hidden]){display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);min-height:0;min-width:0;
   --q0:#6b6560;--q1:var(--ink);--q2:#1a7526;--q3:#2350b8;--q4:#7238b0;--q5:#a14f00;--q6:#86661a;--q7:#0072a3;--q8:#0072a3;--qx:var(--ink);--icon:40px}
-.desktop-home[data-area="items"]{--panel-w:calc(100vw - var(--side-w) - 1px)}
+.desktop-home:is([data-area="items"],[data-area="creatures"]){--panel-w:calc(100vw - var(--side-w) - 1px)}
 /* The panes always take the 1fr row, also while the switcher above them is hidden in the two-pane layout. */
 .desktop-home .iv>.iv-switch{grid-row:1}
 .desktop-home .iv-panes{grid-row:2;display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:1px;background:var(--line);min-height:0;min-width:0}
@@ -208,8 +208,8 @@
 .desktop-home.dh-narrow .iv-search{flex-basis:100%}
 
 /* Window too short for the header and a 10rem area (600×480 at 200%): the shell scrolls as a whole (D086, D092). */
-.desktop-home.dh-shell-scroll[data-area="items"] .dh-app{display:block}
-.desktop-home.dh-shell-scroll[data-area="items"] .dh-area{grid-template-rows:auto;min-height:10rem}
+.desktop-home.dh-shell-scroll:is([data-area="items"],[data-area="creatures"]) .dh-app{display:block}
+.desktop-home.dh-shell-scroll:is([data-area="items"],[data-area="creatures"]) .dh-area{grid-template-rows:auto;min-height:10rem}
 .desktop-home.dh-shell-scroll .iv-panes{grid-template-rows:auto}
 .desktop-home.dh-shell-scroll .iv .dh-pane,.desktop-home.dh-shell-scroll .iv-detail>.iv-dbody{overflow:visible}
 .desktop-home.dh-shell-scroll .iv-list-scroll{flex:none;min-height:0;max-height:calc(100vh - 2.7rem - 1px)}

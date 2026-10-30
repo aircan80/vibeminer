@@ -33,4 +33,6 @@ These JSON documents are synthetic contract fixtures, not acquired Blizzard meta
 
 `creature-geometry-ready.json` is an authored ready geometry reply without the optional `appearance` member, which reads as no textured draw. `creature-geometry-textured.json` is the same reply with a ready textured appearance and its VMA1 manifest; `creature-geometry-lease.json` and `creature-geometry-appearance-lease.json` are the matching `creatures.geometry.open` replies. IDs, hashes and receipts are synthetic.
 
+`creature-display-facts.json` is the authored [display facts](../creature-display-facts-v1.md) reply for the same slot as `creature-display-metadata.json`, with a few more authored columns on each target so the reviewed facts and the raw columns are both shown. `creature-labels.json` is the matching `creatures.labels` reply. Values are synthetic.
+
 `item-facts.json` is one authored [item facts](../item-facts-v1.md) reply for fixture item 6: Item and ItemSparse InventoryType disagree, fields absent from the authored layout are unsupported, and quality carries its reviewed label. `item-labels.json` is the matching `items.labels` reply. Values are synthetic.

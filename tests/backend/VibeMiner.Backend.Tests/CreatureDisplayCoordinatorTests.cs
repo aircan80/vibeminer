@@ -238,6 +238,72 @@ public sealed class CreatureDisplayCoordinatorTests
         finally { release.TrySetResult(); await store.DisposeAsync(); }
     }
 
+    [Fact]
+    public async Task LocalFactsCarryOnlyUniquelyMatchedRowsAndNeverPrepare()
+    {
+        TableDataColumn C(string name, bool id = false) => new(name, "integer", id, null);
+        var source = new Sources
+        {
+            DisplayReady = true, ModelReady = true,
+            Rows = role => role == CreatureDisplayTargetRole.Display
+                ? ([C("ID", true), C("ModelID"), C("CreatureModelScale"), C("SizeClass"), C("TextureVariationFileDataID[0]"), C("TextureVariationFileDataID[1]")], ["100", "33", "1.5", "2", "800", "0"])
+                // Classic CreatureModelData has no ModelScale in this authored layout: the fact is unsupported, never zero.
+                : ([C("ID", true), C("FileDataID"), C("CollisionHeight")], ["33", "777", "2.25"])
+        };
+        await using var store = new CreatureDisplayMetadataStore(source);
+        var facts = await store.ReadFactsAsync(Request, default);
+        Assert.Equal(CreatureDisplayMetadataState.MetadataResolved, facts.Metadata.State); Assert.Equal("creature-display-facts-v1", facts.FactsRevision);
+        Assert.Equal([CreatureDisplayTargetRole.Display, CreatureDisplayTargetRole.Model], facts.Records.Select(r => r.Role));
+        var display = facts.Records[0];
+        Assert.Equal(("bfdaf9f1", "CreatureDisplayInfo", "100"), (display.TableId, display.Table, display.RecordId));
+        Assert.Equal(["model", "scale", "textureVariations"], display.Facts.Select(f => f.Key));
+        Assert.Equal(["33"], display.Facts[0].Cells.Select(c => c.Value)); Assert.Equal(2, display.Facts[1].Cells.Single().ColumnIndex);
+        Assert.Equal(["TextureVariationFileDataID[0]:800", "TextureVariationFileDataID[1]:0"], display.Facts[2].Cells.Select(c => $"{c.Column}:{c.Value}"));
+        Assert.Equal(["SizeClass"], display.Raw.Select(c => c.Column));
+        var model = facts.Records[1];
+        Assert.Equal(["file:Value", "scale:Unsupported"], model.Facts.Select(f => $"{f.Key}:{f.State}")); Assert.Empty(model.Facts[1].Cells);
+        Assert.Equal(["CollisionHeight:2.25"], model.Raw.Select(c => $"{c.Column}:{c.Value}"));
+        Assert.Empty(source.Prepared);
+
+        // Two CreatureDisplayInfo rows have this ID: no row, so no record and no model lookup.
+        source.DisplayMatch = "2";
+        var ambiguous = await store.ReadFactsAsync(Request, default);
+        Assert.Equal(CreatureDisplayMetadataState.DisplayAmbiguous, ambiguous.Metadata.State); Assert.Empty(ambiguous.Records);
+        // Not prepared stays local and has no records.
+        source.DisplayMatch = "1"; source.DisplayReady = false;
+        var local = await store.ReadFactsAsync(Request, default);
+        Assert.Equal(CreatureDisplayMetadataState.NotPrepared, local.Metadata.State); Assert.Empty(local.Records); Assert.Empty(source.Prepared);
+    }
+
+    [Fact]
+    public void A_row_whose_values_were_not_kept_whole_has_no_facts_record()
+    {
+        var snapshot = Source("bfdaf9f1", new('d', 64)) with { Columns = [new("ID", "integer", true, null), new("ModelID", "integer", false, null)] };
+        var row = new CreatureDisplayRowEvidence(new("bfdaf9f1", new('d', 64), "100", 1), false, null, new("bfdaf9f1", 1, "33"));
+        var target = new CreatureDisplayTarget(CreatureDisplayTargetRole.Display, snapshot, "1", row);
+        var metadata = new CreatureDisplayMetadataResult(Context, Request.ArtifactId, "1", 0, "creature-display-metadata-v1", null!, null!, null!, null,
+            CreatureDisplayMetadataState.NoDeclaredModel, CreatureDisplayAppearance.NotEvaluated, [target]);
+        var binding = new CreatureDisplayCatalogBinding("bfdaf9f1", new(null!, null!, null!, "original"));
+        Assert.Empty(CreatureDisplayFacts.Project(metadata, [new(target, binding, "33")]).Records);
+        Assert.Empty(CreatureDisplayFacts.Project(metadata, [new(target, binding, "33", Values: ["100"])]).Records);
+        Assert.Single(CreatureDisplayFacts.Project(metadata, [new(target, binding, "33", Values: ["100", "0"])]).Records);
+    }
+
+    [Fact]
+    public void A_fact_wider_than_sixteen_cells_is_refused_whole()
+    {
+        TableDataColumn C(string name, bool id = false) => new(name, "integer", id, null);
+        var columns = new[] { C("ID", true), C("ModelID") }.Concat(Enumerable.Range(0, 17).Select(i => C($"TextureVariationFileDataID[{i}]"))).ToArray();
+        var snapshot = Source("bfdaf9f1", new('d', 64)) with { Columns = columns };
+        var row = new CreatureDisplayRowEvidence(new("bfdaf9f1", new('d', 64), "100", 1), false, null, new("bfdaf9f1", 1, "33"));
+        var target = new CreatureDisplayTarget(CreatureDisplayTargetRole.Display, snapshot, "1", row);
+        var values = new[] { "100", "33" }.Concat(Enumerable.Repeat("0", 17)).ToArray();
+        Assert.Equal("CREATURES_RESULT_LIMIT", Assert.Throws<DiscoveryException>(() => CreatureDisplayFacts.Record(target, row, values)).Code);
+        // Sixteen still fit.
+        var fits = target with { Snapshot = snapshot with { Columns = columns[..18] } };
+        Assert.Equal(16, CreatureDisplayFacts.Record(fits, row, values[..18]).Facts[2].Cells.Count);
+    }
+
     private sealed class Sources : ICreatureDisplaySources
     {
         internal readonly Dictionary<string, string?> DisplayByCreature = new() { ["1"] = "100", ["2"] = "100" };
@@ -251,6 +317,8 @@ public sealed class CreatureDisplayCoordinatorTests
         internal Func<CreatureDisplayMetadataRequest, CancellationToken, Task>? BeforeAuthorize;
         internal Func<CreatureDisplayTargetRole, string, CancellationToken, Task>? BeforeProbe;
         internal Func<IReadOnlyList<CreatureDisplayProbe>, CancellationToken, Task>? Finish;
+        /// <summary>The columns and row values a probe reads for its role, as the real source keeps them for facts.</summary>
+        internal Func<CreatureDisplayTargetRole, (TableDataColumn[] Columns, string[] Values)>? Rows;
         public async Task<CreaturesDisplayAuthorization> AuthorizeAsync(CreatureDisplayMetadataRequest request, CancellationToken token)
         { token.ThrowIfCancellationRequested(); if (BeforeAuthorize is not null) await BeforeAuthorize(request, token); return Core(request, DisplayByCreature.GetValueOrDefault(request.CreatureId)); }
         public async Task<CreatureDisplayProbe?> ProbeAsync(CreaturesDisplayAuthorization core, CreatureDisplayTargetRole role, string id, CancellationToken token)
@@ -261,10 +329,13 @@ public sealed class CreatureDisplayCoordinatorTests
             var match = role == CreatureDisplayTargetRole.Display ? DisplayMatch : "1";
             var edge = role == CreatureDisplayTargetRole.Display ? EdgeByDisplay.GetValueOrDefault(id, "0") : FileEdge;
             var snapshot = Source(table, artifact, TargetScope);
+            var row = Rows?.Invoke(role);
+            if (row is { } kept) snapshot = snapshot with { Columns = kept.Columns };
             var binding = new CreatureDisplayCatalogBinding(table, new(null!, null!, null!, "original"));
             if (UnsupportedDisplay && role == CreatureDisplayTargetRole.Display)
                 return new(new(role, snapshot, null), binding, null, CreatureDisplayMetadataState.Unsupported, new("UNSUPPORTED", "Unsupported exact edge.", false, role));
-            return new(new(role, snapshot, match, match == "1" ? new(new(table, artifact, id, 1), false, null, new(table, 1, edge)) : null), binding, match == "1" ? edge : null);
+            return new(new(role, snapshot, match, match == "1" ? new(new(table, artifact, id, 1), false, null, new(table, 1, edge)) : null), binding, match == "1" ? edge : null,
+                Values: match == "1" ? row?.Values : null);
         }
         public async Task EnsureAsync(CreaturesContext context, CreatureDisplayTargetRole role, Func<CreaturesPreparationProgress, Task> progress, CancellationToken token)
         {

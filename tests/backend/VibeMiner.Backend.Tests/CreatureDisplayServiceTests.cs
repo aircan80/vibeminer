@@ -215,6 +215,27 @@ public sealed class CreatureDisplayServiceTests
         await using var service = new CreatureDisplayMetadataService(store);
         Assert.Equal("CREATURES_PROGRESS_INVALID", (await Assert.ThrowsAsync<DiscoveryException>(() => service.PrepareDisplayAsync(Request))).Code);
     }
+    [Fact]
+    public async Task Facts_share_the_two_local_read_credits_and_an_older_store_says_facts_are_unavailable()
+    {
+        var hold = new TaskCompletionSource<CreatureDisplayMetadataResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var store = new Store { Read = (_, _) => hold.Task };
+        await using var service = new CreatureDisplayMetadataService(store);
+        var first = service.ReadDisplayAsync(Request); var second = service.ReadDisplayAsync(Request);
+        // Facts use a read credit: with both taken it is refused at once, like a third read.
+        Assert.Equal("CREATURES_QUERY_BUSY", (await Assert.ThrowsAsync<DiscoveryException>(() => service.ReadFactsAsync(Request))).Code);
+        hold.SetResult(Result); await first; await second;
+        // Store has no ReadFactsAsync of its own: the port's default names the missing capability.
+        Assert.Equal("CREATURE_DISPLAY_FACTS_UNAVAILABLE", (await Assert.ThrowsAsync<DiscoveryException>(() => service.ReadFactsAsync(Request))).Code);
+        Assert.Equal(0, store.Prepares);
+    }
+    [Fact]
+    public void Classification_labels_are_the_reviewed_seven()
+    {
+        var labels = CreatureDisplayMetadataService.Labels();
+        Assert.Equal("creature-labels-v1", labels.LabelRevision);
+        Assert.Equal(["0 Normal", "1 Elite", "2 Rare elite", "3 World boss", "4 Rare", "5 Trivial", "6 Minus"], labels.Classification.Select(l => $"{l.Value} {l.Label}"));
+    }
     private static readonly CreatureDisplayMetadataResult Result = new(Context, Request.ArtifactId, Request.CreatureId, 0,
         CreatureDisplayMetadataService.MetadataPolicy, null!, null!, null!, null, CreatureDisplayMetadataState.NotPrepared,
         CreatureDisplayAppearance.NotEvaluated, [], RequiredTableId: "bfdaf9f1");
