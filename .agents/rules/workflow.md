@@ -24,6 +24,8 @@ How an issue moves from idea to closed. Read this before touching issues, branch
 7. The developer runs `git merge --ff-only issue-N`.
    - If `main` moved, rebase the single commit and flip back to `ready-for-qa`. QA retests.
    - If conflict fixes changed code, the reviewer reviews again first.
+   - Clean-rebase recheck: when the rebase had no conflicts, `git range-diff` shows the patch unchanged, and the commits `main` gained share no files with it, QA runs `npm ci`, `npm run build`, `npm test` and only the e2e specs the commit touches or that cover the areas both sides changed. A full gate is needed after any conflict or overlap. CI on `main` still runs everything.
+   - Batch merges: when several issues have passed QA, stack them in merge order and run one recheck on the top commit instead of one per rebase. Then push the whole stack.
 8. Push to `main` once QA passes; no owner OK needed. CI (`.github/workflows/ci.yml`) then runs on Linux as a clean-machine safety net. Windows and macOS are parked and get tested again when they're un-parked.
 9. Once the commit is on `origin/main`, QA ticks the acceptance criteria and review lines, posts one line ("Passed: <sha>."), removes the status label and closes the issue. Only QA closes issues.
 

@@ -19,7 +19,7 @@ Read: [workflow](workflow.md), [docs/TESTING.md](../../docs/TESTING.md).
 
 ## Test
 - Each acceptance criterion, plus the checks listed in [TESTING.md](../../docs/TESTING.md).
-- In the clean worktree at the exact sha: `npm ci`, `npm run build`, `npm test` and `npm run test:e2e`. This run is the gate; any failure is a fail. GitHub CI only runs after the push to `main`.
+- In the clean worktree at the exact sha: `npm ci`, `npm run build`, `npm test` and `npm run test:e2e`. This run is the gate; any failure is a fail. A recheck after a clean rebase can use the lighter run in [workflow](workflow.md) step 7. GitHub CI only runs after the push to `main`.
 - Check whichever of these apply:
   - cancel mid-download and mid-parse
   - reopen offline
