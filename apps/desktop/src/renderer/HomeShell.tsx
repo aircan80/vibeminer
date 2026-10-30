@@ -25,6 +25,10 @@ export function useShell(){return useContext(ShellContext);}
 // In the compact layout the whole area is inert instead. On Items and Creatures the panel covers exactly the detail pane, which
 // those views make inert themselves (docs/design/items-view, docs/design/creatures-view).
 export function useCoveredSide(){const ui=useDownloadActivity(),{compact}=useShell();return !!ui?.expanded&&!compact;}
+// The scroll event of a scroll the focus keeper made itself is not the reader scrolling away, even when the control still doesn't show
+// (a layout too short to hold it): by() scrolls a node and remembers where it left it, and mine() says whether this scroll event is that
+// one, once (#106, #112).
+function ownScroll(){let own:number|null=null;return {by(node:HTMLElement,delta:number){const from=node.scrollTop;node.scrollTop+=delta;if(node.scrollTop!==from)own=node.scrollTop;},mine(node:HTMLElement){const mine=own!==null&&Math.abs(node.scrollTop-own)<=1;own=null;return mine;}};}
 export type ShellArea='home'|'tables'|'files'|'items'|'creatures';
 export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,areas,status,fixtureLabel,children,dialog}:{snapshot:WorkspaceSnapshot;catalogBuild?:Build|null;label:string;retention?:RetentionController;onChoose:()=>void;area:ShellArea;areas:ReactNode;status?:ReactNode;fixtureLabel?:string|null;children:ReactNode;dialog?:ReactNode}){
  const host=useRef<HTMLDivElement>(null),shell=useRef<HTMLDivElement>(null),toolbar=useRef<HTMLElement>(null),statusBar=useRef<HTMLElement>(null),areaNode=useRef<HTMLElement>(null);
@@ -62,17 +66,21 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   // The shell's bottom scroll padding clears what covers the bottom of its view (the sticky status bar, and the floating activity entry
   // while it shows) plus the same gap as at the top, so that covered band, without the gap, is where a control counts as hidden.
   const shown=(el:HTMLElement|null)=>{const app=shell.current;if(!app||!el)return false;const style=getComputedStyle(app),frame=app.getBoundingClientRect(),r=box(el),covered=Math.max(0,(parseFloat(style.scrollPaddingBottom)||0)-(parseFloat(style.scrollPaddingTop)||0));return !r.hidden&&r.top>=frame.top-1&&r.bottom<=frame.top+app.clientHeight-covered+1;};
-  const reveal=(el:HTMLElement|null)=>{const app=shell.current;if(!app||!el||app.scrollHeight<=app.clientHeight+1)return;const style=getComputedStyle(app),frame=app.getBoundingClientRect(),r=box(el),top=frame.top+(parseFloat(style.scrollPaddingTop)||0),bottom=frame.top+app.clientHeight-(parseFloat(style.scrollPaddingBottom)||0);if(r.top<top)app.scrollTop-=top-r.top;else if(r.bottom>bottom)app.scrollTop+=Math.min(r.bottom-bottom,r.top-top);};
+  const self=ownScroll(),reveal=(el:HTMLElement|null)=>{const app=shell.current;if(!app||!el||app.scrollHeight<=app.clientHeight+1)return;const style=getComputedStyle(app),frame=app.getBoundingClientRect(),r=box(el),top=frame.top+(parseFloat(style.scrollPaddingTop)||0),bottom=frame.top+app.clientHeight-(parseFloat(style.scrollPaddingBottom)||0);if(r.top<top)self.by(app,-(top-r.top));else if(r.bottom>bottom)self.by(app,Math.min(r.bottom-bottom,r.top-top));};
   // Focus that was in view stays in view when the header or area changes size under it (the activity entry appearing grows the header).
   // Scrolling away from it on purpose clears that, so a resize never pulls the reader back. A scroll event can also come from layout
   // (the browser clamping the scroll after the area shrank, delivered after content above the focus grew): when the focused control
   // moved within the shell's content or the content height changed, it is handled as a resize, not as the reader scrolling away (#66).
   // Inner scrollers (the Records grid, the lists) are heard in the capture phase: wheeling a grid moves its focused row on purpose, so
   // the shell scroll that wheel chains into next is never taken for a layout shift and never pulls the row back.
+  // As in the panel (#106), a layout too short to hold the focused control doesn't clear it, and neither does the scroll event of the
+  // shell's own reveal: a text-size change passes through layouts where the shell can't scroll far enough yet, and the layout after them
+  // must still bring the control back (#112). Only the reader scrolling away, or focus leaving the shell, clears it.
   let focusShown=false,focusAt=0,contentHeight=0;
   const at=(el:HTMLElement|null)=>{const app=shell.current;return app&&el?box(el).top-app.getBoundingClientRect().top+app.scrollTop:0;};
-  const note=()=>{const el=focused();focusShown=shown(el);focusAt=at(el);contentHeight=shell.current?.scrollHeight??0;};
-  const keep=()=>{const el=focused();if(focusShown&&el&&!shown(el))reveal(el);note();};
+  const mark=()=>{const el=focused();focusAt=at(el);contentHeight=shell.current?.scrollHeight??0;return el;};
+  const note=()=>{focusShown=shown(mark());};
+  const keep=()=>{const el=focused();if(focusShown&&el&&!shown(el))reveal(el);const now=mark();focusShown=!!now&&(focusShown||shown(now));};
   // A control just focused is wanted in view even when the shell can't scroll far enough yet (a short pane clamps it), so the resize that
   // follows finishes the reveal.
   // Opening the panel never moves the shell, and closing it restores the shell exactly (#60): focus returning to the invoker keeps the
@@ -86,7 +94,7 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   const onActivate=(event:Event)=>{if(event instanceof KeyboardEvent&&event.key!=='Enter'&&event.key!==' ')return;const el=focused();if(el&&el.contains(event.target as Node)){focusShown=true;focusAt=at(el);}};
   const partly=(el:HTMLElement)=>{const app=shell.current;if(!app)return false;const frame=app.getBoundingClientRect(),r=box(el);return !r.hidden&&r.bottom>frame.top&&r.top<frame.top+app.clientHeight;};
   const onFocus=(event:FocusEvent)=>{const el=event.target as HTMLElement,restore=restoreTo.current;restoreTo.current=null;if(restore!==null&&shell.current)shell.current.scrollTop=restore;if(!inPanel(el))lastFocus.current=el;if(!(restore!==null&&el===openedBy.current)&&!inPanel(el)&&!(pressing&&partly(el)))reveal(el);note();if(focused())focusShown=true;};
-  const onScroll=(event:Event)=>{if(event.target!==shell.current){const el=focused();if(!el||(event.target as Node).contains(el))note();return;}place(true);const el=focused();if(el&&(Math.abs(at(el)-focusAt)>1||shell.current?.scrollHeight!==contentHeight))keep();else note();};
+  const onScroll=(event:Event)=>{if(event.target!==shell.current){const el=focused();if(!el||(event.target as Node).contains(el))note();return;}place(true);const el=focused(),mine=!!shell.current&&self.mine(shell.current);if(el&&(Math.abs(at(el)-focusAt)>1||shell.current?.scrollHeight!==contentHeight))keep();else if(mine)mark();else note();};
   const onResize=()=>{place();keep();};
   revealer.current=reveal;replace.current=()=>place();rekeep.current=keep;
   place();const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(onResize);for(const el of[toolbar.current,statusBar.current,areaNode.current,shell.current])if(el)observer?.observe(el);window.addEventListener('resize',onResize);const app=shell.current;app?.addEventListener('scroll',onScroll,{passive:true,capture:true});app?.addEventListener('focusin',onFocus);app?.addEventListener('pointerdown',onPress,true);app?.addEventListener('click',onActivate,true);app?.addEventListener('keydown',onActivate,true);for(const type of['pointerup','pointercancel','keydown'])window.addEventListener(type,onRelease,true);
@@ -129,12 +137,12 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   // A layout too short to hold the control doesn't clear that, and neither does the scroll event of the panel's own scroll: on the way
   // to the sheet the compact panel's view can be empty, below the window, and the layout that follows must still bring the control back
   // (#106). Only the reader scrolling away, or focus leaving the panel, clears it.
-  let wanted=false,at=0,height=0,own:number|null=null;
+  let wanted=false,at=0,height=0;const self=ownScroll();
   const mark=()=>{const el=inside();at=el?el.getBoundingClientRect().top-view().base+panel.scrollTop:0;height=panel.scrollHeight;return el;};
   const note=()=>{const el=mark();wanted=!!el&&shown(el);};
-  const keep=()=>{pad();const el=inside();if(wanted&&el&&!shown(el)){const v=view(),r=el.getBoundingClientRect(),from=panel.scrollTop;if(r.bottom>v.bottom)panel.scrollTop+=Math.min(r.bottom-v.bottom,r.top-v.top);else panel.scrollTop-=v.top-r.top;if(panel.scrollTop!==from)own=panel.scrollTop;}const now=mark();wanted=!!now&&(wanted||shown(now));};
+  const keep=()=>{pad();const el=inside();if(wanted&&el&&!shown(el)){const v=view(),r=el.getBoundingClientRect();self.by(panel,r.bottom>v.bottom?Math.min(r.bottom-v.bottom,r.top-v.top):-(v.top-r.top));}const now=mark();wanted=!!now&&(wanted||shown(now));};
   const onFocus=()=>{note();if(inside())wanted=true;};
-  const onScroll=()=>{const el=inside(),mine=own!==null&&Math.abs(panel.scrollTop-own)<=1;own=null;if(el&&(Math.abs(el.getBoundingClientRect().top-view().base+panel.scrollTop-at)>1||panel.scrollHeight!==height))keep();else if(mine)mark();else note();};
+  const onScroll=()=>{const el=inside(),mine=self.mine(panel);if(el&&(Math.abs(el.getBoundingClientRect().top-view().base+panel.scrollTop-at)>1||panel.scrollHeight!==height))keep();else if(mine)mark();else note();};
   pad();note();if(inside())wanted=true;
   const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(keep);observer?.observe(head);observer?.observe(panel);for(const child of panel.children)observer?.observe(child);
   const text=new MutationObserver(keep);text.observe(document.documentElement,{attributes:true,attributeFilter:['style','class']});
