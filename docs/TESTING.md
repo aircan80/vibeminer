@@ -89,14 +89,20 @@ When a result must be attributable to an exact commit:
 
 Use component tests for view state and interaction; use real Electron checks for focus, keyboard, navigation, stale results and responsive progress. Compare screenshots with the guided discovery reference at 1280×800 and 1440×1100, at 100% and 200% text. Verify offline, empty, loading, failure/retry, unsupported and canceled states.
 
-### One e2e run at a time
+### Parallel e2e runs
 
-Overlapping Electron runs make each other flaky, so `npm run test:e2e` runs through `tools/e2e-lock.mjs`, which takes an exclusive lock shared by every worktree of the checkout: `vibeminer-e2e.lock` under `git rev-parse --git-common-dir`. A second run prints the holder's pid, worktree and start time once, then waits and starts when the lock is free. Just run the command; don't write your own wait loop.
+`npm run test:e2e` runs through `tools/e2e-lock.mjs`, which takes one of N slots shared by every worktree of the checkout. Slots are lock files under `git rev-parse --git-common-dir`: slot 1 is `vibeminer-e2e.lock`, the single lock that checkouts from before #121 take, so they still wait for it; slot n is `vibeminer-e2e-<n>.lock`. When every slot is taken, a run prints the holders' pids, worktrees and start times once, then waits and starts when one frees up. Just run the command; don't write your own wait loop.
 
-- The lock goes when the run exits, including on a failure or Ctrl-C (the signal goes to Playwright first).
-- A lock left by a killed run (SIGKILL, power loss) names a dead pid, and the next run takes it over and says so.
-- Outside a git checkout, such as a `git archive` tree, there's no shared lock. The run prints a note and goes ahead unlocked, so don't start two at once there.
-- `npm run test:e2e:unlocked` skips the lock. Leave it to the wrapper.
+- N defaults to the CPU count divided by 8, from 1 to 4 (4 on a 32-CPU machine, 1 on a 4-CPU CI runner). `VIBEMINER_E2E_SLOTS=<1-64>` overrides it. A run only takes slots up to its own N, so `VIBEMINER_E2E_SLOTS=1` waits for slot 1 but doesn't stop runs with a higher N.
+- Two runs from the same worktree never overlap, whatever N is: they share its fixture build and `artifacts/` output folders.
+- Each run gets its own temporary directory (`vibeminer-e2e-*` under the caller's `TMPDIR`) for `TMPDIR`, `TMP` and `TEMP`, removed when the run ends. The fixture build uses `--disable-build-servers`, so no MSBuild node or compiler server outlives it in a directory that's about to go.
+- Playwright runs one worker per run (`tests/desktop/playwright.config.ts`); the slot count assumes that, so don't pass `--workers`.
+- A slot goes when the run exits, including on a failure or Ctrl-C (the signal goes to Playwright first).
+- A slot left by a killed run (SIGKILL, power loss) names a dead pid, and the next run takes it over and says so.
+- Outside a git checkout, such as a `git archive` tree, there are no shared slots. The run prints a note and goes ahead unlocked, so don't start two at once there.
+- `npm run test:e2e:unlocked` skips the slots and the private temporary directory. Leave it to the wrapper.
+
+What parallel runs share, checked for #121: every Electron launch already uses `--ozone-platform=headless` (no X or Wayland display), its own `--user-data-dir` and `VIBEMINER_DATA_DIR` from `mkdtemp`, and Playwright's random debugging ports; engines talk over stdio, and the only loopback port is the dead `127.0.0.1:9` that nothing listens on. The Electron download cache is read only after `npm ci`. What was left was CPU, the shared `TMPDIR` (MSBuild and compiler-server sockets, Chromium and .NET scratch files when `TMPDIR` is `/tmp`) and per-worktree outputs. The timing flakes seen before (#104, #106) came from CPU load and were fixed to survive it; one ordering of #106's is still open as #122. On a 32-CPU machine a full run took about 11 minutes and averaged 0.6 CPUs, and two side by side took the same 11 minutes each (14-20 minutes when other worktrees' backend suites pushed the load past 50).
 
 Electron tests reach tasks through the persistent header activity trigger (`.download-activity-trigger`) and its panel; see `tests/desktop/activity-helpers.ts`. Don't add per-screen progress selectors that the unified activity replaced.
 

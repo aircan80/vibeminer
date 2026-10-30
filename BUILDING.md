@@ -39,7 +39,7 @@ npm test
 npm run test:e2e
 ```
 
-Build before running these from a fresh checkout. `npm test` checks generated contracts, the xUnit backend suite, Vitest desktop behavior, and actual C# process/schema integration. Tests use authored fixtures, temporary catalogs and controlled loopback HTTP, with no live Blizzard dependency. The Electron suite launches the actual application with isolated profiles and writes captures/reports to ignored `artifacts/electron-tests/`. It currently uses Chromium's Linux headless platform; other desktop environments need their own qualification. Only one `npm run test:e2e` runs at a time across all worktrees; a second one waits for the first (see [TESTING](docs/TESTING.md#one-e2e-run-at-a-time)).
+Build before running these from a fresh checkout. `npm test` checks generated contracts, the xUnit backend suite, Vitest desktop behavior, and actual C# process/schema integration. Tests use authored fixtures, temporary catalogs and controlled loopback HTTP, with no live Blizzard dependency. The Electron suite launches the actual application with isolated profiles and writes captures/reports to ignored `artifacts/electron-tests/`. It currently uses Chromium's Linux headless platform; other desktop environments need their own qualification. Up to N `npm run test:e2e` runs go at once across all worktrees (N from the CPU count, or `VIBEMINER_E2E_SLOTS`); further ones wait for a free slot (see [TESTING](docs/TESTING.md#parallel-e2e-runs)).
 
 Useful individual checks:
 
