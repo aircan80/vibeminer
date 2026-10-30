@@ -141,7 +141,7 @@ describe('stored figures per build', () => {
     await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('Counting…'));
     expect(within(list).getByRole('option', { name: /70011/ })).toHaveTextContent('Unavailable');
     // A moving figure is read again about a second later, and the read stops once nothing moves.
-    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('100%'), { timeout: 4000 });
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('100%'));
     expect(bridge.downloadSummaries).toHaveBeenCalledTimes(2);
     fireEvent.click(within(list).getByRole('option', { name: /70011/ }));
     expect(screen.getByText('Downloaded', { selector: 'dt' }).nextElementSibling).toHaveTextContent('Unavailable. The saved download ledger could not be read. (LOCAL_OBJECT_MISSING)');
@@ -194,7 +194,7 @@ describe('stored figures per build', () => {
     await ready(bridge);
     const list = screen.getByRole('listbox', { name: 'Builds' });
     await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('99%'));
-    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('100%'), { timeout: 4000 });
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('100%'));
     expect(bridge.downloadSummaries).toHaveBeenCalledTimes(2);
   });
   it('shows an object stored after the first read without leaving Discovery, and waits on the engine instead of polling (#48)', async () => {
@@ -215,12 +215,12 @@ describe('stored figures per build', () => {
     expect(bridge.downloadSummaries).toHaveBeenCalledTimes(1); expect(waits).toHaveLength(1);
     // The engine's wait runs out with no change: it is asked again, still without a read.
     await act(async () => { waits[0].reply.resolve(success({ revision: revision(1) })); });
-    await waitFor(() => expect(waits).toHaveLength(2), { timeout: 3000 });
+    await waitFor(() => expect(waits).toHaveLength(2));
     expect(waits[1].params).toEqual({ after: revision(1) }); expect(bridge.downloadSummaries).toHaveBeenCalledTimes(1);
     // An ItemSparse Load text stores one more object while Discovery is watched.
     figure = stored({ storedObjects: '5', storedBytes: '510' }); current = 2;
     await act(async () => { waits[1].reply.resolve(success({ revision: revision(2) })); });
-    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('51%'), { timeout: 3000 });
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('51%'));
     expect(bridge.downloadSummaries).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(waits).toHaveLength(3));
     expect(waits[2].params).toEqual({ after: revision(2) });
@@ -236,7 +236,7 @@ describe('stored figures per build', () => {
     await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('41%'));
     await new Promise(done => setTimeout(done, SUMMARY_RETRY_MS + 500));
     expect(bridge.downloadChanges).toHaveBeenCalledTimes(1); expect(bridge.downloadSummaries).toHaveBeenCalledTimes(1);
-  }, SUMMARY_RETRY_MS + 5000);
+  });
   it('tries a failed read again and then shows the figure', async () => {
     let calls = 0;
     const base = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id ? measured(original.builds[0], stored()) : { ...key, state: 'notOpened', download: null });
@@ -248,10 +248,10 @@ describe('stored figures per build', () => {
     // Nothing was read yet, so the inspector says why instead of leaving the section out (#50).
     fireEvent.click(within(list).getAllByRole('option')[0]);
     await waitFor(() => expect(screen.getByText('Downloaded', { selector: 'dt' }).nextElementSibling).toHaveTextContent('Not read. The stored figures couldn’t be read: Outside this test. (NOT_TESTED)'));
-    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('41%'), { timeout: SUMMARY_RETRY_MS + 3000 });
+    await waitFor(() => expect(within(list).getAllByRole('option')[0]).toHaveTextContent('41%'));
     expect(calls).toBe(2);
     expect(screen.getByText('Downloaded', { selector: 'dt' }).nextElementSibling).toHaveTextContent('410 bytes of 1,000 bytes · 41%');
-  }, SUMMARY_RETRY_MS + 6000);
+  });
   it('marks the figures not current when a read fails after a good one, and clears that once a read succeeds (#50)', async () => {
     let failing = false, figure = stored({ running: true, downloadAll: true });
     const stopped = { ok: false as const, error: { code: 'ENGINE_EXITED', message: 'The local engine stopped. Restart VibeMiner to reconnect.', retryable: true } };
@@ -265,7 +265,7 @@ describe('stored figures per build', () => {
     expect(screen.getByText('Activity', { selector: 'dt' })).toBeVisible();
     // The engine stops answering: the last figure stays, muted, without its live marker, and says it is not current.
     failing = true;
-    await waitFor(() => expect(row()).toHaveAccessibleName(/Downloaded\s*41%, not current/), { timeout: 3000 });
+    await waitFor(() => expect(row()).toHaveAccessibleName(/Downloaded\s*41%, not current/));
     expect(row()).not.toHaveAccessibleName(/downloading/); expect(row().querySelector('.dv-pulse')).toBeNull();
     expect(row().querySelector('.dv-stale .dv-meter')).not.toBeNull();
     expect(document.querySelector('.dv-thead .dv-stale-tag')).toHaveTextContent('not current');
@@ -275,13 +275,13 @@ describe('stored figures per build', () => {
     expect(screen.queryByText('Activity', { selector: 'dt' })).toBeNull();
     // The next read succeeds: the new figure is shown as current again, with nothing left of the failure.
     figure = stored({ running: true, downloadAll: true, storedObjects: '5', storedBytes: '510' }); failing = false;
-    await waitFor(() => expect(row()).toHaveAccessibleName(/Downloaded\s*51%, downloading/), { timeout: SUMMARY_RETRY_MS + 3000 });
+    await waitFor(() => expect(row()).toHaveAccessibleName(/Downloaded\s*51%, downloading/));
     expect(row()).not.toHaveAccessibleName(/not current/); expect(row().querySelector('.dv-stale')).toBeNull();
     expect(document.querySelector('.dv-thead .dv-stale-tag')).toBeNull(); expect(document.querySelector('.dv-thead')).toHaveTextContent(/Downloaded/);
     expect(screen.queryByText(/These are the figures last read/)).toBeNull();
     expect(screen.getByText('Downloaded', { selector: 'dt' }).closest('dl')).not.toHaveClass('dv-stale');
     expect(screen.getByText('Activity', { selector: 'dt' })).toBeVisible();
-  }, SUMMARY_RETRY_MS + 8000);
+  });
   it('marks the figures not current as soon as the change wait fails, before the next read (#50)', async () => {
     const waits: ReturnType<typeof deferred<BridgeReply<DownloadChanges>>>[] = [];
     const base = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id ? measured(original.builds[0], stored()) : { ...key, state: 'notOpened', download: null });
@@ -295,10 +295,10 @@ describe('stored figures per build', () => {
     expect(row()).toHaveAccessibleName(/Downloaded\s*41%, not current/); expect(bridge.downloadSummaries).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/These are the figures last read at/)).toHaveTextContent('The latest read failed: The local engine stopped. Restart VibeMiner to reconnect. (ENGINE_EXITED)');
     // The read 2 s later succeeds, so the figure is current again and a new wait stands open.
-    await waitFor(() => expect(waits).toHaveLength(2), { timeout: SUMMARY_RETRY_MS + 3000 });
+    await waitFor(() => expect(waits).toHaveLength(2));
     expect(bridge.downloadSummaries).toHaveBeenCalledTimes(2); expect(row()).not.toHaveAccessibleName(/not current/);
     expect(screen.queryByText(/These are the figures last read/)).toBeNull();
-  }, SUMMARY_RETRY_MS + 6000);
+  });
   it('marks the figures not current when the wait fails for good, and does not retry what cannot succeed (#50)', async () => {
     const base = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id ? measured(original.builds[0], stored()) : { ...key, state: 'notOpened', download: null });
     // EngineClient.fail() rejects the standing wait like this and stops the engine.
@@ -311,7 +311,7 @@ describe('stored figures per build', () => {
     await new Promise(done => setTimeout(done, SUMMARY_RETRY_MS + 500));
     expect(bridge.downloadChanges).toHaveBeenCalledTimes(1); expect(bridge.downloadSummaries).toHaveBeenCalledTimes(1);
     expect(row()).toHaveAccessibleName(/not current/);
-  }, SUMMARY_RETRY_MS + 5000);
+  });
   it('backs off while the wait keeps failing even though reads succeed, and starts over once a wait answers (#50)', async () => {
     vi.useFakeTimers();
     try {
@@ -372,16 +372,30 @@ describe('stored figures per build', () => {
     } finally { vi.useRealTimers(); }
   });
   it('repeats a moving figure about once a second and never overlaps reads', async () => {
-    const starts: number[] = []; let inFlight = 0, most = 0;
-    const base = summaryBridge(bridgeMock(), key => key.buildIdentity === original.builds[0].id ? measured(original.builds[0], stored({ running: true, downloadAll: true })) : { ...key, state: 'notOpened', download: null });
-    const bridge = { ...base, downloadSummaries: vi.fn(async (params: DownloadSummariesParams) => {
-      starts.push(Date.now()); most = Math.max(most, ++inFlight);
-      try { await new Promise(done => setTimeout(done, 300)); return base.downloadSummaries!(params); } finally { inFlight--; }
-    }) } as DiscoveryBridge;
-    await ready(bridge);
-    await waitFor(() => expect(starts.length).toBeGreaterThanOrEqual(3), { timeout: 5000 });
-    expect(most).toBe(1);
-    for (let i = 1; i < starts.length; i++) expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(990);
+    // Fake time (#104): Node arms a timer from the loop's cached time, so on a busy machine it fired 11 ms early in real time.
+    vi.useFakeTimers();
+    try {
+      const starts: number[] = []; let inFlight = 0, most = 0;
+      const read = vi.fn(async (params: DownloadSummariesParams) => {
+        starts.push(Date.now()); most = Math.max(most, ++inFlight);
+        try { await new Promise(done => setTimeout(done, 300)); return success({ summaries: params.builds.map(k => measured({ productId: k.productId, id: k.buildIdentity }, stored({ running: true, downloadAll: true }))), revision: revision(1) } as DownloadSummaries); } finally { inFlight--; }
+      });
+      const bridge = { downloadSummaries: read, cancel: vi.fn(async () => success({ requested: true })) } as unknown as DiscoveryBridge;
+      const builds = [original.builds[0]];
+      const { unmount } = renderHook(() => useDownloadSummaries(bridge, builds, true, true, ''));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(read).toHaveBeenCalledTimes(1);
+      // The next read starts a second after the last one started, not a second after it ended.
+      for (const count of [2, 3]) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(999); });
+        expect(read).toHaveBeenCalledTimes(count - 1);
+        await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+        expect(read).toHaveBeenCalledTimes(count);
+      }
+      expect(most).toBe(1);
+      expect(starts.slice(1).map((t, i) => t - starts[i])).toEqual([1000, 1000]);
+      unmount();
+    } finally { vi.useRealTimers(); }
   });
   it('says Counting while every listed file is measured after Open, and names a manifest-only scope with its reason', async () => {
     const measuring = stored({ scope: 'downloadManifestAllVariants', unresolvableRootContent: '0', scopeState: 'measuring', scopeProblem: null, countState: 'counting', storedObjects: '0', storedBytes: '0' });

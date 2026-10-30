@@ -266,7 +266,7 @@ describe('Settings view', () => {
     expect(toggle.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(toggle.compareDocumentPosition(document.getElementById('settings-listfile-state')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     listfileRead.mockResolvedValue(success(failedRefresh));
-    await within(row).findByText('Release 202601010000 is still in use. The last check for a newer one failed; VibeMiner tries again after 15 minutes.', {}, { timeout: 3000 });
+    await within(row).findByText('Release 202601010000 is still in use. The last check for a newer one failed; VibeMiner tries again after 15 minutes.');
     expect(row).not.toHaveTextContent('Up to date as of');
     expect(within(row).getByRole('alert')).toHaveTextContent('Couldn’t get a newer release. Release 202601010000 is still in use.');
   });
@@ -285,7 +285,7 @@ describe('Settings view', () => {
     expect(within(row).getByRole('button', { name: 'Download now' })).toHaveAttribute('aria-disabled', 'true');
     expect(within(row).getByRole('button', { name: 'Download now' })).toHaveFocus();
     listfileRead.mockResolvedValue(success(offline));
-    await within(row).findByText('Couldn’t get the community file names. Files says Name not known.', {}, { timeout: 3000 });
+    await within(row).findByText('Couldn’t get the community file names. Files says Name not known.');
     expect(within(row).getByRole('alert')).toHaveTextContent('(LISTFILE_FETCH_OFFLINE)');
     expect(within(row).getByRole('button', { name: 'Try again now' })).toBeVisible();
   });

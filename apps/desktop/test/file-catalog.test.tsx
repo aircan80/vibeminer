@@ -39,7 +39,7 @@ it('drops a reply for the build it left and polls only while the catalog is pend
   await act(async () => first.resolve({ ok: true, value: forBuild(w, examples[4]) }));
   await waitFor(() => expect(result.current.status?.state).toBe('pending'));
   expect(result.current.status?.buildIdentity).toBe(other.build.id);
-  await waitFor(() => expect(result.current.status?.state).toBe('ready'), { timeout: 3000 });
+  await waitFor(() => expect(result.current.status?.state).toBe('ready'));
   const calls = fileCatalog.mock.calls.length;
   await new Promise(done => setTimeout(done, 1200));
   expect(fileCatalog.mock.calls.length).toBe(calls);

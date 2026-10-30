@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {act,cleanup,configure,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
 import type {TableDataPage,TableDataSnapshot,TableDefinitionSnapshot,TableReferenceTextColumn,TableReferenceTextPage,TableReferenceTextValue} from '../../../contracts/generated/discovery';
@@ -25,7 +25,6 @@ const column=(state:TableReferenceTextColumn['state'],extra:Partial<TableReferen
 const value=(state:TableReferenceTextValue['state'],extra:Partial<TableReferenceTextValue>={}):TableReferenceTextValue=>({columnIndex:1,value:'9',state,text:null,matchCount:['notFound','keyOutOfRange'].includes(state)?'0':state==='multiple'?'2':'1',row:['notFound','keyOutOfRange','multiple'].includes(state)?null:{id:'301',isCopy:false,copySourceId:null},...extra});
 const idle={loading:false,latch:null};
 // Bounded deadlock guards, not timing claims: the macOS runner can take over a second per step.
-configure({asyncUtilTimeout:5000});
 
 describe('reference text wording',()=>{
  it('gives every state its own words and keeps the number-only states plain',()=>{
@@ -121,7 +120,7 @@ const cell=(record:string)=>screen.getByRole('button',{name:`Inspect record ${re
 beforeEach(()=>{Element.prototype.scrollIntoView=vi.fn();});
 afterEach(cleanup);
 
-describe('reference text in the Data grid and inspector',{timeout:30000},()=>{
+describe('reference text in the Data grid and inspector',()=>{
  it('shows a pending hint, prepares the text table automatically and fills in without moving focus',async()=>{
   const prepared=deferred<BridgeReply<TableDataSnapshot>>();const {bridge,makeReady}=setup({prepare:prepared.promise});
   await screen.findByRole('button',{name:'Inspect record 0'});

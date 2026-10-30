@@ -212,7 +212,7 @@ describe('exact build discovery workflow', () => {
     }
     expect(screen.getByRole('button', { name: '500-build display limit reached' })).toBeDisabled(); expect(screen.getByText(/searching beyond this display window is not available/)).toBeVisible();
     expect(screen.queryByText(/narrow the filter/)).not.toBeInTheDocument();
-  }, 15000);
+  });
   it('describes an ambiguous route as a regional problem and explains full-scope retry', async () => {
     const bridge = bridgeMock(); vi.mocked(bridge.readAll).mockResolvedValue(success(catalog({ ...page, connection: 'partial', errors: [{ region: 'eu', code: 'ROUTE_AMBIGUOUS', message: 'This region has multiple matching CDN routes.', severity: 'problem' }] })));
     await ready(bridge); expect(screen.getByText('Refresh incomplete')).toBeVisible(); expect(screen.getByText('Refresh incomplete').closest('.dv-notice')).not.toHaveClass('error'); // regional route problems only

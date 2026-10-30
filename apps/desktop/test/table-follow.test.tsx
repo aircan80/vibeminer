@@ -1,4 +1,4 @@
-import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FileCatalogStatus, TableCatalogEntry, TableCatalogPage, TableDataSnapshot, TableDefinitionSnapshot, TableFollowPage, WorkspaceSnapshot } from '../../../contracts/generated/discovery';
@@ -22,7 +22,6 @@ const definitions = tableFixture.definitions as unknown as Record<string, TableD
 const workspace = workspaceFixture as unknown as WorkspaceSnapshot;
 const ok = <T,>(value: T): BridgeReply<T> => ({ ok: true, value });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { resolve, promise }; }
-configure({ asyncUtilTimeout: 5000 });
 
 describe('follow reply validation', () => {
  const reply = example as TableFollowPage;
@@ -123,7 +122,7 @@ async function followFromInspector(record: string, label: string) {
 beforeEach(() => { vi.spyOn(window, 'scrollTo').mockImplementation(() => {}); Element.prototype.scrollIntoView = vi.fn(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-describe('Follow in the Tables workbench', { timeout: 30000 }, () => {
+describe('Follow in the Tables workbench', () => {
  it('selects the one match and Back and Forward restore the table, page and selection', async () => {
   const { bridge } = setup(); await openItem();
   fireEvent.click(screen.getByRole('button', { name: 'Next page of records' }));
@@ -260,7 +259,7 @@ describe('Files hand-off', () => {
  });
 });
 
-describe('Follow outcomes that need care', { timeout: 30000 }, () => {
+describe('Follow outcomes that need care', () => {
  it('a failed Follow in the same Data view drops the old rows and keeps the earlier entry intact for Back', async () => {
   let fail = true;
   const { bridge } = setup({ selfReference: true, follow: async p => fail ? { ok: false, error: { code: 'TABLE_ARTIFACT_STALE', message: 'Authored stale source.', retryable: false } } : ok({ ...followReply(p), page: { ...followReply(p).page!, rows: [classRow(4, '54')], totalCount: '1' } }) });

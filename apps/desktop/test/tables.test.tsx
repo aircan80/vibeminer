@@ -93,7 +93,7 @@ describe('provider definition exploration without readable records', () => {
     vi.mocked(bridge.tableDefinition).mockResolvedValue(success(value)); await select('ItemClass'); fireEvent.click(screen.getByRole('button', { name: 'Inspect field ClassID' }));
     for (let index = 0; index < 65; index++) await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Open ItemClass.ClassID definition' })); });
     expect(document.querySelectorAll('.dh-trail .crumb')).toHaveLength(64); expect(screen.getByText(/most recent 64 entries/)).toBeVisible(); expect(bridge.tableDefinition).toHaveBeenCalledTimes(66); expect(screen.getByRole('button', { name: 'Forward through definitions' })).toHaveAttribute('aria-disabled', 'true');
-  }, 15_000);
+  });
 
   it('clears a failed search intent without leaving a retry that can replace the matching visible query', async () => {
     const { bridge } = setup(); await select(); vi.mocked(bridge.tablesCatalog).mockImplementation(async p => p.query === 'Item' ? { ok: false, error: { code: 'LOCAL_READ_FAILED', message: 'Authored failed search.', retryable: true } } : success(catalog(p)));

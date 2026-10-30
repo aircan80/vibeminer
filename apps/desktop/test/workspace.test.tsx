@@ -673,7 +673,7 @@ describe('file catalog prepared after Open', () => {
     const scroll = list.closest('.dh-list-scroll') as HTMLElement; scroll.scrollTop = 40;
     const note = screen.getByRole('note', { name: 'Preparing file list…' });
     // At 100% Show file list is in the footer; the note's copy is the 200% form, hidden by CSS.
-    const show = await within(document.querySelector<HTMLElement>('.dh-files .dh-pane-foot')!).findByRole('button', { name: 'Show file list' }, { timeout: 3000 });
+    const show = await within(document.querySelector<HTMLElement>('.dh-files .dh-pane-foot')!).findByRole('button', { name: 'Show file list' });
     expect(within(screen.getByRole('note', { name: 'File list ready' })).getByRole('button', { name: 'Show file list' })).toHaveClass('dh-compact-only');
     expect(show.closest('.dh-pane-foot')).not.toBeNull(); expect(show.closest('.dh-catalog-ready')!.querySelector('[role=status]')).toHaveTextContent('File list ready');
     // The note keeps its box (and height), so nothing above the rows changes size; focus and scroll stay.
@@ -750,7 +750,7 @@ describe('file catalog prepared after Open', () => {
     fileCatalog.mockResolvedValue(outage);
     await begin(); await screen.findByRole('heading', { name: 'Build overview' });
     const panel = screen.getByRole('heading', { name: 'File catalog' }).closest('section')!;
-    const retry = await within(panel).findByRole('button', { name: 'Retry status' }, { timeout: 3000 });
+    const retry = await within(panel).findByRole('button', { name: 'Retry status' });
     const before = fileCatalog.mock.calls.length;
     retry.focus(); fireEvent.click(retry);
     await waitFor(() => expect(fileCatalog.mock.calls.length).toBe(before + 1));
@@ -759,7 +759,7 @@ describe('file catalog prepared after Open', () => {
     // The user leaves the panel; the next automatic read succeeds and replaces Retry status. Focus stays where it is.
     (document.activeElement as HTMLElement).blur();
     fileCatalog.mockResolvedValue(success(status({ stage: 'writing', completed: '1', total: '2' })) as never);
-    await waitFor(() => expect(within(panel).queryByRole('button', { name: 'Retry status' })).not.toBeInTheDocument(), { timeout: 4000 });
+    await waitFor(() => expect(within(panel).queryByRole('button', { name: 'Retry status' })).not.toBeInTheDocument());
     expect(screen.getByRole('heading', { name: 'File catalog' })).not.toHaveFocus();
     expect(document.activeElement).toBe(document.body);
   });
@@ -778,7 +778,7 @@ describe('file catalog prepared after Open', () => {
     (document.activeElement as HTMLElement).blur();
     // Stopped from elsewhere: the next poll replaces Stop with Resume, and focus stays on the document body.
     state = status({ state: 'stopped', stage: null });
-    await screen.findByRole('button', { name: `Resume preparing file list for ${base.version}` }, { timeout: 3000 });
+    await screen.findByRole('button', { name: `Resume preparing file list for ${base.version}` });
     expect(document.activeElement).toBe(document.body);
   });
   it('shows a failed status read with Retry instead of claiming the list is never prepared', async () => {
@@ -823,7 +823,7 @@ describe('file catalog prepared after Open', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
     (await screen.findByRole('button', { name: `Stop preparing file list for ${base.version}` })).focus();
     state = ready;
-    const note = await screen.findByRole('note', { name: 'File list ready' }, { timeout: 3000 });
+    const note = await screen.findByRole('note', { name: 'File list ready' });
     // jsdom has no layout, so the note's own Show file list (the 200% form) counts as shown and takes focus.
     await waitFor(() => expect(within(note).getByRole('button', { name: 'Show file list' })).toHaveFocus());
     expect(document.activeElement).not.toBe(document.body);
@@ -834,7 +834,7 @@ describe('file catalog prepared after Open', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Browse in Files' })); await screen.findByText('Object 1');
     const note = await screen.findByRole('note', { name: 'Preparing file list…' });
     fileCatalog.mockResolvedValue({ ok: false, error: { code: 'ENGINE_UNAVAILABLE', message: 'Authored outage.', retryable: true } } as never);
-    await within(note).findByText(/Status not confirmed: Authored outage\. \(ENGINE_UNAVAILABLE\)/, undefined, { timeout: 3000 });
+    await within(note).findByText(/Status not confirmed: Authored outage\. \(ENGINE_UNAVAILABLE\)/);
     expect(within(note).getByText('Writing memberships: 10 of 20.')).toBeVisible();
     fileCatalog.mockResolvedValue(success(status({ stage: 'writing', completed: '15', total: '20' })) as never);
     // The 200% form repeats Retry status beside the note's actions; CSS shows one of the two.
@@ -857,14 +857,14 @@ describe('file catalog prepared after Open', () => {
     fileCatalog.mockResolvedValue({ ok: false, error: { code: 'ENGINE_UNAVAILABLE', message: 'Authored outage.', retryable: true } } as never);
     await begin(); await screen.findByRole('heading', { name: 'Build overview' });
     const panel = screen.getByRole('heading', { name: 'File catalog' }).closest('section')!;
-    let retry = await within(panel).findByRole('button', { name: 'Retry status' }, { timeout: 3000 });
+    let retry = await within(panel).findByRole('button', { name: 'Retry status' });
     fileCatalog.mockResolvedValue(success(status({ stage: 'writing', completed: '1', total: '2' })) as never);
     retry.focus(); fireEvent.click(retry);
     await waitFor(() => expect(within(panel).queryByRole('button', { name: 'Retry status' })).not.toBeInTheDocument());
     expect(screen.getByRole('heading', { name: 'File catalog' })).toHaveFocus();
     // The same after a later read fails and the last status is marked not confirmed.
     fileCatalog.mockResolvedValue({ ok: false, error: { code: 'ENGINE_UNAVAILABLE', message: 'Authored outage.', retryable: true } } as never);
-    retry = await within(panel).findByRole('button', { name: 'Retry status' }, { timeout: 3000 });
+    retry = await within(panel).findByRole('button', { name: 'Retry status' });
     fileCatalog.mockResolvedValue(success(status({ stage: 'writing', completed: '2', total: '2' })) as never);
     retry.focus(); fireEvent.click(retry);
     await waitFor(() => expect(within(panel).queryByRole('button', { name: 'Retry status' })).not.toBeInTheDocument());
