@@ -349,7 +349,7 @@ describe('Settings view', () => {
   });
   it('locks the switch for a newer settings file, says why, and never offers a change that cannot work', async () => {
     const problem = { code: 'SETTINGS_VERSION', message: 'The settings file is version 2, saved by a newer VibeMiner.', retryable: false };
-    const newer: SettingsSnapshot = { ...fresh, file: 'newer', problem, communityBuildHistory: { ...fresh.communityBuildHistory, value: false, source: 'unreadable', problem }, fetchTableDefinitions: { ...fresh.fetchTableDefinitions, value: false, source: 'unreadable', problem } };
+    const newer: SettingsSnapshot = { ...fresh, file: 'newer', problem, communityBuildHistory: { ...fresh.communityBuildHistory, value: false, source: 'unreadable', problem }, fetchTableDefinitions: { ...fresh.fetchTableDefinitions, value: false, source: 'unreadable', problem }, communityListfile: { ...fresh.communityListfile, value: false, source: 'unreadable', problem } };
     const bridge = bridgeMock({ settingsRead: vi.fn(async () => success(newer)) });
     await openFromDiscovery(bridge);
     const toggle = await screen.findByRole('switch', { name: /Community build history/ });
@@ -365,6 +365,26 @@ describe('Settings view', () => {
     expect(screen.getByText('Settings saved by a newer VibeMiner')).toBeVisible();
     expect(screen.queryByText(/couldn’t be read/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
+  });
+  // #97: a newer file fails closed, so a default-on switch is Off; no row may call that the default.
+  it.each([
+    ['communityBuildHistory', 'community', /Community build history/, 'Community build history is Off because the settings file comes from a newer VibeMiner, so Discovery shows no community builds and nothing is fetched from wago.tools.'],
+    ['fetchTableDefinitions', 'fetch', /Fetch newer table definitions/, 'Fetch newer table definitions is Off because the settings file comes from a newer VibeMiner, so no table definitions are fetched from WoWDBDefs.'],
+    ['communityListfile', 'listfile', /Community file names/, 'Community file names is Off because the settings file comes from a newer VibeMiner, so Files shows no community names and nothing is downloaded from wow-listfile.'],
+  ] as const)('says default-on %s is Off because a newer VibeMiner saved the file, and the switch agrees', async (_name, key, label, why) => {
+    const problem = { code: 'SETTINGS_VERSION', message: 'The settings file is version 2, saved by a newer VibeMiner.', retryable: false };
+    const off = (c: SettingsSnapshot['communityBuildHistory']) => ({ ...c, value: false, source: 'unreadable' as const, problem });
+    const newer: SettingsSnapshot = { ...fresh, file: 'newer', problem, communityBuildHistory: off(fresh.communityBuildHistory), fetchTableDefinitions: off(fresh.fetchTableDefinitions), communityListfile: off(fresh.communityListfile) };
+    await openFromDiscovery(bridgeMock({ settingsRead: vi.fn(async () => success(newer)) }));
+    const toggle = await screen.findByRole('switch', { name: label });
+    const row = document.getElementById(`settings-row-${key}`)!, note = within(row).getByRole('note');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).toHaveTextContent('Off');
+    expect(within(row).getByText('Default: On · Off in use now')).toBeVisible();
+    expect(note).toHaveTextContent('Saved by a newer VibeMiner. Using Off.');
+    expect(note).toHaveTextContent(why);
+    expect(note).not.toHaveTextContent(/default/i);
+    expect(toggle.getAttribute('aria-describedby')).toContain(`settings-${key}-note`);
   });
   it('locks the switch for a file that was never read and offers Read again only when it can help', async () => {
     const problem = { code: 'SETTINGS_NOT_READ', message: 'The settings file couldn’t be opened. It may be locked or not readable.', retryable: true };

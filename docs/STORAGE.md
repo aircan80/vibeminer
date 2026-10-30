@@ -22,7 +22,7 @@ A legacy metadata receipt with a null `Location` means a loose object at offset 
 
 ## Settings
 
-App-wide settings live in `settings-v1.json` in the engine data directory, next to the catalog, not in it. The engine writes a temporary file, flushes it and then replaces the file, so a failed write leaves the old one. A missing file means defaults; a malformed, oversized or newer-version file, or a single value it doesn't understand, is reported and that value uses its default. A newer file, or one whose bytes could not be read (too large, changed while read, locked or not permitted), is never overwritten. See [settings-v1](../contracts/settings-v1.md).
+App-wide settings live in `settings-v1.json` in the engine data directory, next to the catalog, not in it. The engine writes a temporary file, flushes it and then replaces the file, so a failed write leaves the old one. A missing file means defaults; a malformed, oversized or newer-version file, or a single value it doesn't understand, is reported and that value reads as Off, whatever its default (D081, D105, D106). A newer file, or one whose bytes could not be read (too large, changed while read, locked or not permitted), is never overwritten. See [settings-v1](../contracts/settings-v1.md).
 
 ## Fetched table definitions
 

@@ -141,6 +141,10 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
   const onOff = (value: boolean) => value ? 'On' : 'Off';
   // An unreadable value is never used: it reads as Off, whatever the switch's default (D081, D106).
   const inUse = (c: { value: boolean; defaultValue: boolean }) => c.value === c.defaultValue ? `Using the default, ${onOff(c.value)}.` : locked ? `Using ${onOff(c.value)}.` : `Using ${onOff(c.value)} until you switch it.`; // A locked switch can't be switched here.
+  // A newer file's values are never used, so every switch reads as Off whatever its default (D081, D105, D106).
+  const newerReason = (name: SettingSwitch, c: { value: boolean; defaultValue: boolean }) => c.value === c.defaultValue
+    ? `${SWITCH[name].title} is ${onOff(c.value)}, its default, because the settings file comes from a newer VibeMiner.`
+    : `${SWITCH[name].title} is ${onOff(c.value)} because the settings file comes from a newer VibeMiner, so ${SWITCH[name].byDefault}.`;
   // One switch row's control column, error and note. File-wide problems (a newer or unread file, a read failure) are
   // explained once, at the first row; every switch still says why it can't change.
   function switchParts(name: SettingSwitch, first: boolean): { control: ReactNode; extra: ReactNode; note: ReactNode } {
@@ -165,11 +169,11 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
       }
       if (c.source === 'unreadable' && p && fileWide && !first) note = <div className="st-state warn" role="note" id={`settings-${key}-note`}>
         <strong>{newer ? `Saved by a newer VibeMiner. ${inUse(c)}` : notRead ? `Settings file not read. ${inUse(c)}` : `Settings file couldn’t be read. ${inUse(c)}`}</strong>
-        <p>{c.value === c.defaultValue ? `${title} uses its default.` : `${title} reads as ${onOff(c.value)}, so ${byDefault}.`} {newer ? 'Change it in the newer VibeMiner.' : notRead ? 'The file wasn’t changed; see the first setting for why.' : 'Switching saves a new value.'} <code>({p.code})</code></p>
+        <p>{newer ? newerReason(name, c) : c.value === c.defaultValue ? `${title} uses its default.` : `${title} reads as ${onOff(c.value)}, so ${byDefault}.`} {newer ? 'Change it in the newer VibeMiner.' : notRead ? 'The file wasn’t changed; see the first setting for why.' : 'Switching saves a new value.'} <code>({p.code})</code></p>
       </div>;
       else if (c.source === 'unreadable' && p && noted) note = <div className="st-state warn" role="note" id={`settings-${key}-note`}>
         <strong>{newer ? `Saved by a newer VibeMiner. ${inUse(c)}` : notRead ? `Settings file not read. ${inUse(c)}` : `Saved value couldn’t be read. ${inUse(c)}`}</strong>
-        <p>{newer ? `${p.message} This version uses the default and doesn’t change the file. Change this setting in the newer VibeMiner.` : notRead ? p.retryable ? `${p.message} The file wasn’t changed, and the switches can’t be used until the file is read.` : `${p.message} This version of VibeMiner can’t read settings-v1.json in the storage folder, so it wasn’t changed. Fix or remove that file, then open Settings again.` : fileWide ? `${p.message} Every setting uses a safe value, so ${SWITCH.communityBuildHistory.byDefault}, ${SWITCH.fetchTableDefinitions.byDefault}, and ${SWITCH.communityListfile.byDefault}. Switching saves a new value.` : `The settings file has a value for this setting that VibeMiner doesn’t understand, so it is ignored and ${byDefault}. Switching saves a new value.`} <code>({p.code})</code></p>
+        <p>{newer ? `${p.message} ${newerReason(name, c)} This version doesn’t change the file. Change this setting in the newer VibeMiner.` : notRead ? p.retryable ? `${p.message} The file wasn’t changed, and the switches can’t be used until the file is read.` : `${p.message} This version of VibeMiner can’t read settings-v1.json in the storage folder, so it wasn’t changed. Fix or remove that file, then open Settings again.` : fileWide ? `${p.message} Every setting uses a safe value, so ${SWITCH.communityBuildHistory.byDefault}, ${SWITCH.fetchTableDefinitions.byDefault}, and ${SWITCH.communityListfile.byDefault}. Switching saves a new value.` : `The settings file has a value for this setting that VibeMiner doesn’t understand, so it is ignored and ${byDefault}. Switching saves a new value.`} <code>({p.code})</code></p>
         {notRead && p.retryable && <button className="st-btn st-note-action" onClick={() => readAgain(name)}>Read again</button>}
       </div>;
     }
