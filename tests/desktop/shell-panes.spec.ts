@@ -264,3 +264,77 @@ test('right-click and middle-click on a Files row never scroll the shell at 600x
   } finally { await session.close(); }
 });
 
+// #87: at 200% text, a list left by Shift+Tab and entered again by Tab shows its active row, in the Files object list and file list.
+// Tab focuses the whole listbox, and the active row (here the 14th) must come back into its list and the shell's view with it.
+for (const [width, height] of [[600, 480], [1280, 800]] as const) test(`Tab back into a Files list keeps its active row in view at ${width}x${height} and 200% text (#87)`, async () => {
+  test.setTimeout(90_000);
+  const session = await launch(true, false, false, false, false, false, false, false, false, false, false, true);
+  try {
+    const { page, app, data } = session;
+    await size(app, 1280, 800);
+    await page.locator('.build-row').first().click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeFocused();
+    await size(app, width, height); await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([width, height]);
+    await text(page, 2);
+    await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-compact'));
+    await page.getByRole('navigation', { name: 'Build areas' }).getByRole('button', { name: 'Files', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeFocused();
+    const pane = page.locator('.dh-files .dh-pane.dh-list');
+    await expect(pane.getByText('Object 1', { exact: true })).toBeVisible();
+    async function tabBack(label: string) {
+      const listbox = pane.getByRole('listbox'), twelfth = listbox.getByRole('option').nth(11);
+      await twelfth.scrollIntoViewIfNeeded(); await twelfth.click();
+      await expect(listbox).toBeFocused(); await expectFocusVisible(page, `${label}: row 12 clicked`);
+      for (let i = 13; i <= 14; i++) { await page.keyboard.press('ArrowDown'); await expectFocusVisible(page, `${label}: row ${i} after ArrowDown`); }
+      await page.keyboard.press('Shift+Tab'); await expect(listbox).not.toBeFocused(); await settle(page);
+      // The object list keeps its notices above the rows in the same scroller, so Shift+Tab to the notice's button scrolls the
+      // active row out of the list. Tab back in must bring it back, not just show the listbox (#87).
+      if (label === 'object list') expect(await page.evaluate(() => { const focused = document.activeElement!, scroller = focused.closest<HTMLElement>('.dh-list-scroll'), row = scroller?.querySelectorAll('[role=option]')[13]; return !!row && row.getBoundingClientRect().top >= scroller!.getBoundingClientRect().top + scroller!.clientHeight; }), 'Shift+Tab went to a control in the list scroller and scrolled row 14 out of it').toBe(true);
+      await page.keyboard.press('Tab'); await expect(listbox).toBeFocused();
+      await expect(listbox.getByRole('option').nth(13)).toHaveAttribute('aria-selected', 'true');
+      await expectFocusVisible(page, `${label}: row 14 after Tab back in`);
+    }
+    await tabBack('object list');
+    await writeFile(path.join(data, 'file-catalog-ready'), 'ready');
+    const show = page.getByRole('button', { name: 'Show file list' }).first();
+    await expect(show).toBeVisible(); await show.click();
+    await expect(pane.getByRole('listbox', { name: 'Files, one row per FileDataID' }).getByRole('option').first()).toContainText('800001');
+    await tabBack('file list');
+    await text(page, 1);
+  } finally { await session.close(); }
+});
+
+// #87: the Items and Creatures lists go through the same shell focus handling, so Tab back into them keeps their active row in view too.
+for (const [width, height] of [[600, 480], [1280, 800]] as const) test(`Tab back into the Items and Creatures lists keeps the active row in view at ${width}x${height} and 200% text (#87)`, async () => {
+  test.setTimeout(90_000);
+  const session = await launch(true, false, false, true, false, false, true);
+  try {
+    const { page, app, data } = session;
+    await size(app, 1280, 800);
+    await page.locator('.build-row').first().click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeFocused();
+    for (const flag of ['cached-items', 'cached-creatures']) await writeFile(path.join(data, flag), 'cached');
+    await size(app, width, height); await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([width, height]);
+    await text(page, 2);
+    await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-compact'));
+    const nav = page.getByRole('navigation', { name: 'Build areas' });
+    for (const [area, name] of [['Items', 'Items on this page'], ['Creatures', 'Creatures on this page']] as const) {
+      await nav.getByRole('button', { name: area, exact: true }).click();
+      const listbox = page.getByRole('listbox', { name });
+      await expect(listbox.getByRole('option').nth(13)).toBeAttached();
+      await listbox.focus(); await page.keyboard.press('Home');
+      for (let i = 2; i <= 14; i++) await page.keyboard.press('ArrowDown');
+      await expect(listbox.getByRole('option').nth(13)).toHaveAttribute('aria-selected', 'true');
+      await expectFocusVisible(page, `${area}: row 14 after ArrowDown`);
+      await page.keyboard.press('Shift+Tab'); await expect(listbox).not.toBeFocused(); await settle(page);
+      await page.keyboard.press('Tab'); await expect(listbox).toBeFocused();
+      await expectFocusVisible(page, `${area}: row 14 after Tab back in`);
+    }
+    await text(page, 1);
+  } finally { await session.close(); }
+});
+
