@@ -195,6 +195,8 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
     : notRead ? <div className="st-state warn"><strong>Settings file not read</strong><p>Every setting reads as Off until the file is read. The file wasn’t changed.</p></div>
     : defaulted.length ? <div className="st-state warn"><strong>{defaulted.every(name => snapshot![name].value === snapshot![name].defaultValue) ? defaulted.length === 1 ? '1 setting is using its default' : `${defaulted.length} settings are using their defaults` : defaulted.length === 1 ? '1 setting is Off until you switch it' : `${defaulted.length} settings are Off until you switch them`}</strong><p>{snapshot!.file === 'read' ? `The saved ${defaulted.length === 1 ? 'value' : 'values'} for ${defaulted.map(name => SWITCH[name].title).join(' and ')} couldn’t be read. The other settings were read normally.` : 'The settings file isn’t one VibeMiner understands, so every setting reads as Off and nothing is fetched.'}</p></div> : null;
   const lastChange = isReading ? <span className="st-dim">Not read yet</span> : reading.phase === 'readFailed' || notRead ? <span className="st-dim">Not known</span> : snapshot?.lastChangedAt ? stamp(snapshot.lastChangedAt) : <span className="st-dim">{snapshot?.file === 'absent' ? 'Never changed' : 'Not recorded'}</span>;
+  // formatVersion is the version this engine writes; a newer file's own version isn't in the snapshot (#100).
+  const savedIn = newer ? `The storage folder, saved by a newer VibeMiner. This version reads settings version ${snapshot!.formatVersion}.` : `The storage folder, settings version ${snapshot?.formatVersion ?? 1}`;
   const summary = ui && ui.entry && !ui.expanded ? ui.summary : null;
   return <div ref={host} className={`settings-screen${size.compact ? ' st-compact st-medium' : size.medium ? ' st-medium' : ''}`}>
     <a className="st-skip" href="#settings-list">Skip to settings</a>
@@ -288,7 +290,7 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
         <aside className="st-side" aria-labelledby="settings-about" inert={!!ui?.expanded && !size.compact}>
           <div className="st-panel-head"><h2 id="settings-about">About settings</h2></div>
           <div className="st-side-body">{aboutBox}
-            <dl className="st-facts"><dt>Saved by</dt><dd>The VibeMiner engine</dd><dt>Applies to</dt><dd>Every product and build</dd><dt>Saved in</dt><dd>The storage folder, settings version {snapshot?.formatVersion ?? 1}</dd><dt>Last change</dt><dd>{lastChange}</dd></dl>
+            <dl className="st-facts"><dt>Saved by</dt><dd>The VibeMiner engine</dd><dt>Applies to</dt><dd>Every product and build</dd><dt>Saved in</dt><dd>{savedIn}</dd><dt>Last change</dt><dd>{lastChange}</dd></dl>
             <p className="st-tiny">Changing a setting never deletes builds or downloaded files. The only work in Downloads &amp; activity a setting stops is the community file names download, when you turn them off; what it has is kept.</p>
             <p className="st-tiny">Escape or <strong>← {origin.backLabel}</strong> returns to {origin.returnsTo} as you left it.</p>
           </div>

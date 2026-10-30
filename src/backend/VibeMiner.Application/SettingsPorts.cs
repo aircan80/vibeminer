@@ -16,7 +16,7 @@ public interface ISettingsStore
 /// <summary>Whether a table may fetch a newer definition from WoWDBDefs when no bundled one covers its layout (D081).</summary>
 public interface ITableDefinitionFetchPolicy
 {
-    // Never throws for an unreadable settings file: the setting's default applies.
+    // Never throws for an unreadable or newer settings file: either reads as Off, whatever the default, so nothing is fetched.
     Task<bool> FetchEnabledAsync(CancellationToken token);
 }
 

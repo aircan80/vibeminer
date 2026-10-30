@@ -366,6 +366,21 @@ describe('Settings view', () => {
     expect(screen.queryByText(/couldn’t be read/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
   });
+  // #100: formatVersion is the engine's own version, so About never calls a newer file "settings version 1".
+  it('says in About where settings are saved, and that a newer file comes from a newer VibeMiner rather than calling it version 1', async () => {
+    const savedIn = () => within(screen.getByRole('complementary', { name: 'About settings' })).getByText('Saved in').nextElementSibling;
+    await openFromDiscovery(bridgeMock({ settingsRead: vi.fn(async () => success(saved(true))) }));
+    await screen.findByRole('switch', { name: /Community build history/ });
+    expect(savedIn()).toHaveTextContent(/^The storage folder, settings version 1$/);
+    cleanup();
+    const problem = { code: 'SETTINGS_VERSION', message: 'The settings file is version 2, saved by a newer VibeMiner.', retryable: false };
+    const off = (c: SettingsSnapshot['communityBuildHistory']) => ({ ...c, value: false, source: 'unreadable' as const, problem });
+    const newer: SettingsSnapshot = { ...fresh, file: 'newer', problem, communityBuildHistory: off(fresh.communityBuildHistory), fetchTableDefinitions: off(fresh.fetchTableDefinitions), communityListfile: off(fresh.communityListfile) };
+    await openFromDiscovery(bridgeMock({ settingsRead: vi.fn(async () => success(newer)) }));
+    await screen.findByRole('switch', { name: /Community build history/ });
+    expect(savedIn()).toHaveTextContent(/^The storage folder, saved by a newer VibeMiner\. This version reads settings version 1\.$/);
+    expect(savedIn()).not.toHaveTextContent(/, settings version 1/);
+  });
   // #97: a newer file fails closed, so a default-on switch is Off; no row may call that the default.
   it.each([
     ['communityBuildHistory', 'community', /Community build history/, 'Community build history is Off because the settings file comes from a newer VibeMiner, so Discovery shows no community builds and nothing is fetched from wago.tools.'],
