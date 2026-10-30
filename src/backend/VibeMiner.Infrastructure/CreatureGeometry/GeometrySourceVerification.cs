@@ -112,8 +112,10 @@ internal static class GeometrySourceVerification
         if (expected.EncodedBytes <= encodedLimit && expected.DecodedBytes <= decodedLimit) return;
         var role = dependency switch { CreatureGeometryDependency.Model => "model", CreatureGeometryDependency.Skin => "SKIN", _ => "texture" };
         throw new DiscoveryException("CREATURE_GEOMETRY_RESOURCE_LIMIT", string.Create(CultureInfo.InvariantCulture,
-            $"The {role} file is {Mib(expected.DecodedBytes)} decoded and {Mib(expected.EncodedBytes)} encoded; geometry reads at most {Mib(decodedLimit)} decoded and {Mib(encodedLimit)} encoded."));
+            $"The {role} file is {Mib(expected.DecodedBytes)} decoded and {Mib(expected.EncodedBytes)} encoded; geometry reads at most {Mib(decodedLimit)} decoded and {Mib(encodedLimit)} encoded. {SizeLimit}"));
     }
+    /// <summary>Only this refusal is over a byte size; every other limit is just "a limit" (#111).</summary>
+    internal const string SizeLimit = "This is a size limit, not a corrupt file.";
     // Rounded up, so a file just over a limit never reads as equal to it.
     private static string Mib(long bytes) => (bytes % (1 << 20) == 0 ? (bytes >> 20).ToString(CultureInfo.InvariantCulture)
         : (Math.Ceiling(bytes / 104857.6) / 10).ToString("0.0", CultureInfo.InvariantCulture)) + " MiB";

@@ -60,8 +60,8 @@ public static class M2ModelReader
         Declare("boneLookup", 120, 2, limits.MaxMetadataEntries); Declare("textureCombos", 128, 2, limits.MaxMetadataEntries);
         Declare("textureCoordinates", 136, 2, limits.MaxMetadataEntries); Declare("weightLookup", 144, 2, limits.MaxMetadataEntries);
         Declare("transformLookup", 152, 2, limits.MaxMetadataEntries);
-        // The collision box may be the empty box only when the model declares no collision vertices.
-        var declaredBounds = Bounds(core, 160); _ = Bounds(core, 188, emptyAllowed: U32(core, 224) == 0);
+        // The collision box may be the empty box only when the model declares no collision triangles and no collision vertices (#111).
+        var declaredBounds = Bounds(core, 160); _ = Bounds(core, 188, emptyAllowed: U32(core, 216) == 0 && U32(core, 224) == 0);
         Declare("collisionTriangles", 216, 2, limits.MaxTriangleIndices); Declare("collisionVertices", 224, 12, limits.MaxVertices);
         Declare("collisionNormals", 232, 12, limits.MaxVertices); Declare("attachments", 240, 40, limits.MaxMetadataEntries);
         Declare("attachmentLookup", 248, 2, limits.MaxMetadataEntries); Declare("events", 256, 0, limits.MaxMetadataEntries);

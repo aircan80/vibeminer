@@ -158,7 +158,7 @@ public sealed class M2StaticDecoderTests
     }
 
     [Fact]
-    public async Task Empty_collision_box_is_admitted_only_without_collision_vertices()
+    public async Task Empty_collision_box_is_admitted_only_without_collision_triangles_or_vertices()
     {
         var model = await ReadModel(EmptyCollisionBox());
         Assert.Equal(4, model.Vertices.Count); Assert.Equal(274u, model.Version);
@@ -168,6 +168,13 @@ public sealed class M2StaticDecoderTests
         var withVertices = EmptyCollisionBox(); var b = Base(withVertices);
         U32(withVertices, b + 224, 1); U32(withVertices, b + 228, U32(withVertices, b + 64));
         await Throws("MODEL_INVALID", () => ReadModel(withVertices));
+        // #111: declared collision triangles also rule out the empty box; the same triangles beside an ordered box read fine.
+        var withTriangles = EmptyCollisionBox(); b = Base(withTriangles);
+        U32(withTriangles, b + 216, 3); U32(withTriangles, b + 220, U32(withTriangles, b + 64));
+        await Throws("MODEL_INVALID", () => ReadModel(withTriangles));
+        var ordered = Model(); b = Base(ordered);
+        U32(ordered, b + 216, 3); U32(ordered, b + 220, U32(ordered, b + 64));
+        Assert.Equal(4, (await ReadModel(ordered)).Vertices.Count);
         // The main bounding box never gets the empty exception.
         var main = Model(); b = Base(main);
         F(main, b + 160, 1e7f); F(main, b + 164, 1e7f); F(main, b + 168, 1e7f); F(main, b + 172, -1e7f); F(main, b + 176, -1e7f); F(main, b + 180, -1e7f); F(main, b + 184, 0);

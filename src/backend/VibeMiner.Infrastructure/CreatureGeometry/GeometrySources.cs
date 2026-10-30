@@ -194,7 +194,7 @@ internal sealed partial class GeometrySourceClosure
     private static bool RequestFailure(string code) => code.Contains("STALE", StringComparison.Ordinal) || code.Contains("SOURCE_CHANGED", StringComparison.Ordinal) ||
         code.Contains("BUSY", StringComparison.Ordinal) || code.EndsWith("CLEANUP_FAILED", StringComparison.Ordinal) || code is "ENGINE_STOPPING" or "INVALID_REQUEST";
     private static bool OwnMessage(string code) => code is "MODEL_UNSUPPORTED" or "MODEL_INVALID" or "MODEL_LIMIT" or "CREATURE_GEOMETRY_RESOURCE_LIMIT";
-    private static GeometrySourceFailureException Failure(DiscoveryException e, CreatureGeometryDependency dependency, IReadOnlyList<CreatureGeometrySource> reached)
+    internal static GeometrySourceFailureException Failure(DiscoveryException e, CreatureGeometryDependency dependency, IReadOnlyList<CreatureGeometrySource> reached)
     {
         var state = e.Code switch
         {
@@ -208,9 +208,15 @@ internal sealed partial class GeometrySourceClosure
             _ => CreatureGeometryState.Corrupt
         };
         // Our own readers and size checks name the feature, malformation or limit in a short fixed message (#75, #98); keep it.
-        var message = "The original geometry source could not be admitted (" + state + ")";
-        message = OwnMessage(e.Code) && e.Message.Length is > 0 and <= 400 ? message + ": " + e.Message : message + ".";
-        if (state == CreatureGeometryState.ResourceLimit && !e.Retryable) message += " This is a size limit, not a corrupt file.";
+        // A limit leads with what tripped it, such as the file's sizes and the caps, in plain words (#111).
+        var own = OwnMessage(e.Code) && e.Message.Length is > 0 and <= 400;
+        var message = state == CreatureGeometryState.ResourceLimit
+            ? own ? e.Message : "The geometry source is over one of its limits."
+            : "The original geometry source could not be admitted (" + state + ")" + (own ? ": " + e.Message : ".");
+        // The source-size refusal already says it is a size limit. Codes mix byte and count caps (memberships, vertices,
+        // output bytes), so every other limit says only "a limit", which is true of both.
+        if (state == CreatureGeometryState.ResourceLimit && !e.Retryable && !message.EndsWith(GeometrySourceVerification.SizeLimit, StringComparison.Ordinal))
+            message += " This is a limit, not a corrupt file.";
         return new(state, dependency, new(e.Code, message, e.Retryable), reached);
     }
 }

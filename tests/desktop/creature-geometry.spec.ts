@@ -103,11 +103,20 @@ test('A model with no triangles names its state instead of a bare "Model not dra
  await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);await capture(page,s.app,'no-triangles',card(page),true);
  expect((await methods(s.data)).some(r=>r.method==='creatures.geometry.open')).toBe(false);
 }finally{await s.close();}});
-test('A model over a size limit says so with its code (#98)',async()=>{test.setTimeout(90000);const s=await opened('resourceLimit');try{
+test('A model over a size limit says so with its code, leading with the sizes and caps (#98, #111)',async()=>{test.setTimeout(90000);const s=await opened('resourceLimit');try{
  const{page}=s;await show(page).click();
  await expect(card(page).getByRole('img',{name:'Model too large',exact:true})).toBeVisible({timeout:20000});
  await expect(card(page)).toContainText('AUTHORED_RESOURCE_LIMIT');await expect(card(page)).not.toContainText('Model not drawn');
+ // The note is the code, then the sizes and caps in plain words, then the size-limit sentence, with no engine wording.
+ await expect(card(page).locator('.cv-pnote')).toHaveText('AUTHORED_RESOURCE_LIMIT Authored model: the model file is 12.4 MiB decoded and 4.1 MiB encoded; geometry reads at most 8 MiB decoded and 4 MiB encoded. This is a size limit, not a corrupt file.');
+ await expect(card(page)).not.toContainText('admitted');await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);
  await capture(page,s.app,'too-large',card(page),true);
+}finally{await s.close();}});
+test('A model over a count limit says "a limit", not "a size limit" (#111)',async()=>{test.setTimeout(90000);const s=await opened('countLimit');try{
+ const{page}=s;await show(page).click();
+ await expect(card(page).getByRole('img',{name:'Model too large',exact:true})).toBeVisible({timeout:20000});
+ await expect(card(page).locator('.cv-pnote')).toHaveText('AUTHORED_RESOURCE_LIMIT Authored model: the M2 vertices count exceeds its bound. This is a limit, not a corrupt file.');
+ await expect(card(page)).not.toContainText('size limit');await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);
 }finally{await s.close();}});
 test('Switching builds closes the open view lease, and no geometry block is left above the panes',async()=>{test.setTimeout(120000);const s=await opened();try{
  const{page}=s,closes=async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length;

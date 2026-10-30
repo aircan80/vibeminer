@@ -23,8 +23,9 @@ export function geometryArtifact(){
 }
 /** A geometry result over the exact display metadata the fixture returned for the same slot. */
 export function creatureGeometry(display,requested,manifest){
- // 'encrypted' is the protected outcome whose TACT key isn't available (BLTE_KEY_UNAVAILABLE); every other name is the state itself.
- const encrypted=requested==='encrypted',state=encrypted?'protected':requested;
+ // 'encrypted' is the protected outcome whose TACT key isn't available (BLTE_KEY_UNAVAILABLE); 'countLimit' is a resourceLimit over a
+ // reader count rather than a byte cap (#111); every other name is the state itself.
+ const encrypted=requested==='encrypted',countLimit=requested==='countLimit',state=encrypted?'protected':countLimit?'resourceLimit':requested;
  const v=structuredClone(template),targets=display.sources.map(t=>({role:t.role,tableId:t.row?.source.tableId??(t.role==='display'?'bfdaf9f1':'7f695fa5'),artifactId:t.snapshot.artifactId,coverage:t.snapshot.coverage,matchCount:t.matchCount,row:t.row}));
  Object.assign(v,{context:display.context,artifactId:display.artifactId,creatureId:display.creatureId,slot:display.slot,opening:display.opening,state,problem:null,
   metadata:{state:display.state,creatureSource:display.creatureSource,creatureCoverage:display.creatureCoverage,selected:display.selected,targets,absence:display.absence,modelId:display.modelId,modelFileDataId:display.modelFileDataId,requiredTableId:display.requiredTableId,appearance:'notEvaluated'}});
@@ -33,6 +34,9 @@ export function creatureGeometry(display,requested,manifest){
  if(!['ready','noDeclaredTriangles'].includes(state))v.sources=[];
  if(state==='notPrepared')v.problem=null;
  else if(!['ready','noDeclaredTriangles'].includes(state))v.problem={code:'AUTHORED_'+state.replace(/[A-Z]/g,c=>'_'+c).toUpperCase(),message:'Authored geometry outcome.',retryable:false,dependency:'skin',target:null};
+ // Authored wording in the engine's own shape: the sizes and caps first, then which kind of limit it is (#111).
+ if(state==='resourceLimit')v.problem.message=countLimit?'Authored model: the M2 vertices count exceeds its bound. This is a limit, not a corrupt file.'
+  :'Authored model: the model file is 12.4 MiB decoded and 4.1 MiB encoded; geometry reads at most 8 MiB decoded and 4 MiB encoded. This is a size limit, not a corrupt file.';
  if(encrypted)v.problem={code:'BLTE_KEY_UNAVAILABLE',message:'Authored encrypted model: TACT key 0123456789ABCDEF isn\'t available.',retryable:false,dependency:'model',target:null};
  return v;
 }

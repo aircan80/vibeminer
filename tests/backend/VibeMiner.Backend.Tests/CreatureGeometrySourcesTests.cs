@@ -177,11 +177,30 @@ public sealed class CreatureGeometrySourcesTests
         if (!ambiguous)
         {
             Assert.Equal("CREATURE_GEOMETRY_RESOURCE_LIMIT", failure.Problem.Code);
+            // #111: the message opens with the sizes and caps, not with engine wording.
+            Assert.StartsWith("The model file is ", failure.Problem.Message);
             Assert.Contains("4.1 MiB encoded; geometry reads at most 8 MiB decoded and 4 MiB encoded.", failure.Problem.Message);
-            Assert.EndsWith("This is a size limit, not a corrupt file.", failure.Problem.Message);
+            Assert.EndsWith("encoded. This is a size limit, not a corrupt file.", failure.Problem.Message);
+            Assert.DoesNotContain("admitted", failure.Problem.Message); Assert.DoesNotContain("This is a limit", failure.Problem.Message);
             Assert.InRange(failure.Problem.Message.Length, 1, 512);
         }
         Assert.Empty(failure.Sources); Assert.Equal(requests, fixture.Http.Requests.Count); Assert.Equal(0, fixture.Payload.ReservedBytes);
+    }
+    // #111: a limit opens with what tripped it. Only the source-size refusal (tested above) says "size limit"; the same
+    // codes also carry count caps (memberships, vertices), so every other limit says "a limit". A retryable capacity
+    // refusal claims neither, and other states keep their named prefix.
+    [Theory]
+    [InlineData("CREATURE_GEOMETRY_RESOURCE_LIMIT", "The geometry proof exceeds its bounded metadata allowance.", false,
+        "The geometry proof exceeds its bounded metadata allowance. This is a limit, not a corrupt file.")]
+    [InlineData("MODEL_LIMIT", "The M2 vertices count exceeds its bound.", false, "The M2 vertices count exceeds its bound. This is a limit, not a corrupt file.")]
+    [InlineData("BLTE_FRAME_LIMIT", "Reader detail.", false, "The geometry source is over one of its limits. This is a limit, not a corrupt file.")]
+    [InlineData("CREATURE_GEOMETRY_RESOURCE_LIMIT", "Geometry payload reservations are at their bounded capacity.", true, "Geometry payload reservations are at their bounded capacity.")]
+    [InlineData("MODEL_INVALID", "The M2 header is short.", false, "The original geometry source could not be admitted (Corrupt): The M2 header is short.")]
+    public void Failure_message_leads_with_the_limit_and_names_only_the_source_size_as_a_size_limit(string code, string detail, bool retryable, string expected)
+    {
+        var failure = GeometrySourceClosure.Failure(new DiscoveryException(code, detail, retryable), CreatureGeometryDependency.Model, []);
+        Assert.Equal(expected, failure.Problem.Message); Assert.Equal(code, failure.Problem.Code);
+        Assert.Equal(code == "MODEL_INVALID" ? CreatureGeometryState.Corrupt : CreatureGeometryState.ResourceLimit, failure.State);
     }
     [Theory]
     [InlineData(false)]
