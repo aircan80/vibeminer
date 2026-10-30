@@ -126,11 +126,15 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   const inside=()=>{const el=document.activeElement as HTMLElement|null;return el&&el!==panel&&panel.contains(el)&&!head.contains(el)?el:null;};
   const view=()=>{const p=panel.getBoundingClientRect();return {top:p.top+head.offsetHeight,bottom:p.top+panel.clientHeight,base:p.top};};
   const shown=(el:HTMLElement)=>{const v=view(),r=el.getBoundingClientRect();return r.top>=v.top-1&&r.bottom<=v.bottom+1;};
-  let wanted=false,at=0,height=0;
-  const note=()=>{const el=inside();wanted=!!el&&shown(el);at=el?el.getBoundingClientRect().top-view().base+panel.scrollTop:0;height=panel.scrollHeight;};
-  const keep=()=>{pad();const el=inside();if(wanted&&el&&!shown(el)){const v=view(),r=el.getBoundingClientRect();if(r.bottom>v.bottom)panel.scrollTop+=Math.min(r.bottom-v.bottom,r.top-v.top);else panel.scrollTop-=v.top-r.top;}note();};
+  // A layout too short to hold the control doesn't clear that, and neither does the scroll event of the panel's own scroll: on the way
+  // to the sheet the compact panel's view can be empty, below the window, and the layout that follows must still bring the control back
+  // (#106). Only the reader scrolling away, or focus leaving the panel, clears it.
+  let wanted=false,at=0,height=0,own:number|null=null;
+  const mark=()=>{const el=inside();at=el?el.getBoundingClientRect().top-view().base+panel.scrollTop:0;height=panel.scrollHeight;return el;};
+  const note=()=>{const el=mark();wanted=!!el&&shown(el);};
+  const keep=()=>{pad();const el=inside();if(wanted&&el&&!shown(el)){const v=view(),r=el.getBoundingClientRect(),from=panel.scrollTop;if(r.bottom>v.bottom)panel.scrollTop+=Math.min(r.bottom-v.bottom,r.top-v.top);else panel.scrollTop-=v.top-r.top;if(panel.scrollTop!==from)own=panel.scrollTop;}const now=mark();wanted=!!now&&(wanted||shown(now));};
   const onFocus=()=>{note();if(inside())wanted=true;};
-  const onScroll=()=>{const el=inside();if(el&&(Math.abs(el.getBoundingClientRect().top-view().base+panel.scrollTop-at)>1||panel.scrollHeight!==height))keep();else note();};
+  const onScroll=()=>{const el=inside(),mine=own!==null&&Math.abs(panel.scrollTop-own)<=1;own=null;if(el&&(Math.abs(el.getBoundingClientRect().top-view().base+panel.scrollTop-at)>1||panel.scrollHeight!==height))keep();else if(mine)mark();else note();};
   pad();note();if(inside())wanted=true;
   const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(keep);observer?.observe(head);observer?.observe(panel);for(const child of panel.children)observer?.observe(child);
   const text=new MutationObserver(keep);text.observe(document.documentElement,{attributes:true,attributeFilter:['style','class']});

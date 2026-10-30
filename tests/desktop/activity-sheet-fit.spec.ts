@@ -48,6 +48,22 @@ test('a focused panel control stays in view inside the panel after the text size
       const after = await inPanelView(page);
       expect.soft(after.whole, `Pause in view after ${from * 100}% → ${to * 100}% (${after.at})`).toBe(true);
     }
+    // #106: a layout too short to hold Pause doesn't drop it, nor does the scroll event of the panel's own scroll there. On the way to the
+    // sheet the compact panel passes through such a layout (its view below the window), and a slow machine could deliver that scroll
+    // event after the sheet, leaving Pause under a heading that then grew. 400% text makes the heading taller than the window, so every
+    // step here goes through that state; the stage update grows the heading while Pause can't show.
+    const steady = async () => { await settle(page); await page.waitForTimeout(150); await settle(page); };
+    await text(page, 4); await steady();
+    await text(page, 2); await steady();
+    const back = await inPanelView(page);
+    expect.soft(back.whole, `Pause in view after 200% → 400% → 200% (${back.at})`).toBe(true);
+    await text(page, 4); await steady();
+    await writeFile(path.join(data, 'retention-state.json'), JSON.stringify({ state: 'running', progress: { stage: 'Transferring encoded objects from the authored archive while verifying each stored copy against its receipt', unit: 'bytes', completed: '50', total: '100' }, wireBytesThisSession: '300' }));
+    await expect(panel.getByText(/50 of 100 bytes/)).toBeVisible({ timeout: 10_000 }); await steady();
+    await text(page, 2); await steady();
+    await expect(pause).toBeFocused();
+    const grown = await inPanelView(page);
+    expect.soft(grown.whole, `Pause in view after its heading grew at 400% and the text went back to 200% (${grown.at})`).toBe(true);
     // A layout change inside the panel (the window shrinking) keeps it in view too.
     await text(page, 2); await pause.focus(); await settle(page);
     await size(app, 600, 400); await expect.poll(() => page.evaluate(() => innerHeight)).toBe(400); await settle(page); await page.waitForTimeout(150); await settle(page);
