@@ -614,7 +614,7 @@ public sealed class CommunityListfile : IFileNameSource, ICommunityListfileContr
     private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken caller, CancellationToken token)
     {
         try { return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); }
-        catch (HttpRequestException error) when (error.HttpRequestError is HttpRequestError.NameResolutionError or HttpRequestError.ConnectionError) { throw Offline(); }
+        catch (HttpRequestException error) when (HttpFailures.Unreachable(error)) { throw Offline(); }
         catch (HttpRequestException) { throw Failed("The connection to GitHub failed."); }
         // A connect timeout surfaces as a cancellation wrapping a TimeoutException; the caller didn't cancel.
         catch (OperationCanceledException error) when (!caller.IsCancellationRequested && error.InnerException is TimeoutException) { throw Offline(); }

@@ -240,7 +240,7 @@ public sealed class WoWDBDefsDefinitions
         using (connections?.Grant())
         {
             try { response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); }
-            catch (HttpRequestException error) when (Unreachable(error)) { throw Offline(tableName); }
+            catch (HttpRequestException error) when (HttpFailures.Unreachable(error)) { throw Offline(tableName); }
             catch (HttpRequestException) { throw Failed(tableName, "The connection to GitHub failed."); }
             // A connect timeout surfaces as a cancellation wrapping a TimeoutException; the caller didn't cancel.
             catch (OperationCanceledException error) when (!token.IsCancellationRequested && error.InnerException is TimeoutException)
@@ -278,22 +278,6 @@ public sealed class WoWDBDefsDefinitions
             catch (HttpRequestException) { throw Failed(tableName, "The download from GitHub was interrupted."); }
             catch (IOException) { throw Failed(tableName, "The download from GitHub was interrupted."); }
         }
-    }
-
-    /// <summary>
-    /// No answer came back: the name didn't resolve, no connection opened, or the connection, also one to a proxy, was
-    /// closed or reset before any response (#125). The pool reports a reset as an unknown error over a socket error.
-    /// A certificate failure or an answer VibeMiner can't read is a failure, not offline.
-    /// </summary>
-    private static bool Unreachable(HttpRequestException error) =>
-        error.HttpRequestError is HttpRequestError.NameResolutionError or HttpRequestError.ConnectionError or HttpRequestError.ResponseEnded
-        || HasSocketError(error.InnerException);
-
-    private static bool HasSocketError(Exception? error)
-    {
-        for (var depth = 0; error is not null && depth < 8; error = error.InnerException, depth++)
-            if (error is System.Net.Sockets.SocketException) return true;
-        return false;
     }
 
     private string RecordPath(string tableId) => Path.Combine(folder, tableId + ".json");

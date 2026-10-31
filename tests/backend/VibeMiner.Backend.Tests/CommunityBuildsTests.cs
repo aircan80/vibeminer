@@ -115,6 +115,20 @@ public sealed class CommunityBuildsTests
         Assert.Equal("COMMUNITY_BUILDS_INVALID", Assert.Throws<DiscoveryException>(() => WagoBuildList.Parse("{"u8.ToArray())).Code);
     }
 
+    [Theory]
+    [InlineData("reset", "COMMUNITY_BUILDS_OFFLINE")]
+    [InlineData("ended", "COMMUNITY_BUILDS_OFFLINE")]
+    [InlineData("tls-reset", "COMMUNITY_BUILDS_OFFLINE")]
+    [InlineData("certificate", "COMMUNITY_BUILDS_FAILED")]
+    [InlineData("garbled", "COMMUNITY_BUILDS_FAILED")]
+    public async Task A_connection_closed_before_any_answer_is_offline(string shape, string code)
+    {
+        // #127: a proxy's reset surfaced as an unknown error over a socket error and read as a failed fetch.
+        var wago = new WagoTools("{}") { Failure = ConnectionFailures.Of(shape) };
+        var failure = await Assert.ThrowsAsync<DiscoveryException>(() => new WagoBuildList(new HttpClient(wago)).FetchAsync(CancellationToken.None));
+        Assert.Equal(code, failure.Code); Assert.True(failure.Retryable);
+    }
+
     [Fact]
     public async Task FetchNamesVibeMinerAndRefusesRedirectsErrorsAndOversizedAnswers()
     {

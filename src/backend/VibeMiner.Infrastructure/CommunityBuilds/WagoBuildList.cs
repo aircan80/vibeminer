@@ -69,8 +69,7 @@ public sealed class WagoBuildList : ICommunityBuildFetcher
             if (response.Content.Headers.ContentLength is { } declared && declared != bytes.Length)
                 throw Failed("The answer from wago.tools ended early.");
         }
-        catch (HttpRequestException error) when (error.HttpRequestError is HttpRequestError.NameResolutionError or HttpRequestError.ConnectionError)
-        { throw Offline(); }
+        catch (HttpRequestException error) when (HttpFailures.Unreachable(error)) { throw Offline(); }
         catch (HttpRequestException) { throw Failed("The connection to wago.tools failed."); }
         catch (IOException) { throw Failed("The answer from wago.tools was interrupted."); }
         catch (OperationCanceledException error) when (!token.IsCancellationRequested)

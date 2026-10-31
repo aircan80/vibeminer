@@ -314,6 +314,23 @@ public sealed class CommunityListfileTests
         Assert.Equal("authored/one.txt", (await listfile.LookupAsync([1], default)).Names[1]);
     }
 
+    [Theory]
+    [InlineData("reset", "LISTFILE_FETCH_OFFLINE")]
+    [InlineData("ended", "LISTFILE_FETCH_OFFLINE")]
+    [InlineData("tls-reset", "LISTFILE_FETCH_OFFLINE")]
+    [InlineData("certificate", "LISTFILE_FETCH_FAILED")]
+    [InlineData("garbled", "LISTFILE_FETCH_FAILED")]
+    public async Task A_connection_closed_before_any_answer_is_offline(string shape, string code)
+    {
+        // #127: a proxy's reset surfaced as an unknown error over a socket error and read as a failed fetch.
+        using var directory = new TempDirectory(); var github = new GitHub { Failure = ConnectionFailures.Of(shape) };
+        await using var listfile = Listfile(directory.Path, github);
+        await listfile.EnsureAsync(true, default);
+        var problem = (await listfile.StatusAsync(default)).Problem!;
+        Assert.Equal(code, problem.Code); Assert.True(problem.Retryable);
+        Assert.Single(github.Requests);
+    }
+
     [Fact]
     public async Task Bytes_that_dont_match_GitHubs_digest_are_never_read()
     {
