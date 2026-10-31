@@ -45,18 +45,23 @@ const measure = (page: Page, bar: string) => page.evaluate(([sel, rule]): Fit =>
   return { problems, cut };
 }, [bar, rules[bar]] as const);
 
+type Layout = [width: number, height: number, scale: number];
+// Sets the window and text size, then waits for the bar to settle: titles and tab stops follow the layout a frame later.
+async function settle(page: Page, app: ElectronApplication, bar: string, name: string, [width, height, scale]: Layout) {
+  await size(app, width, height);
+  await expect.poll(() => page.evaluate(() => innerWidth)).toBe(width);
+  await text(page, scale);
+  await expect.poll(async () => (await measure(page, bar)).problems, name).toEqual([]);
+}
+
 async function check(page: Page, app: ElectronApplication, bar: string, label: string) {
   const out = path.join(root, 'artifacts/status-bar-fit'); await mkdir(out, { recursive: true });
   await expect(page.locator(bar)).toBeVisible();
   const cuts: string[] = [];
   for (const [width, height] of [[600, 480], [1280, 800], [1440, 1100]]) {
-    await size(app, width, height);
-    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(width);
     for (const scale of [1, 2]) {
-      await text(page, scale);
       const name = `${label} ${width}x${height} ${scale * 100}%`;
-      // Titles and tab stops follow the layout a frame later.
-      await expect.poll(async () => (await measure(page, bar)).problems, name).toEqual([]);
+      await settle(page, app, bar, name, [width, height, scale]);
       cuts.push(...(await measure(page, bar)).cut.map(c => `${name}: ${c}`));
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${name} page scrolls sideways`).toBeLessThanOrEqual(0);
       await page.locator(bar).screenshot({ path: path.join(out, `${name.replace(/[ %]+/g, '-')}.png`) });
@@ -66,13 +71,26 @@ async function check(page: Page, app: ElectronApplication, bar: string, label: s
   return cuts;
 }
 
-// Tab reaches each cut fact, and focus shows its whole text on a line above the bar, inside the window.
-async function readByKeyboard(page: Page, bar: string, label: string) {
+// Runs each animation frame the page asks for ms late (0 restores them), so a layout the hook hasn't caught up with yet lasts.
+const slowFrames = (page: Page, ms: number) => page.evaluate(delay => {
+  const w = window as typeof window & { realFrame?: typeof requestAnimationFrame; realCancel?: typeof cancelAnimationFrame };
+  w.realFrame ??= requestAnimationFrame.bind(window); w.realCancel ??= cancelAnimationFrame.bind(window);
+  if (!delay) { window.requestAnimationFrame = w.realFrame; window.cancelAnimationFrame = w.realCancel; return; }
+  const frame = w.realFrame;
+  window.requestAnimationFrame = callback => window.setTimeout(() => frame(callback), delay);
+  window.cancelAnimationFrame = id => window.clearTimeout(id);
+}, ms);
+
+// Tab reaches each cut fact, and focus shows its whole text on a line above the bar, inside the window. The tab stops are counted
+// only once the bar has settled at this layout: before that they are the last layout's, and a fact gone since is still one (#143).
+async function readByKeyboard(page: Page, app: ElectronApplication, bar: string, label: string, layout: Layout) {
+  await settle(page, app, bar, label, layout);
   const facts = page.locator(`${bar} [data-cut-title][tabindex="0"]`);
-  await expect.poll(() => facts.count(), `${label}: something is cut here`).toBeGreaterThan(0);
   const count = await facts.count();
+  expect(count, `${label}: something is cut here`).toBeGreaterThan(0);
   for (let i = 0; i < count; i++) {
     const fact = facts.nth(i), whole = await fact.getAttribute('title');
+    await expect(fact, `${label}: "${whole}" shows`).toBeVisible();
     await fact.focus();
     const full = page.locator('.vm-status-full');
     await expect(full, `${label}: focus shows "${whole}"`).toHaveText(whole!);
@@ -80,6 +98,7 @@ async function readByKeyboard(page: Page, bar: string, label: string) {
     expect(fit, `${label}: "${whole}" in the window, above the bar`).toEqual({ inside: true, above: true });
   }
   await page.keyboard.press('Shift+Tab');
+  await expect(page.locator(`${bar} :focus`), `${label}: Shift+Tab leaves the bar`).toHaveCount(0);
   await expect(page.locator('.vm-status-full')).toHaveCount(0);
 }
 
@@ -102,7 +121,7 @@ test('status bar facts stay inside the window, give way in order, and a cut fact
     await page.evaluate(() => { const s = document.createElement('style'); s.id = 'narrow-bar'; s.textContent = '.discovery-screen .dv-statusbar{padding-right:50%}'; document.head.append(s); });
     await expect.poll(async () => (await measure(page, '.dv-statusbar')).problems, 'forced busy cut').toEqual([]);
     expect((await measure(page, '.dv-statusbar')).cut, 'the busy line is cut').toContain('Checking 2 products · 0 of 2 done…');
-    await readByKeyboard(page, '.dv-statusbar', 'Discovery busy, forced cut');
+    await readByKeyboard(page, app, '.dv-statusbar', 'Discovery busy, forced cut', [600, 480, 2]);
     // The busy line ending while it has focus takes its full-text line with it.
     await discovery.locator('.dv-busy').focus();
     await expect(page.locator('.vm-status-full')).toHaveText('Checking 2 products · 0 of 2 done…');
@@ -130,7 +149,7 @@ test('status bar facts stay inside the window, give way in order, and a cut fact
     await expect(status.locator(':scope>.dh-status-end')).toHaveAttribute('title', 'File list · ROOT and install · needs attention');
     await expect(status.locator(':scope>span').first()).toHaveAttribute('title', 'wow 12.1.5.70448 · US · enUS');
     await expect(status.locator(':scope>.dh-fixture')).not.toHaveAttribute('title');
-    await readByKeyboard(page, '.dh-statusbar', 'Files 600x480 200%');
+    await readByKeyboard(page, app, '.dh-statusbar', 'Files 600x480 200%', [600, 480, 2]);
     await text(page, 1); await size(app, 1280, 800);
 
     await page.locator('.dh-toolbar').getByRole('button', { name: 'Settings' }).click();
@@ -142,8 +161,14 @@ test('status bar facts stay inside the window, give way in order, and a cut fact
     await page.locator('.dh-toolbar').getByRole('button', { name: /Choose build/ }).click();
     await expect(discovery.locator('.dv-status-end')).toHaveText('File list · ROOT and install · needs attention');
     await check(page, app, '.dv-statusbar', 'Discovery with activity');
-    await size(app, 600, 480); await text(page, 2);
-    await readByKeyboard(page, '.dv-statusbar', 'Discovery 600x480 200%');
+    // #143: at 1280x800 and 200% the summary is a cut tab stop, and at 600x480 it is squeezed to nothing. The hook drops that tab
+    // stop a frame after the resize, so a step that counted tab stops straight away focused the hidden summary instead of the facts
+    // that are cut there. Slow frames keep that stale layout up long enough to be counted on every run.
+    await settle(page, app, '.dv-statusbar', 'Discovery 1280x800 200%', [1280, 800, 2]);
+    await expect(discovery.locator(':scope>.dv-status-end')).toHaveAttribute('tabindex', '0');
+    await slowFrames(page, 500);
+    await readByKeyboard(page, app, '.dv-statusbar', 'Discovery 600x480 200%', [600, 480, 2]);
+    await slowFrames(page, 0);
     await text(page, 1); await size(app, 1280, 800);
   } finally { await session.close(); }
 });
