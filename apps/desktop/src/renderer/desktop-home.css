@@ -379,6 +379,19 @@
    in the wider DejaVu Sans (#130). */
 .desktop-home.dh-compact .dh-fcols{grid-template-columns:minmax(5.133333rem,1fr) minmax(6.533333rem,1.6fr) minmax(max(4.2rem,9.5rch),.7fr) minmax(5.133333rem,1fr) minmax(4.666667rem,.9fr)}
 .desktop-home.dh-compact .dh-fcols>:nth-child(5){display:none}
+/* Narrow (#135): below 28rem the five compact columns don't fit, so each row and the header take two lines: FileDataID and
+   its name, then Memberships, Encoded size and Local. Memberships and Encoded size keep their headers whole in rch, as in the
+   compact layout; Local takes the rest, and values wrap at their spaces rather than being cut. */
+.desktop-home.dh-narrow .dh-list-scroll:has(>.dh-fcols){--thead:3.2rem}
+.desktop-home.dh-narrow .dh-fcols{grid-template-columns:minmax(9.5rch,1fr) minmax(9.5rch,1fr) minmax(0,1fr);grid-template-areas:"id name name" "mem size local";row-gap:.186667rem;align-content:center}
+.desktop-home.dh-narrow .dh-fcols>:nth-child(1){grid-area:id}
+.desktop-home.dh-narrow .dh-fcols>:nth-child(2){grid-area:name}
+.desktop-home.dh-narrow .dh-fcols>:nth-child(3){grid-area:mem}
+.desktop-home.dh-narrow .dh-fcols>:nth-child(4){grid-area:size}
+.desktop-home.dh-narrow .dh-fcols>:nth-child(6){grid-area:local}
+.desktop-home.dh-narrow .dh-files [role="option"].dh-fcols{white-space:normal;align-items:baseline;padding-top:.186667rem;padding-bottom:.186667rem}
+.desktop-home.dh-narrow .dh-files [role="option"].dh-fcols>span{overflow:visible;overflow-wrap:anywhere}
+.desktop-home.dh-narrow .dh-files [role="option"].dh-fcols>span.dh-fname-cell{padding:0}
 .desktop-home.dh-compact .dh-files-filters{flex-wrap:wrap}
 .desktop-home.dh-compact .dh-list-scroll{overflow-x:hidden}
 /* At 200% on small windows the search stays visible and the other filters collapse behind Filters, a nonmodal disclosure. */
