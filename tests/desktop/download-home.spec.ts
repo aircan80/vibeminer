@@ -1,7 +1,7 @@
 import { test, expect, type Page, type ElectronApplication } from '@playwright/test';
 import { mkdir, writeFile, unlink, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { launch, root, widerSystemFont } from './helpers';
+import { launch, root } from './helpers';
 import { activityTask, closeActivity } from './activity-helpers';
 
 async function capture(page: Page, app: ElectronApplication, state: string) {
@@ -259,13 +259,12 @@ test('the Object column shows seven-digit ordinals whole at every size and text 
     await writeFile(path.join(session.data, 'measured-scope'), 'measured');
     await expect(page.getByText('Object 2879941', { exact: true })).toBeVisible({ timeout: 40_000 });
     await expect(page.getByRole('heading', { name: 'Encoded object 2879941' })).toBeVisible();
-    // Then again in a wider system font, as on Ubuntu (DejaVu Sans), where a 7rem Object cut every ordinal at 1280×800 (#130).
-    for (const font of ['system', 'wider'] as const) for (const [width, height] of [[1280, 800], [1440, 1100], [600, 480]] as const) for (const scale of [1, 2]) {
-      if (font === 'wider' && width === 1280 && scale === 1) await widerSystemFont(page);
+    // e2e renders in DejaVu Sans, as on Ubuntu (#138), where a 7rem Object cut every ordinal at 1280×800 (#130).
+    for (const [width, height] of [[1280, 800], [1440, 1100], [600, 480]] as const) for (const scale of [1, 2]) {
       await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height), { width, height });
       await page.evaluate(px => { document.documentElement.style.fontSize = `${px}px`; }, 15 * scale);
       await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
-      const label = `${width}×${height} at ${scale * 100}% in the ${font} font`;
+      const label = `${width}×${height} at ${scale * 100}%`;
       const cells = await page.locator('.dh-files:not([hidden]) .dh-list-scroll [role="option"] .dh-fid').evaluateAll(cells => cells.map(cell => {
         const range = document.createRange(); range.selectNodeContents(cell);
         const text = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
@@ -293,7 +292,7 @@ test('the Object column shows seven-digit ordinals whole at every size and text 
       if (width !== 600) {
         expect(await page.locator('.dh-files:not([hidden]) .dh-fthead > span').evaluateAll(spans => spans.filter(span => span.scrollWidth > span.clientWidth + 1).map(span => span.textContent)), `${label}: cut column headers`).toEqual([]);
       }
-      await page.screenshot({ path: path.join(root, 'artifacts/size-first', `download-objects-long-ordinals-${width}x${height}-${scale * 100}${font === 'wider' ? '-wider' : ''}.png`) });
+      await page.screenshot({ path: path.join(root, 'artifacts/size-first', `download-objects-long-ordinals-${width}x${height}-${scale * 100}.png`) });
     }
   } finally { await session.close(); }
 });
@@ -355,8 +354,8 @@ test('the Files pane head keeps the list and inspector headers aligned and the t
 });
 // #135: at 600×480 and 200% text All files had no narrow layout, so its compact columns ran 927px wide (945px in DejaVu
 // Sans) in a 570px list that hides sideways overflow; Memberships was cut and Encoded size and Local were out of reach.
-// Each column now shows its header and value whole, on a row's first line or its second, in either font.
-test('All files shows every column header and value whole at 600×480 and 200% text in either font (#135)', async () => {
+// Each column now shows its header and value whole, on a row's first line or its second.
+test('All files shows every column header and value whole at 600×480 and 200% text (#135)', async () => {
   test.setTimeout(90_000);
   const session = await launch(true, false, false, false, false, false, false, false, false, false, false, true);
   try {
@@ -375,38 +374,35 @@ test('All files shows every column header and value whole at 600×480 and 200% t
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(600, 480));
     await page.evaluate(() => { document.documentElement.style.fontSize = '30px'; });
     await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-narrow'));
-    for (const font of ['system', 'wider'] as const) {
-      if (font === 'wider') await widerSystemFont(page);
-      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
-      const label = `600×480 at 200% in the ${font} font`;
-      const g = await page.evaluate(() => {
-        const scroll = document.querySelector<HTMLElement>('.dh-files:not([hidden]) .dh-list-scroll')!, edge = scroll.getBoundingClientRect();
-        const right = edge.left + scroll.clientWidth;
-        // A cell is cut when its text is wider than its box, its box runs past the list's visible width, or it clips.
-        const cut = (cell: HTMLElement) => {
-          const range = document.createRange(); range.selectNodeContents(cell);
-          const text = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
-          return text.width > box.width + .5 || box.right > right + .5 || text.right > right + .5 || cell.scrollWidth > cell.clientWidth + 1;
-        };
-        const shown = (row: Element) => [...row.children].filter((c): c is HTMLElement => c instanceof HTMLElement && c.getClientRects().length > 0);
-        const head = scroll.querySelector<HTMLElement>('.dh-fthead')!, rows = [...scroll.querySelectorAll<HTMLElement>('[role="option"]')];
-        return {
-          heads: shown(head).map(c => c.textContent ?? ''), cutHeads: shown(head).filter(cut).map(c => c.textContent),
-          cells: rows.map(r => shown(r).length), cutCells: rows.flatMap(r => shown(r).filter(cut).map(c => `${r.querySelector('.dh-fid')?.textContent}: ${c.textContent}`)),
-          sideways: scroll.scrollWidth - scroll.clientWidth, grid: Math.round(head.scrollWidth), list: Math.round(scroll.clientWidth),
-        };
-      });
-      // The shell scrolls at this size; bring the list up for the capture.
-      await page.locator('.dh-files:not([hidden]) .dh-list-scroll').evaluate(scroll => scroll.scrollIntoView({ block: 'start' }));
-      await page.screenshot({ path: path.join(root, 'artifacts/size-first', `files-all-600x480-200${font === 'wider' ? '-wider' : ''}.png`) });
-      // As in the compact layout, Locales is left to the inspector; every other column keeps its header and its value.
-      expect(g.heads, label).toEqual(['FileDataID', 'Name', 'Memberships', 'Encoded size', 'Local']);
-      expect(g.cells.length, label).toBeGreaterThan(0);
-      expect(g.cells.filter(n => n !== g.heads.length), `${label}: rows missing a column`).toEqual([]);
-      expect(g.cutHeads, `${label}: cut column headers (grid ${g.grid}px in a ${g.list}px list)`).toEqual([]);
-      expect(g.cutCells, `${label}: cut values`).toEqual([]);
-      expect(g.sideways, `${label}: the list overflows sideways`).toBeLessThanOrEqual(1);
-    }
+    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+    const label = '600×480 at 200%';
+    const g = await page.evaluate(() => {
+      const scroll = document.querySelector<HTMLElement>('.dh-files:not([hidden]) .dh-list-scroll')!, edge = scroll.getBoundingClientRect();
+      const right = edge.left + scroll.clientWidth;
+      // A cell is cut when its text is wider than its box, its box runs past the list's visible width, or it clips.
+      const cut = (cell: HTMLElement) => {
+        const range = document.createRange(); range.selectNodeContents(cell);
+        const text = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
+        return text.width > box.width + .5 || box.right > right + .5 || text.right > right + .5 || cell.scrollWidth > cell.clientWidth + 1;
+      };
+      const shown = (row: Element) => [...row.children].filter((c): c is HTMLElement => c instanceof HTMLElement && c.getClientRects().length > 0);
+      const head = scroll.querySelector<HTMLElement>('.dh-fthead')!, rows = [...scroll.querySelectorAll<HTMLElement>('[role="option"]')];
+      return {
+        heads: shown(head).map(c => c.textContent ?? ''), cutHeads: shown(head).filter(cut).map(c => c.textContent),
+        cells: rows.map(r => shown(r).length), cutCells: rows.flatMap(r => shown(r).filter(cut).map(c => `${r.querySelector('.dh-fid')?.textContent}: ${c.textContent}`)),
+        sideways: scroll.scrollWidth - scroll.clientWidth, grid: Math.round(head.scrollWidth), list: Math.round(scroll.clientWidth),
+      };
+    });
+    // The shell scrolls at this size; bring the list up for the capture.
+    await page.locator('.dh-files:not([hidden]) .dh-list-scroll').evaluate(scroll => scroll.scrollIntoView({ block: 'start' }));
+    await page.screenshot({ path: path.join(root, 'artifacts/size-first', 'files-all-600x480-200.png') });
+    // As in the compact layout, Locales is left to the inspector; every other column keeps its header and its value.
+    expect(g.heads, label).toEqual(['FileDataID', 'Name', 'Memberships', 'Encoded size', 'Local']);
+    expect(g.cells.length, label).toBeGreaterThan(0);
+    expect(g.cells.filter(n => n !== g.heads.length), `${label}: rows missing a column`).toEqual([]);
+    expect(g.cutHeads, `${label}: cut column headers (grid ${g.grid}px in a ${g.list}px list)`).toEqual([]);
+    expect(g.cutCells, `${label}: cut values`).toEqual([]);
+    expect(g.sideways, `${label}: the list overflows sideways`).toBeLessThanOrEqual(1);
   } finally { await session.close(); }
 });
 test('focus on View task in a Check note moves to Check when the Check ends, in its own and in another build\'s note (#38, D093)', async () => {

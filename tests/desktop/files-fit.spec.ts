@@ -1,7 +1,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { launch, root, size, text, widerSystemFont } from './helpers';
+import { launch, root, size, text } from './helpers';
 
 // D071 (#35): every way into Files × every file list state × both reference sizes × 100% and 200% text. Each combination
 // keeps a whole row in view under the notes, nothing in the pane overflows, and the footer with its page controls sits
@@ -78,7 +78,7 @@ async function reach(page: Page, data: string, entry: Entry, state: State) {
   if (state === 'failed' || state === 'full' || state === 'unsupported') await expect(page.getByRole('note', { name: 'File list not prepared' })).toBeVisible();
 }
 
-async function fits(page: Page, app: ElectronApplication, entry: Entry, state: State, width: number, height: number, scale: number, variant: '' | 'two-line header' | 'wider font' = '') {
+async function fits(page: Page, app: ElectronApplication, entry: Entry, state: State, width: number, height: number, scale: number, variant: '' | 'two-line header' = '') {
   const label = `${entry} · ${state} · ${width}×${height} · ${scale * 100}%${variant ? ` · ${variant}` : ''}`;
   await size(app, width, height); await text(page, scale);
   // The compact layout follows the text size on its next frame; measure it, not the frame before.
@@ -159,9 +159,6 @@ for (const entry of entries) for (const state of states) {
       expect(await page.evaluate(() => { const f = [...document.querySelectorAll('.dh-idfields>.dh-idf')].filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().top); return f.at(-1)! - f[0]; }), 'Download mode on a second header line').toBeGreaterThan(10);
       await fits(page, app, entry, state, 1280, 800, 2, 'two-line header');
       await page.evaluate(() => document.getElementById('two-line-header')!.remove());
-      // #130: and in a wider system font, where the compact object columns left Local status too narrow and its rows wrapped.
-      await widerSystemFont(page);
-      for (const [width, height] of sizes) for (const scale of scales) await fits(page, app, entry, state, width, height, scale, 'wider font');
       if (state === 'full' || state === 'unsupported') {
         // In a narrower window the failed note's code goes first; its message and next step stay.
         await size(app, 900, 800); await text(page, 2); await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-compact'));
