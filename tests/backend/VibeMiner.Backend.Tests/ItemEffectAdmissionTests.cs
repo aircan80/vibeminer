@@ -268,11 +268,17 @@ public sealed class ItemEffectAdmissionTests
         Assert.Null(sink.Header); Assert.Empty(sink.Rows);
         // The adapter opt-in preserves even canonical-negative bits as raw uint32, tested above.
         // A separate strict all-fit source proves the unchanged candidate signed16 decoding path.
-        var payload = Table(h.Definition, Effect, "4CA77678", false, true, null);
+        var payload = Table(h.Definition, Effect, "4CA77678", false, true, null, chargesPalette: [uint.MaxValue, 0xfffffffe, 1, 2, 3]);
         input.SetLength(0); await input.WriteAsync(payload.Decoded); input.Position = 0; sink = new();
         await Wdc5TableReader.ReadAsync(input, h.Definition.Document, Version, new(), sink);
-        Assert.Equal(new[] { "-1", "-1", "1", "2", "3", "-1" }, sink.Rows.Select(r => r.Values[3]));
+        Assert.Equal(new[] { "-1", "-2", "1", "2", "3", "-1" }, sink.Rows.Select(r => r.Values[3]));
         Assert.Null(sink.Header!.Columns[3].Interpretation); Assert.Null(sink.Header.Columns[3].Narrowing);
+        // D117 (#105): 0xFFFFFFFF and 0x0000FFFF both fit signed16 but would both read -1, so that column keeps its physical values.
+        payload = Table(h.Definition, Effect, "4CA77678", false, true, null);
+        input.SetLength(0); await input.WriteAsync(payload.Decoded); input.Position = 0; sink = new();
+        await Wdc5TableReader.ReadAsync(input, h.Definition.Document, Version, new(), sink);
+        Assert.Equal(new[] { "4294967295", "65535", "1", "2", "3", "4294967295" }, sink.Rows.Select(r => r.Values[3]));
+        Assert.Equal("raw-physical-integer-v1", sink.Header!.Columns[3].Interpretation!.Policy); Assert.Null(sink.Header.Columns[3].Narrowing);
     }
 
     [Fact]

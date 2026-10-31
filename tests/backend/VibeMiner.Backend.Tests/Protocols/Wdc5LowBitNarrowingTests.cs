@@ -158,6 +158,45 @@ public sealed class Wdc5LowBitNarrowingTests
         Assert.Null(TableDataStore.ProjectColumn(column,Fixture(kind,32,values,schema).Definition).Reference);
     }
 
+    // D117 (#105): values that all fit a signed width can still collide. 0x0000FFFF and its sign extension 0xFFFFFFFF
+    // both read -1 as int16, so the column keeps its physical values the same way.
+    [Theory]
+    [InlineData(3,"<16>",new ulong[]{0xffff,0xffffffff})]
+    [InlineData(3,"<16>",new ulong[]{0xffffffff,0xffff})]
+    [InlineData(2,"<16>",new ulong[]{0xffff,0xffffffff})]
+    [InlineData(2,"<16>",new ulong[]{0xffffffff,0xffff})]
+    [InlineData(3,"<8>",new ulong[]{0xff,0xffffffff})]
+    [InlineData(3,"<16>",new ulong[]{0x8000,0xffff8000})]
+    public async Task Fitting_signed_values_that_read_the_same_keep_the_column_raw(uint kind,string schema,ulong[] values)
+    {
+        var f=Fixture(kind,32,values,schema);var sink=new Sink();await Read(f,sink);
+        Assert.Equal(values.Select(v=>v.ToString(System.Globalization.CultureInfo.InvariantCulture)),sink.Rows.Select(r=>r.Values[1]));
+        var column=sink.Header!.Columns[1];Assert.Null(column.Narrowing);
+        Assert.Equal("raw-physical-integer-v1",column.Interpretation!.Policy);Assert.Contains("same number",column.Interpretation.Warning);
+        Assert.Null(TableDataStore.ProjectColumn(column,f.Definition).Reference);
+    }
+
+    [Theory]
+    [InlineData("<16>",new ulong[]{0xffff,0xfffffffe},"-1,-2")]
+    [InlineData("<16>",new ulong[]{0x7fff,0xffff8000},"32767,-32768")]
+    [InlineData("<u16>",new ulong[]{0xffff,5},"65535,5")]
+    public async Task Fitting_values_that_stay_distinct_are_unchanged_and_unmarked(string schema,ulong[] values,string expected)
+    {
+        var sink=new Sink();await Read(Fixture(3,32,values,schema),sink);
+        Assert.Equal(expected.Split(','),sink.Rows.Select(r=>r.Values[1]));
+        Assert.Null(sink.Header!.Columns[1].Narrowing);Assert.Null(sink.Header.Columns[1].Interpretation);
+    }
+
+    [Fact]
+    public async Task A_rule_that_narrows_when_constant_keeps_colliding_fitting_values_raw()
+    {
+        var f=Fixture(3,32,[0xffff,0xffffffff],"<16>");var limits=Evidence(f);
+        limits=limits with{VerifiedRawIntegerRules=[limits.VerifiedRawIntegerRules![0] with{NarrowsWhenConstant=true}]};
+        var sink=new Sink();await Read(f,sink,limits);
+        Assert.Equal(["65535","4294967295"],sink.Rows.Select(r=>r.Values[1]));
+        Assert.NotNull(sink.Header!.Columns[1].Interpretation);Assert.Null(sink.Header.Columns[1].Narrowing);
+    }
+
     [Theory]
     [InlineData(new ulong[]{5,0xffff0005},"5,4294901765")]
     [InlineData(new ulong[]{0xffff0005,5},"4294901765,5")]

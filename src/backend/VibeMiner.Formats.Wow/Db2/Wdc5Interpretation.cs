@@ -58,11 +58,13 @@ public static partial class Wdc5TableReader
             else foreach(var value in column.Palette)if(!Observe(value))break;
             // D109 (#101): one pattern narrows only when no two different stored values keep the same low bits; 0x00000005
             // and 0xFFFF0005 would both read 5. Such a column keeps its physical values and the table still opens.
-            var collides=patterns.Count==1&&LowBitsCollide(column,width,token);
+            // D117 (#105): a signed column whose values all fit is checked too, since 0x0000FFFF and 0xFFFFFFFF both read
+            // -1 as int16. An unsigned column whose values all fit has no upper bits, so it can't collide.
+            var collides=(patterns.Count==1||patterns.Count==0&&!unsigned)&&LowBitsCollide(column,width,token);
             if(yielding)
             {
                 // Two or more patterns or colliding low bits keep the whole column raw. One pattern narrows it; none means
-                // every value fits and it reads at its width.
+                // every value fits and it reads at its width, unless two fitting values collide.
                 if(patterns.Count>1||collides)continue;
                 column.VerifiedRawEvidence=false;column.KeepsLowBits=patterns.Count==1;any=true;continue;
             }
