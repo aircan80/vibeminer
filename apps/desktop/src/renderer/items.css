@@ -162,7 +162,7 @@
 .desktop-home .iv .effect-receipt{margin:.373333rem 0;font-size:var(--fs-s)}
 .desktop-home .iv .effect-receipt h5{margin:0 0 .14rem;font-size:var(--fs-s);font-weight:600;color:var(--ink)}
 .desktop-home .iv .effect-receipt p{margin:0 0 .14rem}
-/* Text inside the sources disclosure matches its 11px headings (browser-base.css sets .item-property-group p for Creatures). */
+/* Text inside the sources disclosure matches its 11px headings. */
 .desktop-home .iv .item-effects .effect-phase-details p{font-size:var(--fs-s)}
 .desktop-home .iv .effect-receipt pre{max-block-size:12rem;overflow:auto;font-size:var(--fs-s);white-space:pre-wrap;overflow-wrap:anywhere}
 .desktop-home .iv-effect{border:1px solid var(--line);border-radius:6px;padding:.466667rem .653333rem;margin-top:.466667rem;background:var(--paper)}

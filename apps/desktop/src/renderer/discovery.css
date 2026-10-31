@@ -13,7 +13,6 @@
 .discovery-screen .dv-brand{display:flex;align-items:center;gap:.56rem;font-weight:700;font-size:1.133333rem;letter-spacing:-.01em;white-space:nowrap}
 .discovery-screen .dv-brand img{width:1.866667rem;height:1.866667rem;display:block;flex:none}
 .discovery-screen .dv-word span{color:var(--teal)}
-.discovery-screen .dv-divider{width:1px;align-self:stretch;background:var(--line);margin:.14rem 0}
 .discovery-screen .dv-field{display:flex;align-items:center;gap:.466667rem;min-width:0}
 .discovery-screen .dv-field>label{font-size:var(--dv-m);color:var(--dv-muted);white-space:nowrap}
 .discovery-screen .dv-control{height:2rem;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 .6rem;min-width:0;font-size:var(--dv-b)}
@@ -152,7 +151,7 @@
 
 /* Enlarged text or a narrow window, narrower than 65.333333rem (980px at 100%). App.tsx sets .dv-compact from the window width and the current root text size, so this follows text enlargement immediately. The window still never scrolls. */
 .discovery-screen .dv-compact .dv-toolbar{gap:.56rem}
-.discovery-screen .dv-compact .dv-word,.discovery-screen .dv-compact .dv-divider,.discovery-screen .dv-compact .dv-fixture span{display:none}
+.discovery-screen .dv-compact .dv-word,.discovery-screen .dv-compact .dv-fixture span{display:none}
 .discovery-screen .dv-compact .dv-toolbar .dv-field>label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .discovery-screen .dv-compact .dv-toolbar .dv-field{flex:1 1 7.466667rem}
 .discovery-screen .dv-compact .dv-chip-long{display:none}

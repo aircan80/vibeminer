@@ -63,7 +63,6 @@
 .desktop-home .dh-segmented button+button{border-left:1px solid var(--line)}
 .desktop-home .dh-segmented button[aria-pressed="true"]{background:var(--mint);color:var(--teal);font-weight:600}
 .desktop-home .dh-pill{display:inline-block;padding:0 .373333rem;border-radius:4px;border:1px solid var(--pill);background:var(--paper);color:var(--teal);font-size:var(--fs-s);font-weight:600;line-height:1.5;white-space:nowrap}
-.desktop-home .dh-pill.dh-gold{border-color:var(--gold-line);background:var(--gold-bg);color:var(--gold-ink)}
 .desktop-home .dh-pill.dh-community{border-color:#c9cfdc;background:#f3f4f8;color:#4a5670;margin-left:.4rem}
 .desktop-home .dh-notice{margin:.56rem .802667rem 0;padding:.513333rem .7rem;border-radius:6px;border:1px solid var(--warn-line);background:var(--warn-bg);font-size:var(--fs-m);display:flex;gap:.746667rem;align-items:flex-start}
 .desktop-home .dh-notice.dh-error{border-color:var(--err-line);background:var(--err-bg)}
@@ -248,7 +247,6 @@
 .desktop-home .dh-records-grid th:first-child{z-index:2;background:var(--toolbar)}
 .desktop-home .dh-records-grid tbody tr:hover td:first-child{background:var(--hover)}
 .desktop-home .dh-records-grid tbody tr[aria-selected="true"] td:first-child{background:var(--mint);box-shadow:inset 3px 0 0 var(--teal),inset -1px 0 0 var(--line-soft)}
-.desktop-home .dh-records-grid td.dh-txt{white-space:nowrap}
 .desktop-home .dh-records-grid .dh-unv,.desktop-home .dh-unv{color:var(--gold-ink);font-weight:700;margin-left:.093333rem}
 .desktop-home .dh-records-grid.dh-struct td{height:2.053333rem}
 .desktop-home .dh-records-grid.dh-struct td:first-child{min-width:2.053333rem}
@@ -506,7 +504,6 @@
 .desktop-home .dh-records-grid th button.dh-rowsel,.desktop-home .dh-records-grid td button.dh-rowsel{color:var(--ink);font-size:inherit}
 .desktop-home .dh-records-grid .dh-raw-note{display:block;font-size:var(--fs-s);color:var(--muted);white-space:normal;min-width:14rem}
 .desktop-home .dh-records-grid td.dh-issue{color:var(--gold-ink);font-weight:600}
-.desktop-home .dh-records-grid tbody tr.dh-copy td:first-child .dh-rowsel::after{content:none}
 .desktop-home .dh-subbar select{height:1.773333rem}
 .desktop-home .dh-subbar label{display:inline-flex;align-items:center;gap:.373333rem}
 .desktop-home .dh-data{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
@@ -531,7 +528,6 @@
 .desktop-home.dh-compact .dh-def-problem.dh-on-data .dh-text>strong{display:inline;margin-right:.56rem}
 .desktop-home .dh-idfilter input{height:2.006667rem}
 .desktop-home .dh-idfilter form{display:contents}
-.desktop-home .dh-field-error{color:#8a3a26;font-size:var(--fs-s);margin:.28rem .802667rem 0}
 .desktop-home .dh-data-slot,.desktop-home .dh-foot-slot{display:contents}
 .desktop-home .dh-admission{margin:.56rem .802667rem 0;padding:.513333rem .7rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);font-size:var(--fs-s);overflow:auto;max-height:16rem;user-select:text}
 .desktop-home .dh-admission dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.233333rem .84rem;margin:0}
@@ -548,14 +544,11 @@
 .desktop-home.dh-compact .dh-relcard{grid-template-columns:minmax(0,1fr)}
 .desktop-home.dh-compact .dh-relcard .dh-act{grid-column:1;grid-row:auto}
 
-/* Files: membership and object lists use their own column sets. */
-.desktop-home .dh-mcols{display:grid;grid-template-columns:6.066667rem minmax(9.333333rem,2fr) 5.6rem 7rem minmax(6.533333rem,1fr) 6.533333rem;align-items:center;column-gap:.802667rem;padding:0 .802667rem}
+/* Files: the object list uses its own column set. */
 /* Object fits a seven-digit ordinal and a little more ("Object 2879941" is 6.46rem; retail has about 2.88M objects, #77). */
 .desktop-home .dh-ocols{display:grid;grid-template-columns:7rem minmax(12rem,3fr) 7rem minmax(8.4rem,1fr);align-items:center;column-gap:.802667rem;padding:0 .802667rem}
 .desktop-home .dh-files [role="option"] .dh-mono{font-size:var(--fs-s)}
 .desktop-home .dh-files [role="option"]>span.dh-wrap{white-space:normal;overflow-wrap:anywhere;overflow:visible;padding:.28rem 0}
-.desktop-home.dh-compact .dh-mcols{grid-template-columns:minmax(5.133333rem,1fr) minmax(6.533333rem,1.6fr) minmax(4.2rem,.7fr) minmax(5.133333rem,1fr) minmax(4.666667rem,.9fr)}
-.desktop-home.dh-compact .dh-mcols>:nth-child(5){display:none}
 /* At 200% and on small windows Object keeps just the room of a seven-digit ordinal, so the key beside it keeps its 32
    digits on one line where it can; the key wraps rather than being cut (#77). */
 .desktop-home.dh-compact .dh-ocols{grid-template-columns:minmax(6.533333rem,.8fr) minmax(6.533333rem,2fr) minmax(5.133333rem,1fr) minmax(5.133333rem,1fr)}
