@@ -77,6 +77,20 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   // while it shows) plus the same gap as at the top, so that covered band, without the gap, is where a control counts as hidden.
   const shown=(el:HTMLElement|null)=>{const app=shell.current;if(!app||!el)return false;const style=getComputedStyle(app),frame=app.getBoundingClientRect(),r=box(el),covered=Math.max(0,(parseFloat(style.scrollPaddingBottom)||0)-(parseFloat(style.scrollPaddingTop)||0));return !r.hidden&&r.top>=frame.top-1&&r.bottom<=frame.top+app.clientHeight-covered+1&&!cut(el);};
   const self=ownScroll(),reveal=(el:HTMLElement|null)=>{const app=shell.current;if(!app||!el||app.scrollHeight<=app.clientHeight+1)return;const style=getComputedStyle(app),frame=app.getBoundingClientRect(),r=box(el),top=frame.top+(parseFloat(style.scrollPaddingTop)||0),bottom=frame.top+app.clientHeight-(parseFloat(style.scrollPaddingBottom)||0);if(r.top<top)self.by(app,-(top-r.top));else if(r.bottom>bottom)self.by(app,Math.min(r.bottom-bottom,r.top-top));};
+  // The list's sticky column header (the first child of the scroller that holds the option) names the row's columns, so the shell
+  // reveals it with the row, not the row alone (#139). When the header, the rows between them and the row don't fit the shell's view
+  // together, the list first drops rows between them (as the keeper's own scroll); when even the header and the row don't fit, the row
+  // stays whole and the header shows as far as it fits. A header that isn't drawn (Items and Creatures hide theirs in the compact
+  // layout) counts as none. The keeper reveals an option this way too: the floating activity entry can appear just after Tab in (the
+  // shell's reveal scrolled the build header away) and cover the row. False when there is no such header, so the plain reveal runs.
+  const revealWithHead=(el:HTMLElement)=>{const app=shell.current,option=targetOf(el);if(!app||option===el||app.scrollHeight<=app.clientHeight+1)return false;
+   let list:HTMLElement|null=null;for(let up=option.parentElement;up&&up!==app;up=up.parentElement)if(/auto|scroll/.test(getComputedStyle(up).overflowY)){list=up;break;}
+   const head=list?.firstElementChild;if(!list||!(head instanceof HTMLElement)||head.contains(option)||!head.getClientRects().length||getComputedStyle(head).position!=='sticky')return false;
+   const style=getComputedStyle(app),frame=app.getBoundingClientRect(),top=frame.top+(parseFloat(style.scrollPaddingTop)||0),bottom=frame.top+app.clientHeight-(parseFloat(style.scrollPaddingBottom)||0);
+   let h=head.getBoundingClientRect(),o=option.getBoundingClientRect();if(o.bottom-o.top>bottom-top+1)return false;
+   const over=o.bottom-h.top-(bottom-top),gap=o.top-h.bottom;if(over>1&&gap>1){inner.by(list,Math.min(over,gap));h=head.getBoundingClientRect();o=option.getBoundingClientRect();}
+   // The shell's move: the row whole (o.bottom-bottom ≤ d ≤ o.top-top), and the header too when both fit, by the least amount.
+   const low=o.bottom-bottom,high=h.top-top,d=low<=high?Math.min(Math.max(0,low),high):low;if(Math.abs(d)>.5)self.by(app,d);return true;};
   // Focus that was in view stays in view when the header or area changes size under it (the activity entry appearing grows the header).
   // Scrolling away from it on purpose clears that, so a resize never pulls the reader back. A scroll event can also come from layout
   // (the browser clamping the scroll after the area shrank, delivered after content above the focus grew): when the focused control
@@ -93,7 +107,7 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   const pane=(up:HTMLElement)=>`${getComputedStyle(up).overflowY} ${up.scrollHeight} ${up.clientHeight}`;
   const mark=()=>{const el=focused();focusAt=at(el);contentHeight=shell.current?.scrollHeight??0;panes=new Map(el?inners(el).list.map(up=>[up,pane(up)]):[]);return el;};
   const note=()=>{focusShown=shown(mark());};
-  const keep=()=>{const el=focused();if(focusShown&&el&&!shown(el)){fit(el,true);reveal(el);}const now=mark();focusShown=!!now&&(focusShown||shown(now));};
+  const keep=()=>{const el=focused();if(focusShown&&el&&!shown(el)){fit(el,true);if(!revealWithHead(el))reveal(el);}const now=mark();focusShown=!!now&&(focusShown||shown(now));};
   // A control just focused is wanted in view even when the shell can't scroll far enough yet (a short pane clamps it), so the resize that
   // follows finishes the reveal.
   // Opening the panel never moves the shell, and closing it restores the shell exactly (#60): focus returning to the invoker keeps the
@@ -113,7 +127,7 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   // reveal (#112), that list scroll is the keeper's own, so its scroll event never reads as the reader scrolling away. A press picks
   // the row under the pointer, so a press never moves it.
   const keepOption=(el:HTMLElement)=>{const id=el.getAttribute('aria-activedescendant');if(!id||!el.contains(document.getElementById(id)))return;requestAnimationFrame(()=>{const app=shell.current,option=document.getElementById(id);if(!app||document.activeElement!==el||el.getAttribute('aria-activedescendant')!==id||!option||!el.contains(option))return;
-   fit(el,false);reveal(el);mark();focusShown=true;});};
+   fit(el,false);if(!revealWithHead(el))reveal(el);mark();focusShown=true;});};
   const onFocus=(event:FocusEvent)=>{const el=event.target as HTMLElement,restore=restoreTo.current;restoreTo.current=null;if(restore!==null&&shell.current)shell.current.scrollTop=restore;if(!inPanel(el))lastFocus.current=el;if(!(restore!==null&&el===openedBy.current)&&!inPanel(el)&&!(pressing&&partly(el))){reveal(el);if(!pressing)keepOption(el);}note();if(focused())focusShown=true;};
   // An inner scroller whose overflow or size changed since it was last seen was scrolled by the layout, not by the reader: the Home grid
   // stops scrolling while the shell scrolls and starts again when it stops, and the browser puts it back at an offset of its own (#115).

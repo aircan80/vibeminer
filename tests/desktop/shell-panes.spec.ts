@@ -333,6 +333,16 @@ for (const [width, height] of [[600, 480], [1280, 800]] as const) test(`Tab back
       await page.keyboard.press('Shift+Tab'); await expect(listbox).not.toBeFocused(); await settle(page);
       await page.keyboard.press('Tab'); await expect(listbox).toBeFocused();
       await expectFocusVisible(page, `${area}: row 14 after Tab back in`);
+      // #139: the compact layout hides the list's column header, so focus coming back to a list whose row already shows scrolls
+      // neither the shell nor the list, not even for a frame (a hidden header measured as drawn at the window's top nudged the shell).
+      const moves = await page.evaluate(async () => {
+        const log: string[] = [], hear = (event: Event) => log.push(`${(event.target as HTMLElement).className} ${(event.target as HTMLElement).scrollTop}`);
+        document.addEventListener('scroll', hear, { capture: true });
+        const list = document.activeElement as HTMLElement; list.blur(); list.focus();
+        for (let k = 0; k < 4; k++) await new Promise(r => requestAnimationFrame(r));
+        document.removeEventListener('scroll', hear, { capture: true }); return log;
+      });
+      expect.soft(moves, `${area}: focus back on a list whose row shows scrolled`).toEqual([]);
     }
     await text(page, 1);
   } finally { await session.close(); }
@@ -411,3 +421,67 @@ for (const view of ['Download objects', 'All files'] as const) test(`${view} is 
   } finally { await session.close(); }
 });
 
+// #139: Tab into a Files list at 600x480 and 200% text brings its sticky column header into the shell's view with the active row,
+// not only the row: both wholly between the shell's top and the status bar whenever they fit together. Where the rows between them
+// don't fit too, the list drops them (the active row moves up under the header). Where they still can't fit (the list is at its end
+// and taller than the view, as the D092 three-row minimum leaves All files with the activity entry), the row stays whole and the
+// header gives way. Tab in from the shell's and the list's tops, on the first row, rows 6 and 12 and the last row. Both Files views,
+// in DejaVu Sans as on CI (#138).
+for (const view of ['Download objects', 'All files'] as const) test(`Tab into ${view} shows its column header with the active row at 600x480 and 200% text (#139)`, async () => {
+  test.setTimeout(120_000);
+  const session = await launch(true, false, false, false, false, false, false, false, false, false, false, true);
+  try {
+    const { page, app, data } = session;
+    await size(app, 1280, 800);
+    await page.locator('.build-row').first().click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeFocused();
+    await writeFile(path.join(data, 'file-catalog-ready'), 'ready');
+    await expect(page.locator('section[aria-labelledby="home-catalog"]')).toContainText('Ready to browse', { timeout: 40_000 });
+    await page.getByRole('navigation', { name: 'Build areas' }).getByRole('button', { name: 'Files', exact: true }).click();
+    const files = page.locator('.dh-files:not([hidden])');
+    await files.getByRole('group', { name: 'Files view' }).getByRole('button', { name: view, exact: true }).click();
+    const listbox = files.getByRole('listbox');
+    await expect(listbox.getByRole('option').nth(13)).toBeAttached();
+    await size(app, 600, 480); await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([600, 480]);
+    await text(page, 2);
+    await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-narrow.dh-shell-scroll'));
+    const heading = page.getByRole('heading', { name: 'Files', exact: true });
+    // The column header and the active row against the shell's view: its top, and the status bar (or the floating activity entry
+    // above it, which the shell's bottom scroll padding clears) at the bottom.
+    const probe = () => page.evaluate(() => {
+      const app = document.querySelector<HTMLElement>('.dh-app')!, cs = getComputedStyle(app), frame = app.getBoundingClientRect();
+      const scroller = document.querySelector<HTMLElement>('.dh-files:not([hidden]) .dh-list-scroll')!, head = scroller.querySelector<HTMLElement>('.dh-fthead')!.getBoundingClientRect();
+      const id = document.activeElement!.getAttribute('aria-activedescendant'), row = document.getElementById(id ?? '')!.getBoundingClientRect();
+      const floor = frame.top + app.clientHeight - Math.max(0, (parseFloat(cs.scrollPaddingBottom) || 0) - (parseFloat(cs.scrollPaddingTop) || 0));
+      const ceiling = frame.top;
+      // The least the header's top to the row's bottom can take: the rows between them, less what the list can still scroll.
+      const span = Math.max(head.bottom - head.top + row.bottom - row.top, row.bottom - head.top - (scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop));
+      return { head: head.top >= ceiling - 1 && head.bottom <= floor + 1, row: row.top >= head.bottom - 1 && row.bottom <= floor + 1, fit: span <= floor - ceiling + 1,
+        at: `header ${Math.round(head.top)}-${Math.round(head.bottom)}, row ${Math.round(row.top)}-${Math.round(row.bottom)} in ${Math.round(ceiling)}-${Math.round(floor)}` };
+    });
+    const fits: boolean[] = [];
+    for (const index of [0, 5, 11, 'last'] as const) {
+      const label = `${view}, ${index === 'last' ? 'the last row' : `row ${index + 1}`}`;
+      // Put the active row on the wanted index, leave the list, scroll the shell and the list to their tops, then Tab in from the title.
+      await listbox.focus(); await page.keyboard.press(index === 'last' ? 'End' : 'Home'); if (index !== 'last') for (let i = 0; i < index; i++) await page.keyboard.press('ArrowDown');
+      await expect(listbox.getByRole('option').nth(index === 'last' ? -1 : index)).toHaveAttribute('aria-selected', 'true');
+      await heading.focus();
+      await page.evaluate(() => { for (const el of document.querySelectorAll<HTMLElement>('.dh-app, .dh-files:not([hidden]) .dh-list-scroll')) el.scrollTop = 0; }); await settle(page);
+      for (let i = 0; i < 12 && !(await listbox.evaluate(el => el === document.activeElement)); i++) await page.keyboard.press('Tab');
+      await expect(listbox, `${label}: Tab reaches the list`).toBeFocused();
+      // Once the floating activity entry has settled (the shell's reveal scrolls the build header away, and the entry floats then).
+      await page.waitForTimeout(150); await settle(page);
+      await expectFocusVisible(page, `${label}: active row after Tab in`);
+      const seen = await probe();
+      expect.soft(seen.row, `${label}: active row not whole below the header (${seen.at})`).toBe(true);
+      if (seen.fit) expect.soft(seen.head, `${label}: column header not wholly in view (${seen.at})`).toBe(true);
+      fits.push(seen.fit);
+      if (index === 5) await page.screenshot({ path: path.join(out, `files-header-${view === 'All files' ? 'all' : 'objects'}-600x480-200.png`) });
+    }
+    // The header check ran at all: most of these positions leave room for the header and the row together.
+    expect(fits.filter(Boolean).length, `${view}: header and row fit together in ${fits.filter(Boolean).length} of ${fits.length} positions`).toBeGreaterThanOrEqual(3);
+    await text(page, 1);
+  } finally { await session.close(); }
+});
