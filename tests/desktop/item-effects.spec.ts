@@ -87,6 +87,25 @@ test('a link table the build does not ship reads as not available for this build
  await expect(p.getByRole('button',{name:/^Retry/})).toHaveCount(0);await expect(p).not.toContainText('need attention');await expect(page.locator('body')).not.toContainText(/needs attention/i);await expect(p.locator('details.effect-phase-details')).not.toHaveAttribute('open','');await capture(page,s.app,'not-in-build',heading(p));
  await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Home',exact:true}).click();await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Items',exact:true}).click();await select(page);await expect(panel(page).getByRole('status')).toHaveText('Not available for this build');
  const requests=await calls(s.data);expect(requests.filter(r=>r.method==='items.effects.prepare')).toHaveLength(1);expect(requests.some(r=>r.method==='items.effects.page')).toBe(false);}finally{await s.close();}});
+// #88: no definition reads ItemXItemEffect. Fetching off says so and opens Settings, with Back returning to it; Retry stays.
+test('a link table no definition reads with fetching off offers Settings and keeps Retry',async()=>{test.setTimeout(60_000);const s=await opened(false);try{const{page}=s;
+ await writeFile(path.join(s.data,'effects-scenario.json'),JSON.stringify({scenario:'definition-off'}));await writeFile(path.join(s.data,'release-effects-links'),'release');await select(page);const p=panel(page);
+ await expect(p.getByRole('status')).toHaveText('Links need attention');await expect(p.getByText("ItemXItemEffect definition doesn't cover this build",{exact:true})).toBeVisible();
+ await expect(p).toContainText('Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest ItemXItemEffect definition.');
+ await expect(p).not.toContainText("layout VibeMiner doesn't read");await expect(p.getByRole('button',{name:'Retry link loading for Item 0',exact:true})).toBeVisible();
+ await capture(page,s.app,'definition-off',heading(p));
+ const open=p.getByRole('button',{name:'Open Settings',exact:true});await open.focus();await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{name:'Settings',level:1})).toBeFocused();await page.keyboard.press('Escape');await expect(open).toBeFocused();
+ const requests=await calls(s.data);expect(requests.filter(r=>r.method==='items.effects.prepare')).toHaveLength(1);}finally{await s.close();}});
+// #88: WoWDBDefs couldn't be reached. Retry is offered, no Settings, and once back online Retry loads the links.
+test('a link table whose definition fetch failed retries into its links once online',async()=>{test.setTimeout(60_000);const s=await opened(false);try{const{page}=s;
+ await writeFile(path.join(s.data,'effects-scenario.json'),JSON.stringify({scenario:'definition-offline'}));await writeFile(path.join(s.data,'release-effects-links'),'release');await select(page);const p=panel(page);
+ await expect(p.getByText("Couldn't get a newer ItemXItemEffect definition",{exact:true})).toBeVisible();await expect(p).toContainText('Check the connection, then retry; if it still fails, try later.');
+ await expect(p.getByRole('button',{name:'Open Settings',exact:true})).toHaveCount(0);
+ await capture(page,s.app,'definition-offline',heading(p));
+ await writeFile(path.join(s.data,'effects-scenario.json'),JSON.stringify({scenario:'ready'}));for(const phase of['inputs','names'])await writeFile(path.join(s.data,`release-effects-${phase}`),'release');
+ const retry=p.getByRole('button',{name:'Retry link loading for Item 0',exact:true});await retry.focus();await page.keyboard.press('Enter');
+ await expect(names(p)).toHaveText(['Authored spell label','Authored spell label']);await expect(p).not.toContainText('ItemXItemEffect definition');}finally{await s.close();}});
 // #86: a Classic build links through ItemEffect.ParentItemID. One ItemEffect link per card opens its exact row in Tables.
 test('ParentItemID effects name their link and open the exact ItemEffect row',async()=>{test.setTimeout(60_000);const s=await opened();try{const{page}=s;
  await writeFile(path.join(s.data,'effects-scenario.json'),JSON.stringify({scenario:'parent'}));await select(page);const p=panel(page);

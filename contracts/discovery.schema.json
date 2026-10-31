@@ -11223,6 +11223,9 @@
         },
         "retryable": {
           "type": "boolean"
+        },
+        "definition": {
+          "$ref": "#/definitions/TableDefinitionProblem"
         }
       },
       "required": [
@@ -12958,6 +12961,20 @@
                       },
                       "retryable": {
                         "const": true
+                      },
+                      "definition": {
+                        "properties": {
+                          "tableId": {
+                            "enum": [
+                              "00cb674f",
+                              "4002a5b1",
+                              "46c66698"
+                            ]
+                          },
+                          "definitionFetch": {
+                            "const": "on"
+                          }
+                        }
                       }
                     }
                   }
@@ -12994,7 +13011,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -13030,6 +13048,17 @@
                       },
                       "retryable": {
                         "const": false
+                      },
+                      "definition": {
+                        "properties": {
+                          "tableId": {
+                            "enum": [
+                              "00cb674f",
+                              "4002a5b1",
+                              "46c66698"
+                            ]
+                          }
+                        }
                       }
                     }
                   }
@@ -13066,7 +13095,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -13102,7 +13132,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -13138,7 +13169,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -13174,10 +13206,90 @@
                       },
                       "retryable": {
                         "const": true
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "bridge"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "problem": {
+                "properties": {
+                  "definition": {
+                    "properties": {
+                      "tableId": {
+                        "enum": [
+                          "00cb674f",
+                          "4002a5b1"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "effect"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "problem": {
+                "properties": {
+                  "definition": {
+                    "properties": {
+                      "tableId": {
+                        "enum": [
+                          "4002a5b1"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "name"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "problem": {
+                "properties": {
+                  "definition": {
+                    "properties": {
+                      "tableId": {
+                        "enum": [
+                          "46c66698"
+                        ]
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -14156,6 +14268,19 @@
                       },
                       "retryable": {
                         "const": true
+                      },
+                      "definition": {
+                        "properties": {
+                          "tableId": {
+                            "enum": [
+                              "00cb674f",
+                              "4002a5b1"
+                            ]
+                          },
+                          "definitionFetch": {
+                            "const": "on"
+                          }
+                        }
                       }
                     }
                   }
@@ -14203,7 +14328,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -14250,6 +14376,16 @@
                       },
                       "retryable": {
                         "const": false
+                      },
+                      "definition": {
+                        "properties": {
+                          "tableId": {
+                            "enum": [
+                              "00cb674f",
+                              "4002a5b1"
+                            ]
+                          }
+                        }
                       }
                     }
                   }
@@ -14297,7 +14433,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -14344,7 +14481,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -14391,7 +14529,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -16362,7 +16501,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -16431,6 +16571,20 @@
                       },
                       "retryable": {
                         "const": true
+                      },
+                      "definition": {
+                        "properties": {
+                          "tableId": {
+                            "enum": [
+                              "00cb674f",
+                              "4002a5b1",
+                              "46c66698"
+                            ]
+                          },
+                          "definitionFetch": {
+                            "const": "on"
+                          }
+                        }
                       }
                     }
                   }
@@ -16464,7 +16618,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -16497,6 +16652,17 @@
                       },
                       "retryable": {
                         "const": false
+                      },
+                      "definition": {
+                        "properties": {
+                          "tableId": {
+                            "enum": [
+                              "00cb674f",
+                              "4002a5b1",
+                              "46c66698"
+                            ]
+                          }
+                        }
                       }
                     }
                   }
@@ -16530,7 +16696,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -16563,7 +16730,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -16596,7 +16764,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -16629,7 +16798,8 @@
                       },
                       "retryable": {
                         "const": true
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -16662,7 +16832,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -17073,7 +17244,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -17142,6 +17314,20 @@
                       },
                       "retryable": {
                         "const": true
+                      },
+                      "definition": {
+                        "properties": {
+                          "tableId": {
+                            "enum": [
+                              "00cb674f",
+                              "4002a5b1",
+                              "46c66698"
+                            ]
+                          },
+                          "definitionFetch": {
+                            "const": "on"
+                          }
+                        }
                       }
                     }
                   }
@@ -17175,7 +17361,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -17208,6 +17395,17 @@
                       },
                       "retryable": {
                         "const": false
+                      },
+                      "definition": {
+                        "properties": {
+                          "tableId": {
+                            "enum": [
+                              "00cb674f",
+                              "4002a5b1",
+                              "46c66698"
+                            ]
+                          }
+                        }
                       }
                     }
                   }
@@ -17241,7 +17439,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -17274,7 +17473,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -17307,7 +17507,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -17340,7 +17541,8 @@
                       },
                       "retryable": {
                         "const": true
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -17373,7 +17575,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -17957,6 +18160,20 @@
                       },
                       "retryable": {
                         "const": true
+                      },
+                      "definition": {
+                        "properties": {
+                          "tableId": {
+                            "enum": [
+                              "00cb674f",
+                              "4002a5b1",
+                              "46c66698"
+                            ]
+                          },
+                          "definitionFetch": {
+                            "const": "on"
+                          }
+                        }
                       }
                     }
                   }
@@ -17990,7 +18207,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -18023,6 +18241,17 @@
                       },
                       "retryable": {
                         "const": false
+                      },
+                      "definition": {
+                        "properties": {
+                          "tableId": {
+                            "enum": [
+                              "00cb674f",
+                              "4002a5b1",
+                              "46c66698"
+                            ]
+                          }
+                        }
                       }
                     }
                   }
@@ -18056,7 +18285,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -18089,7 +18319,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -18122,7 +18353,8 @@
                       },
                       "retryable": {
                         "const": false
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]
@@ -18155,7 +18387,8 @@
                       },
                       "retryable": {
                         "const": true
-                      }
+                      },
+                      "definition": false
                     }
                   }
                 ]

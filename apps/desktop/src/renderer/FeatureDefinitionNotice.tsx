@@ -26,7 +26,8 @@ export const failsTable=(p:Problem,tableId:string)=>p.definition?.tableId===tabl
 // The tables features read, by name, so a notice can say which one used which definition.
 const TABLE_NAMES:Record<string,string>={'50238ec2':'Item','919be54e':'ItemSparse','c9d6b6b3':'Creature','b977271e':'ItemClass','95d8638f':'ItemSubClass',
  '00cb674f':'ItemXItemEffect','4002a5b1':'ItemEffect','46c66698':'SpellName','bfdaf9f1':'CreatureDisplayInfo','7f695fa5':'CreatureModelData'};
-export const tableName=(s:TableDataSnapshot)=>TABLE_NAMES[s.tableId]??s.tableId;
+export const tableNameOf=(tableId:string)=>TABLE_NAMES[tableId]??tableId;
+export const tableName=(s:TableDataSnapshot)=>tableNameOf(s.tableId);
 const list=(names:string[])=>names.length<2?names.join(''):`${names.slice(0,-1).join(', ')} and ${names.at(-1)}`;
 
 /** Why tables were read with a fetched definition, one sentence per rule, in the words Tables uses (D081). */

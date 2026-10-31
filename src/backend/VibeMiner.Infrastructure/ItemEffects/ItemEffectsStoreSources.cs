@@ -28,6 +28,15 @@ public sealed partial class ItemEffectsStore
     };
     private static SourceProbe Failed(SourceProbe probe, ItemEffectsSourceState state) => probe with
     { Public = new(probe.Role, state, Problem: Problem(state)), CurrentProfile = false };
+    // #88: a prepare that no definition could read keeps which table and how the Settings switch read, so the view can
+    // offer Settings when fetching was off. Only for the table this role reads, and only on unavailable or unsupported.
+    private static SourceProbe Failed(SourceProbe probe, ItemEffectsSourceState state, Exception error)
+    {
+        var failed = Failed(probe, state);
+        return error is DiscoveryException { Definition: { } definition } && state is ItemEffectsSourceState.Unavailable or ItemEffectsSourceState.Unsupported &&
+            definition.TableId == Role(probe).TableId && definition.DefinitionFetch is "on" or "off" && (definition.DefinitionFetch == "on" || state == ItemEffectsSourceState.Unsupported)
+            ? failed with { Public = failed.Public with { Problem = failed.Public.Problem! with { Definition = definition } } } : failed;
+    }
     private static SourceProbe Failed(SourceProbe probe, ItemEffectsProblem problem) => Failed(probe, problem.Code switch
     { "ITEM_EFFECTS_TARGET_STALE" => ItemEffectsSourceState.Stale, "ITEM_EFFECTS_LIMIT" => ItemEffectsSourceState.ResourceLimit, _ => ItemEffectsSourceState.Corrupt });
 
@@ -199,7 +208,7 @@ public sealed partial class ItemEffectsStore
             }
             // An undecided build needs ItemEffect whichever way its layout decides, so a failure there names ItemEffect's link (#86).
             catch (Exception error) when (AcquisitionFailure(error, out _))
-            { _ = AcquisitionFailure(error, out var state); return Failed(initial with { Provisional = false }, state); }
+            { _ = AcquisitionFailure(error, out var state); return Failed(initial with { Provisional = false }, state, error); }
             // Required persisted authority preflight is outside the optional acquisition catch.
             var current = await ProbeAsync(original, initial.Role, token);
             await CheckOriginalAsync(original, bridge, token);
@@ -252,6 +261,12 @@ public sealed partial class ItemEffectsStore
                 state = ItemEffectsSourceState.Unavailable; return true;
             case "DB2_SCHEMA_MISSING": case "DB2_SCHEMA_AMBIGUOUS": case "DB2_SCHEMA_MISMATCH": case "BLTE_UNSUPPORTED":
             case "DB2_UNSUPPORTED": case "DEFINITION_NOT_BUNDLED": case "SCHEMA_BUILD_NOT_LISTED": case "CONTENT_ROOT_UNSUPPORTED":
+                state = ItemEffectsSourceState.Unsupported; return true;
+            // #88: no definition reads this table on this build because asking WoWDBDefs for a newer one failed. Offline or a
+            // failed answer can change on Retry; a definition too large, unreadable or absent upstream can't until an update.
+            case "DEFINITION_FETCH_OFFLINE": case "DEFINITION_FETCH_FAILED":
+                state = ItemEffectsSourceState.Unavailable; return true;
+            case "DEFINITION_FETCH_TOO_LARGE": case "DEFINITION_FETCH_INVALID": case "DEFINITION_FETCH_NOT_FOUND":
                 state = ItemEffectsSourceState.Unsupported; return true;
             case "ITEM_EFFECTS_LIMIT": case "CONTENT_LIMIT": case "BLTE_LIMIT": case "DB2_LIMIT": case "CONTENT_VARIANT_LIMIT":
             case "ACQUISITION_CAPACITY": case "ACQUISITION_STAGING_LIMIT": case "ACQUISITION_WORKER_LIMIT":

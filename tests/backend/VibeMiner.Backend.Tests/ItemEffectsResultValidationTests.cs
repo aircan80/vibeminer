@@ -254,6 +254,42 @@ public sealed class ItemEffectsResultValidationTests
         }
     }
 
+    // #88: only an unavailable or unsupported source names the table no definition read, it is the table its role reads,
+    // and fetching off is never unavailable.
+    [Theory]
+    [InlineData(ItemEffectsSourceState.Unavailable, "4002a5b1", "on", true)]
+    [InlineData(ItemEffectsSourceState.Unsupported, "4002a5b1", "on", true)]
+    [InlineData(ItemEffectsSourceState.Unsupported, "4002a5b1", "off", true)]
+    [InlineData(ItemEffectsSourceState.Unavailable, "4002a5b1", "off", false)]
+    [InlineData(ItemEffectsSourceState.Unsupported, "46c66698", "on", false)]
+    [InlineData(ItemEffectsSourceState.Unsupported, "50238ec2", "on", false)]
+    [InlineData(ItemEffectsSourceState.Unsupported, "4002a5b1", "maybe", false)]
+    [InlineData(ItemEffectsSourceState.Corrupt, "4002a5b1", "on", false)]
+    [InlineData(ItemEffectsSourceState.NotInBuild, "4002a5b1", "on", false)]
+    [InlineData(ItemEffectsSourceState.Protected, "4002a5b1", "on", false)]
+    public void A_definition_on_a_problem_is_only_the_role_table_on_an_unavailable_or_unsupported_source(ItemEffectsSourceState state, string table, string fetch, bool valid)
+    {
+        var (code, message, retryable) = state switch
+        {
+            ItemEffectsSourceState.Unavailable => ("ITEM_EFFECTS_SOURCE_UNAVAILABLE", "The selected source is unavailable.", true),
+            ItemEffectsSourceState.Unsupported => ("ITEM_EFFECTS_SOURCE_UNSUPPORTED", "The selected source profile is unsupported.", false),
+            ItemEffectsSourceState.Corrupt => ("ITEM_EFFECTS_SOURCE_CORRUPT", "The selected source failed integrity validation.", false),
+            ItemEffectsSourceState.Protected => ("ITEM_EFFECTS_SOURCE_PROTECTED", "The selected source is protected.", false),
+            _ => ("ITEM_EFFECTS_SOURCE_NOT_IN_BUILD", "This build does not include the selected source.", false)
+        };
+        var problem = new ItemEffectsProblem(code, message, retryable, new(table, fetch));
+        var details = new ItemEffectDetailsResult(Details.Selection, Details.BridgeIndexArtifactId, ItemEffectsValidation.InputPolicy, new(ItemEffectsSourceRole.Effect, state, Problem: problem),
+            [new(new("0"), "0", Enum.Parse<ItemEffectState>(state.ToString()), Problem: problem)]);
+        if (valid) ItemEffectsValidation.Validate(details, Details); else Bad(() => ItemEffectsValidation.Validate(details, Details));
+        // The outcome repeats its source's problem exactly, definition included.
+        if (valid) Bad(() => ItemEffectsValidation.Validate(details with { Outcomes = [details.Outcomes[0] with { Problem = problem with { Definition = null } }] }, Details));
+        // A bridge source reads either link table (#86), never SpellName.
+        var readiness = new ItemEffectsReadiness(Details.Selection, true, Enum.Parse<ItemEffectsReadinessState>(state.ToString()), Source: new(ItemEffectsSourceRole.Bridge, state, Problem: problem), Problem: problem);
+        if (valid) ItemEffectsValidation.Validate(readiness, Details.Selection); else Bad(() => ItemEffectsValidation.Validate(readiness, Details.Selection));
+        var spell = problem with { Definition = new("46c66698", fetch) };
+        Bad(() => ItemEffectsValidation.Validate(readiness with { Source = readiness.Source! with { Problem = spell }, Problem = spell }, Details.Selection));
+    }
+
     [Fact]
     public void FieldUnavailableKeepsOnlySafeSourceAndProblemWithoutInventingLookupFacts()
     {

@@ -41,7 +41,7 @@ public sealed partial class ItemEffectsStore
             try { borrow = await BorrowBridgeAsync(original, resolution, prepare, !prepare, token); }
             catch (Exception error) when (AcquisitionFailure(error, out _))
             {
-                _ = AcquisitionFailure(error, out var state); resolution = resolution with { Source = Failed(resolution.Source, state) };
+                _ = AcquisitionFailure(error, out var state); resolution = resolution with { Source = Failed(resolution.Source, state, error) };
                 var failure = Readiness(selection, resolution, null);
                 await CountAsync(failure, token); await FinishAsync(original, resolution, [], token); return failure;
             }

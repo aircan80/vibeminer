@@ -203,7 +203,14 @@ public static partial class ItemEffectsValidation
             Require(value.Snapshot is null);
             if (value.State == ItemEffectsSourceState.NotPrepared) Require((value.HistoricalArtifactId is null || Hash(value.HistoricalArtifactId)) && value.Problem is null);
             else if (value.State == ItemEffectsSourceState.NotChecked) Require(value.HistoricalArtifactId is null && value.Problem is null);
-            else { Require(value.HistoricalArtifactId is null); Problem(value.Problem, value.State.ToString()); }
+            else
+            {
+                Require(value.HistoricalArtifactId is null); Problem(value.Problem, value.State.ToString());
+                // The table this role reads: either link table for the bridge (#86), ItemEffect for inputs, SpellName for names.
+                if (value.Problem?.Definition is { } definition)
+                    Require(role switch { ItemEffectsSourceRole.Bridge => definition.TableId is "00cb674f" or "4002a5b1",
+                        ItemEffectsSourceRole.Effect => definition.TableId == "4002a5b1", _ => definition.TableId == "46c66698" });
+            }
         }
     }
     // The reviewed profile this snapshot is for its role: by exact table and layout, never by role alone (#86).
@@ -310,6 +317,11 @@ public static partial class ItemEffectsValidation
             _ => throw BadResult()
         };
         Require(value is not null && value.Code == code && value.Message == message && value.Retryable == (state is "Unavailable" or "Stale"));
+        // #88: only an unavailable or unsupported source names the effects table no definition read, and fetching off is
+        // never unavailable: with the switch off nothing was asked.
+        if (value.Definition is { } definition)
+            Require(definition.TableId is "00cb674f" or "4002a5b1" or "46c66698" &&
+                (state == "Unsupported" && definition.DefinitionFetch is "on" or "off" || state == "Unavailable" && definition.DefinitionFetch == "on"));
     }
     private static ItemEffectsSourceState SourceState(string state) => Enum.TryParse<ItemEffectsSourceState>(state, out var result) && Enum.IsDefined(result) ? result : throw BadResult();
     private static ItemEffectsAbsence Absence(TableDataSnapshot source) => source.Coverage.Scope == "complete" ? ItemEffectsAbsence.AbsentFromCompleteSource : ItemEffectsAbsence.UnknownOutsideReadableScope;

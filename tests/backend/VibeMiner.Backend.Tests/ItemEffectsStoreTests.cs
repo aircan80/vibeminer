@@ -271,6 +271,9 @@ internal sealed class ItemEffectsStoreFixture : IAsyncDisposable
     internal readonly ConcurrentQueue<string> Prepared = new();
     internal Func<TableDataRequest, CancellationToken, Task>? BeforePrepare { get; set; }
     internal Func<TableDataRequest, Func<string, Task>, CancellationToken, Task>? DuringPrepare { get; set; }
+    /// <summary>The real shared table service behind the fake, when a test needs its definition choice and acquisition.</summary>
+    internal ITableDataStore? Real { get; private set; }
+    internal SharedAcquisitionIntegrationTests.Handler? Cdn { get; private set; }
     internal readonly Dictionary<ItemEffectsSourceRole, StoredTableAdmission> Desired = [];
     internal readonly Dictionary<ItemEffectsSourceRole, Db2Row[]> Rows = new()
     {
@@ -291,9 +294,12 @@ internal sealed class ItemEffectsStoreFixture : IAsyncDisposable
         new(9, true, 7, ["9", "1", "2", "3", "4", "5", "6", "-1", "65535", "9", "1"])
     ];
     internal string TableFor(ItemEffectsSourceRole role) => Classic && role == ItemEffectsSourceRole.Bridge ? "4002a5b1" : Table(role);
-    internal static async Task<ItemEffectsStoreFixture> Create(bool bridge = true, bool effect = true, bool name = true, bool twoItems = false, int coreColumns = 3, uint extraItem = 2, bool singleCpu = false, bool classic = false, string? version = null)
+    // realTables: prepares go through a real TableDataStore over the fixture's CDN, with the Items harness's definition
+    // choice (D101), and roles that aren't published get no authored rows.
+    internal static async Task<ItemEffectsStoreFixture> Create(bool bridge = true, bool effect = true, bool name = true, bool twoItems = false, int coreColumns = 3, uint extraItem = 2, bool singleCpu = false, bool classic = false, string? version = null,
+        bool realTables = false, Func<string, Task<TableDefinitionSources>>? definitions = null)
     {
-        var f = new ItemEffectsStoreFixture { H = await CoreHarness.Create(version: version ?? (classic ? "1.15.9.70003" : "12.1.5.70448")), Classic = classic }; var h = f.H;
+        var f = new ItemEffectsStoreFixture { H = await CoreHarness.Create(version: version ?? (classic ? "1.15.9.70003" : "12.1.5.70448"), definitions: definitions), Classic = classic }; var h = f.H;
         if (classic) { f.Rows[ItemEffectsSourceRole.Bridge] = ClassicEffects; f.Rows[ItemEffectsSourceRole.Effect] = ClassicEffects; }
         if (singleCpu)
         {
@@ -307,11 +313,20 @@ internal sealed class ItemEffectsStoreFixture : IAsyncDisposable
             await h.Objects.PublishAsync(payload.Encoded, Convert.ToHexStringLower(SHA256.HashData(payload.Encoded)), default);
         foreach (var role in Enum.GetValues<ItemEffectsSourceRole>())
         {
+            if (realTables && !(role switch { ItemEffectsSourceRole.Bridge => bridge, ItemEffectsSourceRole.Effect => effect, _ => name })) continue;
             f.Desired[role] = classic && role == ItemEffectsSourceRole.Effect ? f.Desired[ItemEffectsSourceRole.Bridge] : await f.Source(role, f.Rows[role]);
             if (role switch { ItemEffectsSourceRole.Bridge => bridge, ItemEffectsSourceRole.Effect => effect, _ => name }) await f.Publish(role, f.Desired[role]);
         }
         await h.Store.DisposeAsync(); await h.Tables.DisposeAsync();
-        h.Tables = new(new ReadyTables(f)); h.Store = new(h.Catalog, h.Objects, h.Tables, f.Resources);
+        if (realTables)
+        {
+            // The harness records the build's ENCODING and ROOT receipts; the real prepare reads their verified bytes.
+            foreach (var metadata in h.Fixture.Metadata.Values)
+                await h.Objects.PublishAsync(metadata.Encoded, Convert.ToHexStringLower(SHA256.HashData(metadata.Encoded)), default);
+            f.Cdn = new(h.Fixture);
+            f.Real = new TableDataStore(h.Catalog, h.Objects, new HttpClient(f.Cdn), resources: f.Resources, definitions: h.Definitions);
+        }
+        h.Tables = new(new ReadyTables(f)); h.Store = new(h.Catalog, h.Objects, h.Tables, f.Resources, h.Definitions);
         f.Store = new(h.Catalog, h.Objects, h.Store, h.Tables, f.Resources); return f;
     }
     private static async Task ExpandCore(CoreHarness h, int count, int columnCount, uint extraItem)
@@ -385,7 +400,8 @@ internal sealed class ItemEffectsStoreFixture : IAsyncDisposable
     }
     internal async Task<string> ObjectPath(string sha, long length)
     { await using var input = await H.Objects.OpenVerifiedAsync(sha, length, Resources, null, default); return input.Name; }
-    public async ValueTask DisposeAsync() { await Store.DisposeAsync(); await H.DisposeAsync(); }
+    public async ValueTask DisposeAsync()
+    { await Store.DisposeAsync(); if (Real is IAsyncDisposable real) await real.DisposeAsync(); await H.DisposeAsync(); }
     private sealed class ReadyTables(ItemEffectsStoreFixture f) : ITableDataStore
     {
         public Task<TableDataReadiness> ReadAsync(TableDataRequest request, CancellationToken token) => throw new InvalidOperationException("Local effects never use generic eager readiness.");
@@ -395,6 +411,7 @@ internal sealed class ItemEffectsStoreFixture : IAsyncDisposable
             f.Prepared.Enqueue(request.TableId);
             if (f.BeforePrepare is { } before) await before(request, token);
             if (f.DuringPrepare is { } during) await during(request, progress, token);
+            if (f.Real is { } real) return await real.PrepareAsync(request, progress, token);
             token.ThrowIfCancellationRequested(); var role = Enum.GetValues<ItemEffectsSourceRole>().First(role => f.TableFor(role) == request.TableId);
             var admission = f.Desired[role]; await f.Publish(role, admission);
             var a = admission.Artifact; var c = a.Completion; var definition = (await TablesCatalog.Provider.Value).Definitions[request.TableId];

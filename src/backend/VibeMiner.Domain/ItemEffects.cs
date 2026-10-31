@@ -24,7 +24,11 @@ public sealed record ItemEffectNamesRequest(ItemEffectsSelection Selection, stri
     string ItemEffectArtifactId, IReadOnlyList<ItemEffectsEdgeKey> Edges,
     string PolicyRevision = "spell-name-by-emitted-id-v1");
 
-public sealed record ItemEffectsProblem(string Code, string Message, bool Retryable);
+/// <summary>Definition is set only on an unavailable or unsupported source whose table no definition could read (D081, D101,
+/// #88): the table and how the Settings switch read, as on a failure. Views decide their next step from it.</summary>
+public sealed record ItemEffectsProblem(string Code, string Message, bool Retryable,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    TableDefinitionProblem? Definition = null);
 public sealed record ItemEffectsSource(ItemEffectsSourceRole Role, ItemEffectsSourceState State,
     TableDataSnapshot? Snapshot = null, string? HistoricalArtifactId = null, ItemEffectsProblem? Problem = null);
 public sealed record ItemEffectsFieldReference(string TableId, int ColumnIndex);

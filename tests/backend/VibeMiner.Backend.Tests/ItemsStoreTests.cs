@@ -68,7 +68,7 @@ public sealed class ItemsStoreTests(ITestOutputHelper output)
     }
 
     /// <summary>A bundled definition plus one block that lists the build, with the fields of the bundled block for the layout.</summary>
-    private static byte[] WithBuild(string name, string layout, string build)
+    internal static byte[] WithBuild(string name, string layout, string build)
     {
         var text = File.ReadAllText(RepositoryPaths.File($"src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/{name}.dbd")).Replace("\r\n", "\n");
         var lines = text.Split('\n'); var start = Array.IndexOf(lines, "LAYOUT " + layout);

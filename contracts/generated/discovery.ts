@@ -2946,6 +2946,7 @@ export interface ItemEffectsProblem {
   code: string;
   message: string;
   retryable: boolean;
+  definition?: TableDefinitionProblem;
 }
 export interface ItemEffectsSource1 {
   role: ItemEffectsSourceRole;

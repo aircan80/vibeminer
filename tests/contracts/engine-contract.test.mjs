@@ -1046,6 +1046,31 @@ test('a not-in-build effects source carries only its fixed non-retryable problem
  const unavailable={code:'ITEM_EFFECTS_SOURCE_UNAVAILABLE',message:'The selected source is unavailable.',retryable:true};
  assert.equal(validator('ItemEffectsReadiness')({...v,source:{...v.source,problem:unavailable},problem:unavailable}),false,'notInBuild must refuse the unavailable problem');
 });
+// #88: a source no definition reads keeps its fixed problem and names the table and how the Settings switch read.
+test('an effects source no definition reads names its table and the switch beside its fixed problem',async()=>{
+ const template=JSON.parse(await readFile(path.join(root,'contracts/examples/item-effects-readiness.json'),'utf8'));
+ const at=(state,problem)=>({...template,state,snapshot:null,observedAssociations:null,source:{role:'bridge',state,snapshot:null,historicalArtifactId:null,problem},problem});
+ const offline={code:'ITEM_EFFECTS_SOURCE_UNAVAILABLE',message:'The selected source is unavailable.',retryable:true,definition:{tableId:'00cb674f',definitionFetch:'on'}};
+ const off={code:'ITEM_EFFECTS_SOURCE_UNSUPPORTED',message:'The selected source profile is unsupported.',retryable:false,definition:{tableId:'00cb674f',definitionFetch:'off'}};
+ validate('ItemEffectsReadiness',at('unavailable',offline));validate('ItemEffectsReadiness',at('unsupported',off));
+ const odd={...off,definition:{...off.definition,definitionFetch:'maybe'}};
+ assert.equal(validator('ItemEffectsReadiness')(at('unsupported',odd)),false,'the switch reads on or off');
+ const extra={...off,definition:{...off.definition,reason:'x'}};
+ assert.equal(validator('ItemEffectsReadiness')(at('unsupported',extra)),false,'the definition carries only the table and the switch');
+ // Only unavailable or unsupported carry it, fetching off is never unavailable, and it names the table the role reads.
+ const corrupt={code:'ITEM_EFFECTS_SOURCE_CORRUPT',message:'The selected source failed integrity validation.',retryable:false};
+ validate('ItemEffectsReadiness',at('corrupt',corrupt));
+ assert.equal(validator('ItemEffectsReadiness')(at('corrupt',{...corrupt,definition:offline.definition})),false,'corrupt carries no definition');
+ assert.equal(validator('ItemEffectsReadiness')(at('unavailable',{...offline,definition:{...offline.definition,definitionFetch:'off'}})),false,'off is never unavailable');
+ const spell={...off,definition:{...off.definition,tableId:'46c66698'}};
+ assert.equal(validator('ItemEffectsReadiness')(at('unsupported',spell)),false,'a bridge source never names SpellName');
+ assert.equal(validator('ItemEffectsSource')({role:'bridge',state:'unsupported',snapshot:null,historicalArtifactId:null,problem:spell}),false,'a bridge source never names SpellName');
+ validate('ItemEffectsSource',{role:'bridge',state:'unsupported',snapshot:null,historicalArtifactId:null,problem:{...off,definition:{...off.definition,tableId:'4002a5b1'}}});
+ validate('ItemEffectsSource',{role:'name',state:'unsupported',snapshot:null,historicalArtifactId:null,problem:spell});
+ assert.equal(validator('ItemEffectsSource')({role:'effect',state:'unavailable',snapshot:null,historicalArtifactId:null,problem:offline}),false,'an inputs source reads only ItemEffect');
+ assert.equal(validator('ItemEffectsSource')({role:'name',state:'corrupt',snapshot:null,historicalArtifactId:null,problem:{...corrupt,definition:spell.definition}}),false,'corrupt carries no definition');
+ assert.equal(validator('ItemEffectsSource')({role:'name',state:'unsupported',snapshot:null,historicalArtifactId:null,problem:{...spell,definition:{...spell.definition,tableId:'50238ec2'}}}),false,'only effects tables');
+});
 // #86: Classic builds link through ItemEffect.ParentItemID (layout 1BF9CF3A); the ItemEffect admission is the bridge too.
 // #86: real Host wire output (ItemEffectsHostTests writes and compares it) must satisfy the schema, so a field the Host
 // drops or the contract newly requires fails here and not only against a live engine.
