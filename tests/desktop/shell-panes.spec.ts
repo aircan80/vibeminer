@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { launch, root, size, text } from './helpers';
+import { launch, root, size, text, widerSystemFont } from './helpers';
 
 // #66: at 600x480 and 200% text the Home shell scrolls as a whole (D086). Tables and Files then take their natural height, and the
 // Records grid, the Tables list and the Files list keep their own scroller, capped at the shell's visible height. Each shows at least
@@ -333,6 +333,82 @@ for (const [width, height] of [[600, 480], [1280, 800]] as const) test(`Tab back
       await page.keyboard.press('Shift+Tab'); await expect(listbox).not.toBeFocused(); await settle(page);
       await page.keyboard.press('Tab'); await expect(listbox).toBeFocused();
       await expectFocusVisible(page, `${area}: row 14 after Tab back in`);
+    }
+    await text(page, 1);
+  } finally { await session.close(); }
+});
+
+// #133: at 600x480 and 200% text no header leaves room for a Files row above the status bar, so the list only has to be within
+// reach. From the shell's top, one scroll of the shell alone (the list's own scroll untouched) brings the column header and a whole
+// first row into view above the status bar, and Tab into the list brings its active row into view, also after the reader scrolled
+// both the shell and the list back to their tops (#87, #112). Both Files views, in the system font and in a wider one (#130).
+for (const view of ['Download objects', 'All files'] as const) test(`${view} is one shell scroll or one Tab away at 600x480 and 200% text in either font (#133)`, async () => {
+  test.setTimeout(120_000);
+  const session = await launch(true, false, false, false, false, false, false, false, false, false, false, true);
+  try {
+    const { page, app, data } = session;
+    await size(app, 1280, 800);
+    await page.locator('.build-row').first().click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeFocused();
+    await writeFile(path.join(data, 'file-catalog-ready'), 'ready');
+    await expect(page.locator('section[aria-labelledby="home-catalog"]')).toContainText('Ready to browse', { timeout: 40_000 });
+    await page.getByRole('navigation', { name: 'Build areas' }).getByRole('button', { name: 'Files', exact: true }).click();
+    const files = page.locator('.dh-files:not([hidden])');
+    await files.getByRole('group', { name: 'Files view' }).getByRole('button', { name: view, exact: true }).click();
+    const listbox = files.getByRole('listbox');
+    await expect(listbox.getByRole('option').nth(13)).toBeAttached();
+    await size(app, 600, 480); await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([600, 480]);
+    await text(page, 2);
+    await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-narrow.dh-shell-scroll'));
+    const heading = page.getByRole('heading', { name: 'Files', exact: true });
+    for (const font of ['system', 'wider'] as const) {
+      const label = `${view} in the ${font} font`;
+      if (font === 'wider') await widerSystemFont(page);
+      // The shell and the list scrolled back to their tops, as a reader would leave them.
+      const tops = async () => { await page.evaluate(() => { for (const el of document.querySelectorAll<HTMLElement>('.dh-app, .dh-files:not([hidden]) .dh-list-scroll')) el.scrollTop = 0; }); await settle(page); };
+      // From there, with focus on the Files title.
+      const top = async () => { await heading.focus(); await tops(); };
+      await top();
+      const probe = () => page.evaluate(() => {
+        const app = document.querySelector<HTMLElement>('.dh-app')!, bar = document.querySelector('.dh-statusbar')!.getBoundingClientRect();
+        const scroller = document.querySelector<HTMLElement>('.dh-files:not([hidden]) .dh-list-scroll')!, row = scroller.querySelector<HTMLElement>('[role=option]')!;
+        const head = scroller.querySelector<HTMLElement>('.dh-fthead'), s = scroller.getBoundingClientRect(), r = row.getBoundingClientRect(), frame = app.getBoundingClientRect();
+        const floor = Math.min(bar.top, s.top + scroller.clientHeight), ceiling = Math.max(frame.top, s.top, head?.getBoundingClientRect().bottom ?? 0);
+        const drawn = [r.left + 6, r.top + r.height / 2], hit = document.elementFromPoint(drawn[0], drawn[1]);
+        return { whole: r.top >= ceiling - 1 && r.bottom <= floor + 1 && !!hit && row.contains(hit) && (!head || head.getBoundingClientRect().top >= frame.top - 1), at: `${Math.round(r.top)}-${Math.round(r.bottom)} in ${Math.round(ceiling)}-${Math.round(floor)}`, scroll: Math.round(app.scrollTop), max: app.scrollHeight - app.clientHeight };
+      });
+      const start = await probe();
+      expect(start.whole, `${label}: a whole row shows without scrolling, so the size no longer tests reach (${start.at})`).toBe(false);
+      // One wheel over the header, as far as the list's top: the header and the Files title scroll away and the list's column header
+      // meets the shell's top, as a reader scrolling the shell until the list shows would leave it.
+      const wheel = await page.evaluate(() => {
+        const app = document.querySelector<HTMLElement>('.dh-app')!, list = document.querySelector<HTMLElement>('.dh-files:not([hidden]) .dh-list-scroll')!.getBoundingClientRect();
+        const header = document.querySelector<HTMLElement>('.dh-toolbar')!.getBoundingClientRect();
+        return { x: header.left + 8, y: header.top + 8, by: list.top - app.getBoundingClientRect().top - (parseFloat(getComputedStyle(app).scrollPaddingTop) || 0) };
+      });
+      // A distance of 0 would fire no scrollend and leave the wait to the timeout.
+      expect(wheel.by, `${label}: the list is already at the shell's top`).toBeGreaterThan(1);
+      const ended = page.locator('.dh-app').evaluate(el => new Promise(done => el.addEventListener('scrollend', done, { once: true })));
+      await page.mouse.move(wheel.x, wheel.y); await page.mouse.wheel(0, wheel.by); await ended; await settle(page);
+      expect(await page.locator('.dh-files:not([hidden]) .dh-list-scroll').evaluate(el => el.scrollTop), `${label}: the wheel scrolled the list`).toBe(0);
+      const scrolled = await probe();
+      await page.screenshot({ path: path.join(out, `files-reach-${view === 'All files' ? 'all' : 'objects'}-600x480-200${font === 'wider' ? '-wider' : ''}.png`) });
+      expect.soft(scrolled.whole, `${label}: one shell scroll to the list shows no whole row (${scrolled.at}, shell at ${scrolled.scroll} of ${scrolled.max})`).toBe(true);
+      // Tab from the title into the list: its active row comes into view above the status bar.
+      await top();
+      for (let i = 0; i < 12 && !(await listbox.evaluate(el => el === document.activeElement)); i++) await page.keyboard.press('Tab');
+      await expect(listbox, `${label}: Tab reaches the list`).toBeFocused();
+      await expectFocusVisible(page, `${label}: active row after Tab in`);
+      // Down to row 6, out by Shift+Tab, the shell and the list back to their tops, then Tab in again: row 6 comes back into view.
+      await page.keyboard.press('Home'); for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowDown');
+      await expect(listbox.getByRole('option').nth(5)).toHaveAttribute('aria-selected', 'true');
+      await page.keyboard.press('Shift+Tab'); await expect(listbox).not.toBeFocused();
+      await tops();
+      await page.keyboard.press('Tab'); await expect(listbox).toBeFocused();
+      await expect(listbox.getByRole('option').nth(5)).toHaveAttribute('aria-selected', 'true');
+      await expectFocusVisible(page, `${label}: row 6 after Tab back in from the shell's top`);
     }
     await text(page, 1);
   } finally { await session.close(); }
