@@ -19,6 +19,9 @@ public sealed class ManagedHeapBudgetCollection
 /// <summary>Heap samples for tests in the <see cref="ManagedHeapBudgetCollection"/>.</summary>
 internal static class ManagedHeap
 {
+    /// <summary>Two samples closer than this count as the same heap.</summary>
+    internal const long Tolerance = 64 << 10;
+
     /// <summary>
     /// Live managed heap after full blocking collections stop changing. GC.GetTotalMemory(true)
     /// stops once two samples are within 5%, which on a 150 MB test process leaves up to ~8 MB of
@@ -32,7 +35,7 @@ internal static class ManagedHeap
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
             var current = GC.GetTotalMemory(false);
-            if (previous >= 0 && (change = Math.Abs(current - previous)) < 64 << 10) return current;
+            if (previous >= 0 && (change = Math.Abs(current - previous)) < Tolerance) return current;
             previous = current;
         }
         throw new Xunit.Sdk.XunitException($"Managed heap did not settle after 16 full collections; last change {change} bytes.");

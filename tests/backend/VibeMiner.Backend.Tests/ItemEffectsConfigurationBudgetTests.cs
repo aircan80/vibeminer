@@ -34,7 +34,7 @@ public sealed class ItemEffectsConfigurationBudgetTests(ITestOutputHelper output
             Assert.Equal(2048, parsed.Fields.Count); Assert.Equal(8192, parsed.Fields.Count + parsed.Fields.Values.Sum(values => values.Count));
         });
         parse.RequireWithin(2L << 20);
-        output.WriteLine("maxConfig bytes={0}; fields2048; tokens8192; cumulativeAllocated={1}; releasedGraph={2}; growthWhileHeld={3}. One parse only; not transient-live/RSS proof.", bytes.Length, parse.Allocated, parse.Released, parse.Growth);
+        output.WriteLine("maxConfig bytes={0}; fields2048; tokens8192; cumulativeAllocated={1}; releasedGraph={2}; growthWhileHeld={3}; windows={4}. One parse per window; not transient-live/RSS proof.", bytes.Length, parse.Allocated, parse.Released, parse.Growth, parse.Windows);
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public sealed class ItemEffectsConfigurationBudgetTests(ITestOutputHelper output
             Assert.Equal(["x", "x"], parsed.Fields["last"].Skip(1));
         });
         parse.RequireWithin(2L << 20);
-        output.WriteLine("maxSeparatorConfig bytes={0}; fields2048/tokens8192/lineChars65536; cumulativeAllocated={1}; releasedGraph={2}; growthWhileHeld={3}. Split scratch transient remains separately accounted.", bytes.Length, parse.Allocated, parse.Released, parse.Growth);
+        output.WriteLine("maxSeparatorConfig bytes={0}; fields2048/tokens8192/lineChars65536; cumulativeAllocated={1}; releasedGraph={2}; growthWhileHeld={3}; windows={4}. Split scratch transient remains separately accounted.", bytes.Length, parse.Allocated, parse.Released, parse.Growth, parse.Windows);
     }
 
     [Fact]
@@ -67,6 +67,20 @@ public sealed class ItemEffectsConfigurationBudgetTests(ITestOutputHelper output
         Assert.True(parse.Growth < 0, $"The freed leftover must show up as negative growth; growth={parse.Growth}.");
         parse.RequireWithin(2L << 20);
         Assert.True(parse.Released > 0, $"The held parse graph must be measured; released={parse.Released}.");
+    }
+
+    [Fact]
+    public void Parse_graph_measurement_holds_when_earlier_work_is_freed_between_the_held_and_dropped_samples()
+    {
+        // Stands in for a retired pool worker's thread-static ArrayPool slots or an ArrayPool.Shared
+        // trim: live when the graph is sampled held, freed before it is sampled dropped (#72).
+        var leftover = Leftover(4 << 20);
+        var parse = MeasureParse(Dense(2048, 6144, 131072), static parsed => Assert.Equal(2048, parsed.Fields.Count),
+            betweenSamples: () => leftover.Value = null);
+        parse.RequireWithin(2L << 20);
+        Assert.True(parse.Released > 0, $"The held parse graph must be measured; released={parse.Released}.");
+        // The inflated first window disagrees with the second, so at least three windows ran.
+        Assert.True(parse.Windows >= 3, $"The inflated first window must not count; windows={parse.Windows}.");
     }
 
     [Fact]
@@ -179,14 +193,29 @@ public sealed class ItemEffectsConfigurationBudgetTests(ITestOutputHelper output
     /// Charges the parse graph by what dropping it releases, between settled samples. A plain
     /// GC.GetTotalMemory(true) delta from a baseline read -549,984 bytes on Linux (#67): leftovers
     /// of earlier tests were still counted at the baseline and freed during the parse.
+    /// Earlier work is also freed between the held and dropped samples: under load, pool workers
+    /// retire after 20 s idle and drop their thread-static ArrayPool slots, and ArrayPool.Shared
+    /// trims stale arrays from a gen2 callback, both on wall-clock time. One of them added
+    /// 1,844,496 bytes to Released (#72). Such a free inflates one window only, so a window counts
+    /// once the next one releases the same graph. Growth is charged from the first baseline.
     /// </summary>
-    private static ParseSample MeasureParse(byte[] bytes, Action<TactConfiguration> check)
+    private static ParseSample MeasureParse(byte[] bytes, Action<TactConfiguration> check, Action? betweenSamples = null)
     {
+        const int MaxWindows = 8;
         Warm(bytes);
-        var before = ManagedHeap.Settled();
-        var (held, allocated) = ParseAndHold(bytes, check);
-        var dropped = ManagedHeap.Settled();
-        return new(held - dropped, held - before, allocated);
+        var baseline = ManagedHeap.Settled();
+        long? previous = null;
+        for (var window = 1; window <= MaxWindows; window++)
+        {
+            var (held, allocated) = ParseAndHold(bytes, check);
+            betweenSamples?.Invoke();
+            var dropped = ManagedHeap.Settled();
+            var released = held - dropped;
+            if (previous is { } last && Math.Abs(released - last) < ManagedHeap.Tolerance)
+                return new(released, held - baseline, allocated, window);
+            previous = released;
+        }
+        throw new Xunit.Sdk.XunitException($"No two consecutive of {MaxWindows} parse windows released the same graph; last released {previous} bytes.");
     }
 
     // Separate frames, so no unoptimized JIT temporary of the caller keeps either parse alive.
@@ -208,7 +237,7 @@ public sealed class ItemEffectsConfigurationBudgetTests(ITestOutputHelper output
         return (held, allocated);
     }
 
-    private readonly record struct ParseSample(long Released, long Growth, long Allocated)
+    private readonly record struct ParseSample(long Released, long Growth, long Allocated, int Windows)
     {
         // Released is the graph itself. Growth from the settled pre-parse sample also catches
         // parser state that outlives the result; it has no lower bound because earlier work
