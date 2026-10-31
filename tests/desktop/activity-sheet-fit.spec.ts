@@ -37,6 +37,11 @@ test('a focused panel control stays in view inside the panel after the text size
     if (!await panel.isVisible()) await page.locator('.download-activity-trigger:visible, .dv-chip:visible').click();
     const pause = panel.getByRole('button', { name: 'Pause build download' });
     await expect(pause).toBeVisible();
+    // #122: the running state written above reaches the panel on the fixture's next poll. Waiting for it keeps that progress update out of
+    // the steps below. Landing just after a step's settle, its commit grew the heading over Pause and the step measured before the next
+    // frame, whose ResizeObserver run lets the keeper move Pause back below the heading. The step after the loop sends such an update on purpose.
+    await expect(panel.getByText(/25 of 100 bytes/)).toBeVisible({ timeout: 10_000 });
+    const steady = async () => { await settle(page); await page.waitForTimeout(150); await settle(page); };
     for (const [from, to] of [[1, 2], [2, 1], [1, 2]]) {
       await text(page, from); await settle(page);
       // Focused and scrolled into the panel's view, as Tab would leave it (focus() alone doesn't scroll an already focused control).
@@ -48,11 +53,17 @@ test('a focused panel control stays in view inside the panel after the text size
       const after = await inPanelView(page);
       expect.soft(after.whole, `Pause in view after ${from * 100}% → ${to * 100}% (${after.at})`).toBe(true);
     }
+    // A progress update in the sheet whose stage wraps grows the heading and the card above Pause, which sits right under the heading: the
+    // browser's scroll anchoring keeps Pause where it was on screen, now under the taller heading, and the keeper brings it back (#122).
+    await writeFile(path.join(data, 'retention-state.json'), JSON.stringify({ state: 'running', progress: { stage: 'Transferring encoded objects from the authored archive', unit: 'bytes', completed: '40', total: '100' }, wireBytesThisSession: '300' }));
+    await expect(panel.getByText(/40 of 100 bytes/)).toBeVisible({ timeout: 10_000 }); await steady();
+    await expect(pause).toBeFocused();
+    const updated = await inPanelView(page);
+    expect.soft(updated.whole, `Pause in view after a progress update grew the sheet heading at 200% (${updated.at})`).toBe(true);
     // #106: a layout too short to hold Pause doesn't drop it, nor does the scroll event of the panel's own scroll there. On the way to the
     // sheet the compact panel passes through such a layout (its view below the window), and a slow machine could deliver that scroll
     // event after the sheet, leaving Pause under a heading that then grew. 400% text makes the heading taller than the window, so every
     // step here goes through that state; the stage update grows the heading while Pause can't show.
-    const steady = async () => { await settle(page); await page.waitForTimeout(150); await settle(page); };
     await text(page, 4); await steady();
     await text(page, 2); await steady();
     const back = await inPanelView(page);
