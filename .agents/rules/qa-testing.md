@@ -10,12 +10,12 @@ Never QA code written in the same session. Work only from the issue text, the co
 Read: [workflow](workflow.md), [docs/TESTING.md](../../docs/TESTING.md).
 
 ## Setup (worktree, so development keeps going)
-1. `git worktree add .claude/worktrees/qa-N <sha>`. Keep only one QA worktree at a time.
+1. `git worktree add .claude/worktrees/qa-N <sha>`. Keep one QA worktree per issue. For a recheck of the same issue, reuse it if it's still there: `git checkout --detach <sha> && git clean -fdx -e node_modules`, then follow the reinstall rule in [workflow](workflow.md) step 7.
 2. In the worktree:
    - `source tools/dev-env.sh && npm ci` as one command. The helper picks up the main checkout's toolchains and Electron cache.
    - Agent shell calls don't keep env vars between calls, so start every later npm or dotnet call with `source tools/dev-env.sh && ` too, e.g. `source tools/dev-env.sh && npm ci && npm run build && npm test`.
 3. Every app or Electron run uses `VIBEMINER_DATA_DIR=<worktree>/.local/qa-data`. Never touch the owner's app profile.
-4. When done: `git worktree remove .claude/worktrees/qa-N`.
+4. When done: after a fail, or a pass whose commit still needs a rebase, keep the worktree for the recheck. Otherwise `git worktree remove .claude/worktrees/qa-N`.
 
 ## Test
 - Each acceptance criterion, plus the checks listed in [TESTING.md](../../docs/TESTING.md).
