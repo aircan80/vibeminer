@@ -338,7 +338,7 @@
 .desktop-home .dh-files [role="option"]>span.dh-fname-cell{white-space:normal;overflow-wrap:anywhere;overflow:visible;padding:.28rem 0}
 .desktop-home .dh-files .dh-insp-head{min-height:calc(var(--pane-head) + var(--thead))}
 .desktop-home.dh-medium .dh-storage-cols{grid-template-columns:minmax(0,1fr)}
-/* Compact header: brand and identity on the first line; the area bar and the actions share the next line when they fit, otherwise the actions take their own line and the tabs wrap. BuildHeader keeps the activity entry's widest width in this area reserved (its min-width, then .dh-entry-reserve once it retires), so the header doesn't re-wrap under the reader (#64). */
+/* Compact header: brand and identity on the first line; the area bar and the actions share the next line when they fit, otherwise the actions take their own line and the tabs wrap. BuildHeader keeps the activity entry's widest width in this area reserved (its min-width, then .dh-entry-reserve once it retires), so the header doesn't re-wrap under the reader (#64); the wide header does the same (#128). */
 .desktop-home.dh-compact .dh-toolbar{align-items:stretch;gap:0;padding:0;reading-flow:flex-visual}
 .desktop-home.dh-compact .dh-brand{order:1;padding:.401333rem 0 .401333rem .802667rem}
 .desktop-home.dh-compact .dh-idfields{order:2;flex:1 1 calc(100% - 3rem);padding:.401333rem .802667rem .401333rem .653333rem}
@@ -348,9 +348,8 @@
 .desktop-home.dh-compact .dh-idf>dt{font-size:var(--fs-m)}
 .desktop-home.dh-compact .dh-idf.dh-named>dt{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .desktop-home.dh-compact .dh-idf.dh-moved{display:none}
-.desktop-home .dh-entry-reserve{display:none}
-.desktop-home.dh-compact .dh-entry-reserve{display:block;flex:none;width:var(--dh-entry-min,0);min-height:2.006667rem}
-.desktop-home.dh-compact .dh-hgroup .dv-chip{min-width:var(--dh-entry-min,0)}
+.desktop-home .dh-entry-reserve{display:block;flex:none;width:var(--dh-entry-min,0);min-height:2.006667rem}
+.desktop-home .dh-hgroup .dv-chip{min-width:var(--dh-entry-min,0)}
 .desktop-home.dh-compact .dh-areas{order:3;flex:1 1 auto;min-width:0;margin:0}
 .desktop-home.dh-compact .dh-hgroup{order:4;flex:1 1 auto;min-width:0;flex-wrap:wrap;justify-content:flex-end;gap:.401333rem .802667rem;margin:0;padding:.28rem .802667rem .28rem .653333rem;border-top:1px solid var(--line)}
 .desktop-home.dh-compact .dh-home-grid{display:block;overflow:auto;background:var(--paper)}

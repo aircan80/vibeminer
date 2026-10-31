@@ -17,7 +17,7 @@ import './desktop-home.css';
 // Narrow (#52, D093): below 28rem the Files object rows take two lines, so their local state stays in view.
 const MEDIUM_REM=78.4,COMPACT_REM=65.333333,NARROW_REM=28;
 // setMinimum(owner, px) asks for at least px of area height while owner shows; null withdraws it. The largest request counts.
-type Shell={compact:boolean;statusSlot:HTMLElement|null;setMinimum?:(owner:object,px:number|null)=>void};
+type Shell={compact:boolean;medium?:boolean;statusSlot:HTMLElement|null;setMinimum?:(owner:object,px:number|null)=>void};
 export const ShellContext=createContext<Shell>({compact:false,statusSlot:null,setMinimum:()=>{}});
 export function useShell(){return useContext(ShellContext);}
 // Areas can add their own status bar facts through statusSlot (Tables names its definitions revision and admitted rows).
@@ -159,7 +159,7 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
   return()=>{observer?.disconnect();text.disconnect();panel.removeEventListener('focusin',onFocus);panel.removeEventListener('scroll',onScroll);window.removeEventListener('resize',keep);panel.style.scrollPaddingTop='';};
  },[expanded]);
  const summary=ui&&ui.entry&&!ui.expanded?ui.summary:null;
- return <ShellContext.Provider value={{compact:size.compact,statusSlot,setMinimum}}><div ref={host} className={`desktop-home${size.compact?' dh-compact dh-medium':size.medium?' dh-medium':''}${size.narrow?' dh-narrow':''}${scrolling?' dh-shell-scroll':''}${expanded?' dh-panel-open':''}`} data-area={area}>
+ return <ShellContext.Provider value={{compact:size.compact,medium:size.medium,statusSlot,setMinimum}}><div ref={host} className={`desktop-home${size.compact?' dh-compact dh-medium':size.medium?' dh-medium':''}${size.narrow?' dh-narrow':''}${scrolling?' dh-shell-scroll':''}${expanded?' dh-panel-open':''}`} data-area={area}>
   <a className="dh-skip" href="#dh-area">Skip to content</a>
   <div ref={shell} className="dh-app">
    <BuildHeader ref={toolbar} snapshot={snapshot} catalogBuild={catalogBuild} label={label} retention={retention} onChoose={onChoose} areas={areas} area={area}/>

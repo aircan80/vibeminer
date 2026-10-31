@@ -36,12 +36,27 @@ test('Files says the file list is being prepared, hands it off in the footer wit
     // Sealed while Files shows the object list: offered in the footer; the rows, focus, selection and scroll stay put.
     const objects = page.getByRole('listbox'); await objects.focus(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown');
     await page.evaluate(() => { document.querySelector<HTMLElement>('.dh-files .dh-list-scroll')!.scrollTop = 60; });
+    // #128: in a wider system font (DejaVu Sans) the wide header's actions take their own line while the activity entry shows. Here the
+    // actions get a right margin that leaves room for them beside the fields only without the entry, so that line break happens in any font.
+    const wrapped = () => page.evaluate(() => document.querySelector('.dh-hgroup')!.getBoundingClientRect().top >= document.querySelector('.dh-idfields')!.getBoundingClientRect().bottom - 1);
+    if (!await wrapped()) await page.evaluate(() => {
+      const group = document.querySelector<HTMLElement>('.dh-hgroup')!, fields = document.querySelector('.dh-idfields')!.getBoundingClientRect(), chip = group.querySelector('.dv-chip')!.getBoundingClientRect().width;
+      const free = group.getBoundingClientRect().left - fields.right - parseFloat(getComputedStyle(group.parentElement!).columnGap);
+      const style = document.createElement('style'); style.id = 'force-header-wrap'; style.textContent = `.desktop-home .dh-hgroup{margin-right:${free + chip / 2}px}`; document.head.append(style);
+    });
+    expect(await wrapped(), 'header actions on their own line while the entry shows').toBe(true);
+    const header = () => page.evaluate(() => document.querySelector('.dh-toolbar')!.getBoundingClientRect().height);
     const before = await page.evaluate(() => ({ row: document.querySelector('.dh-files [aria-selected="true"]')!.getBoundingClientRect().top, scroll: document.querySelector<HTMLElement>('.dh-files .dh-list-scroll')!.scrollTop }));
+    const tall = await header();
     await writeFile(path.join(data, 'file-catalog-ready'), 'ready');
     const show = page.locator('.dh-pane-foot').getByRole('button', { name: 'Show file list' });
     await expect(show).toBeVisible(); await expect(page.locator('.dh-catalog-ready [role=status]')).toContainText('File list ready');
+    await expect(page.locator('.dh-toolbar .dv-chip')).toHaveCount(0);
+    await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+    expect(Math.abs(await header() - tall), 'header height after the entry went away').toBeLessThan(0.5);
     const after = await page.evaluate(() => ({ row: document.querySelector('.dh-files [aria-selected="true"]')!.getBoundingClientRect().top, scroll: document.querySelector<HTMLElement>('.dh-files .dh-list-scroll')!.scrollTop }));
     expect(after.scroll).toBe(before.scroll); expect(Math.abs(after.row - before.row)).toBeLessThan(0.5); await expect(objects).toBeFocused();
+    await page.evaluate(() => document.getElementById('force-header-wrap')?.remove());
     await capture(page, app, 'ready-offered');
     await show.focus(); await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeFocused();
