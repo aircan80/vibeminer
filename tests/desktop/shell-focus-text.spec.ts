@@ -60,3 +60,62 @@ test('a focused shell control stays in view after the text size changes at 600x4
     await text(page, 1);
   } finally { await session.close(); }
 });
+
+// #115: when the shell doesn't scroll (600x480 back at 100%, or 1280x800 at these sizes), a focused Build overview control sits in the
+// area's own scroll pane, and a text-size change could leave it scrolled out of that pane, wholly or partly under the status bar: the
+// keeper only scrolled the shell. Here "in view" also means wholly inside every scroller that holds the control.
+const inEveryView = (page: Page) => page.evaluate(() => {
+  const el = document.activeElement as HTMLElement, r = el.getBoundingClientRect(), app = document.querySelector<HTMLElement>('.dh-app')!, bar = document.querySelector('.dh-statusbar')!.getBoundingClientRect();
+  let top = Math.max(0, app.getBoundingClientRect().top), bottom = Math.min(bar.top, innerHeight);
+  for (let up = el.parentElement; up && up !== app; up = up.parentElement) {
+    if (!/auto|scroll|hidden|clip/.test(getComputedStyle(up).overflowY)) continue;
+    const s = up.getBoundingClientRect(); top = Math.max(top, s.top); bottom = Math.min(bottom, s.bottom);
+  }
+  return { whole: r.height > 0 && r.top >= top - 1 && r.bottom <= bottom + 1, at: `${Math.round(r.top)}-${Math.round(r.bottom)} in ${Math.round(top)}-${Math.round(bottom)}; shell scroll ${Math.round(app.scrollTop)} of ${app.scrollHeight - app.clientHeight}` };
+});
+
+test('a focused control in the area\'s own pane stays in view after the text size changes, at 600x480 and 1280x800', async () => {
+  const session = await launch(true, false, true);
+  try {
+    const { page, app, data } = session;
+    await size(app, 1280, 800);
+    await page.locator('.build-row').first().click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
+    const sizes: [number, number, number[][]][] = [[600, 480, [[2, 1], [4, 1], [4, 2, 1]]], [1280, 800, [[2], [4], [2, 4, 2], [2, 1]]]];
+    for (const [width, height, runs] of sizes) {
+      await size(app, width, height); await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([width, height]);
+      for (const name of ['View metadata details', 'Browse in Files']) {
+        const control = page.locator('.dh-area').getByRole('button', { name, exact: true });
+        for (const steps of runs) {
+          await text(page, 1); await steady(page);
+          await control.focus(); await control.evaluate(el => el.scrollIntoView({ block: 'nearest' })); await steady(page);
+          const before = await inEveryView(page);
+          expect(before.whole, `${name} in view at ${width}x${height}, 100% (${before.at})`).toBe(true);
+          let from = 100;
+          for (const to of steps) {
+            await text(page, to); await steady(page);
+            await expect(control).toBeFocused();
+            const after = await inEveryView(page);
+            expect.soft(after.whole, `${name} in view at ${width}x${height} after ${from}% → ${to * 100}% (${after.at})`).toBe(true);
+            from = to * 100;
+          }
+        }
+      }
+    }
+    // Wheeling the pane away from the control still clears that: the next text-size change doesn't pull it back.
+    const meta = page.locator('.dh-area').getByRole('button', { name: 'View metadata details', exact: true });
+    await text(page, 2); await steady(page);
+    await meta.focus(); await meta.evaluate(el => el.scrollIntoView({ block: 'nearest' })); await steady(page);
+    expect((await inEveryView(page)).whole, 'View metadata details in view at 1280x800, 200%').toBe(true);
+    const pane = await meta.evaluate(el => { let up = el.parentElement; while (up && !(/auto|scroll/.test(getComputedStyle(up).overflowY) && up.scrollHeight > up.clientHeight + 1)) up = up.parentElement; const r = up!.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    await page.mouse.move(pane.x, pane.y); await page.mouse.wheel(0, -20000); await steady(page);
+    expect((await inEveryView(page)).whole, 'View metadata details wheeled out of view').toBe(false);
+    await text(page, 2.5); await steady(page);
+    await expect(meta).toBeFocused();
+    const wheeled = await inEveryView(page);
+    expect(wheeled.whole, `View metadata details not pulled back after the reader wheeled away (${wheeled.at})`).toBe(false);
+    await text(page, 1);
+  } finally { await session.close(); }
+});
