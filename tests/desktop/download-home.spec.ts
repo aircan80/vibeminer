@@ -354,7 +354,8 @@ test('the Files pane head keeps the list and inspector headers aligned and the t
 });
 // #135: at 600×480 and 200% text All files had no narrow layout, so its compact columns ran 927px wide (945px in DejaVu
 // Sans) in a 570px list that hides sideways overflow; Memberships was cut and Encoded size and Local were out of reach.
-// Each column now shows its header and value whole, on a row's first line or its second.
+// Each column now shows its header and value whole, on a row's first line or its second, and short values such as Not
+// stored don't wrap (#137).
 test('All files shows every column header and value whole at 600×480 and 200% text (#135)', async () => {
   test.setTimeout(90_000);
   const session = await launch(true, false, false, false, false, false, false, false, false, false, false, true);
@@ -391,6 +392,11 @@ test('All files shows every column header and value whole at 600×480 and 200% t
         heads: shown(head).map(c => c.textContent ?? ''), cutHeads: shown(head).filter(cut).map(c => c.textContent),
         cells: rows.map(r => shown(r).length), cutCells: rows.flatMap(r => shown(r).filter(cut).map(c => `${r.querySelector('.dh-fid')?.textContent}: ${c.textContent}`)),
         sideways: scroll.scrollWidth - scroll.clientWidth, grid: Math.round(head.scrollWidth), list: Math.round(scroll.clientWidth),
+        // #137: each row's second-line values and how many lines each takes.
+        second: rows.map(r => ({ id: r.querySelector('.dh-fid')?.textContent, values: shown(r).slice(2).map(c => {
+          const range = document.createRange(); range.selectNodeContents(c);
+          return { text: c.textContent ?? '', lines: new Set([...range.getClientRects()].map(x => Math.round(x.top))).size };
+        }) })),
       };
     });
     // The shell scrolls at this size; bring the list up for the capture.
@@ -403,6 +409,11 @@ test('All files shows every column header and value whole at 600×480 and 200% t
     expect(g.cutHeads, `${label}: cut column headers (grid ${g.grid}px in a ${g.list}px list)`).toEqual([]);
     expect(g.cutCells, `${label}: cut values`).toEqual([]);
     expect(g.sideways, `${label}: the list overflows sideways`).toBeLessThanOrEqual(1);
+    // #137: a row with a single size and Stored or Not stored keeps two lines, so three rows fit under the header (#66).
+    // In DejaVu Sans Not stored wrapped and pushed most rows to a third line. Longer values, such as a size range, may wrap.
+    const plain = g.second.filter(r => /^(Stored|Not stored)$/.test(r.values.at(-1)!.text) && !/–|unresolved|Unresolved/.test(r.values[1].text));
+    expect(plain.length, label).toBeGreaterThan(5);
+    expect(plain.filter(r => r.values.some(v => v.lines !== 1)).map(r => `${r.id}: ${r.values.map(v => `${v.text} (${v.lines})`).join(', ')}`), `${label}: wrapped values`).toEqual([]);
   } finally { await session.close(); }
 });
 test('focus on View task in a Check note moves to Check when the Check ends, in its own and in another build\'s note (#38, D093)', async () => {

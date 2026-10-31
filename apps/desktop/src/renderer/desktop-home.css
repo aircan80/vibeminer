@@ -385,9 +385,12 @@
 .desktop-home.dh-compact .dh-fcols>:nth-child(5){display:none}
 /* Narrow (#135): below 28rem the five compact columns don't fit, so each row and the header take two lines: FileDataID and
    its name, then Memberships, Encoded size and Local. Memberships and Encoded size keep their headers whole in rch, as in the
-   compact layout; Local takes the rest, and values wrap at their spaces rather than being cut. */
+   compact layout; Local takes the rest, and values wrap at their spaces rather than being cut.
+   #137: 9rch still holds Memberships and Encoded size whole (8.7rch and 8.5rch in DejaVu Sans), and a .4rem column gap leaves
+   Local room for Stored and Not stored (7.1rch in DejaVu) at 600x480 and 200%, so those rows keep two lines and three fit
+   under the header. Longer values, such as 1 of 2 stored or a size range, still wrap to a third line. */
 .desktop-home.dh-narrow .dh-list-scroll:has(>.dh-fcols){--thead:3.2rem}
-.desktop-home.dh-narrow .dh-fcols{grid-template-columns:minmax(9.5rch,1fr) minmax(9.5rch,1fr) minmax(0,1fr);grid-template-areas:"id name name" "mem size local";row-gap:.186667rem;align-content:center}
+.desktop-home.dh-narrow .dh-fcols{grid-template-columns:minmax(9rch,1fr) minmax(9rch,1fr) minmax(0,1fr);grid-template-areas:"id name name" "mem size local";column-gap:.4rem;row-gap:.186667rem;align-content:center}
 .desktop-home.dh-narrow .dh-fcols>:nth-child(1){grid-area:id}
 .desktop-home.dh-narrow .dh-fcols>:nth-child(2){grid-area:name}
 .desktop-home.dh-narrow .dh-fcols>:nth-child(3){grid-area:mem}
