@@ -1,3 +1,4 @@
+using System.Globalization;
 using VibeMiner.Application;
 using VibeMiner.Domain;
 
@@ -14,9 +15,9 @@ public sealed class AcquisitionResources
         long maximumStagingBytes = 2L << 30, long maximumBackgroundStagingBytes = 512L << 20)
     {
         MaximumHttp = maximumHttp; MaximumBackgroundHttp = maximumBackgroundHttp;
-        http = new(maximumHttp, maximumBackgroundHttp);
-        cpu = new(maximumCpu, maximumBackgroundCpu);
-        staging = new(maximumStagingBytes, maximumBackgroundStagingBytes);
+        http = new(maximumHttp, maximumBackgroundHttp, "ACQUISITION_WORKER_LIMIT", "download workers");
+        cpu = new(maximumCpu, maximumBackgroundCpu, "ACQUISITION_WORKER_LIMIT", "CPU workers");
+        staging = new(maximumStagingBytes, maximumBackgroundStagingBytes, "ACQUISITION_STAGING_LIMIT", "bytes of temporary storage");
     }
     /// <summary>HTTP permits: downloads at once in total, and how many of them background work may hold.</summary>
     public int MaximumHttp { get; }
@@ -25,7 +26,10 @@ public sealed class AcquisitionResources
     public Task<IDisposable> EnterCpuAsync(IAcquisitionWorkContext? context, CancellationToken token) => cpu.EnterAsync(1, context, token);
     public Task<IDisposable> ReserveStagingAsync(long bytes, IAcquisitionWorkContext? context, CancellationToken token) => staging.EnterAsync(bytes, context, token, reportStagingWait: true);
 
-    private sealed class PriorityBudget(long maximum, long backgroundMaximum)
+    /// <summary>A request bigger than the budget itself can never be granted, so it is refused at once and is not
+    /// retryable as-is (#117). A budget that is merely busy makes the request wait instead; a full queue is a different,
+    /// retryable code (ACQUISITION_CAPACITY in the coordinator).</summary>
+    private sealed class PriorityBudget(long maximum, long backgroundMaximum, string limitCode, string unit)
     {
         private readonly object gate = new();
         private readonly List<Entry> waiting = [];
@@ -40,9 +44,14 @@ public sealed class AcquisitionResources
         }
         internal async Task<IDisposable> EnterAsync(long weight, IAcquisitionWorkContext? context, CancellationToken token, bool reportStagingWait = false)
         {
-            if (weight < 1 || weight > maximum || context?.Snapshot.Priority == AcquisitionPriority.Background && weight > backgroundMaximum)
-                throw new DiscoveryException("ACQUISITION_CAPACITY", "The complete operation exceeds its staging or worker allowance.", true);
+            ArgumentOutOfRangeException.ThrowIfNegative(weight);
             token.ThrowIfCancellationRequested();
+            // Nothing to hold, e.g. staging for an empty file.
+            if (weight == 0) return new Release(static () => { });
+            var background = context?.Snapshot.Priority == AcquisitionPriority.Background;
+            if (weight > maximum || background && weight > backgroundMaximum)
+                throw new DiscoveryException(limitCode, string.Create(CultureInfo.InvariantCulture,
+                    $"One operation needs more {unit} ({weight:N0}) than {(background ? "background work" : "it")} may hold ({(background ? backgroundMaximum : maximum):N0})."), false);
             var entry = new Entry(weight, context);
             lock (gate) { waiting.Add(entry); Grant(); }
             using var cancellation = token.Register(() => Cancel(entry, token));

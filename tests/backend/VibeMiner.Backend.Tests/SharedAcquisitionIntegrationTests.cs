@@ -283,6 +283,34 @@ public sealed class SharedAcquisitionIntegrationTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => parsing);
     }
 
+    // #117: a full budget makes the request wait (and a full queue is the coordinator's retryable ACQUISITION_CAPACITY); a
+    // request bigger than the budget itself can never be granted, so it is a named limit that a retry can't pass.
+    [Fact]
+    public async Task One_operation_over_its_own_allowance_is_a_named_limit_not_a_full_queue()
+    {
+        var resources = new AcquisitionResources(maximumCpu: 0, maximumBackgroundCpu: 0, maximumStagingBytes: 100, maximumBackgroundStagingBytes: 25);
+        var staging = await Assert.ThrowsAsync<DiscoveryException>(() => resources.ReserveStagingAsync(101, new Work(AcquisitionPriority.Interactive), default));
+        Assert.Equal("ACQUISITION_STAGING_LIMIT", staging.Code); Assert.False(staging.Retryable);
+        Assert.Equal("One operation needs more bytes of temporary storage (101) than it may hold (100).", staging.Message);
+        // Background work has its own, smaller allowance; the same request at interactive priority fits.
+        var background = await Assert.ThrowsAsync<DiscoveryException>(() => resources.ReserveStagingAsync(26, new Work(AcquisitionPriority.Background), default));
+        Assert.Equal("ACQUISITION_STAGING_LIMIT", background.Code); Assert.False(background.Retryable);
+        Assert.Equal("One operation needs more bytes of temporary storage (26) than background work may hold (25).", background.Message);
+        using (await resources.ReserveStagingAsync(26, new Work(AcquisitionPriority.Interactive), default).WaitAsync(Deadline)) { }
+        var cpu = await Assert.ThrowsAsync<DiscoveryException>(() => resources.EnterCpuAsync(null, default));
+        Assert.Equal("ACQUISITION_WORKER_LIMIT", cpu.Code); Assert.False(cpu.Retryable);
+        Assert.Equal("One operation needs more CPU workers (1) than it may hold (0).", cpu.Message);
+        // A budget that is only busy now waits instead of failing, and grants once it frees up.
+        var held = await resources.ReserveStagingAsync(100, null, default).WaitAsync(Deadline);
+        var waiting = resources.ReserveStagingAsync(100, null, default);
+        Assert.False(waiting.IsCompleted);
+        held.Dispose();
+        using (await waiting.WaitAsync(Deadline)) { }
+        // An empty file needs no staging and is not refused.
+        using (await resources.ReserveStagingAsync(0, null, default).WaitAsync(Deadline)) { }
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => resources.ReserveStagingAsync(-1, null, default));
+    }
+
     private sealed class Work(AcquisitionPriority priority, IReadOnlyList<EncodedSourceContext>? sources = null) : IAcquisitionWorkContext
     {
         private readonly object gate = new();

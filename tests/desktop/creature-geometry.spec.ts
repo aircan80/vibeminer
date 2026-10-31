@@ -155,7 +155,7 @@ test('A model over a size limit says so with its code, leading with the sizes an
 // #114: these notes are worded by the real C# engine. The backend fixture runs the real M2 reader and failure mapping and
 // prints the problems; the authored engine only carries them to the card, so this checks engine text, not fixture text.
 type EngineProblem={code:string;message:string;retryable:boolean;dependency:string;headline:string};
-async function engineLimits():Promise<{vertexCount:EngineProblem;namedLimit:EngineProblem;buildListLimit:EngineProblem;rootVariants:EngineProblem}>{
+async function engineLimits():Promise<{vertexCount:EngineProblem;namedLimit:EngineProblem;buildListLimit:EngineProblem;rootVariants:EngineProblem;stagingAllowance:EngineProblem;fullQueue:EngineProblem}>{
  const local=path.join(root,'.local/toolchains/dotnet/dotnet'),dotnet=process.env.VIBEMINER_DOTNET||(process.env.DOTNET_ROOT?path.join(process.env.DOTNET_ROOT,'dotnet'):existsSync(local)?local:'dotnet');
  const{stdout}=await promisify(execFile)(dotnet,[path.join(root,'.local/backend-fixture-build/bin/BackendFixture/debug/BackendFixture.dll'),'--geometry-limit-messages'],{timeout:60000});
  return JSON.parse(stdout);}
@@ -196,6 +196,26 @@ test('A ROOT cap on the model\'s own variants says so and calls the model too la
  await expect(card(page)).not.toContainText('Build list too large');await expect(card(page)).not.toContainText('file list');
  await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);
 }finally{await s.close();}});
+// #117: a read bigger than its own staging allowance gets the same allowance on a retry, so it is a named limit with no
+// Retry, and it doesn't say the download queue is full. A full queue may have room later, so it keeps Retry model.
+test('A read over its own staging allowance names that limit with no Retry; a full download queue keeps Retry (#117)',async()=>{test.setTimeout(120000);const{stagingAllowance,fullQueue}=await engineLimits();
+ expect(stagingAllowance).toMatchObject({code:'ACQUISITION_STAGING_LIMIT',retryable:false,headline:'modelTooLarge',
+  message:'The model file needs more temporary storage than one read may use. This is a limit, not a corrupt file.'});
+ expect(fullQueue).toMatchObject({code:'ACQUISITION_CAPACITY',retryable:true,headline:'notDrawn',message:'The engine\'s download queue is full, so the model file was not read.'});
+ let s=await engineLimit(stagingAllowance);try{
+  const{page}=s;await show(page).click();
+  await expect(card(page).getByRole('img',{name:'Model too large',exact:true})).toBeVisible({timeout:20000});
+  await expect(card(page).locator('.cv-pnote')).toHaveText(`ACQUISITION_STAGING_LIMIT ${stagingAllowance.message}`);
+  await expect(card(page)).not.toContainText('queue');await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);
+ }finally{await s.close();}
+ s=await engineLimit(fullQueue);try{
+  const{page}=s;await show(page).click();
+  await expect(card(page).getByRole('img',{name:'Model not drawn',exact:true})).toBeVisible({timeout:20000});
+  await expect(card(page).locator('.cv-pnote')).toHaveText(`ACQUISITION_CAPACITY ${fullQueue.message}`);
+  await expect(card(page)).not.toContainText('Model too large');await expect(card(page)).not.toContainText('not a corrupt file');
+  await expect(card(page).getByRole('button',{name:'Retry model',exact:true})).toBeVisible();
+ }finally{await s.close();}
+});
 test('Switching builds closes the open view lease, and no geometry block is left above the panes',async()=>{test.setTimeout(120000);const s=await opened();try{
  const{page}=s,closes=async()=>(await methods(s.data)).filter(r=>r.method==='creatures.geometry.close').length;
  const switchTo=async(row:number)=>{await page.getByRole('button',{name:/Choose build/}).click();await page.locator('.build-row').nth(row).click();await page.getByRole('button',{name:'Open build',exact:true}).click();await expect(page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();};

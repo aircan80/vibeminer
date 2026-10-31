@@ -117,7 +117,10 @@ public sealed class CreatureGeometryLimitWordsTests
     [InlineData("ASSET_CONTEXT_CAPACITY", "", "The engine's build source pool is full, so the model file was not read.", CreatureGeometryHeadline.NotDrawn)]
     [InlineData("ASSET_HANDLE_CAPACITY", "", "The engine's asset handle pool is full, so the model file was not read.", CreatureGeometryHeadline.NotDrawn)]
     [InlineData("ASSET_BATCH_CAPACITY", "", "The engine's asset lookup queue is full, so the model file was not read.", CreatureGeometryHeadline.NotDrawn)]
-    [InlineData("RETENTION_CAPACITY", "", "The engine's retention capacity is full, so the model file was not read.", CreatureGeometryHeadline.NotDrawn)]
+    [InlineData("RETENTION_CAPACITY", "", "The engine's list of kept downloads is full, so the model file was not read.", CreatureGeometryHeadline.NotDrawn)]
+    // #117: one read over its own allowance is not a full queue. Staging is sized by the file; workers are the engine's.
+    [InlineData("ACQUISITION_STAGING_LIMIT", "", "The model file needs more temporary storage than one read may use.", CreatureGeometryHeadline.ModelTooLarge)]
+    [InlineData("ACQUISITION_WORKER_LIMIT", "", "One read needs more workers than the engine allows it, so the model file was not read.", CreatureGeometryHeadline.NotDrawn)]
     // A code the engine has no words for names no owner it can't know.
     [InlineData("ASSET_BATCH_LIMIT", "", "The engine's asset batch limit was reached, so the model file was not read.", CreatureGeometryHeadline.NotDrawn)]
     [InlineData("BLTE_FRAME_LIMIT", "", "The engine's BLTE frame limit was reached, so the model file was not read.", CreatureGeometryHeadline.NotDrawn)]
@@ -131,6 +134,25 @@ public sealed class CreatureGeometryLimitWordsTests
             Assert.Equal(retryable ? message : message + " This is a limit, not a corrupt file.", failure.Problem.Message);
             Assert.Equal(retryable ? CreatureGeometryHeadline.NotDrawn : headline, failure.Headline);
         }
+    }
+
+    // #117: the real budgets' refusals. A read bigger than its own allowance can't pass on a retry, so the card shows a
+    // named limit and no Retry. A full download queue (the coordinator's ACQUISITION_CAPACITY) stays retryable.
+    [Fact]
+    public async Task A_read_over_its_own_allowance_is_a_named_limit_that_is_not_retryable()
+    {
+        var resources = new AcquisitionResources(maximumCpu: 0, maximumBackgroundCpu: 0, maximumStagingBytes: 100, maximumBackgroundStagingBytes: 25);
+        var staging = GeometrySourceClosure.Failure(await Assert.ThrowsAsync<DiscoveryException>(() => resources.ReserveStagingAsync(101, null, default)),
+            CreatureGeometryDependency.Model, []);
+        Assert.Equal(("ACQUISITION_STAGING_LIMIT", "The model file needs more temporary storage than one read may use. This is a limit, not a corrupt file.", false),
+            (staging.Problem.Code, staging.Problem.Message, staging.Problem.Retryable));
+        Assert.Equal(CreatureGeometryState.ResourceLimit, staging.State);
+        Assert.Equal(CreatureGeometryHeadline.ModelTooLarge, staging.Headline);
+        var worker = GeometrySourceClosure.Failure(await Assert.ThrowsAsync<DiscoveryException>(() => resources.EnterCpuAsync(null, default)),
+            CreatureGeometryDependency.Skin, []);
+        Assert.Equal(("ACQUISITION_WORKER_LIMIT", "One read needs more workers than the engine allows it, so the SKIN file was not read. This is a limit, not a corrupt file.", false),
+            (worker.Problem.Code, worker.Problem.Message, worker.Problem.Retryable));
+        Assert.Equal(CreatureGeometryHeadline.NotDrawn, worker.Headline);
     }
 
     [Theory]

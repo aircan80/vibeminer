@@ -23,7 +23,7 @@ These are the engine's current bounds. Code is the source of truth: [Acquisition
 | Community build list (D106) | Own HTTP client, one connection, not the CDN permits; one GET at most a day, from Refresh builds only, alongside the product checks and never failing them; 30 s and 16 MiB for the answer; at most 50,000 rows read, 200,000 kept; cancelled with the refresh (the attempt still counts) |
 | Check availability (D106) | One check at a time; HEADs through the shared transport and HTTP permits, 3 at once, 15 s each; two config GETs of at most 1 MiB; at most 8,192 archives; progress every 50 files; cancelled only by Stop check or shutdown, and a cancelled check saves nothing |
 | CPU permits | 2 total, at most 1 background |
-| Staging (temporary disk) | 2 GiB total, at most 512 MiB background |
+| Staging (temporary disk) | 2 GiB total, at most 512 MiB background. One reservation bigger than its allowance fails at once with nonretryable `ACQUISITION_STAGING_LIMIT` (`ACQUISITION_WORKER_LIMIT` for HTTP or CPU permits); a full one waits ([D116](DECISIONS.md)) |
 | Shared physical producers | 128 total; at most 32 pending background; 32 admissions reserved for interactive work |
 | Consumers per producer | 32 |
 | Priorities | Only `Interactive` and `Background`. A null work context counts as `Interactive`. |

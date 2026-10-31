@@ -254,7 +254,7 @@ public sealed partial class ItemEffectsStore
             case "DB2_UNSUPPORTED": case "DEFINITION_NOT_BUNDLED": case "SCHEMA_BUILD_NOT_LISTED": case "CONTENT_ROOT_UNSUPPORTED":
                 state = ItemEffectsSourceState.Unsupported; return true;
             case "ITEM_EFFECTS_LIMIT": case "CONTENT_LIMIT": case "BLTE_LIMIT": case "DB2_LIMIT": case "CONTENT_VARIANT_LIMIT":
-            case "ACQUISITION_CAPACITY":
+            case "ACQUISITION_CAPACITY": case "ACQUISITION_STAGING_LIMIT": case "ACQUISITION_WORKER_LIMIT":
                 state = ItemEffectsSourceState.ResourceLimit; return true;
             case "ITEM_EFFECTS_TARGET_STALE": state = ItemEffectsSourceState.Stale; return true;
             case "LOCAL_OBJECT_CORRUPT": case "BLTE_INTEGRITY": case "BLTE_INVALID": case "DB2_INTEGRITY": case "DB2_INVALID":

@@ -191,7 +191,9 @@ public sealed class AcquisitionCoordinatorTests
         await using var service = new AcquisitionCoordinator(producer, limits);
         await using var first = service.Attach(Need(1), Source, AcquisitionPriority.Background); await producer.Next();
         await using var second = service.Attach(Need(2), Source, AcquisitionPriority.Background);
-        Assert.Equal("ACQUISITION_CAPACITY", Assert.Throws<DiscoveryException>(() => service.Attach(Need(3), Source, AcquisitionPriority.Background)).Code);
+        // A full queue may have room later, so it is retryable (#117); one operation over its own allowance is not.
+        var full = Assert.Throws<DiscoveryException>(() => service.Attach(Need(3), Source, AcquisitionPriority.Background));
+        Assert.Equal("ACQUISITION_CAPACITY", full.Code); Assert.True(full.Retryable);
         await using var interactive = service.Attach(Need(3), Source, AcquisitionPriority.Interactive);
         await using var last = service.Attach(Need(4), Source, AcquisitionPriority.Interactive);
         Assert.Throws<DiscoveryException>(() => service.Attach(Need(5), Source, AcquisitionPriority.Interactive));

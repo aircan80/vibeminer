@@ -73,7 +73,12 @@ internal sealed partial class GeometrySourceClosure
             case "CONTENT_LIMIT": return Of($"The {file} is over the download size limit.", GeometryLimitOwner.File);
             case "CONTENT_VARIANT_LIMIT": return Of($"The {file} has more ROOT variants than one lookup keeps.", GeometryLimitOwner.File);
             case "GEOMETRY_ARTIFACT_LIMIT": return Of($"The {file} is over the geometry artifact size limit.", GeometryLimitOwner.File);
+            // A full queue may have room on a retry; one read bigger than its own allowance never will (#117). Staging is sized
+            // by the file being read, so that cap is the file's; a worker allowance is the engine's.
             case "ACQUISITION_CAPACITY": return Of(Full("download queue"), GeometryLimitOwner.Capacity);
+            case "ACQUISITION_STAGING_LIMIT": return Of($"The {file} needs more temporary storage than one read may use.", GeometryLimitOwner.File);
+            case "ACQUISITION_WORKER_LIMIT": return Of(NotRead("One read needs more workers than the engine allows it"), GeometryLimitOwner.Engine);
+            case "RETENTION_CAPACITY": return Of(Full("list of kept downloads"), GeometryLimitOwner.Capacity);
             case "CONTENT_LOCATOR_CAPACITY": return Of(Full("archive lookup cache"), GeometryLimitOwner.Capacity);
             case "ENCODED_SOURCE_CAPACITY": return Of(Full("download source pool"), GeometryLimitOwner.Capacity);
             case "CONTENT_STORE_CAPACITY": return Of(Full("file check queue"), GeometryLimitOwner.Capacity);
