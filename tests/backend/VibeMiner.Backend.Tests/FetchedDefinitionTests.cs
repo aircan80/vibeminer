@@ -191,6 +191,34 @@ public sealed class FetchedDefinitionTests
         Assert.Equal("DEFINITION_FETCH_OFFLINE", stale.Failure!.Code); Assert.Equal(cached.Sha256, stale.Definition!.Sha256);
     }
 
+    // The shapes .NET 10 gives a connection, direct or to a proxy, that ends before any answer, and two that aren't that.
+    [Theory]
+    [InlineData("reset", "DEFINITION_FETCH_OFFLINE")]
+    [InlineData("ended", "DEFINITION_FETCH_OFFLINE")]
+    [InlineData("tls-reset", "DEFINITION_FETCH_OFFLINE")]
+    [InlineData("certificate", "DEFINITION_FETCH_FAILED")]
+    [InlineData("garbled", "DEFINITION_FETCH_FAILED")]
+    public async Task A_connection_closed_before_any_answer_is_offline_every_time(string shape, string code)
+    {
+        // #125: a proxy's reset surfaced as an unknown error over a socket error and read as a failed fetch.
+        var reset = new IOException("Unable to read data from the transport connection: Connection reset by peer.",
+            new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionReset));
+        Exception failure = shape switch
+        {
+            "reset" => new HttpRequestException(HttpRequestError.Unknown, "An error occurred while sending the request.", reset),
+            "ended" => new HttpRequestException(HttpRequestError.ResponseEnded, "The response ended prematurely.",
+                new HttpIOException(HttpRequestError.ResponseEnded)),
+            "tls-reset" => new HttpRequestException(HttpRequestError.SecureConnectionError, "The SSL connection could not be established.", reset),
+            "certificate" => new HttpRequestException(HttpRequestError.SecureConnectionError, "The SSL connection could not be established.",
+                new System.Security.Authentication.AuthenticationException("The remote certificate is invalid.")),
+            _ => new HttpRequestException(HttpRequestError.InvalidResponse, "The server returned an invalid or unrecognized response.",
+                new HttpIOException(HttpRequestError.InvalidResponse)),
+        };
+        using var directory = new TempDirectory(); var github = new GitHub { Failure = failure };
+        var outcome = await new WoWDBDefsDefinitions(directory.Path, new HttpClient(github)).EnsureAsync(ItemTable, "Item", Any, None, default, deliberate: true);
+        Assert.Null(outcome.Definition); Assert.Equal(code, outcome.Failure!.Code); Assert.True(outcome.Failure.Retryable);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
