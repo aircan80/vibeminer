@@ -54,10 +54,13 @@ public sealed class WoWDBDefsDefinitions
     private readonly ConcurrentDictionary<string, SemaphoreSlim> tables = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, FetchedTableDefinition> loaded = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (DateTimeOffset At, DiscoveryException Failure)> failures = new(StringComparer.Ordinal);
+    private readonly WoWDBDefsConnections? connections;
 
+    /// <summary>Pass <paramref name="connections"/> when <paramref name="client"/> runs on <see cref="CreateHandler"/>.</summary>
     public WoWDBDefsDefinitions(string dataDirectory, HttpClient client, TimeProvider? clock = null,
-        TimeSpan? refreshInterval = null, TimeSpan? fetchBudget = null, TimeSpan? minimumGap = null)
+        TimeSpan? refreshInterval = null, TimeSpan? fetchBudget = null, TimeSpan? minimumGap = null, WoWDBDefsConnections? connections = null)
     {
+        this.connections = connections;
         folder = Path.Combine(Path.GetFullPath(dataDirectory), FolderName, "wowdbdefs");
         this.client = client; time = clock ?? TimeProvider.System;
         refresh = refreshInterval ?? DefaultRefreshInterval; budget = fetchBudget ?? DefaultFetchBudget; gap = minimumGap ?? DefaultMinimumGap;
@@ -67,6 +70,29 @@ public sealed class WoWDBDefsDefinitions
         new($"https://{ApiHost}/repos/{Repository}/commits?path=definitions/{tableName}.dbd&sha={Branch}&per_page=1");
     public static string DefinitionUrl(string revision, string tableName) =>
         $"https://{RawHost}/{Repository}/{revision}/definitions/{tableName}.dbd";
+
+    /// <summary>
+    /// The definitions' own HTTP handler: no redirects or decompression, two connections per host, a 10 s connect timeout,
+    /// and every new connection, also to a proxy, taken from <paramref name="connections"/>. .NET's pool opens a new
+    /// connection again when one closes before any response, so one check through a proxy that drops connections opened a
+    /// dozen or more within milliseconds (#124).
+    /// </summary>
+    public static SocketsHttpHandler CreateHandler(WoWDBDefsConnections connections) => new()
+    {
+        AllowAutoRedirect = false, MaxConnectionsPerServer = MaxConcurrentFetches, PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        ConnectTimeout = TimeSpan.FromSeconds(10), AutomaticDecompression = DecompressionMethods.None,
+        ConnectCallback = async (context, token) =>
+        {
+            await connections.TakeAsync(token);
+            var socket = new System.Net.Sockets.Socket(System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp) { NoDelay = true };
+            try
+            {
+                await socket.ConnectAsync(context.DnsEndPoint, token);
+                return new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+            }
+            catch { socket.Dispose(); throw; }
+        },
+    };
 
     /// <summary>The verified cached definition, or null. Local only: never contacts WoWDBDefs.</summary>
     public async Task<FetchedTableDefinition?> CachedAsync(string tableId, string tableName, CancellationToken token)
@@ -210,13 +236,17 @@ public sealed class WoWDBDefsDefinitions
         request.Headers.Accept.ParseAdd(api ? "application/vnd.github+json" : "text/plain");
         if (api) request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         HttpResponseMessage response;
-        try { response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); }
-        catch (HttpRequestException error) when (error.HttpRequestError is HttpRequestError.NameResolutionError or HttpRequestError.ConnectionError)
-        { throw Offline(tableName); }
-        catch (HttpRequestException) { throw Failed(tableName, "The connection to GitHub failed."); }
-        // A connect timeout surfaces as a cancellation wrapping a TimeoutException; the caller didn't cancel.
-        catch (OperationCanceledException error) when (!token.IsCancellationRequested && error.InnerException is TimeoutException)
-        { throw Offline(tableName); }
+        // The request may open connections until its answer's headers arrive (#124).
+        using (connections?.Grant())
+        {
+            try { response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); }
+            catch (HttpRequestException error) when (error.HttpRequestError is HttpRequestError.NameResolutionError or HttpRequestError.ConnectionError)
+            { throw Offline(tableName); }
+            catch (HttpRequestException) { throw Failed(tableName, "The connection to GitHub failed."); }
+            // A connect timeout surfaces as a cancellation wrapping a TimeoutException; the caller didn't cancel.
+            catch (OperationCanceledException error) when (!token.IsCancellationRequested && error.InnerException is TimeoutException)
+            { throw Offline(tableName); }
+        }
         using (response)
         {
             if (response.StatusCode == HttpStatusCode.NotFound) throw NotFound(tableName);
@@ -361,4 +391,58 @@ public sealed class WoWDBDefsDefinitions
         $"The newest WoWDBDefs {table} definition couldn’t be read safely ({code}), so it wasn’t used.");
     internal static DiscoveryException NotFound(string table) => new("DEFINITION_FETCH_NOT_FOUND",
         $"WoWDBDefs on GitHub has no {table}.dbd file to fetch, so only the bundled {table} definition can be used.");
+}
+
+/// <summary>
+/// New connections the WoWDBDefs client may open (#124). Each request grants <see cref="PerRequest"/> while it waits for
+/// its answer, and the grant ends with the last request in flight, so the client never opens more than that many per
+/// request and none for a request it didn't make. One connection per request opens at once; any other starts at least
+/// <see cref="Spacing"/> after the connection before it, so a proxy that drops connections sees two a second apart
+/// instead of a burst. Waiting is cancellable.
+/// </summary>
+public sealed class WoWDBDefsConnections(TimeProvider? clock = null)
+{
+    /// <summary>The first connection and one reconnect.</summary>
+    public const int PerRequest = 2;
+    public static readonly TimeSpan Spacing = TimeSpan.FromSeconds(1);
+    private readonly TimeProvider time = clock ?? TimeProvider.System;
+    private readonly Lock gate = new();
+    private int requests, left, firsts;
+    private long last;
+
+    internal IDisposable Grant()
+    {
+        lock (gate) { requests++; left += PerRequest; firsts++; }
+        return new Granted(this);
+    }
+
+    private void End() { lock (gate) if (--requests == 0) left = firsts = 0; }
+
+    /// <summary>Waits for this connection's turn, then takes it, or refuses as a connection error when none is left.</summary>
+    internal async ValueTask TakeAsync(CancellationToken token)
+    {
+        TimeSpan wait;
+        lock (gate)
+        {
+            if (left == 0) throw Refused();
+            var now = time.GetTimestamp();
+            if (firsts > 0) { firsts--; left--; last = Math.Max(last, now); return; }
+            // A reconnect: its turn comes a spacing after the connection before it.
+            var start = Math.Max(now, last + (long)(Spacing.TotalSeconds * time.TimestampFrequency));
+            last = start;
+            wait = TimeSpan.FromSeconds((start - now) / (double)time.TimestampFrequency);
+        }
+        if (wait > TimeSpan.Zero) await Task.Delay(wait, time, token);
+        // A request that ended or was cancelled while this waited took its grant with it.
+        lock (gate) { if (left == 0) throw Refused(); left--; }
+    }
+
+    private static HttpRequestException Refused() =>
+        new(HttpRequestError.ConnectionError, "The WoWDBDefs requests used the connections they may open.");
+
+    private sealed class Granted(WoWDBDefsConnections owner) : IDisposable
+    {
+        private int done;
+        public void Dispose() { if (Interlocked.Exchange(ref done, 1) == 0) owner.End(); }
+    }
 }

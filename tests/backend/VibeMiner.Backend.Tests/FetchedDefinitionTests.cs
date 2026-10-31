@@ -258,6 +258,134 @@ public sealed class FetchedDefinitionTests
             .EnsureAsync(ItemTable, "Item", Any, None, cancel.Token));
     }
 
+    /// <summary>A proxy that accepts each connection and closes it before answering, as QA's refusing proxy did (#124).</summary>
+    private sealed class DroppingProxy : IAsyncDisposable
+    {
+        private readonly System.Net.Sockets.TcpListener listener = new(IPAddress.Loopback, 0);
+        private readonly CancellationTokenSource stop = new();
+        private readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        private readonly List<TimeSpan> accepted = [];
+        private readonly Task loop;
+        internal DroppingProxy()
+        {
+            listener.Start();
+            loop = Task.Run(async () =>
+            {
+                try
+                {
+                    while (true)
+                    {
+                        using var client = await listener.AcceptTcpClientAsync(stop.Token);
+                        lock (accepted) accepted.Add(clock.Elapsed);
+                        client.Client.Close();
+                    }
+                }
+                catch (OperationCanceledException) { }
+            });
+        }
+        internal TimeSpan[] Accepted { get { lock (accepted) return [.. accepted]; } }
+        internal readonly WoWDBDefsConnections Connections = new();
+        internal SocketsHttpHandler Handler()
+        {
+            var handler = WoWDBDefsDefinitions.CreateHandler(Connections);
+            handler.Proxy = new WebProxy($"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}"); handler.UseProxy = true;
+            return handler;
+        }
+        internal WoWDBDefsDefinitions Definitions(string directory, SocketsHttpHandler handler) =>
+            new(directory, new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, connections: Connections);
+        public async ValueTask DisposeAsync() { stop.Cancel(); listener.Stop(); await loop; stop.Dispose(); }
+    }
+
+    [Fact]
+    public async Task A_failed_check_through_a_proxy_that_drops_connections_opens_at_most_two_a_second_apart()
+    {
+        // Before #124 one check opened 12 to 16 connections to the proxy within about 35 ms.
+        await using var proxy = new DroppingProxy();
+        using var directory = new TempDirectory();
+        using var handler = proxy.Handler();
+        var definitions = proxy.Definitions(directory.Path, handler);
+        var failed = await definitions.EnsureAsync(ItemTable, "Item", Any, None, default, deliberate: true);
+        Assert.Null(failed.Definition); Assert.True(failed.Asked);
+        Assert.Equal("DEFINITION_FETCH_OFFLINE", failed.Failure!.Code);
+        var seen = proxy.Accepted;
+        // The pool usually reconnects at once after a drop; it may also give up after the first.
+        Assert.InRange(seen.Length, 1, WoWDBDefsConnections.PerRequest);
+        if (seen.Length == 2) Assert.True(seen[1] - seen[0] >= WoWDBDefsConnections.Spacing - TimeSpan.FromMilliseconds(50), $"{seen[1] - seen[0]}");
+        // A Retry is a new request with its own two connections, never a burst.
+        var retried = await definitions.EnsureAsync(ItemTable, "Item", Any, None, default, deliberate: true);
+        Assert.Equal("DEFINITION_FETCH_OFFLINE", retried.Failure!.Code);
+        Assert.InRange(proxy.Accepted.Length - seen.Length, 1, WoWDBDefsConnections.PerRequest);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_check_while_it_waits_to_reconnect_stops_it_at_once()
+    {
+        await using var proxy = new DroppingProxy();
+        using var directory = new TempDirectory();
+        using var handler = proxy.Handler();
+        var definitions = proxy.Definitions(directory.Path, handler);
+        using var cancel = new CancellationTokenSource();
+        var check = definitions.EnsureAsync(ItemTable, "Item", Any, None, cancel.Token, deliberate: true);
+        using (var bound = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+            while (proxy.Accepted.Length == 0) await Task.Delay(10, bound.Token);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        cancel.Cancel();
+        // The pool may already have given up on the dropped connection; either way nothing waits out the reconnect.
+        try { Assert.Equal("DEFINITION_FETCH_OFFLINE", (await check).Failure!.Code); }
+        catch (OperationCanceledException) { }
+        Assert.True(watch.Elapsed < WoWDBDefsConnections.Spacing / 2, $"{watch.Elapsed}");
+        // Whatever the pool still does after the cancel stays inside the request's allowance.
+        await Task.Delay(WoWDBDefsConnections.Spacing + TimeSpan.FromMilliseconds(300));
+        Assert.InRange(proxy.Accepted.Length, 1, WoWDBDefsConnections.PerRequest);
+    }
+
+    [Fact]
+    public async Task A_reconnect_waits_its_spacing_cancellably_and_is_refused_once_its_request_ended()
+    {
+        var connections = new WoWDBDefsConnections();
+        using (connections.Grant())
+        {
+            await connections.TakeAsync(default);
+            using var cancel = new CancellationTokenSource();
+            var reconnect = connections.TakeAsync(cancel.Token).AsTask();
+            await Task.Delay(50);
+            Assert.False(reconnect.IsCompleted);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            cancel.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reconnect);
+            Assert.True(watch.Elapsed < WoWDBDefsConnections.Spacing / 2, $"{watch.Elapsed}");
+        }
+        var late = new WoWDBDefsConnections();
+        Task waiting;
+        using (late.Grant()) { await late.TakeAsync(default); waiting = late.TakeAsync(default).AsTask(); }
+        // The request ended while its reconnect waited: the reconnect takes nothing.
+        await Assert.ThrowsAsync<HttpRequestException>(() => waiting);
+    }
+
+    [Fact]
+    public async Task Each_request_opens_its_first_connection_at_once_so_a_working_fetch_never_waits()
+    {
+        // The commit answer then the file: two requests one after the other, each needing one new connection.
+        var connections = new WoWDBDefsConnections();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        for (var request = 0; request < 3; request++)
+            using (connections.Grant()) await connections.TakeAsync(default);
+        Assert.True(watch.Elapsed < WoWDBDefsConnections.Spacing / 2, $"{watch.Elapsed}");
+        // Once no request is in flight nothing is left to take.
+        await Assert.ThrowsAsync<HttpRequestException>(() => connections.TakeAsync(default).AsTask());
+    }
+
+    [Fact]
+    public async Task The_definitions_handler_opens_no_connection_for_a_request_it_did_not_make()
+    {
+        await using var proxy = new DroppingProxy();
+        using var handler = proxy.Handler();
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync(WoWDBDefsDefinitions.CommitsUrl("Item")));
+        Assert.Equal(HttpRequestError.ConnectionError, error.HttpRequestError);
+        Assert.Empty(proxy.Accepted);
+    }
+
     [Theory]
     [InlineData("bytes")]
     [InlineData("record")]

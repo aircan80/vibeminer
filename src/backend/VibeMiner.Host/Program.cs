@@ -25,11 +25,10 @@ try
     var settings = new SettingsService(new JsonSettingsStore(dataDirectory), new DataDirectoryMeasurer(dataDirectory),
         new VibeMiner.Domain.DownloadLimitSettings(resources.MaximumHttp, resources.MaximumBackgroundHttp, null, false));
     // Table definitions from WoWDBDefs on GitHub (D081) use their own client, so they never share the CDN's connections.
-    using var definitionHandler = new SocketsHttpHandler { AllowAutoRedirect = false, MaxConnectionsPerServer = 2,
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5), ConnectTimeout = TimeSpan.FromSeconds(10),
-        AutomaticDecompression = System.Net.DecompressionMethods.None };
+    var definitionConnections = new WoWDBDefsConnections();
+    using var definitionHandler = WoWDBDefsDefinitions.CreateHandler(definitionConnections);
     using var definitionClient = new HttpClient(definitionHandler) { Timeout = Timeout.InfiniteTimeSpan };
-    var definitionSources = new TableDefinitionSources(new WoWDBDefsDefinitions(dataDirectory, definitionClient), settings);
+    var definitionSources = new TableDefinitionSources(new WoWDBDefsDefinitions(dataDirectory, definitionClient, connections: definitionConnections), settings);
     // Community file names from wow-listfile's GitHub releases (D105): their own client, one background loop.
     var listfileConnections = new ListfileConnectionBudget();
     using var listfileHandler = CommunityListfile.CreateHandler(listfileConnections);
