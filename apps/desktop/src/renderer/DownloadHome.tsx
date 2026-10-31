@@ -34,12 +34,14 @@ type Evidence = 'source' | 'metadata' | 'measurement';
 export type FilesView = 'catalog' | 'objects';
 const noViews = new Map<string, FilesView>();
 type Pane = 'overview' | 'files' | 'tables' | 'items' | 'creatures';
+export type HomePane = Pane;
 const shellArea: Record<Pane, ShellArea> = { overview: 'home', files: 'files', tables: 'tables', items: 'items', creatures: 'creatures' };
 const joined = (values: string[]) => values.length ? values.map(x => x.toUpperCase()).join(', ') : 'no recorded region';
 // Home after a build opens (docs/design/desktop-home): one shell for the download-sized and the catalog-prepared workspace.
-export function DownloadHome({ filesViews = noViews, downloadCheck, catalogTasks, activityNavigation, creatureGeometry, effectsLoading, effectsAvailable=false, creatureDisplays, creatureDisplayAvailable=false, creaturesLoading, creaturesAvailable=false, classificationsLoading, classificationsAvailable=false, subclassAvailable=false, iconsLoading, iconsAvailable=false, factsAvailable=false, itemsLoading, itemsAvailable=false, retention, operation: op, catalogBuild, fixtureLabel, bridge, onChoose, onReopen, evidence, tableLoading }: { filesViews?: Map<string, FilesView>; downloadCheck?: DownloadCheckController; catalogTasks?: FileCatalogTasks; activityNavigation?:{area:'tables'|'items'|'creatures'|'files';sequence:number}|null;creatureGeometry?:GeometryFlow;effectsLoading?:ItemEffectsLoading;effectsAvailable?:boolean; creatureDisplays?:CreatureDisplays;creatureDisplayAvailable?:boolean; creaturesLoading?:CreaturesLoading;creaturesAvailable?:boolean; classificationsLoading?:Classifications;classificationsAvailable?:boolean;subclassAvailable?:boolean; iconsLoading?:IconsLoading;iconsAvailable?:boolean;factsAvailable?:boolean; itemsLoading?: ItemsLoading; itemsAvailable?: boolean; retention?: RetentionController; tableLoading: TableLoading; operation: Opening & { result: WorkspaceSnapshot }; catalogBuild?: Build | null; fixtureLabel?: string | null; bridge: DiscoveryBridge; onChoose: () => void; onReopen: () => void; evidence: (mode: Evidence, close: () => void) => ReactNode }) {
+export function DownloadHome({ initialPane, onPane, filesViews = noViews, downloadCheck, catalogTasks, activityNavigation, creatureGeometry, effectsLoading, effectsAvailable=false, creatureDisplays, creatureDisplayAvailable=false, creaturesLoading, creaturesAvailable=false, classificationsLoading, classificationsAvailable=false, subclassAvailable=false, iconsLoading, iconsAvailable=false, factsAvailable=false, itemsLoading, itemsAvailable=false, retention, operation: op, catalogBuild, fixtureLabel, bridge, onChoose, onReopen, evidence, tableLoading }: { initialPane?: Pane; onPane?: (pane: Pane) => void; filesViews?: Map<string, FilesView>; downloadCheck?: DownloadCheckController; catalogTasks?: FileCatalogTasks; activityNavigation?:{area:'tables'|'items'|'creatures'|'files';sequence:number}|null;creatureGeometry?:GeometryFlow;effectsLoading?:ItemEffectsLoading;effectsAvailable?:boolean; creatureDisplays?:CreatureDisplays;creatureDisplayAvailable?:boolean; creaturesLoading?:CreaturesLoading;creaturesAvailable?:boolean; classificationsLoading?:Classifications;classificationsAvailable?:boolean;subclassAvailable?:boolean; iconsLoading?:IconsLoading;iconsAvailable?:boolean;factsAvailable?:boolean; itemsLoading?: ItemsLoading; itemsAvailable?: boolean; retention?: RetentionController; tableLoading: TableLoading; operation: Opening & { result: WorkspaceSnapshot }; catalogBuild?: Build | null; fixtureLabel?: string | null; bridge: DiscoveryBridge; onChoose: () => void; onReopen: () => void; evidence: (mode: Evidence, close: () => void) => ReactNode }) {
   const snapshot = op.result, summary = snapshot.download, inventory = isInventoryWorkspace(snapshot) ? snapshot : null;
-  const [pane, setPane] = useState<Pane>('overview');
+  const [pane, setPane] = useState<Pane>(initialPane ?? 'overview');
+  useEffect(() => { onPane?.(pane); }, [pane]);
   // The build's file catalog prepared after Open (D071). A legacy full catalog snapshot carries its own generation; any other
   // workspace reads the build's ready file catalog. Files never mixes the two: each view reads one exact generation.
   // Only an engine with file-catalog-v1 prepares one; without it Files keeps the earlier "not prepared" note.
@@ -87,7 +89,8 @@ export function DownloadHome({ filesViews = noViews, downloadCheck, catalogTasks
   const [dialog, setDialog] = useState<Evidence | null>(null);
   const heading = useRef<HTMLHeadingElement>(null), grid = useRef<HTMLDivElement>(null);
   const origin = useRef<{ element: HTMLElement | null; scroll: number }>({ element: null, scroll: 0 });
-  useEffect(() => { heading.current?.focus({ preventScroll: true }); }, []);
+  // Home reopened on another area after an engine restart (D119) leaves focus to that area's own heading.
+  useEffect(() => { if (!initialPane || initialPane === 'overview') heading.current?.focus({ preventScroll: true }); }, []);
   const { home, returnHome } = useHomeFocus(pane, heading, origin, () => setPane('overview'), grid);
   const [fromHome, setFromHome] = useState(false);
   // A FileDataID followed from Tables (#19) opens Files with the way back to that record.

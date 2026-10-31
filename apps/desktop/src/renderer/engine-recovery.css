@@ -1,0 +1,10 @@
+/* D119: the app-wide stopped-engine state. A centred modal over the shared :root tokens, not the side sheet other dialogs use.
+   Its action sticks to the bottom so Restart engine stays in view when 200% text makes the dialog scroll. */
+dialog.engine-stopped{inset:0;margin:auto;width:min(32rem,calc(100% - 2rem));height:fit-content;max-height:calc(100dvh - 2rem);padding:1.6rem 1.733rem 0;border:1px solid #e4c0b9;border-top:4px solid #923c30;border-radius:.8rem;box-shadow:0 .8rem 3rem #243b3a33;overflow:auto;overflow-wrap:anywhere}
+dialog.engine-stopped h2{color:#923c30;margin:0 0 .8rem}
+dialog.engine-stopped p{font-size:.933333rem}
+dialog.engine-stopped .engine-stopped-code{padding:.6rem .8rem;border-radius:8px;background:#fff0ed;color:#923c30;font-size:.866667rem}
+dialog.engine-stopped .engine-stopped-code code{font-weight:700;margin-right:.4rem}
+dialog.engine-stopped .engine-stopped-problem{color:#923c30}
+dialog.engine-stopped .engine-stopped-actions{position:sticky;bottom:0;display:flex;flex-wrap:wrap;gap:.6rem;padding:.8rem 0 1.6rem;border-top:1px solid var(--line);background:var(--paper)}
+@media(max-width:40rem){dialog.engine-stopped{width:calc(100% - 1rem);max-height:calc(100dvh - 1rem);padding:1.067rem 1.067rem 0}dialog.engine-stopped .engine-stopped-actions{padding-bottom:1.067rem}}

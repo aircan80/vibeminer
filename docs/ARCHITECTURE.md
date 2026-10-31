@@ -19,7 +19,7 @@ flowchart LR
   Infra --> Parsers[Original pure parsers]
 ```
 
-Electron main owns windows, native dialogs, engine launch, exit handling, and IPC routing. The renderer owns presentation, navigation, and GPU rendering; it has no general Node/filesystem access. Preload exposes narrow operations through context isolation, not arbitrary IPC, SQL, HTTP, or path access.
+Electron main owns windows, native dialogs, engine launch, exit handling, and IPC routing. After an invalid engine reply it stops the engine and restarts it only when the user asks; a restart replaces the process and everything bound to it, and the renderer reloads what was open ([D119](DECISIONS.md)). The renderer owns presentation, navigation, and GPU rendering; it has no general Node/filesystem access. Preload exposes narrow operations through context isolation, not arbitrary IPC, SQL, HTTP, or path access.
 
 C# owns source discovery, acquisition, exact build contexts, parsing, job scheduling, SQLite, shared object publication, indexes, comparisons, and asset preparation. It returns bounded projections and approved asset handles, not live database connections or arbitrary local paths.
 

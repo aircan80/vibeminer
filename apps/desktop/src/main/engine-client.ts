@@ -71,6 +71,8 @@ export class EngineClient extends EventEmitter {
   private engineCapabilities: readonly string[] = [];
   get hasExited():boolean{return this.exited;}
   get hasFailed():boolean{return this.failure!==null;}
+  /** The failure that stopped this client, or null while it works. The first failure wins. */
+  get stopReason():EngineFailure|null{return this.failure;}
   async waitForExit(milliseconds:number):Promise<boolean>{if(this.exited)return true;let timer:ReturnType<typeof setTimeout>;await Promise.race([this.exitPromise,new Promise<void>(resolve=>{timer=setTimeout(resolve,milliseconds);})]);clearTimeout(timer!);return this.exited;}
   get capabilities(): readonly string[] { return this.engineCapabilities; }
   private pending = new Map<string, Pending>();

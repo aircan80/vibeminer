@@ -1,4 +1,5 @@
 import {validGeometryRetirement} from '../shared/creature-geometry';
+import {validEngineStatus} from '../shared/engine-status';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { DiscoveryBridge } from '../shared/bridge';
 import type { EngineProgress } from '../../../../contracts/generated/discovery';
@@ -75,6 +76,13 @@ const bridge: DiscoveryBridge = Object.freeze<DiscoveryBridge>({
   fileCatalogs: () => ipcRenderer.invoke('discovery:invoke', 'inventory.catalogs', {}),
   fileCatalogSet: params => ipcRenderer.invoke('discovery:invoke', 'inventory.catalog.set', params),
   cancel: requestId => ipcRenderer.invoke('discovery:invoke', 'request.cancel', { requestId }),
+  engineStatus: () => ipcRenderer.invoke('discovery:invoke', 'desktop.engine.status', {}),
+  restartEngine: () => ipcRenderer.invoke('discovery:invoke', 'desktop.engine.restart', {}),
+  onEngineStatus: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, status: unknown) => { if (validEngineStatus(status)) listener(status); };
+    ipcRenderer.on('discovery:engineStatus', handler);
+    return () => { ipcRenderer.removeListener('discovery:engineStatus', handler); };
+  },
   onProgress: (listener: (progress: EngineProgress) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, progress: EngineProgress) => listener(progress);
     ipcRenderer.on('discovery:progress', handler);

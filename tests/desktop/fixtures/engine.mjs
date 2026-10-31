@@ -242,6 +242,14 @@ function settingsSnapshot() {
 async function dispatch(request) {
   const { id, method, params = {} } = request;
   appendFileSync(path.join(directory, 'requests.ndjson'), JSON.stringify({ id, method, params }) + '\n');
+  // D119: invalid-reply-<method> answers the next request for that method with a result the schema refuses, once. The file
+  // is removed first, so a restarted fixture answers normally.
+  const invalid = path.join(directory, `invalid-reply-${method}`);
+  if (existsSync(invalid)) {
+    unlinkSync(invalid);
+    send({ id, result: { authoredInvalidReply: true } });
+    return;
+  }
   if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', ...(listfileEnabled ? ['community-listfile-v1'] : []), 'download-summary-v1', 'download-check-v1', ...(communityEnabled ? ['community-builds-v1', 'build-availability-v1'] : []), 'inventory-files-v1',...(fileCatalogEnabled?['file-catalog-v1']:[]),...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1',...(process.env.VIBEMINER_FIXTURE_FACTS==='0'?[]:['item-facts-v1'])]:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1',...(process.env.VIBEMINER_FIXTURE_CREATURE_FACTS==='0'?[]:['creature-display-facts-v1'])]:[]),...(geometryEnabled?['creature-source-geometry-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
   if(geometryEnabled&&method==='creatures.geometry.close'){geometryLeases.delete(params.leaseId);return reply(id,{closed:true});}
   if(creaturesEnabled&&method==='creatures.labels'){if(!displayEnabled||process.env.VIBEMINER_FIXTURE_CREATURE_FACTS==='0')return fail(id,'CREATURE_DISPLAY_UNAVAILABLE','Selected Creature display metadata is unavailable.');return reply(id,JSON.parse(readFileSync(path.join(root,'contracts/examples/creature-labels.json'),'utf8')));}

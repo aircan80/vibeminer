@@ -22,6 +22,7 @@ import type { Product, DiscoveryPage, DiscoveryCatalogPage, EngineProgress, Work
 import type { TablesCatalogParams, TableDefinitionParams } from './tables';
 import { isDownloadWorkspace, type DownloadReadParams } from './download';
 import { isInventoryWorkspace, type InventoryReadParams, type InventoryFilesParams, type InventoryFileParams, type FileCatalogParams, type FileCatalogStatus, type FileCatalogList, type FileCatalogSetParams } from './inventory';
+import type { EngineStatus } from './engine-status';
 export type DiscoveryFilter = 'all' | 'local' | 'advertised';
 export type ReadParams = { productId: string; filter?: DiscoveryFilter; limit?: number; cursor?: string };
 /** Cross-product read. Without productId it reads every registered product. */
@@ -132,6 +133,10 @@ export interface DiscoveryBridge {
   fileCatalogSet?(params: FileCatalogSetParams): Promise<BridgeReply<FileCatalogStatus>>;
   cancel(requestId: string): Promise<BridgeReply<{ requested: boolean }>>;
   onProgress(listener: (progress: EngineProgress) => void): () => void;
+  /** D119: main's view of the engine process, a user-triggered restart after a restartable stop, and its changes. */
+  engineStatus?(): Promise<BridgeReply<EngineStatus>>;
+  restartEngine?(): Promise<BridgeReply<EngineStatus>>;
+  onEngineStatus?(listener: (status: EngineStatus) => void): () => void;
 }
 declare global { interface Window { discovery: DiscoveryBridge } }
 export const validProduct = (value: unknown): value is string => typeof value === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(value);

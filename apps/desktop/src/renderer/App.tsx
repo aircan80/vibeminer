@@ -19,7 +19,7 @@ import {useItemsLoading,ItemsLoadBanner} from './useItemsLoading';
 import { useRetention } from './useRetention';
 import { exactBytes, exactCount } from '../shared/inventory';
 import { RetentionActivity } from './Retention';
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject } from 'react';
 import './discovery.css';
 import type { Build, BuildDownloadSummary, DiscoveryCatalogPage, Product, ProductDiscoveryStatus, ProductRefreshProblem, EngineProgress } from '../../../../contracts/generated/discovery';
 import { storedPercent, summaryKey } from '../shared/download-summary';
@@ -30,6 +30,7 @@ import { earlierHistoryText, historyCounts, historyLabels, newerRegionCdnConfigs
 import { TableLoadBanner, useTableLoading } from './useTableLoading';
 import { useWorkspaceFlow, type Opening } from './useWorkspaceFlow';
 import { PreparationView, HomeView } from './WorkspaceViews';
+import type { HomePane } from './DownloadHome';
 import brand from '../../../../branding/vibeminer.svg';
 import { SettingsButton, SettingsProvider, SettingsView, type SettingsOrigin } from './Settings';
 import { AvailabilityRow, useAvailabilityCheck } from './BuildAvailability';
@@ -99,9 +100,17 @@ function savedSelection(): string | null {
     return localStorage.getItem(`vibeminer.selection.${localStorage.getItem('vibeminer.product') || 'wow'}`);
   } catch { return null; }
 }
-export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge }) {
+/** What a restarted engine's app opens again (D119): the build that was open or opening, and the Home area shown. */
+export type Resume = { build: Build; sourceRegion: string; label: string; pane: HomePane } | null;
+export function App({ bridge = window.discovery, resume = null, captureResume }: { bridge?: DiscoveryBridge; resume?: Resume; captureResume?: MutableRefObject<() => Resume> }) {
   const [products, setProducts] = useState<Product[]>([]);
   const flow = useWorkspaceFlow(bridge);
+  // After an engine restart the build that was open opens again through the normal Open, and Home starts on the area that
+  // was shown. That area is used for the first Home only; a later Open starts on Build overview as usual.
+  const homePane = useRef<HomePane>('overview'), resumed = useRef(resume);
+  useLayoutEffect(() => { if (captureResume) captureResume.current = () => { const op = flow.operation; return op && flow.view !== 'discovery' ? { build: op.build, sourceRegion: op.sourceRegion, label: op.label, pane: flow.view === 'home' ? homePane.current : 'overview' } : null; }; });
+  useEffect(() => { const r = resumed.current; if (r) void flow.open(r.build, r.sourceRegion, r.label); }, []);
+  useEffect(() => { if (flow.view === 'home') resumed.current = null; }, [flow.view]);
   const tableLoading = useTableLoading(bridge);
   const itemsLoading = useItemsLoading(bridge);
   const effectsLoading=useItemEffects(bridge);
@@ -213,7 +222,7 @@ export function App({ bridge = window.discovery }: { bridge?: DiscoveryBridge })
     </div>
     <div className="app-view" data-app-view="" hidden={flow.view === 'discovery' || !!settings} inert={flow.view === 'discovery' || !!settings}>
     {flow.view === 'preparation' && flow.operation && <PreparationView tableActivity={null} operation={flow.operation} notice={flow.notice} fixtureLabel={bridge.fixtureLabel} onBack={flow.detach} onCancel={() => { void flow.cancel(); }} onRetry={() => { const op = flow.operation!; void flow.open(op.build, op.sourceRegion, op.label); }} onEnter={flow.enterVerified}/>}
-    {flow.view === 'home' && flow.operation?.result && <HomeView filesViews={filesViews} downloadCheck={downloadCheck} catalogTasks={retention.features.includes('file-catalog-v1')?fileCatalogTasks:undefined} activityNavigation={activityNavigation} creatureGeometry={geometryAvailable(bridge,retention.features)?creatureGeometry:undefined} effectsLoading={effectsLoading} effectsAvailable={['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1'].every(cap=>retention.features.includes(cap))&&!!bridge.itemEffectsRead&&!!bridge.itemEffectsPrepareLinks&&!!bridge.itemEffectsPage&&!!bridge.itemEffectDetails&&!!bridge.itemEffectPrepareDetails&&!!bridge.itemEffectNames&&!!bridge.itemEffectPrepareNames} creatureDisplays={creatureDisplays} creatureDisplayAvailable={retention.features.includes('creature-display-metadata-v1')&&!!bridge.creatureDisplayRead&&!!bridge.creatureDisplayPrepare} creaturesLoading={creaturesLoading} creaturesAvailable={retention.features.includes('creatures-v1')&&!!bridge.creaturesData&&!!bridge.creaturesPrepare&&!!bridge.creaturesPage&&!!bridge.creatureInspect} classificationsLoading={classificationsLoading} classificationsAvailable={retention.features.includes('item-classifications-v1')} subclassAvailable={retention.features.includes('item-subclass-labels-v1')} iconsLoading={iconsLoading} iconsAvailable={retention.features.includes('item-icons-v1')} factsAvailable={retention.features.includes('item-facts-v1')&&!!bridge.itemFacts&&!!bridge.itemLabels} itemsLoading={itemsLoading} itemsAvailable={retention.features.includes('items-v1')} retention={retention} tableLoading={tableLoading} operation={{ ...flow.operation, result: flow.operation.result }} catalogBuild={catalogOpenBuild} fixtureLabel={bridge.fixtureLabel} onChoose={flow.detach} bridge={bridge} onReopen={() => { const op = flow.operation!; void flow.open(op.build, op.sourceRegion, op.label); }}/>}
+    {flow.view === 'home' && flow.operation?.result && <HomeView initialPane={resumed.current?.pane} onPane={pane => { homePane.current = pane; }} filesViews={filesViews} downloadCheck={downloadCheck} catalogTasks={retention.features.includes('file-catalog-v1')?fileCatalogTasks:undefined} activityNavigation={activityNavigation} creatureGeometry={geometryAvailable(bridge,retention.features)?creatureGeometry:undefined} effectsLoading={effectsLoading} effectsAvailable={['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1'].every(cap=>retention.features.includes(cap))&&!!bridge.itemEffectsRead&&!!bridge.itemEffectsPrepareLinks&&!!bridge.itemEffectsPage&&!!bridge.itemEffectDetails&&!!bridge.itemEffectPrepareDetails&&!!bridge.itemEffectNames&&!!bridge.itemEffectPrepareNames} creatureDisplays={creatureDisplays} creatureDisplayAvailable={retention.features.includes('creature-display-metadata-v1')&&!!bridge.creatureDisplayRead&&!!bridge.creatureDisplayPrepare} creaturesLoading={creaturesLoading} creaturesAvailable={retention.features.includes('creatures-v1')&&!!bridge.creaturesData&&!!bridge.creaturesPrepare&&!!bridge.creaturesPage&&!!bridge.creatureInspect} classificationsLoading={classificationsLoading} classificationsAvailable={retention.features.includes('item-classifications-v1')} subclassAvailable={retention.features.includes('item-subclass-labels-v1')} iconsLoading={iconsLoading} iconsAvailable={retention.features.includes('item-icons-v1')} factsAvailable={retention.features.includes('item-facts-v1')&&!!bridge.itemFacts&&!!bridge.itemLabels} itemsLoading={itemsLoading} itemsAvailable={retention.features.includes('items-v1')} retention={retention} tableLoading={tableLoading} operation={{ ...flow.operation, result: flow.operation.result }} catalogBuild={catalogOpenBuild} fixtureLabel={bridge.fixtureLabel} onChoose={flow.detach} bridge={bridge} onReopen={() => { const op = flow.operation!; void flow.open(op.build, op.sourceRegion, op.label); }}/>}
     </div>
     {settings && <SettingsView bridge={bridge} origin={settings.origin} fixtureLabel={bridge.fixtureLabel} onBack={closeSettings} onPreparedDataChanged={fileCatalogTasks.changed}/>}
   </DownloadActivity></SettingsProvider>;
