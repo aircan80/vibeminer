@@ -19,7 +19,7 @@ internal static class ItemEffectsLinkChoice
     internal static readonly ConcurrentDictionary<string, bool> UndecidedForTests = new(StringComparer.Ordinal);
 
     internal static ItemEffectsLink? For(BundledTableDefinitions provider, string version, string? itemEffectLayout, CancellationToken token) =>
-        provider.Definitions.TryGetValue(ItemEffectsLinks.ClassicItemEffect.TableId, out var effect)
+        provider.Definitions.TryGet(ItemEffectsLinks.ClassicItemEffect.TableId, out var effect, out _)
             ? For(effect.Document, version, itemEffectLayout, token) : ItemEffectsLinks.Bridge;
     internal static ItemEffectsLink? For(DbdDocument document, string version, string? itemEffectLayout, CancellationToken token)
     {

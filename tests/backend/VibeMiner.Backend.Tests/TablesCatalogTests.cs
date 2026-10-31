@@ -27,9 +27,9 @@ public sealed class TablesCatalogTests
         } while (after is not null);
         Assert.Equal(1346, result.Count); Assert.Equal(1346, result.Select(entry => entry.TableId).Distinct().Count());
         Assert.Equal(1270, result.Count(entry => entry.Db2FileDataId is not null));
-        Assert.Equal(14, result.Count(entry => entry.DefinitionState == "bundled"));
-        Assert.Equal(["Creature", "CreatureDisplayInfo", "CreatureFamily", "CreatureModelData", "CreatureType", "Item", "ItemClass", "ItemEffect", "ItemGroupSounds",
-            "ItemSparse", "ItemSubClass", "ItemXItemEffect", "Material", "SpellName"], result.Take(14).Select(entry => entry.Name));
+        // #144: every pinned definition is bundled, so the catalogue is in name order.
+        Assert.All(result, entry => Assert.Equal("bundled", entry.DefinitionState));
+        Assert.Equal(result.Select(entry => entry.Name).Order(StringComparer.OrdinalIgnoreCase), result.Select(entry => entry.Name));
         Assert.All(result, entry => { Assert.Equal("notChecked", entry.SourceState); Assert.Equal("notPrepared", entry.RowsState); });
         Assert.False(Directory.Exists(Path.Combine(h.Directory, "objects-v1")));
     }
@@ -277,29 +277,48 @@ public sealed class TablesCatalogTests
             await using var input = assembly.GetManifestResourceStream(resource)!;
             using var bytes = new MemoryStream(); await input.CopyToAsync(bytes); return bytes.ToArray();
         }
-        var data = await Resource("definitions/" + name + ".dbd");
+        // #144: the files sit unmodified in one Brotli stream; only these resources are embedded, never a loose .dbd.
+        Assert.Equal(["LICENSE.md", "NOTICE.md", "definitions.br", "manifest.json", "sources.json"], assembly.GetManifestResourceNames()
+            .Where(value => value.Contains(".WoWDBDefs.", StringComparison.Ordinal)).Select(value => value[(value.IndexOf(BundledTableDefinitions.Revision, StringComparison.Ordinal) + 41)..])
+            .Order(StringComparer.Ordinal));
+        var data = PinnedDefinitionFiles.Bytes(name);
         Assert.Equal(length, data.Length); Assert.Equal(hash, Convert.ToHexStringLower(SHA256.HashData(data)));
-        using var sources = JsonDocument.Parse(await Resource("sources.json"));
+        var sourcesBytes = await Resource("sources.json");
+        Assert.Equal(BundledTableDefinitions.SourcesSha256, Convert.ToHexStringLower(SHA256.HashData(sourcesBytes)));
+        using var sources = JsonDocument.Parse(sourcesBytes);
         Assert.Equal(BundledTableDefinitions.Revision, sources.RootElement.GetProperty("revision").GetString());
         Assert.Equal("CC-BY-SA-4.0", sources.RootElement.GetProperty("definitionLicense").GetString());
-        var receipt = Assert.Single(sources.RootElement.GetProperty("resources").EnumerateArray(),
+        Assert.Equal($"https://raw.githubusercontent.com/wowdev/WoWDBDefs/{BundledTableDefinitions.Revision}/", sources.RootElement.GetProperty("sourceBase").GetString());
+        var receipt = Assert.Single(sources.RootElement.GetProperty("definitions").GetProperty("files").EnumerateArray(),
             source => source.GetProperty("path").GetString() == "definitions/" + name + ".dbd");
         Assert.Equal(hash, receipt.GetProperty("sha256").GetString()); Assert.Equal(length, receipt.GetProperty("byteLength").GetInt32());
-        Assert.Equal($"https://raw.githubusercontent.com/wowdev/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/{name}.dbd",
-            receipt.GetProperty("sourceUrl").GetString());
+        Assert.Equal(await Resource("definitions.br"), await File.ReadAllBytesAsync(Path.Combine(PinnedDefinitionFiles.Directory, "definitions.br")));
+        // The engine reads the same bytes, names the immutable upstream URL and keeps the CC BY-SA attribution.
+        var provider = await TablesCatalog.Provider.Value;
+        var tableId = provider.Entries.Single(entry => entry.Name == name).TableId;
+        Assert.Equal(hash, provider.Definitions[tableId].Sha256);
+        Assert.Equal($"https://raw.githubusercontent.com/wowdev/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/{name}.dbd", provider.Definitions[tableId].SourceUrl);
+        Assert.Contains("CC BY-SA 4.0", System.Text.Encoding.UTF8.GetString(await Resource("NOTICE.md")));
+        Assert.Contains("Attribution-ShareAlike 4.0", System.Text.Encoding.UTF8.GetString(await Resource("LICENSE.md")));
         var manifest = await Resource("manifest.json");
         Assert.Equal(BundledTableDefinitions.ManifestSha256, Convert.ToHexStringLower(SHA256.HashData(manifest)));
         Assert.Equal(1346, BundledTableDefinitions.ParseManifest(manifest).Count);
     }
 
     [Fact]
-    public async Task Missing_bundled_definition_and_missing_exact_build_are_separate_metadata_states()
+    public async Task An_unreadable_bundled_definition_and_a_missing_exact_build_are_separate_metadata_states()
     {
         await using var h = await Harness.Create("1.2.3.12345");
-        var page = await h.Tables.ReadCatalogAsync(new("wow", h.Id, "us", "Achievement", 100), default);
-        var unbundled = page.Entries.First(entry => entry.DefinitionState == "notBundled");
-        var missing = await h.Tables.ReadDefinitionAsync(new("wow", h.Id, "us", unbundled.TableId), default);
-        Assert.Null(missing.Definition); Assert.Equal("DEFINITION_NOT_BUNDLED", missing.Problem!.Code);
+        // #144: Treasure's pinned file is a placeholder with no columns. Only that table is unsupported, with its reason
+        // and its pinned identity; it offers no columns or layouts.
+        var page = await h.Tables.ReadCatalogAsync(new("wow", h.Id, "us", "Treasure", 100), default);
+        var placeholder = Assert.Single(page.Entries, entry => entry.Name == "Treasure"); Assert.Equal("bundled", placeholder.DefinitionState);
+        var unusable = await h.Tables.ReadDefinitionAsync(new("wow", h.Id, "us", placeholder.TableId), default);
+        Assert.Equal("DEFINITION_UNSUPPORTED", unusable.Problem!.Code);
+        Assert.StartsWith("VibeMiner can’t read the pinned Treasure definition (DBD_EMPTY), so this table can’t open.", unusable.Problem.Message);
+        Assert.Contains("doesn't describe it yet", unusable.Problem.Message); Assert.InRange(unusable.Problem.Message.Length, 1, 400);
+        Assert.Empty(unusable.Definition!.Columns); Assert.Empty(unusable.Definition.Candidates);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(PinnedDefinitionFiles.Bytes("Treasure"))), unusable.Definition.Sha256);
         // D080: 1.2.3.12345 is not listed, so the preview offers only the layouts a 1.x file could open by.
         var candidate = await h.Tables.ReadDefinitionAsync(new("wow", h.Id, "us", "50238ec2"), default);
         Assert.NotNull(candidate.Definition); Assert.Equal("SCHEMA_BUILD_NOT_LISTED", candidate.Problem!.Code);
@@ -326,8 +345,11 @@ public sealed class TablesCatalogTests
     {
         await using var h = await Harness.Create(version);
         var provider = await TablesCatalog.Provider.Value;
-        foreach (var (tableId, bundled) in provider.Definitions)
+        // The feature tables: each has retail 12.x blocks.
+        foreach (var tableId in new[] { "c9d6b6b3", "bfdaf9f1", "7f695fa5", "1f80ad3f", "369f469f", "50238ec2", "919be54e", "b977271e", "4002a5b1",
+            "95d8638f", "00cb674f", "a4c11069", "46c66698", "9f4206c9" })
         {
+            var bundled = provider.Definitions[tableId];
             var definition = await h.Tables.ReadDefinitionAsync(new("wow", h.Id, "us", tableId), default);
             Assert.Equal("SCHEMA_BUILD_NOT_LISTED", definition.Problem!.Code);
             Assert.Equal(bundled.Document.LayoutCandidates(version).Select(value => value.LayoutHash), definition.Definition!.Candidates.Select(value => value.LayoutHash));

@@ -246,8 +246,8 @@ public sealed partial class TableDataStore : ITableDataStore, ITableReferenceTex
         var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
         var entry = provider.Entries.SingleOrDefault(entry => entry.TableId == request.TableId)
             ?? throw new DiscoveryException("TABLE_NOT_IN_PROVIDER", "This exact table identity is not listed by the pinned definition provider.");
-        if (!provider.Definitions.TryGetValue(entry.TableId, out var definition))
-            throw new DiscoveryException("DEFINITION_NOT_BUNDLED", "This table's definition is not bundled yet.");
+        // #144: a bundled file that fails its check or doesn't parse stops only this table, saying why.
+        var definition = provider.Definitions.Require(entry.TableId);
         if (entry.Db2FileDataId is null)
             throw new DiscoveryException("TABLE_FILE_ID_UNKNOWN", "The pinned provider does not identify this table's DB2 FileDataID.");
         // An unlisted build can still open when the acquired file's layout selects a block on its version line (D080),

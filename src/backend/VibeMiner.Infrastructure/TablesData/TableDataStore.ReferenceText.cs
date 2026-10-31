@@ -126,8 +126,10 @@ public sealed partial class TableDataStore
         var target = new TextTarget { Rule = rule };
         TextTarget Fail(string state, string code, string message) { target.State = state; target.Problem = new(code, message); return target; }
         var entry = provider.Entries.SingleOrDefault(e => e.TableId == rule.TextTableId);
-        if (entry?.Db2FileDataId is null || !provider.Definitions.TryGetValue(rule.TextTableId, out var bundled))
-            return Fail(S.NoDefinition, "DEFINITION_NOT_BUNDLED", $"The {rule.TextTable} definition is not bundled.");
+        DiscoveryException? unusable = null;
+        if (entry?.Db2FileDataId is null || !provider.Definitions.TryGet(rule.TextTableId, out var bundled, out unusable))
+            return unusable is null ? Fail(S.NoDefinition, "DEFINITION_NOT_BUNDLED", $"The {rule.TextTable} definition is not bundled.")
+                : Fail(S.Unsupported, unusable.Code, unusable.Message);
         if (!fetchEnabled && !OpensBuild(bundled.Document, context.Build.Version, token))
             return Fail(S.Unsupported, "SCHEMA_BUILD_NOT_LISTED", $"The pinned {rule.TextTable} definition does not list this exact build or any layout on its version line.");
         var admission = await catalog.ReadTableAdmissionAsync(context, rule.TextTableId, locale, token);

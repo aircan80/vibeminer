@@ -45,7 +45,8 @@ public sealed class TableReferenceTextTests
         Assert.Equal(new TableReference("ItemClass", "ClassID"), classColumn.Reference);
         Assert.Equal(("ItemClass", "ClassName_lang", "ClassID", "complete"), (classColumn.TextSource!.Table, classColumn.TextSource.TextColumn, classColumn.TextSource.MatchColumn, classColumn.TextSource.Scope));
         Assert.Equal(S.NoTextRule, Assert.Single(page.Columns, c => c.Name == "Material").State);
-        Assert.Equal(S.NoDefinition, Assert.Single(page.Columns, c => c.Name == "ContentTuningID").State);
+        // #144: ContentTuning's definition is bundled now; it just has no reviewed text column.
+        Assert.Equal(S.NoTextRule, Assert.Single(page.Columns, c => c.Name == "ContentTuningID").State);
         Assert.DoesNotContain(page.Values, v => v.ColumnIndex != 1);
 
         var values = page.Values.ToDictionary(v => v.Value);

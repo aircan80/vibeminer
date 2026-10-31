@@ -11,10 +11,11 @@ checkpoint and digests are recorded in docs/migration/java-reference.json.
 
 Third-party dependencies and separately identified resources retain their own
 licenses. No third-party game parser, runtime distribution or downloaded Blizzard content
-is included. The separately attributed WoWDBDefs manifest and twelve definition
+is included. The separately attributed WoWDBDefs manifest and all 1,346 definition
 files at revision b9a63096cdd99b26967f17f9515377ae62cadfd7 are community data
-under CC BY-SA 4.0 (WoWDBDefs contributors). Original source URLs, digests,
-NOTICE and full upstream LICENSE accompany these unmodified resources in
+under CC BY-SA 4.0 (WoWDBDefs contributors). The definition files are stored
+unmodified in one Brotli stream. Original source URLs, digests, NOTICE and full
+upstream LICENSE accompany these unmodified resources in
 src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/ and in
 packages under resources/legal/third-party/WoWDBDefs/. Application parsing code
 is original.

@@ -157,9 +157,8 @@ public sealed class TableDefinitionSources(WoWDBDefsDefinitions? fetched = null,
     {
         var provider = await TablesCatalog.Provider.Value.WaitAsync(token);
         var entry = provider.Entries.SingleOrDefault(value => value.TableId == tableId);
-        if (entry is null || !provider.Definitions.TryGetValue(tableId, out var bundled))
-            throw new DiscoveryException("DEFINITION_NOT_BUNDLED", "This table's definition is not bundled yet.");
-        return (entry, bundled);
+        if (entry is null) throw new DiscoveryException("DEFINITION_NOT_BUNDLED", "This table's definition is not bundled yet.");
+        return (entry, provider.Definitions.Require(tableId));
     }
 
     /// <summary>The definition chosen now for a feature's admitted rows (D101), as Tables reads them.</summary>

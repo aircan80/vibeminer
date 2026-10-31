@@ -70,7 +70,7 @@ public sealed class ItemsStoreTests(ITestOutputHelper output)
     /// <summary>A bundled definition plus one block that lists the build, with the fields of the bundled block for the layout.</summary>
     internal static byte[] WithBuild(string name, string layout, string build)
     {
-        var text = File.ReadAllText(RepositoryPaths.File($"src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/{name}.dbd")).Replace("\r\n", "\n");
+        var text = PinnedDefinitionFiles.Text(name).Replace("\r\n", "\n");
         var lines = text.Split('\n'); var start = Array.IndexOf(lines, "LAYOUT " + layout);
         var fields = lines.Skip(start).TakeWhile(line => line.Length > 0).Where(line => !line.StartsWith("LAYOUT ", StringComparison.Ordinal) && !line.StartsWith("BUILD ", StringComparison.Ordinal));
         return Encoding.UTF8.GetBytes(text.TrimEnd('\n') + "\n\nLAYOUT " + layout + "\nBUILD " + build + "\n" + string.Join("\n", fields) + "\n");

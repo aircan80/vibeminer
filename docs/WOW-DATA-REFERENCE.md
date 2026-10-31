@@ -136,9 +136,9 @@ Pinned revision `b9a63096cdd99b26967f17f9515377ae62cadfd7`. The bundled manifest
 | With a DB2 FileDataID (all distinct) | 1,270 |
 | Without a DB2 FileDataID | 76 |
 | Also carrying a DBC FileDataID | 378 |
-| Definitions bundled | 14 |
+| Definitions bundled | 1,346 (7 are placeholders with no columns) |
 
-The 14 bundled definitions: Creature, CreatureDisplayInfo, CreatureFamily, CreatureModelData, CreatureType, Item, ItemClass, ItemEffect, ItemGroupSounds, ItemSparse, ItemSubClass, ItemXItemEffect, Material, SpellName. They are unmodified upstream bytes with recorded SHA-256 and length.
+Every definition at the pin is bundled, unmodified, in one Brotli stream with each file's SHA-256 and length in `sources.json` ([D120](DECISIONS.md)). A definition is parsed when its table first asks for it and kept in a bounded cache. Seven files are upstream placeholders (just `COLUMNS`): Cfg_Languages, Cfg_Realms, GarrMissionReward, MobileStrings, SpellTooltip, Treasure and VW_MobileSpell. Those tables are `DEFINITION_UNSUPPORTED`; every other table opens by exact build or layout match. The 14 the features read keep their pinned SHA-256s: Creature, CreatureDisplayInfo, CreatureFamily, CreatureModelData, CreatureType, Item, ItemClass, ItemEffect, ItemGroupSounds, ItemSparse, ItemSubClass, ItemXItemEffect, Material, SpellName.
 
 - **License:** definitions and manifest are CC BY-SA 4.0; WoWDBDefs code is BSD-3-Clause. Keep contributor attribution, revision, digests and modification status. See [LICENSING.md](LICENSING.md).
 - **It is community metadata, not a per-build inventory.** The manifest lists known tables; names can be provisional. Which tables a build actually contains comes only from authenticated ROOT/ENCODING. ROOT carries FDIDs and CKeys, not paths, so "every DB2 in this build" cannot be derived from ROOT alone.
@@ -149,6 +149,7 @@ Interpretation rules for the DBD reader:
 
 - `?` marks an unverified name, not nullable data. `$noninline$` means outside the inline record. `$id$` is the identity. `$relation$` is a storage annotation, separate from a COLUMNS foreign-target declaration, and is not always noninline.
 - A declared `int32` says nothing about physical storage; pallet, bitpacked and common storage are decoder facts.
+- A block can carry `LAYOUT` without `BUILD` (seven definitions at the pin have one). It is kept but selects no build, and the layout match below can't choose it.
 - Builds are compared as four numeric components. Several matching layout blocks are an ambiguity, never "take the first". No latest-build fallback.
 - A listed build uses exact build and layout. A build no block lists can still open by the file's layout hash, but only from blocks on its version line (same major version); several such blocks go to the one with a listed build number nearest the file's, and a tie between different field sets is ambiguous. The field checks still run, and the result says "matched by layout, build not listed" (D080).
 - With fetching on, the Tables view uses exact build first (D081): a definition that lists the build wins, bundled before one fetched from WoWDBDefs, and only then the layout match above, bundled first. Rows read with a fetched definition say "Definition from WoWDBDefs (fetched <date>, <commit>)". Items, Creatures and the other feature views choose the same way and say so too (D101); their reviewed field profiles still have to match the chosen definition.

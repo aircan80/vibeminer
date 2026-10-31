@@ -10,31 +10,21 @@ Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)**. The upstream LICENSE.
 is retained unchanged beside this notice and explains the repository's distinct
 data/code licenses. No upstream code/parser is bundled or used by VibeMiner.
 
-Original URLs, exact byte lengths and SHA-256 digests are recorded in sources.json.
-No data-file contents were changed. VibeMiner's parser and presentation code are
-original project software; these attributed definition data retain their own license.
+All 1,346 definition files of this revision are included. They are stored back to
+back, unmodified, in one Brotli stream, definitions.br. sources.json records each
+file's path, exact byte length and SHA-256, in stream order, and the original URL
+of each is the revision's sourceBase plus that path. It also records the manifest
+and LICENSE.md. No data-file contents were changed; VibeMiner checks every file
+against sources.json before it uses it. VibeMiner's parser and presentation code
+are original project software; these attributed definition data retain their
+own license.
 
-The twelve bundled definitions are Creature, CreatureDisplayInfo,
-CreatureModelData, Item, ItemSparse, ItemClass, ItemEffect, ItemSubClass,
-ItemXItemEffect, Material, ItemGroupSounds and SpellName. ItemSubClass and ItemXItemEffect
-retain the same pinned revision and unchanged bytes for qualification of inline
-and external relationship fields; their inclusion does not establish acquired
-table records or enable a semantic join by itself. The full 1,346-entry manifest
-and its existing digest remain unchanged.
-
-Creature, CreatureDisplayInfo and CreatureModelData retain unchanged bytes from
-the same pinned revision. Their declared fields, arrays and references are
-candidate metadata only; this bundle does not establish acquired client records,
-an admitted appearance, model decoding, animation or an NPC population.
-
-ItemEffect and SpellName also retain unchanged bytes at this revision. Their
-inclusion supplies candidate field/reference metadata for future linked-effect
-qualification, not observed associations, game rows, evaluated effects, spell
-descriptions or tooltip calculations. SpellName is a distinct source table from
-Spell; definition availability does not establish target or text coverage.
+Seven files at this revision are WoWDBDefs placeholders with no columns
+(Cfg_Languages, Cfg_Realms, GarrMissionReward, MobileStrings, SpellTooltip,
+Treasure and VW_MobileSpell); VibeMiner says those tables aren't described yet.
 
 With the Settings switch "Fetch newer table definitions from WoWDBDefs" on (the
-default), VibeMiner may also download one of these tables' definition files from
+default), VibeMiner may also download a table's definition file from
 https://github.com/wowdev/WoWDBDefs at runtime when no bundled definition covers a
 file's layout (decision D081). Fetched files are WoWDBDefs contributors' data under
 the same CC BY-SA 4.0 terms, used unmodified, kept with their commit, URL and

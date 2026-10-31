@@ -20,8 +20,7 @@ public sealed class FetchedDefinitionTests
     internal const string Revision = "1111111111111111111111111111111111111111";
     internal const string Newer = "2222222222222222222222222222222222222222";
     private const string ItemTable = "50238ec2";
-    private static readonly string ItemDbd = File.ReadAllText(RepositoryPaths.File(
-        "src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/Item.dbd"));
+    private static readonly string ItemDbd = PinnedDefinitionFiles.Text("Item");
 
     /// <summary>The bundled Item definition plus one block: the 9A2A4834 fields under another layout and build.</summary>
     internal static byte[] ItemWith(string layout, string build)
@@ -139,8 +138,7 @@ public sealed class FetchedDefinitionTests
         var item = provider.Entries.Single(e => e.TableId == ItemTable); var sparse = provider.Entries.Single(e => e.TableId == "919be54e");
         var fetched = new WoWDBDefsDefinitions(directory.Path, new HttpClient(github), clock);
         // WoWDBDefs' newest ItemSparse doesn't list the build either: the words name no table.
-        github.Serve("ItemSparse", Revision, File.ReadAllBytes(RepositoryPaths.File(
-            $"src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/ItemSparse.dbd")));
+        github.Serve("ItemSparse", Revision, PinnedDefinitionFiles.Bytes("ItemSparse"));
         var newest = (await fetched.EnsureAsync("919be54e", "ItemSparse", Any, None, default)).Definition!;
         var neither = TableDefinitionSources.Unusable(sparse, "99.0.0.1", null, new(null, TableDefinition.From(newest), null), true, "Items");
         Assert.DoesNotContain("ItemSparse", neither.Message);
@@ -517,7 +515,7 @@ public sealed class FetchedDefinitionTests
     public async Task Every_bundled_definition_fits_the_layout_and_selection_bounds()
     {
         var provider = await TablesCatalog.Provider.Value;
-        Assert.Equal(14, provider.Definitions.Count);
+        Assert.Equal(1346, provider.Definitions.Count);
         Assert.NotNull(DbdDefinitionReader.Parse(ItemWith("9A2A4834", "77.0.0.100")));
     }
 
@@ -639,8 +637,10 @@ public sealed class FetchedDefinitionTests
     public async Task Each_selection_key_stays_within_the_parsed_bound()
     {
         // The bound holds for the real definitions too: the key's JSON never exceeds what the reader allowed.
-        foreach (var (_, definition) in (await TablesCatalog.Provider.Value).Definitions)
+        var provider = await TablesCatalog.Provider.Value;
+        foreach (var entry in provider.Entries)
         {
+            if (!provider.Definitions.TryGet(entry.TableId, out var definition, out _)) continue;
             Assert.InRange(definition.Document.SelectionCost, 1, new DbdLimits().MaxSelectionBytes / 3);
             foreach (var block in definition.Document.Blocks)
                 foreach (var field in block.Fields)
@@ -715,8 +715,7 @@ public sealed class FetchedDefinitionTests
     public async Task A_fetched_definition_gets_the_reviewed_raw_rules_only_for_an_identical_block(string change, bool reviewed)
     {
         var bundled = (await TablesCatalog.Provider.Value).Definitions["4002a5b1"];
-        var text = File.ReadAllText(RepositoryPaths.File(
-            "src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/b9a63096cdd99b26967f17f9515377ae62cadfd7/definitions/ItemEffect.dbd")).Replace("\r\n", "\n");
+        var text = PinnedDefinitionFiles.Text("ItemEffect").Replace("\r\n", "\n");
         var lines = text.Split('\n'); var start = Array.IndexOf(lines, "LAYOUT 4CA77678");
         var fields = lines.Skip(start).TakeWhile(line => line.Length > 0).Where(line => !line.StartsWith("LAYOUT ", StringComparison.Ordinal) && !line.StartsWith("BUILD ", StringComparison.Ordinal)).ToArray();
         fields = change switch
@@ -756,8 +755,7 @@ public sealed class FetchedDefinitionTests
         var bundled = (await TablesCatalog.Provider.Value).Definitions[table];
         TableDefinition Fetched(Func<string, string> change)
         {
-            var text = File.ReadAllText(RepositoryPaths.File(
-                $"src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/{name}.dbd")).Replace("\r\n", "\n");
+            var text = PinnedDefinitionFiles.Text(name).Replace("\r\n", "\n");
             var lines = text.Split('\n'); var start = Array.IndexOf(lines, "LAYOUT " + layout);
             var fields = lines.Skip(start).TakeWhile(line => line.Length > 0).Where(line => !line.StartsWith("LAYOUT ", StringComparison.Ordinal) &&
                 !line.StartsWith("BUILD ", StringComparison.Ordinal) && !line.StartsWith("COMMENT ", StringComparison.Ordinal)).Select(change);
@@ -797,8 +795,7 @@ public sealed class FetchedDefinitionTests
     public async Task Effect_rows_current_for_a_fetched_block_without_the_reviewed_rules_are_unsupported_not_stale()
     {
         var bundled = (await TablesCatalog.Provider.Value).Definitions["4002a5b1"];
-        var text = File.ReadAllText(RepositoryPaths.File(
-            $"src/backend/VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/{BundledTableDefinitions.Revision}/definitions/ItemEffect.dbd")).Replace("\r\n", "\n");
+        var text = PinnedDefinitionFiles.Text("ItemEffect").Replace("\r\n", "\n");
         var lines = text.Split('\n'); var start = Array.IndexOf(lines, "LAYOUT 4CA77678");
         var fields = lines.Skip(start).TakeWhile(line => line.Length > 0).Where(line => !line.StartsWith("LAYOUT ", StringComparison.Ordinal) && !line.StartsWith("BUILD ", StringComparison.Ordinal))
             .Select(line => line.StartsWith("Charges", StringComparison.Ordinal) ? "Charges<32>" : line);

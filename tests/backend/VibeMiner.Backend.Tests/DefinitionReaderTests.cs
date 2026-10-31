@@ -169,9 +169,58 @@ public sealed class DefinitionReaderTests
         Assert.Equal("missing", document.SelectBuild("3.1.0.9000", "ABCD1234").Status);
     }
 
+    // #144: WoWDBDefs keeps blocks with a LAYOUT line and no BUILD line (Achievement, AlliedRace, WorldSafeLocs and four
+    // more at the pinned revision). The rest of the definition stays usable; the block itself never selects a build, and
+    // D080 can't choose it because it lists no build on any version line.
+    [Fact]
+    public void A_layout_only_block_is_kept_but_never_selects_a_build_or_a_layout_match()
+    {
+        var document = Parse(Source + "\n\nLAYOUT 0BADF00D, ABCD1234\n$noninline,id$ID<32>\nName\n");
+        Assert.Equal(2, document.Blocks.Count);
+        var layoutOnly = document.Blocks[1];
+        Assert.Equal(["0BADF00D", "ABCD1234"], layoutOnly.LayoutHashes); Assert.Empty(layoutOnly.Builds);
+        Assert.Equal(["ID", "Name"], layoutOnly.Fields.Select(field => field.Column.Name));
+        // The listed build still selects its own block, and only that one.
+        Assert.Same(document.Blocks[0], Assert.Single(document.SelectBuild("1.60.1.70450", "ABCD1234").Blocks));
+        Assert.Equal("missing", document.SelectBuild("1.60.1.70450", "0BADF00D").Status);
+        // An unlisted build: the layout-only block's hash opens nothing and isn't offered as a candidate.
+        Assert.Equal("missing", document.SelectFile("1.60.1.70500", "0BADF00D").Status);
+        Assert.DoesNotContain(document.LayoutCandidates("1.60.1.70500"), value => value.LayoutHash == "0BADF00D");
+        Assert.Same(document.Blocks[0], Assert.Single(document.SelectFile("1.60.1.70500", "ABCD1234").Blocks));
+    }
+
+    [Fact]
+    public void Columns_only_reads_the_same_columns_with_the_same_checks_and_skips_the_blocks()
+    {
+        var bytes = Encoding.UTF8.GetBytes(Source);
+        Assert.Equal(Parse(Source).Columns, DbdDefinitionReader.ParseColumns(bytes));
+        // A block the full reader refuses doesn't stop the column list.
+        var bad = Encoding.UTF8.GetBytes(Source + "\n\nBUILD 1.2.3.5\nSounds<24>\n");
+        Assert.Equal("DBD_UNSUPPORTED", Assert.Throws<DiscoveryException>(() => DbdDefinitionReader.Parse(bad)).Code);
+        Assert.Equal(4, DbdDefinitionReader.ParseColumns(bad).Count);
+        Assert.Equal("DBD_INVALID", Assert.Throws<DiscoveryException>(() => DbdDefinitionReader.ParseColumns("COLUMNS\nint ID\nint ID\n"u8)).Code);
+        Assert.Equal("DBD_EMPTY", Assert.Throws<DiscoveryException>(() => DbdDefinitionReader.ParseColumns("COLUMNS\n\n"u8)).Code);
+        Assert.Equal("DBD_LIMIT", Assert.Throws<DiscoveryException>(() => DbdDefinitionReader.ParseColumns(bytes, new(MaxColumns: 2))).Code);
+        Assert.Equal("DBD_LIMIT", Assert.Throws<DiscoveryException>(() => DbdDefinitionReader.ParseColumns(bytes, new(MaxBytes: 10))).Code);
+        using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+        Assert.ThrowsAny<OperationCanceledException>(() => DbdDefinitionReader.ParseColumns(bytes, token: cancellation.Token));
+    }
+
+    [Theory]
+    [InlineData("COLUMNS\n")]
+    [InlineData("COLUMNS\n\n")]
+    [InlineData("COLUMNS")]
+    public void A_placeholder_with_no_columns_says_WoWDBDefs_does_not_describe_the_table(string text)
+    {
+        var failure = Assert.Throws<DiscoveryException>(() => Parse(text));
+        Assert.Equal("DBD_EMPTY", failure.Code); Assert.Contains("doesn't describe it yet", failure.Message);
+    }
+
     [Theory]
     [InlineData("COLUMNS\nint ID\nint ID\n\nBUILD 1.2.3.4\nID<32>")]
-    [InlineData("COLUMNS\nint ID\n\nLAYOUT ABCD1234\nID<32>")]
+    [InlineData("COLUMNS\nint ID\n\nID<32>")]
+    [InlineData("COLUMNS\nint ID\n\nCOMMENT note\nID<32>")]
+    [InlineData("COLUMNS\nint ID\n\nLAYOUT ABCD1234")]
     [InlineData("COLUMNS\nint ID\n\nBUILD 1.2.3.4\nOther<32>")]
     [InlineData("COLUMNS\nint ID\n\nBUILD 1.2.3.4\nID<32>\nID<32>")]
     [InlineData("COLUMNS\nint ID\n\nLAYOUT ABCD1234\nLAYOUT ABCD1234\nBUILD 1.2.3.4\nID<32>")]

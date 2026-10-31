@@ -198,7 +198,8 @@ Observed, not a format law: in Classic beta and Retail Item files, all global me
 Definitions come from pinned WoWDBDefs (CC BY-SA 4.0) and are read by our own bounded reader.
 
 - `COLUMNS` first: `int|float|string|locstring`, optional `<Table::Column>` reference, name, optional `?`. `?` means **unverified name**, not nullable.
-- Version blocks: `LAYOUT` hashes, `BUILD` selectors (exact four-part builds or inclusive ranges, compared numerically), optional `COMMENT`, then fields.
+- Version blocks: `LAYOUT` hashes, `BUILD` selectors (exact four-part builds or inclusive ranges, compared numerically), optional `COMMENT`, then fields. A block needs fields and at least one `LAYOUT` or `BUILD` line. The upstream README calls `BUILD` required, but the data and upstream's own tooling keep layout-only blocks (D120); such a block selects no build and no layout match.
+- A file that is only `COLUMNS` is an upstream placeholder: `DBD_EMPTY`, and its table is unsupported.
 - Field: optional annotations `$id$`, `$noninline$`, `$relation$` (comma-separated, no repeats), name, optional `<N>` or `<uN>` with N in 8/16/32/64, optional `[N]` array length.
 - A DBD integer width is a candidate interpretation. It says nothing about physical storage width; pallet, common and bitpacked storage are separate facts.
 - Selection needs the exact build **and** the actual layout hash: exactly one matching block, else `DB2_SCHEMA_MISSING` or `DB2_SCHEMA_AMBIGUOUS`. No latest fallback.
@@ -211,6 +212,6 @@ Definitions come from pinned WoWDBDefs (CC BY-SA 4.0) and are read by our own bo
 
 - Original Java VibeMiner checkpoint `8f353d046d961108f7acc86bfe1381004467afd5`: `Wdc5HeaderInspector`, `Wdc5MetadataInspector`, `FixedSectionIndexParser`, `FieldValueDecoder`, `RecordBitFields`, `SparseSectionIndexParser`, `ValidatedSparseSection`.
 - DBCD `e732093f8864240fc5884bd1bba6b02f3dfc0d56` (MIT): `WDC5Reader`, `WDC5Writer`, `DBStructs`, `DB2Flags`, `BaseReader`, `BitReader`. Its zero-ID repair, negative string clamping, zero-filled encrypted records and dictionary overwrites are tool behavior we do not copy. Its reader's 200-byte header constant disagrees with its own reads; the header is 204 bytes.
-- WoWDBDefs `b9a63096cdd99b26967f17f9515377ae62cadfd7` (CC BY-SA 4.0): definitions and grammar.
+- WoWDBDefs `b9a63096cdd99b26967f17f9515377ae62cadfd7` (CC BY-SA 4.0): definitions and grammar. Its `code/C#/DBDefsLib` (BSD-3-Clause, read only, nothing copied) was checked for how it orders blocks without builds.
 
 Our reader is original code.

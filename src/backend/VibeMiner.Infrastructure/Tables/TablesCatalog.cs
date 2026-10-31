@@ -16,14 +16,16 @@ public sealed class TablesCatalog(DiscoveryCatalog catalog, TableDefinitionSourc
         TablesService.Validate(request);
         await Context(new(request.ProductId, request.BuildIdentity, request.SourceRegion), token);
         var provider = await Provider.Value.WaitAsync(token);
+        // Column names come from one read of every bundled COLUMNS section (#144), not from parsing each definition.
+        var columns = request.Query.Length == 0 ? null : await provider.Definitions.ColumnNamesAsync(token);
         var result = new List<TableCatalogEntry>();
         foreach (var entry in provider.Entries)
         {
             token.ThrowIfCancellationRequested();
             if (request.Query.Length == 0 || entry.Name?.Contains(request.Query, StringComparison.OrdinalIgnoreCase) == true ||
                 entry.TableId.Contains(request.Query, StringComparison.OrdinalIgnoreCase) || entry.Db2FileDataId?.Contains(request.Query, StringComparison.Ordinal) == true ||
-                provider.Definitions.TryGetValue(entry.TableId, out var definition) &&
-                    definition.Document.Columns.Any(column => column.Name.Contains(request.Query, StringComparison.OrdinalIgnoreCase))) result.Add(entry);
+                columns!.TryGetValue(entry.TableId, out var names) &&
+                    names.Any(name => name.Contains(request.Query, StringComparison.OrdinalIgnoreCase))) result.Add(entry);
         }
         var after = request.After is null ? 0 : int.Parse(request.After, CultureInfo.InvariantCulture);
         if (after > result.Count) throw new DiscoveryException("INVALID_CURSOR", "The table catalogue cursor exceeds this exact filtered provider catalogue.");
@@ -40,8 +42,19 @@ public sealed class TablesCatalog(DiscoveryCatalog catalog, TableDefinitionSourc
         var entry = provider.Entries.SingleOrDefault(entry => entry.TableId == request.TableId)
             ?? throw new DiscoveryException("TABLE_NOT_IN_PROVIDER", "This exact table identity is not listed by the pinned definition provider.");
         TableDefinitionInfo? info = null; TablesProblem? problem; string? fetch = null; TableDefinitionCheck? check = null;
-        if (!provider.Definitions.TryGetValue(entry.TableId, out var bundled))
-            problem = new("DEFINITION_NOT_BUNDLED", "This provider entry is listed, but its definition data is not bundled in this application yet.");
+        if (!provider.Definitions.TryGet(entry.TableId, out var bundled, out var unusable))
+        {
+            if (unusable is null)
+                problem = new("DEFINITION_NOT_BUNDLED", "This provider entry is listed, but its definition data is not bundled in this application yet.");
+            else
+            {
+                // #144: the file is bundled but can't be used, so only this table is unsupported. Its pinned identity
+                // stays visible, with no columns or layouts to offer.
+                var file = provider.Definitions.File(entry.TableId)!;
+                info = new(file.Sha256, file.SourceUrl, Array.Empty<TableDefinitionField>(), Array.Empty<TableLayoutCandidate>(), null);
+                problem = new(unusable.Code, unusable.Message);
+            }
+        }
         else
         {
             // Local only (D081): the fetched definition the admitted rows were read with, or a cached one for a build line

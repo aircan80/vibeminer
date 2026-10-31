@@ -166,6 +166,22 @@ public static class DbdDefinitionReader
     public static DbdDocument Parse(ReadOnlySpan<byte> bytes, DbdLimits? limits = null, CancellationToken token = default)
     {
         limits ??= new();
+        var (groups, columns) = Head(bytes, limits, token, columnsOnly: false);
+        return Blocks(groups, columns, limits, token);
+    }
+
+    /// <summary>Only the COLUMNS section, read and checked exactly as <see cref="Parse"/> reads it, for a search over
+    /// many definitions (#144). Version blocks are neither read nor checked, so a definition Parse refuses for a block
+    /// still lists its columns here.</summary>
+    public static IReadOnlyList<DbdColumn> ParseColumns(ReadOnlySpan<byte> bytes, DbdLimits? limits = null, CancellationToken token = default)
+    {
+        var (_, columns) = Head(bytes, limits ?? new(), token, columnsOnly: true);
+        return new ReadOnlyCollection<DbdColumn>(columns.Values.ToArray());
+    }
+
+    private static (List<List<(string Text, string? Comment)>> Groups, Dictionary<string, DbdColumn> Columns) Head(ReadOnlySpan<byte> bytes,
+        DbdLimits limits, CancellationToken token, bool columnsOnly)
+    {
         if (limits.MaxBytes < 1 || limits.MaxLines < 1 || limits.MaxLineCharacters < 1 || limits.MaxColumns < 1 || limits.MaxBlocks < 1 ||
             limits.MaxFieldsPerBlock < 1 || limits.MaxSelectors < 1 || limits.MaxArrayLength < 1 || limits.MaxCommentCharacters < 1 ||
             limits.MaxLayouts < 1 || limits.MaxSelectionBytes < 1)
@@ -198,14 +214,14 @@ public static class DbdDefinitionReader
                 if (comment?.Length > limits.MaxCommentCharacters) throw Error("DBD_LIMIT", "A definition comment exceeds its bound.");
                 if (body.Length == 0)
                 {
-                    if (group.Count > 0) { groups.Add(group); group = []; }
+                    if (group.Count > 0) { groups.Add(group); group = []; if (columnsOnly) break; }
                 }
                 else group.Add((body, string.IsNullOrEmpty(comment) ? null : comment));
             }
         if (group.Count > 0) groups.Add(group);
         if (groups.Count == 0 || groups[0].Count == 0 || groups[0][0].Text != "COLUMNS")
             throw Error("DBD_INVALID", "A definition requires its initial COLUMNS section.");
-        if (groups.Count - 1 > limits.MaxBlocks) throw Error("DBD_LIMIT", "The definition exceeds its block bound.");
+        if (!columnsOnly && groups.Count - 1 > limits.MaxBlocks) throw Error("DBD_LIMIT", "The definition exceeds its block bound.");
         var columns = new Dictionary<string, DbdColumn>(StringComparer.Ordinal);
         foreach (var (body, comment) in groups[0].Skip(1))
         {
@@ -219,7 +235,14 @@ public static class DbdDefinitionReader
             if (!columns.TryAdd(column.Name, column)) throw Error("DBD_INVALID", "A definition declares the same column twice.");
             if (columns.Count > limits.MaxColumns) throw Error("DBD_LIMIT", "The definition exceeds its column bound.");
         }
-        if (columns.Count == 0) throw Error("DBD_INVALID", "The COLUMNS section is empty.");
+        // WoWDBDefs keeps a placeholder file, just "COLUMNS", for a table it knows of but hasn't described (#144).
+        if (columns.Count == 0) throw Error("DBD_EMPTY", "The definition declares no columns: WoWDBDefs lists the table but doesn't describe it yet.");
+        return (groups, columns);
+    }
+
+    private static DbdDocument Blocks(List<List<(string Text, string? Comment)>> groups, Dictionary<string, DbdColumn> columns, DbdLimits limits,
+        CancellationToken token)
+    {
         var blocks = new List<DbdBlock>(); var selectors = 0; var layoutTotal = 0; long selectionBytes = 0;
         foreach (var lines in groups.Skip(1))
         {
@@ -290,7 +313,11 @@ public static class DbdDefinitionReader
                 fields.Add(new(column, bits, unsigned, array, annotations.Contains("id"), annotations.Contains("noninline"), annotations.Contains("relation"), comment));
                 if (fields.Count > limits.MaxFieldsPerBlock) throw Error("DBD_LIMIT", "A definition block exceeds its field bound.");
             }
-            if (builds.Count == 0 || fields.Count == 0) throw Error("DBD_INVALID", "Every definition block requires BUILD selectors and fields.");
+            // A block names its builds, its layouts or both (#144). WoWDBDefs keeps layout-only blocks for structures
+            // seen without a known build; they never select a build, and D080 can't choose them since they list no build
+            // on any version line.
+            if (builds.Count == 0 && layouts.Count == 0 || fields.Count == 0)
+                throw Error("DBD_INVALID", "Every definition block requires BUILD or LAYOUT selectors and fields.");
             // Bound the work layout selection can do over this definition before any of it happens.
             layoutTotal += layouts.Count;
             if (layoutTotal > limits.MaxLayouts) throw Error("DBD_LIMIT", "The definition exceeds its layout bound.");
