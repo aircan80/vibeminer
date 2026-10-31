@@ -3,6 +3,7 @@ import type {Build,WorkspaceSnapshot} from '../../../../contracts/generated/disc
 import {useDownloadActivity} from './DownloadActivity';
 import {summaryLine} from './download-activity-state';
 import {BuildHeader} from './BuildHeader';
+import {useTruncationTitles} from './status-titles';
 import type {RetentionController} from './useRetention';
 import './desktop-home.css';
 
@@ -33,6 +34,7 @@ export type ShellArea='home'|'tables'|'files'|'items'|'creatures';
 export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,areas,status,fixtureLabel,children,dialog}:{snapshot:WorkspaceSnapshot;catalogBuild?:Build|null;label:string;retention?:RetentionController;onChoose:()=>void;area:ShellArea;areas:ReactNode;status?:ReactNode;fixtureLabel?:string|null;children:ReactNode;dialog?:ReactNode}){
  const host=useRef<HTMLDivElement>(null),shell=useRef<HTMLDivElement>(null),toolbar=useRef<HTMLElement>(null),statusBar=useRef<HTMLElement>(null),areaNode=useRef<HTMLElement>(null);
  const [size,setSize]=useState<{compact:boolean;medium:boolean;narrow:boolean}>({compact:false,medium:false,narrow:false}),[statusSlot,setStatusSlot]=useState<HTMLElement|null>(null),[scrolling,setScrolling]=useState(false);
+ useTruncationTitles(statusBar);
  const minimums=useRef(new Map<object,number>()),replace=useRef<()=>void>(()=>{}),rekeep=useRef<()=>void>(()=>{});
  const setMinimum=useRef((owner:object,px:number|null)=>{const map=minimums.current,old=map.get(owner);if(px===null){if(old===undefined)return;map.delete(owner);}else{const next=Math.ceil(px);if(old===next)return;map.set(owner,next);}replace.current();}).current;
  useLayoutEffect(()=>{
@@ -197,8 +199,7 @@ export function HomeShell({snapshot,catalogBuild,label,retention,onChoose,area,a
     <span><strong>{snapshot.build.productId} {snapshot.build.version}</strong> · {snapshot.sourceReference.region.toUpperCase()} · enUS</span>
     {status}<span ref={setStatusSlot} className="dh-status-slot"/>
     {fixtureLabel&&<span className="dh-fixture"><strong>{fixtureLabel}</strong><span className="dh-secondary"> · Synthetic identities and receipts.</span></span>}
-    <span className="dh-spacer"/>
-    {summary&&<span className={ui!.attention?'dh-warn':'dh-busy'} aria-live="off">{!ui!.attention&&ui!.active&&<span className="dh-pulse" aria-hidden="true"/>}{summaryLine(summary)}</span>}
+    {summary&&<span className={`dh-status-end ${ui!.attention?'dh-warn':'dh-busy'}`} aria-live="off">{!ui!.attention&&ui!.active&&<span className="dh-pulse" aria-hidden="true"/>}{summaryLine(summary)}</span>}
    </footer>
   </div>
   {dialog}

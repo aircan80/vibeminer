@@ -8,6 +8,7 @@ import { PreparedDataSetting } from './PreparedData';
 import { listfileMeasurement, listfileStage } from './useCommunityListfile';
 import brand from '../../../../branding/vibeminer.svg';
 import './settings.css';
+import { useTruncationTitles } from './status-titles';
 
 // Settings (docs/design/desktop-settings): one plain toolbar, a grouped list, an About column and a status bar.
 // It replaces the window content; the screen it was opened from stays mounted and hidden, so its state comes back.
@@ -61,6 +62,7 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
   const saveGeneration = useRef(0), shownSave = useRef(0);
   const toggles = useRef<Record<SettingSwitch, HTMLButtonElement | null>>({ communityBuildHistory: null, fetchTableDefinitions: null, communityListfile: null });
   const host = useRef<HTMLDivElement>(null), heading = useRef<HTMLHeadingElement>(null), copy = useRef<HTMLButtonElement>(null), toolbar = useRef<HTMLElement>(null), statusBar = useRef<HTMLElement>(null);
+  useTruncationTitles(statusBar);
   async function read() {
     const generation = ++readGeneration.current;
     setReading({ phase: 'reading' });
@@ -300,8 +302,7 @@ export function SettingsView({ bridge, origin, fixtureLabel, onBack, onPreparedD
         <span><strong>Settings</strong> · saved by the engine</span>
         <span className="st-secondary">{origin.kept}</span>
         {fixtureLabel && <span className="st-fixture"><strong>{fixtureLabel}</strong><span className="st-secondary"> · Synthetic identities and receipts.</span></span>}
-        <span className="st-spacer"/>
-        {summary && <span className={ui!.attention ? 'st-warn' : 'st-busy'} aria-live="off">{!ui!.attention && ui!.active && <span className="st-pulse" aria-hidden="true"/>}{summaryLine(summary)}</span>}
+        {summary && <span className={`st-status-end ${ui!.attention ? 'st-warn' : 'st-busy'}`} aria-live="off">{!ui!.attention && ui!.active && <span className="st-pulse" aria-hidden="true"/>}{summaryLine(summary)}</span>}
       </footer>
     </div>
   </div>;

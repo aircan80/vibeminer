@@ -653,13 +653,16 @@
 .desktop-home .dh-data>.dh-grid-scroll{min-height:0}
 .desktop-home .dh-insp-foot:empty{display:none}
 .desktop-home .dh-insp-details .dh-admission{margin:.746667rem 0 0;max-height:none}
-/* Status bar: secondary facts give way before the activity summary. */
+/* Status bar (#134): one line that never runs past the window. Secondary facts give way first, then the activity summary (the
+   activity entry says the same), then the exact build, source and locale (the identity popover has them whole). The fixture
+   badge is never cut. A cut fact ends in an ellipsis, has its whole text as a tooltip and can be focused to read it
+   (status-titles.ts). The summary sits at the end without a spacer, which would cost another gap. Flex shrinking is
+   proportional, so the shrink factors are a million apart: a fact later in the order then loses well under a layout unit while an
+   earlier one still has width, and keeps its text whole. */
 .desktop-home .dh-statusbar>span{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
-.desktop-home .dh-statusbar>span:first-child{flex-shrink:0}
-.desktop-home .dh-statusbar .dh-secondary,.desktop-home .dh-status-slot>span{flex-shrink:1000}
-/* The fixture badge keeps its label; the activity line and secondary facts give up width first. */
-.desktop-home .dh-statusbar .dh-fixture{flex-shrink:0}
-.desktop-home .dh-statusbar>.dh-spacer{flex:1 1 0}
+.desktop-home .dh-statusbar>.dh-secondary,.desktop-home .dh-status-slot>span{flex-shrink:1e12}
+.desktop-home .dh-statusbar>.dh-status-end{flex-shrink:1e6;margin-left:auto}
+.desktop-home .dh-statusbar>.dh-fixture{flex-shrink:0;max-width:100%}
 .desktop-home.dh-compact .dh-statusbar .dh-fixture .dh-secondary{display:none}
 .desktop-home .dh-data{overflow:clip}
 .desktop-home .dh-heading-slot{display:contents}

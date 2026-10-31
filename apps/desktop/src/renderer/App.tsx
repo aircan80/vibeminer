@@ -33,6 +33,7 @@ import { PreparationView, HomeView } from './WorkspaceViews';
 import brand from '../../../../branding/vibeminer.svg';
 import { SettingsButton, SettingsProvider, SettingsView, type SettingsOrigin } from './Settings';
 import { AvailabilityRow, useAvailabilityCheck } from './BuildAvailability';
+import { useTruncationTitles } from './status-titles';
 const stamp = (value: string | null) => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Not checked yet';
 const regions = (values: string[]) => values.length ? values.map(x => x.toUpperCase()).join(', ') : 'None recorded';
 const short = (value: string) => `${value.slice(0, 10)}…${value.slice(-4)}`;
@@ -518,6 +519,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
   </>;
   const summary = activity_ && activity_.entry && !activity_.expanded ? activity_.summary : null;
   const windowRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLElement>(null), statusRef = useRef<HTMLElement>(null);
+  useTruncationTitles(statusRef);
   // Text-relative breakpoint, evaluated here because Chromium does not always re-run rem container queries when only the root text size changes.
   // Narrow (#52): below 28rem the four compact columns no longer fit, so each row takes two lines.
   // Shared (#52): a stacked window under 25rem tall can't hold the list and the inspector at once, so both take their natural height in one scrolling area.
@@ -647,10 +649,9 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
     <footer className="dv-statusbar" ref={statusRef}>
       {busy && <span className="dv-busy"><span className="dv-pulse" aria-hidden="true"/>{!stopping && <span aria-live="off">{checking}</span>}</span>}
       {checksLine && <span className="dv-secondary dv-checks">{checksLine}</span>}
-      {latestCheck ? <span className="dv-latest">Latest check <strong>{stamp(latestCheck)}</strong>{oldestCheck && <span className="dv-secondary"> · oldest <strong>{stamp(oldestCheck)}</strong></span>}</span> : !checksLine && <span>Not checked yet</span>}
+      {latestCheck ? <span className="dv-latest">Latest check <strong>{stamp(latestCheck)}</strong>{oldestCheck && <span className="dv-secondary"> · oldest <strong>{stamp(oldestCheck)}</strong></span>}</span> : !checksLine && <span className="dv-latest">Not checked yet</span>}
       <span role="status" aria-live="polite" className="dv-message">{stopping ? 'Stopping discovery…' : refused ? 'The saved catalog was not opened.' : message}</span>
-      <span className="dv-spacer"/>
-      {summary && <span className={activity_!.attention ? 'dv-warn' : 'dv-busy'} aria-live="off">{!activity_!.attention && activity_!.active && <span className="dv-pulse" aria-hidden="true"/>}{summaryLine(summary)}</span>}
+      {summary && <span className={`dv-status-end ${activity_!.attention ? 'dv-warn' : 'dv-busy'}`} aria-live="off">{!activity_!.attention && activity_!.active && <span className="dv-pulse" aria-hidden="true"/>}{summaryLine(summary)}</span>}
     </footer>
   </div>;
 }

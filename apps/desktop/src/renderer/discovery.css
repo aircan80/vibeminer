@@ -145,8 +145,17 @@
 /* Status bar: always one line. */
 .discovery-screen .dv-statusbar{display:flex;align-items:center;gap:1.027rem;height:1.633333rem;padding:0 .8rem;background:var(--dv-status);border-top:1px solid var(--line);font-size:var(--dv-s);color:var(--dv-muted);white-space:nowrap;overflow:hidden}
 .discovery-screen .dv-statusbar strong{color:var(--ink);font-weight:600}
-.discovery-screen .dv-statusbar>span{overflow:hidden;text-overflow:ellipsis}
+.discovery-screen .dv-statusbar>span{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
 .discovery-screen .dv-busy{display:inline-flex;align-items:center;gap:.373rem;color:var(--teal);font-weight:600}
+/* The same rules as the Home shell's status bar (#134, desktop-home.css): the secondary check line gives way first, then the
+   activity summary, then the check message, then Latest check, and the busy line last. Each cut fact ends in an ellipsis, so the
+   busy line is a block here rather than a flex row, and can be focused to read it whole (status-titles.ts). */
+.discovery-screen .dv-statusbar .dv-busy{display:block}
+.discovery-screen .dv-statusbar .dv-busy .dv-pulse{margin-right:.373rem;vertical-align:middle}
+.discovery-screen .dv-statusbar>.dv-secondary{flex-shrink:1e24}
+.discovery-screen .dv-statusbar>.dv-status-end{flex-shrink:1e18;margin-left:auto}
+.discovery-screen .dv-statusbar>.dv-message{flex-shrink:1e12}
+.discovery-screen .dv-statusbar>.dv-latest{flex-shrink:1e6}
 .discovery-screen .dv-warn{color:var(--dv-gold-ink);font-weight:600}
 
 /* Enlarged text or a narrow window, narrower than 65.333333rem (980px at 100%). App.tsx sets .dv-compact from the window width and the current root text size, so this follows text enlargement immediately. The window still never scrolls. */

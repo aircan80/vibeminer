@@ -74,12 +74,15 @@
 .settings-screen .st-statusbar{display:flex;align-items:center;gap:1.026667rem;height:1.633333rem;padding:0 .802667rem;background:var(--status);border-top:1px solid var(--line);font-size:var(--fs-s);color:var(--muted);white-space:nowrap;overflow:hidden}
 .settings-screen .st-statusbar strong{color:var(--ink);font-weight:600}
 .settings-screen .st-statusbar>span{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
-.settings-screen .st-statusbar>span:first-child{flex-shrink:0}
-.settings-screen .st-statusbar .st-secondary{flex-shrink:1000}
-.settings-screen .st-statusbar>.st-spacer{flex:1 1 0}
-.settings-screen .st-statusbar .st-busy{display:inline-flex;align-items:center;gap:.373333rem;color:var(--teal);font-weight:600}
+/* The same order as the Home shell's status bar (#134, desktop-home.css): the secondary fact, then the activity summary, then the
+   screen's name; the fixture badge is never cut. */
+.settings-screen .st-statusbar>.st-secondary{flex-shrink:1e12}
+.settings-screen .st-statusbar>.st-status-end{flex-shrink:1e6;margin-left:auto}
+.settings-screen .st-statusbar>.st-fixture{flex-shrink:0;max-width:100%}
+.settings-screen .st-statusbar .st-busy{display:block;color:var(--teal);font-weight:600}
+.settings-screen .st-statusbar .st-busy .st-pulse{margin-right:.373333rem;vertical-align:middle}
 .settings-screen .st-statusbar .st-warn{color:var(--gold-ink);font-weight:600}
-.settings-screen .st-fixture{font-size:var(--fs-s);color:#76632e;background:#f5efd9;border:1px solid #e7dfc3;border-radius:5px;padding:0 .373333rem;line-height:1.4;white-space:nowrap;flex-shrink:100}
+.settings-screen .st-fixture{font-size:var(--fs-s);color:#76632e;background:#f5efd9;border:1px solid #e7dfc3;border-radius:5px;padding:0 .373333rem;line-height:1.4;white-space:nowrap}
 
 /* Settings: one grouped list, plus an About column at the Home side-column width. */
 .settings-screen .st-main{display:grid;grid-template-columns:minmax(0,1fr) var(--side-w);grid-template-rows:auto minmax(0,1fr);min-height:0}
