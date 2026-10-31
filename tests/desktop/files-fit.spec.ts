@@ -7,7 +7,7 @@ import { launch, root, size, text, widerSystemFont } from './helpers';
 // keeps a whole row in view under the notes, nothing in the pane overflows, and the footer with its page controls sits
 // above the status bar. The authored engine advertises file-catalog-v1 and tables-follow-v1.
 const entries = ['browse', 'follow'] as const;
-const states = ['preparing', 'retrying', 'not-confirmed', 'stopped', 'failed', 'full', 'unsupported', 'ready-offered', 'ready-list', 'measured', 'checked'] as const;
+const states = ['preparing', 'retrying', 'not-confirmed', 'stopped', 'failed', 'full', 'unsupported', 'ready-offered', 'ready-list', 'measured', 'measured-retail', 'checked'] as const;
 const sizes = [[1280, 800], [1440, 1100]] as const;
 const scales = [1, 2] as const;
 type Entry = typeof entries[number]; type State = typeof states[number];
@@ -15,6 +15,9 @@ type Entry = typeof entries[number]; type State = typeof states[number];
 // Written before Open: the fixture reports these states from the first status read.
 const before: Partial<Record<State, [string, string]>> = {
   retrying: ['file-catalog-retrying', 'on'], failed: ['file-catalog-failed', 'failed'], full: ['file-catalog-failed', 'full'], unsupported: ['file-catalog-failed', 'unsupported'],
+  // Retail-size counts (#136): the measured ledger puts 2,879,940 ROOT-only files first, so 2,879,945 aren't checked at Open
+  // and the rows are objects 2,879,941 on. Their longer words wrapped the head and footer until no row was left in view.
+  'measured-retail': ['long-ordinals', 'long'],
 };
 // What each note says at 100% and in its 200% form; the other form's words are hidden.
 const words: Partial<Record<State, { wide: string; compact: string }>> = {
@@ -65,9 +68,9 @@ async function reach(page: Page, data: string, entry: Entry, state: State) {
     }
   }
   // D093: the measured ledger lands, so the Check note sits under the file list note; checked has run one Check.
-  if (state === 'measured' || state === 'checked') {
+  if (state === 'measured' || state === 'measured-retail' || state === 'checked') {
     await writeFile(path.join(data, 'measured-scope'), 'measured');
-    const note = page.getByRole('group', { name: '5 files not checked at Open' });
+    const note = page.getByRole('group', { name: `${state === 'measured-retail' ? '2,879,945' : '5'} files not checked at Open` });
     await expect(note).toBeVisible({ timeout: 40_000 });
     if (state === 'checked') { await note.getByRole('button', { name: 'Check 5 files' }).click(); await expect(note.getByRole('status')).toContainText('1 verified · 3 not stored · 1 missing · 0 corrupt.'); }
   }
@@ -171,5 +174,5 @@ for (const entry of entries) for (const state of states) {
 }
 
 test('the fit matrix covers every entry, state, size and text scale', () => {
-  expect(entries.length * states.length * sizes.length * scales.length).toBe(88);
+  expect(entries.length * states.length * sizes.length * scales.length).toBe(96);
 });

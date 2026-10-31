@@ -115,6 +115,10 @@
    the head's own gap spaces it from the title, so when it wraps under the title it starts flush with it. */
 .desktop-home .dh-check-pointer{font-size:var(--fs-s);line-height:1.4;color:var(--ink);min-width:0}
 .desktop-home .dh-check-pointer .dh-linkbtn{font-size:inherit}
+/* With retail-size counts ("2,879,945 not checked at Open") the pointer is wider than the room beside the switch at 1280x800
+   and 200% in DejaVu Sans. It keeps to the title line then and wraps its own words, rather than taking a head line of its
+   own that leaves no list row in view; below 16rem beside the switch it still goes under the title (#136). */
+.desktop-home.dh-compact .dh-check-pointer{flex:1 1 16rem}
 .desktop-home .dh-check-inspector .dh-row{margin-top:.28rem}
 .desktop-home .dh-reason{margin:0;font-size:var(--fs-s);color:var(--muted)}
 .desktop-home .dh-tiny{font-size:var(--fs-s);color:var(--muted);margin:.56rem 0 0}
@@ -615,6 +619,9 @@
 .desktop-home .evidence-dialog .tiny{font-size:var(--fs-s);color:var(--muted);margin:.8rem 1.4rem}
 .desktop-home .evidence-dialog :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .desktop-home .dh-pages{display:inline-flex;flex-wrap:wrap;gap:.42rem}
+/* At 200% the Files pager shows First, Previous and Next; "page" stays in each name. With the return button and a retail-size
+   count beside it, the whole pager then keeps the footer to one line at 1280x800 in DejaVu Sans (#136). */
+.desktop-home.dh-compact .dh-pages .dh-page-word{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .desktop-home .activity-task-link{height:1.773333rem;display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);padding:0 .606667rem;font-size:var(--fs-m);white-space:nowrap;cursor:pointer}
 .desktop-home .activity-task-link:hover{background:var(--hover);border-color:#c5d3cb}
 .desktop-home .dh-statusbar .dh-fixture{padding:0 .373333rem;line-height:1.4}
