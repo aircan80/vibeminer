@@ -44,7 +44,7 @@ const active = new Map();
 const opened = new Map();
 const tableData = new Map();
 const labelsEnabled=!!process.env.VIBEMINER_FIXTURE_CLASSIFICATIONS, subclassEnabled=process.env.VIBEMINER_FIXTURE_CLASSIFICATIONS==='subclass', labelAdmissions=new Map();
-const labelScenario=()=>existsSync(path.join(directory,'labels-scenario.json'))?JSON.parse(readFileSync(path.join(directory,'labels-scenario.json'),'utf8')).scenario:'ready';
+const labelScenario=()=>control('labels-scenario.json')?.scenario??'ready';
 const iconsEnabled=process.env.VIBEMINER_FIXTURE_ICONS==='1', iconLeases=new Map();
 const dataDirectory=process.argv[process.argv.indexOf('--data-dir')+1];
 const displayEnabled=process.env.VIBEMINER_FIXTURE_CREATURE_DISPLAY==='1',displayReady=new Set(),creatureText=new Map(),displayTargets=new Map();
@@ -52,7 +52,7 @@ const displayEnabled=process.env.VIBEMINER_FIXTURE_CREATURE_DISPLAY==='1',displa
 const geometryEnabled=displayEnabled&&process.env.VIBEMINER_FIXTURE_CREATURE_GEOMETRY==='1',geometryReady=new Set(),geometryLeases=new Set();
 const creaturesEnabled=process.env.VIBEMINER_FIXTURE_CREATURES==='1',creatureAdmissions=new Map();
 const effectsEnabled=!!process.env.VIBEMINER_FIXTURE_EFFECTS,effectsAdmissions=new Set(),effectsTargets=new Map();
-const effectsMode=()=>existsSync(path.join(directory,'effects-scenario.json'))?JSON.parse(readFileSync(path.join(directory,'effects-scenario.json'),'utf8')).scenario:'ready';
+const effectsMode=()=>control('effects-scenario.json')?.scenario??'ready';
 const itemsEnabled=process.env.VIBEMINER_FIXTURE_ITEMS==='1', itemsAdmissions=new Map();
 const referenceTextEnabled=process.env.VIBEMINER_FIXTURE_REFERENCE_TEXT==='1';
 const followEnabled=process.env.VIBEMINER_FIXTURE_FOLLOW==='1';
@@ -68,9 +68,21 @@ const retentionSeed=JSON.parse(readFileSync(path.join(root,'contracts/examples/r
 function retentionSnapshot(target){
  const key=JSON.stringify(target);let value=retentionJobs.get(key);
  if(!value){value=structuredClone(retentionSeed);Object.assign(value,{target,jobId:null,revision:'9007199254740993',mode:'onDemand',state:'onDemand',pendingObjects:0,progress:null,objectCount:'60',totalEncodedBytes:'6000'});Object.assign(value.coverage,{receiptObjects:'2',receiptBytes:'200',presentObjects:'1',presentBytes:'100'});retentionJobs.set(key,value);}
- if(existsSync(path.join(directory,'retention-state.json')))Object.assign(value,JSON.parse(readFileSync(path.join(directory,'retention-state.json'),'utf8')));
+ Object.assign(value,control('retention-state.json'));
  if(value.state==='stopping'&&existsSync(path.join(directory,'finish-retention-stop')))value.state=value.mode==='onDemand'?'onDemand':value.paused?'paused':'queued';
  return structuredClone(value);
+}
+/** A JSON control file, or null while it is absent. The tests write these with a plain writeFile, so a watch callback
+ * can find one empty or half written (#118). That reads as the last whole content (null for a new file), as an atomic
+ * write would, instead of a parse error that stops this engine. */
+const controlSeen = new Map();
+function control(name) {
+  try { const value = JSON.parse(readFileSync(path.join(directory, name), 'utf8')); controlSeen.set(name, value); return value; }
+  catch (error) {
+    if (error.code === 'ENOENT') { controlSeen.delete(name); return null; }
+    if (error instanceof SyntaxError) return controlSeen.get(name) ?? null;
+    throw error;
+  }
 }
 const shutdown = new AbortController();
 const send = value => process.stdout.write(JSON.stringify({ protocolVersion: 1, ...value }) + '\n');
@@ -161,8 +173,8 @@ function waitForRelease(name, signal) {
 const summaryEpoch = randomBytes(8).toString('hex');
 let summaryCount = 0, summarySeen = null;
 function summaryRevision() {
-  const text = name => existsSync(path.join(directory, name)) ? readFileSync(path.join(directory, name), 'utf8') : null;
-  const seen = JSON.stringify([text('stored-summary.json'), text('retention-state.json'), [...opened.keys()], [...retentionJobs.values()], existsSync(path.join(directory, 'summaries-error')), existsSync(path.join(directory, 'measured-scope')), downloadCheck?.checkedAt ?? null]);
+  // Read as summaries read them: a half-written file has not changed anything yet.
+  const seen = JSON.stringify([control('stored-summary.json'), control('retention-state.json'),[...opened.keys()], [...retentionJobs.values()], existsSync(path.join(directory, 'summaries-error')), existsSync(path.join(directory, 'measured-scope')), downloadCheck?.checkedAt ?? null]);
   if (seen !== summarySeen) { if (summarySeen !== null) summaryCount++; summarySeen = seen; }
   return `${summaryEpoch}-${summaryCount}`;
 }
@@ -220,7 +232,7 @@ function ledgerAt(rows, run, index) {
   return { id: String(index + 1), encodingKey: key, encodedBytes: '100', verifiedAtAssessment: false, checkedAtOpen: false, check: downloadCheck ? downloadCheck.found[key] ?? 'notStored' : null };
 }
 function settingsSnapshot() {
-  const file = path.join(directory, 'settings.json'), stored = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
+  const stored = control('settings.json');
   const saved = name => stored?.values?.[name] ?? (name === 'communityBuildHistory' ? stored?.value : undefined);
   const value = (name, defaultValue) => ({ value: saved(name) ?? defaultValue, defaultValue, source: saved(name) === undefined ? 'default' : 'saved', problem: null });
   return { formatVersion: 1, file: stored ? 'read' : 'absent', problem: null, lastChangedAt: stored?.changedAt ?? null,
@@ -238,26 +250,26 @@ async function dispatch(request) {
     if(!opened.has(key))return fail(id,'WORKSPACE_NOT_OPEN','Open the exact authored workspace first.');
     function admit(){const value=creaturesSnapshot(context,existsSync(path.join(directory,'creatures-partial')));if(existsSync(path.join(directory,'creatures-fetched')))fetchedSource(value.creatureSource,'exactBuild');creatureAdmissions.set(key,value);tableData.set(`${key}|c9d6b6b3|enUS`,value.creatureSource);if(!existsSync(path.join(directory,'creature-text-missing'))){creatureText.set(`${key}|1f80ad3f`,'a'.repeat(63)+'1');creatureText.set(`${key}|369f469f`,'a'.repeat(63)+'2');}return value;}
     if(method==='creatures.data'){const value=creatureAdmissions.get(key)??(existsSync(path.join(directory,'cached-creatures'))?admit():null);return reply(id,{snapshot:value,dependencyState:value?'ready':'notPrepared',sourceArtifactId:value?.creatureSource.artifactId??null});}
-    if(method==='creatures.prepare'){const controller=new AbortController();active.set(id,controller);writeFileSync(path.join(directory,'waiting-creatures'),id);send({type:'progress',requestId:id,sequence:1,stage:'Preparing Creature source',region:params.sourceRegion,completed:25,total:100,unit:'bytes'});try{await waitForRelease('release-creatures',controller.signal);if(existsSync(path.join(directory,'creatures-load-error.json')))return send({id,error:JSON.parse(readFileSync(path.join(directory,'creatures-load-error.json'),'utf8'))});if(existsSync(path.join(directory,'creatures-offline')))return fail(id,'NETWORK_UNAVAILABLE','The authored Creature source is unavailable offline. Retained evidence is preserved.');return reply(id,admit());}catch{if(existsSync(path.join(directory,'hold-creatures-cancel'))&&!shutdown.signal.aborted){try{await waitForRelease('finish-creatures-cancel',shutdown.signal);}catch{}}return fail(id,'CANCELED','Authored Creature consumer stopped after cleanup.');}finally{active.delete(id);}}
+    if(method==='creatures.prepare'){const controller=new AbortController();active.set(id,controller);writeFileSync(path.join(directory,'waiting-creatures'),id);send({type:'progress',requestId:id,sequence:1,stage:'Preparing Creature source',region:params.sourceRegion,completed:25,total:100,unit:'bytes'});try{await waitForRelease('release-creatures',controller.signal);{const error=control('creatures-load-error.json');if(error)return send({id,error});}if(existsSync(path.join(directory,'creatures-offline')))return fail(id,'NETWORK_UNAVAILABLE','The authored Creature source is unavailable offline. Retained evidence is preserved.');return reply(id,admit());}catch{if(existsSync(path.join(directory,'hold-creatures-cancel'))&&!shutdown.signal.aborted){try{await waitForRelease('finish-creatures-cancel',shutdown.signal);}catch{}}return fail(id,'CANCELED','Authored Creature consumer stopped after cleanup.');}finally{active.delete(id);}}
     const value=creatureAdmissions.get(key);if(!value||value.artifactId!==params.artifactId)return fail(id,'CREATURES_STALE','This exact authored Creature artifact is no longer current.');
-    if(displayEnabled&&method.startsWith('creatures.display.')){const summary=creatureSummary(value,params.creatureId),requestKey=`${key}|${params.artifactId}|${params.creatureId}|${params.slot}`;if(!summary)return fail(id,'CREATURES_STALE','The authored selected Creature is unavailable.');const scenario=()=>existsSync(path.join(directory,'creature-display-state.json'))?JSON.parse(readFileSync(path.join(directory,'creature-display-state.json'),'utf8')).state:'metadataResolved';function metadata(state){const result=creatureDisplay(value,summary,params.slot,opened.get(key).sourceReference,state);for(const target of result.sources){tableData.set(`${key}|${target.snapshot.tableId}|enUS`,target.snapshot);displayTargets.set(`${key}|${target.snapshot.tableId}`,target);}return result;}
+    if(displayEnabled&&method.startsWith('creatures.display.')){const summary=creatureSummary(value,params.creatureId),requestKey=`${key}|${params.artifactId}|${params.creatureId}|${params.slot}`;if(!summary)return fail(id,'CREATURES_STALE','The authored selected Creature is unavailable.');const scenario=()=>control('creature-display-state.json')?.state??'metadataResolved';function metadata(state){const result=creatureDisplay(value,summary,params.slot,opened.get(key).sourceReference,state);for(const target of result.sources){tableData.set(`${key}|${target.snapshot.tableId}|enUS`,target.snapshot);displayTargets.set(`${key}|${target.snapshot.tableId}`,target);}return result;}
       // Display and model tables are shared by every slot: once one slot prepared them, every slot reads them.
       const tablesReady=()=>displayReady.has(requestKey)||displayReady.has(key)||existsSync(path.join(directory,'cached-display'));
-      const slotScenario=()=>{const file=path.join(directory,`creature-display-state-${params.creatureId}-${params.slot}.json`);return existsSync(file)?JSON.parse(readFileSync(file,'utf8')).state:scenario();};
+      const slotScenario=()=>control(`creature-display-state-${params.creatureId}-${params.slot}.json`)?.state??scenario();
       if(method==='creatures.display.read'){if(existsSync(path.join(directory,'hold-display-read')))await waitForRelease('release-display-read',shutdown.signal);return reply(id,metadata(tablesReady()?slotScenario():'notPrepared'));}
       if(method==='creatures.display.facts'){if(process.env.VIBEMINER_FIXTURE_CREATURE_FACTS==='0')return fail(id,'UNSUPPORTED','Authored engine without display facts.');if(existsSync(path.join(directory,'hold-display-read')))await waitForRelease('release-display-read',shutdown.signal);return reply(id,creatureDisplayFacts(metadata(tablesReady()?slotScenario():'notPrepared')));}
       if(method==='creatures.display.prepare'){const controller=new AbortController();active.set(id,controller);writeFileSync(path.join(directory,`waiting-display-${params.creatureId}-${params.slot}`),id);send({type:'progress',requestId:id,sequence:1,stage:'Preparing CreatureDisplayInfo metadata',region:params.sourceRegion,completed:25,total:100,unit:'bytes'});try{await waitForRelease('release-display',controller.signal);if(existsSync(path.join(directory,'display-stale')))return fail(id,'CREATURE_DISPLAY_STALE','The authored target source changed. Core Creature records remain valid.');displayReady.add(requestKey);displayReady.add(key);return reply(id,metadata(existsSync(path.join(directory,'display-offline'))?'unavailable':slotScenario()));}catch{if(existsSync(path.join(directory,'hold-display-cancel'))&&!shutdown.signal.aborted){try{await waitForRelease('finish-display-cancel',shutdown.signal);}catch{}}return fail(id,'CANCELED','Authored selected-slot consumer stopped after cleanup.');}finally{active.delete(id);}}
     }
     if(geometryEnabled&&method.startsWith('creatures.geometry.')){const summary=creatureSummary(value,params.creatureId),requestKey=`${key}|${params.artifactId}|${params.creatureId}|${params.slot}`;if(!summary)return fail(id,'CREATURES_STALE','The authored selected Creature is unavailable.');
-      const display=creatureDisplay(value,summary,params.slot,opened.get(key).sourceReference,'metadataResolved'),artifact=geometryArtifact(),scenario=()=>existsSync(path.join(directory,'geometry-state.json'))?JSON.parse(readFileSync(path.join(directory,'geometry-state.json'),'utf8')).state:'ready';
+      const display=creatureDisplay(value,summary,params.slot,opened.get(key).sourceReference,'metadataResolved'),artifact=geometryArtifact(),scenario=()=>control('geometry-state.json')?.state??'ready';
       // geometry-state.json {textured:true} adds a ready authored VMA1 appearance to a ready result (#63).
-      const textured=()=>existsSync(path.join(directory,'geometry-state.json'))&&JSON.parse(readFileSync(path.join(directory,'geometry-state.json'),'utf8')).textured===true;
+      const textured=()=>control('geometry-state.json')?.textured===true;
       // {textured:'notPrepared'} keeps the ready lines but not their textures, so opening the view prepares them (#99).
-      const untextured=()=>existsSync(path.join(directory,'geometry-state.json'))&&JSON.parse(readFileSync(path.join(directory,'geometry-state.json'),'utf8')).textured==='notPrepared';
+      const untextured=()=>control('geometry-state.json')?.textured==='notPrepared';
       const result=state=>{const v=creatureGeometry(display,state,artifact.manifest);if(state==='ready'&&textured())v.appearance=appearanceArtifact(v.manifest,Number(display.selected.displayId)).appearance;
        else if(state==='ready'&&untextured())v.appearance={policy:'creature-textured-appearance-v1',state:'notPrepared',display:appearanceArtifact(v.manifest,Number(display.selected.displayId)).appearance.display,textures:[],effects:null,manifest:null,problem:null};
        // {problem:{code,message,retryable,dependency,headline}} replaces the authored problem with one the real C# engine worded (#114, #116).
-       const engineProblem=existsSync(path.join(directory,'geometry-state.json'))?JSON.parse(readFileSync(path.join(directory,'geometry-state.json'),'utf8')).problem:null;
+       const engineProblem=control('geometry-state.json')?.problem??null;
        if(engineProblem&&v.problem)v.problem={code:engineProblem.code,message:engineProblem.message,retryable:engineProblem.retryable,dependency:engineProblem.dependency,target:null,headline:engineProblem.headline};return v;};
       // geometry-read-busy holds a count: that many reads fail as a busy engine would (#62 QA), then reads answer again.
       if(method==='creatures.geometry.read'&&existsSync(path.join(directory,'geometry-read-busy'))){const left=Number(readFileSync(path.join(directory,'geometry-read-busy'),'utf8'));if(left>0){writeFileSync(path.join(directory,'geometry-read-busy'),String(left-1));return fail(id,'CREATURES_QUERY_BUSY','Local Creature display reads are at their bounded capacity or retiring.',true);}}
@@ -286,11 +298,11 @@ async function dispatch(request) {
       const result=phase==='links'?f.readiness:phase==='inputs'?{...f.details,outcomes:params.edges.map(k=>f.details.outcomes.find(o=>o.key.indexOrdinal===k.indexOrdinal))}:{...f.names,outcomes:params.edges.map(k=>f.names.outcomes.find(o=>o.key.indexOrdinal===k.indexOrdinal))};
       if(!prepare){if(existsSync(path.join(directory,`hold-effects-${phase}-read`)))await waitForRelease(`release-effects-${phase}-read`,shutdown.signal);const missing=effectsNotPrepared(f,phase);if(phase!=='links')missing.outcomes=params.edges.map(k=>missing.outcomes.find(o=>o.key.indexOrdinal===k.indexOrdinal));return reply(id,ready?result:missing);}
       const controller=new AbortController();active.set(id,controller);writeFileSync(path.join(directory,`waiting-effects-${phase}`),id);send({type:'progress',requestId:id,sequence:1,stage:`Preparing authored ${phase} source`,tableId:phase==='links'?'00cb674f':phase==='inputs'?'4002a5b1':'46c66698',region:params.sourceRegion,completed:25,total:100,unit:'bytes'});
-      try{await waitForRelease(`release-effects-${phase}`,controller.signal);if(existsSync(path.join(directory,`effects-${phase}-error.json`)))return send({id,error:JSON.parse(readFileSync(path.join(directory,`effects-${phase}-error.json`),'utf8'))});if(existsSync(path.join(directory,`effects-${phase}-offline`)))return fail(id,'NETWORK_UNAVAILABLE',`Authored ${phase} source is unavailable offline.`);effectsAdmissions.add(`${key}|${phase}`);return reply(id,result);}catch{if(existsSync(path.join(directory,'hold-effects-cancel'))&&!shutdown.signal.aborted){try{await waitForRelease('finish-effects-cancel',shutdown.signal);}catch{}}return fail(id,'CANCELED','Authored effects consumer stopped after cleanup.');}finally{active.delete(id);}
+      try{await waitForRelease(`release-effects-${phase}`,controller.signal);{const error=control(`effects-${phase}-error.json`);if(error)return send({id,error});}if(existsSync(path.join(directory,`effects-${phase}-offline`)))return fail(id,'NETWORK_UNAVAILABLE',`Authored ${phase} source is unavailable offline.`);effectsAdmissions.add(`${key}|${phase}`);return reply(id,result);}catch{if(existsSync(path.join(directory,'hold-effects-cancel'))&&!shutdown.signal.aborted){try{await waitForRelease('finish-effects-cancel',shutdown.signal);}catch{}}return fail(id,'CANCELED','Authored effects consumer stopped after cleanup.');}finally{active.delete(id);}
     }
     const value=itemsAdmissions.get(key);if(!value||value.artifactId!==params.artifactId)return fail(id,'ITEMS_ARTIFACT_STALE','This exact authored Items artifact is no longer current.');
     if(labelsEnabled&&method==='items.classifications'){const controller=new AbortController();active.set(id,controller);writeFileSync(path.join(directory,'waiting-labels'),id);send({type:'progress',requestId:id,sequence:1,stage:'Checking optional classification targets',region:params.sourceRegion,completed:25,total:100,unit:'records'});try{if(!existsSync(path.join(directory,'labels-auto')))await waitForRelease('release-labels',controller.signal);if(existsSync(path.join(directory,'labels-offline')))return fail(id,'NETWORK_UNAVAILABLE','Authored optional classification source is unavailable offline. Original Item values remain usable.');const scenario=labelScenario(),batch=classificationBatch(value,params,scenario);labelAdmissions.set(key,{scenario});for(const source of batch.sources)if(source.snapshot)tableData.set(`${key}|${source.snapshot.tableId}|enUS`,source.snapshot);return reply(id,batch);}catch{if(existsSync(path.join(directory,'hold-labels-cancel'))&&!shutdown.signal.aborted){try{await waitForRelease('finish-labels-cancel',shutdown.signal);}catch{}}return fail(id,'CANCELED','Authored source-label consumer stopped after cleanup.');}finally{active.delete(id);}}
-    if(iconsEnabled&&method==='items.icons'){const controller=new AbortController();active.set(id,controller);writeFileSync(path.join(directory,'waiting-icons'),id);send({type:'progress',requestId:id,sequence:1,stage:'Preparing optional icon sources',region:params.sourceRegion,completed:25,total:100,unit:'bytes'});try{if(!existsSync(path.join(directory,'icons-auto')))await waitForRelease('release-icons',controller.signal);if(existsSync(path.join(directory,'icons-error.json')))return send({id,error:JSON.parse(readFileSync(path.join(directory,'icons-error.json'),'utf8'))});if(existsSync(path.join(directory,'icons-offline')))return fail(id,'NETWORK_UNAVAILABLE','Authored optional icon source is unavailable offline. Item text remains usable.');return reply(id,{context,artifactId:value.artifactId,outcomes:params.itemIds.map(iconOutcome)});}catch{if(existsSync(path.join(directory,'hold-icons-cancel'))&&!shutdown.signal.aborted){try{await waitForRelease('finish-icons-cancel',shutdown.signal);}catch{}}return fail(id,'CANCELED','Authored optional icon consumer stopped after cleanup.');}finally{active.delete(id);}}
+    if(iconsEnabled&&method==='items.icons'){const controller=new AbortController();active.set(id,controller);writeFileSync(path.join(directory,'waiting-icons'),id);send({type:'progress',requestId:id,sequence:1,stage:'Preparing optional icon sources',region:params.sourceRegion,completed:25,total:100,unit:'bytes'});try{if(!existsSync(path.join(directory,'icons-auto')))await waitForRelease('release-icons',controller.signal);{const error=control('icons-error.json');if(error)return send({id,error});}if(existsSync(path.join(directory,'icons-offline')))return fail(id,'NETWORK_UNAVAILABLE','Authored optional icon source is unavailable offline. Item text remains usable.');return reply(id,{context,artifactId:value.artifactId,outcomes:params.itemIds.map(iconOutcome)});}catch{if(existsSync(path.join(directory,'hold-icons-cancel'))&&!shutdown.signal.aborted){try{await waitForRelease('finish-icons-cancel',shutdown.signal);}catch{}}return fail(id,'CANCELED','Authored optional icon consumer stopped after cleanup.');}finally{active.delete(id);}}
     if(iconsEnabled&&method==='items.icon.open'){const outcome=iconOutcome(params.itemId);if(outcome.status!=='ready'||outcome.image.artifactId!==params.imageArtifactId)return fail(id,'ICON_ARTIFACT_STALE','The exact authored image is not ready.');const controller=new AbortController();active.set(id,controller);try{if(existsSync(path.join(directory,'hold-icon-open')))await waitForRelease('release-icon-open',shutdown.signal);const root=path.join(dataDirectory,'objects-v1',pngSha.slice(0,2));mkdirSync(root,{recursive:true});publishObject(path.join(root,pngSha.slice(2)),existsSync(path.join(directory,'corrupt-icon-cas'))?Buffer.alloc(png.length):png);const leaseId=randomBytes(16).toString('hex');iconLeases.set(leaseId,params.itemId);return reply(id,{leaseId,...outcome.image,sha256:pngSha});}finally{active.delete(id);}}
     if(iconsEnabled&&method==='items.icon.close'){iconLeases.delete(params.leaseId);return reply(id,{closed:true});}
     if(method==='items.page'){if(existsSync(path.join(directory,'hold-items-page')))await waitForRelease('release-items-page',shutdown.signal);if(existsSync(path.join(directory,'items-page-error')))return fail(id,'LOCAL_ITEMS_READ_FAILED','Authored local Items page could not be read.');return reply(id,itemsPage(value,params,iconsEnabled));}
@@ -318,7 +330,7 @@ async function dispatch(request) {
     // hold-settings-set keeps the save open until release-settings-set, as a slow write would.
     if (existsSync(path.join(directory, 'hold-settings-set'))) await waitForRelease('release-settings-set', shutdown.signal);
     if (existsSync(path.join(directory, 'settings-write-fail'))) return fail(id, 'SETTINGS_WRITE_FAILED', 'The engine couldn’t write the settings file. Nothing else changed.', true);
-    const file = path.join(directory, 'settings.json'), before = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+    const file = path.join(directory, 'settings.json'), before = control('settings.json') ?? {};
     const values = { ...(before.value === undefined ? {} : { communityBuildHistory: before.value }), ...before.values, [params.name]: params.value };
     writeFileSync(file, JSON.stringify({ values, changedAt: new Date().toISOString() }));
     return reply(id, settingsSnapshot());
@@ -422,7 +434,7 @@ async function dispatch(request) {
         if(existsSync(path.join(directory,'table-fetched'))&&params.tableId==='b977271e'){
           if(!fetchEnabled())return fail(id,'SCHEMA_BUILD_NOT_LISTED',`The pinned ItemClass definition doesn’t list build ${opened.get(contextKey).build.version} or any layout on its version line. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest ItemClass definition. Tables the bundled definitions cover still open.`,false);
           send({type:'progress',requestId:id,sequence:2,stage:'Checking WoWDBDefs for the newest ItemClass definition',region:params.sourceRegion,completed:null,total:null,unit:null});
-          if(existsSync(path.join(directory,'table-fetch-error.json'))){const e=JSON.parse(readFileSync(path.join(directory,'table-fetch-error.json'),'utf8'));return fail(id,e.code,e.message,e.retryable);}
+          {const e=control('table-fetch-error.json');if(e)return fail(id,e.code,e.message,e.retryable);}
           if(existsSync(path.join(directory,'table-fetch-offline')))return fail(id,'DEFINITION_FETCH_OFFLINE',`VibeMiner couldn’t reach WoWDBDefs on GitHub to fetch a newer ItemClass definition. The pinned ItemClass definition doesn’t list build ${opened.get(contextKey).build.version} or any layout on its version line, so this table can’t open. Tables the bundled definitions cover still open. Check the connection, then use Retry table data, or turn off Fetch newer table definitions in Settings.`,true);
           Object.assign(value,{definitionSha256:FETCHED_SHA,providerRevision:FETCHED.revision,fetchedDefinition:FETCHED,fetchedBecause:value.schemaMatch==='layoutOnly'?'layoutMatch':existsSync(path.join(directory,'table-fetched-layout'))?'layoutNotBundled':'exactBuild',bundledFallback:false});
         }
@@ -501,7 +513,7 @@ async function dispatch(request) {
     if (existsSync(path.join(directory, 'summaries-error'))) return fail(id, 'LOCAL_READ_FAILED', 'Authored stored download figures could not be read.');
     // Authored running figures (D065): one per build across its opened regions. A fresh open is at 0%; an authored
     // Download all job's present objects stand in for stored ones. stored-summary.json overrides the measured fields.
-    const scripted = existsSync(path.join(directory, 'stored-summary.json')) ? JSON.parse(readFileSync(path.join(directory, 'stored-summary.json'), 'utf8')) : {};
+    const scripted = control('stored-summary.json') ?? {};
     const revision = summaryRevision();
     return reply(id, { revision, summaries: params.builds.map(({ productId, buildIdentity }) => {
       const opens = [...opened.values()].filter(snapshot => snapshot.build.productId === productId && snapshot.build.id === buildIdentity);
