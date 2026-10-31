@@ -263,3 +263,35 @@ test('area tabs and header actions never overlap or clip at 600x480, 1280x800 an
     await expect(nav.getByRole('button', { name: 'Tables', exact: true })).toHaveAttribute('aria-current', 'page');
   } finally { await session.close(); }
 });
+
+// #129: in DejaVu Sans, Download mode's label and value don't fit side by side on a line of the compact header at 600x480 and 200%, and
+// the value pushed the header 20 px wider than the window. Its label gets a right padding here so that happens in any font.
+test('a header field too wide for its line puts its value under the label instead of overflowing sideways', async () => {
+  const session = await launch(true, false, false, true, false, false, true);
+  try {
+    const { page, app } = session;
+    await size(app, 1280, 800);
+    await page.locator('.build-row').first().click();
+    await page.getByRole('button', { name: 'Open build', exact: true }).click();
+    await writeFile(path.join(session.data, 'release-open'), 'release');
+    await expect(page.getByRole('heading', { name: 'Build overview', exact: true })).toBeFocused();
+    await size(app, 600, 480); await expect.poll(() => page.evaluate(() => innerWidth)).toBe(600);
+    await text(page, 2);
+    const settle = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+    await settle();
+    await page.evaluate(() => {
+      const fields = document.querySelector<HTMLElement>('.dh-idfields')!, field = document.querySelector('#header-mode-label')!.parentElement!, cs = getComputedStyle(fields);
+      const line = fields.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const need = [...field.children].reduce((sum, el) => sum + el.getBoundingClientRect().width, 0) + parseFloat(getComputedStyle(field).columnGap);
+      const style = document.createElement('style'); style.textContent = `.desktop-home #header-mode-label{padding-right:${Math.max(0, line - need) + 40}px}`; document.head.append(style);
+    });
+    await settle();
+    const m = await measure(page);
+    for (const r of m.roots) { expect.soft(r.width, `${r.selector} wider than the window`).toBeLessThanOrEqual(m.width + 1); expect.soft(r.overflow, `${r.selector} overflows sideways`).toBeLessThanOrEqual(1); }
+    expect.soft(m.pageScroll, 'page scrolls sideways').toBeLessThanOrEqual(0);
+    const field = await page.evaluate(() => { const label = document.querySelector('#header-mode-label')!.getBoundingClientRect(), value = document.querySelector('#header-mode-value')!.getBoundingClientRect(), header = document.querySelector('.dh-toolbar')!.getBoundingClientRect(); return { below: value.top >= label.bottom - 1, right: value.right, header: header.right }; });
+    expect(field.below, 'value under its label').toBe(true);
+    expect(field.right, 'value inside the header').toBeLessThanOrEqual(field.header + 1);
+    await page.screenshot({ path: path.join(root, 'artifacts/header-fit/field-wrap-600x480-200.png') });
+  } finally { await session.close(); }
+});

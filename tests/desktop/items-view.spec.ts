@@ -59,6 +59,17 @@ test('Items read with fetched definitions say which tables they read, without pa
    if(font===30){await expect(box.locator('strong'),tag).toHaveText(/^WoWDBDefs · .* · a50ca6f$/);expect((await box.boundingBox())!.height,tag).toBeLessThan(width===1280?130:160);}
    await shot(page,`fetched-${tag}`);
   }
+  // #129: in DejaVu Sans the compact source label is wider than the notice at 600×480 and 200% and wraps. Letter spacing widens the
+  // notice's text here until the label is 40 px wider than its line in any font; the notice still fits the same height.
+  const box=page.locator('.feature-definition');
+  await box.evaluate(el=>{const strong=el.querySelector('strong')!,text=el.querySelector<HTMLElement>('.dh-text')!,probe=document.createElement('span');
+   probe.style.cssText='position:absolute;white-space:nowrap;visibility:hidden';probe.textContent=strong.textContent;strong.append(probe);const width=probe.getBoundingClientRect().width;probe.remove();
+   const style=document.createElement('style');style.textContent=`.desktop-home .feature-definition{letter-spacing:${Math.max(0,text.clientWidth+40-width)/strong.textContent!.length}px}`;document.head.append(style);});
+  await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+  expect(await box.locator('strong').evaluate(el=>{const range=document.createRange();range.selectNodeContents(el);return new Set([...range.getClientRects()].map(r=>Math.round(r.top))).size;}),'source label wraps').toBeGreaterThan(1);
+  expect(await overflow(page),'widened text').toBe(false);
+  expect((await box.boundingBox())!.height,'widened text').toBeLessThan(160);
+  await shot(page,'fetched-600x480-200-wide-text');
  }finally{await s.close();}
 });
 

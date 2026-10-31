@@ -344,7 +344,8 @@
 .desktop-home.dh-compact .dh-idfields{order:2;flex:1 1 calc(100% - 3rem);padding:.401333rem .802667rem .401333rem .653333rem}
 .desktop-home.dh-compact .dh-brand .dh-word,.desktop-home.dh-compact .dh-toolbar .dh-divider{display:none}
 .desktop-home.dh-compact .dh-idfields{gap:.28rem .84rem}
-.desktop-home.dh-compact .dh-idf{flex-direction:row;align-items:center;gap:.326667rem}
+/* A field whose label and value don't fit side by side on a line of their own (Download mode at 600 wide and 200% in DejaVu Sans, #129) puts its value under the label rather than overflowing the header. */
+.desktop-home.dh-compact .dh-idf{flex-direction:row;flex-wrap:wrap;align-items:center;gap:.326667rem}
 .desktop-home.dh-compact .dh-idf>dt{font-size:var(--fs-m)}
 .desktop-home.dh-compact .dh-idf.dh-named>dt{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .desktop-home.dh-compact .dh-idf.dh-moved{display:none}
@@ -530,6 +531,9 @@
 .desktop-home.dh-compact .dh-def-problem.dh-on-data{padding-top:.28rem;padding-bottom:.28rem}
 .desktop-home.dh-compact .dh-def-problem.dh-on-data .dh-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .desktop-home.dh-compact .dh-def-problem.dh-on-data .dh-text>strong{display:inline;margin-right:.56rem}
+/* Items and Creatures: in the compact layout the source label runs on into the short rule rather than taking a line of its own, so a
+   label that wraps in a wider system font (DejaVu Sans at 600 wide and 200%, #129) doesn't add a line. */
+.desktop-home.dh-compact .dh-notice.feature-definition .dh-text>strong{display:inline;margin-right:.56rem}
 .desktop-home .dh-idfilter input{height:2.006667rem}
 .desktop-home .dh-idfilter form{display:contents}
 .desktop-home .dh-data-slot,.desktop-home .dh-foot-slot{display:contents}
