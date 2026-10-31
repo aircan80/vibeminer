@@ -6,7 +6,8 @@ try
 {
     string dataDirectory;
     if (args.Length == 0)
-        dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VibeMiner", "engine-v1");
+        // The same per-OS folder the desktop uses by default (D128): %LOCALAPPDATA%, ~/Library/Application Support, ~/.local/share.
+        dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VibeMiner");
     else if (args.Length == 2 && args[0] == "--data-dir" && Path.IsPathFullyQualified(args[1])) dataDirectory = args[1];
     else { await Console.Error.WriteLineAsync("Usage: VibeMiner.Host [--data-dir <absolute-path>]"); return 2; }
     using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, MaxConnectionsPerServer = 4,

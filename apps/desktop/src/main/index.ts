@@ -18,9 +18,11 @@ import { validRetentionTarget, validRetentionSet } from '../shared/retention';
 import { validSettingsSet, validEmpty, validPreparedDataFree } from '../shared/settings';
 import { validTableData, validTableRows } from '../shared/table-data';
 import { validTableFollow } from '../shared/table-follow';
-import { app, BrowserWindow, clipboard, ipcMain, nativeImage, protocol, session, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, protocol, session, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { excludeFromBackups, prepareDataFolder, readDataFolderChoice, resolveDataFolder, type DataFolder } from './data-folder';
 import path from 'node:path';
 import { EngineClient, EngineFailure } from './engine-client';
 import { EngineSupervisor } from './engine-supervisor';
@@ -55,7 +57,20 @@ function geometryDocumentGone(){const old=geometryDocument;geometryDocument=null
 const iconCleanupFailure=()=>{console.error('Verified image cleanup could not be confirmed; image delivery remains unavailable.');};
 // Authored-fixture e2e runs may shorten the icon URL lifetime to watch its refresh; the app always uses 90 s.
 const iconUrlLifetime=()=>process.env.VIBEMINER_AUTHORED_FIXTURES==='1'&&/^[1-9][0-9]{3,4}$/.test(process.env.VIBEMINER_FIXTURE_ICON_URL_LIFETIME_MS??'')?Number(process.env.VIBEMINER_FIXTURE_ICON_URL_LIFETIME_MS):90000;
-const engineDataDirectory=()=>path.resolve(process.env.VIBEMINER_DATA_DIR||path.join(app.getPath('userData'),'engine-v1'));
+// The data folder (D128) is resolved once at start: VIBEMINER_DATA_DIR, then the user's choice, then the per-OS default.
+let dataFolder:DataFolder|null=null;
+const engineDataDirectory=()=>{if(!dataFolder)throw new Error('The data folder is resolved when the app is ready.');return dataFolder.path;};
+/** Resolves and creates the data folder; false, after telling the user, when the saved choice can't be used. */
+function openDataFolder():boolean{
+  const resolved=resolveDataFolder({platform:process.platform,env:process.env,home:homedir()},readDataFolderChoice(app.getPath('userData'),process.platform));
+  const problem='problem' in resolved?resolved:prepareDataFolder(resolved);
+  if(problem){dialog.showErrorBox('VibeMiner can\'t open its data folder',`${problem.problem}\n\n${problem.remedy}`);return false;}
+  if('problem' in resolved)return false;
+  dataFolder=resolved;
+  // Test and QA folders (the override) are left alone; the user's own folder is kept out of Time Machine on macOS.
+  if(resolved.source!=='override')void excludeFromBackups(resolved.path,process.platform).then(result=>{if(result==='failed')console.error('The data folder could not be excluded from Time Machine backups.');});
+  return true;
+}
 let window: BrowserWindow | null = null;
 let quitting = false;
 function createEngine(): EngineClient {
@@ -203,6 +218,10 @@ async function openWindow(): Promise<void> {
   await window.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 app.whenReady().then(async () => {
+  let opened=false;
+  try{opened=openDataFolder();}
+  catch(error){dialog.showErrorBox('VibeMiner can\'t open its data folder',`${error instanceof Error?error.message:String(error)}\n\nStart VibeMiner again; if it keeps happening, set VIBEMINER_DATA_DIR to a folder you own.`);}
+  if(!opened){app.exit(1);return;}
   supervisor=new EngineSupervisor(startSession);
   supervisor.on('status',(status:EngineStatus)=>{if(window&&!window.isDestroyed())window.webContents.send('discovery:engineStatus',status);});
   // Reuse the sole app-window session to preserve its existing local preferences.

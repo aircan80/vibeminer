@@ -50,7 +50,7 @@ export const CATALOG_RESET_EXIT = 3, CATALOG_NEWER_EXIT = 4;
  */
 export function engineExitFailure(code: number | null | undefined, dataDirectory?: string): EngineFailure {
   const folder = dataDirectory ? `The catalog folder is ${dataDirectory}.` : 'The catalog folder is the engine data folder.';
-  const step = `Close VibeMiner, move or rename that folder (for example to ${dataDirectory ? path.basename(dataDirectory) : 'engine-v1'}.old), then start VibeMiner again.`;
+  const step = `Close VibeMiner, move or rename that folder (for example to ${dataDirectory ? path.basename(dataDirectory) : 'VibeMiner'}.old), then start VibeMiner again.`;
   if (code === CATALOG_RESET_EXIT) return new EngineFailure('CATALOG_RESET_REQUIRED', `The saved catalog was made by an older VibeMiner and cannot be opened by this version. A fresh catalog is needed. ${folder} ${step} The old catalog was left unchanged.`);
   if (code === CATALOG_NEWER_EXIT) return new EngineFailure('CATALOG_VERSION', `The saved catalog was made by a newer VibeMiner. Use that version, or start this one with a fresh catalog. ${folder} ${step} The saved catalog was left unchanged.`);
   return new EngineFailure('ENGINE_EXITED', 'The local engine stopped. Restart VibeMiner to reconnect.', true);

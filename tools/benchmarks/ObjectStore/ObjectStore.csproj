@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>VibeMiner.ObjectStore.Benchmark</AssemblyName></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../../src/backend/VibeMiner.Objects/VibeMiner.Objects.csproj" /></ItemGroup>
+  <!-- The shared scale store, compiled from the test-support project so the test and the benchmark build the same one. -->
+  <ItemGroup><Compile Include="../../../tests/backend/VibeMiner.Objects.CrashWriter/ScaleStore.cs" Link="ScaleStore.cs" /></ItemGroup>
+</Project>

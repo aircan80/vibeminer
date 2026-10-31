@@ -1,6 +1,57 @@
 # Local storage and readiness
 
-C# owns one embedded SQLite catalog and one app-owned immutable object store (CAS). Builds, policies and derived artifacts reference shared bytes instead of keeping separate archive/cache/per-build copies.
+C# owns one embedded SQLite catalog and one app-owned immutable object store (CAS). Builds, policies and derived artifacts reference shared bytes instead of keeping separate archive/cache/per-build copies. A storage rewrite (#153-#160) replaces both; its first layer is below, and the rest of this page describes the store it replaces.
+
+## Layer 1: the object store
+
+The storage rewrite (#153-#160) splits local data into three layers. Layer 1, the object store, is a permanent copy of what the CDN served: configs, archive and loose-file indexes, encoded (BLTE) objects and dated version-service replies. Layer 2 (catalog and settings) and layer 3 (everything generated) are rebuilt from it and can be reset; layer 1 survives a reset. It knows nothing about builds or features ([D121](DECISIONS.md)). Code: [`src/backend/VibeMiner.Objects/`](../src/backend/VibeMiner.Objects/), a project that references no other engine project. The sections after this one describe the old store, which slices 2-6 replace.
+
+**The full specification is [object-store-v1](formats/object-store-v1.md):** byte layouts, keys, verification, the index schema, every algorithm, durability, concurrency, codes and limits. In short:
+
+- **Files.** `cdn-store-v1/` in the data folder holds:
+  - append-only packs (`packs/pack-NNNNNN.vmp`, 2 GiB by default) of entries: a 96-byte header, the bytes as served, and a CRC-32C per 64 KiB block;
+  - a rebuildable SQLite index, `objects.sqlite3`;
+  - a `writer.lock`, and `staging/` for large objects arriving in pieces.
+- **Verify first** ([D122](DECISIONS.md)). Every object is checked against its own key before it is appended: config MD5, index footer and page hashes, BLTE header and chunk MD5s, history record grammar.
+- **Group commit** ([D123](DECISIONS.md)). Fsync the pack, then commit the batch's rows. A batch closes at 128 objects, 16 MiB, 250 ms, or when nothing else is queued. Pack rolls and compaction switches commit with `synchronous=FULL`.
+- **Reads check** ([D124](DECISIONS.md)) the header, every block's CRC, and the SHA-256 on the first read of a small object in a session. A range read touches only its blocks. Damage reads as Corrupt, never as bytes.
+- **Recovery and rebuild** ([D125](DECISIONS.md), [D126](DECISIONS.md)):
+  - an open replays the synced tail past the last commit, keeping the first copy of a key;
+  - the index is checked at open (`integrity_check`, row checks, totals over every row) and rebuilt from the packs when it doesn't hold;
+  - Scan rebuilds it in place.
+- **History log** ([D127](DECISIONS.md)): raw versions, cdns and bgdl replies, stored once, with dated records.
+- **Formats** ([D129](DECISIONS.md)): anything newer is refused by name and never truncated.
+- **Second store** ([D130](DECISIONS.md)): a read-only store, such as the shared dev store, can be read alongside the profile's own.
+- **Interfaces** ([D131](DECISIONS.md)): the layers above use `IObjectReader`, `IObjectWriter`, `IHistoryReader`/`IHistoryLog`, `IObjectStoreMaintenance` and `IObjectVerifier` (`ObjectVerification.Default`, the one instance Put uses). Tests use `InMemoryObjectStore`, kept in step with the real store by `ObjectStoreContractTests`.
+
+### Data folder
+
+Electron resolves the data folder once at start ([D128](DECISIONS.md)): `VIBEMINER_DATA_DIR`, then the choice saved in `data-folder-v1.json` (`{"version":1,"path":"<absolute>"}`) in Electron's userData folder, then the per-OS default.
+
+| OS | Default | Extra |
+| --- | --- | --- |
+| Windows | `%LOCALAPPDATA%\VibeMiner` | |
+| macOS | `~/Library/Application Support/VibeMiner` | `tmutil addexclusion` at each start; Spotlight still indexes it |
+| Linux | `$XDG_DATA_HOME/VibeMiner`, else `~/.local/share/VibeMiner` | |
+
+A choice file that can't be used (unreadable, not JSON, a newer version, an unknown field, not an absolute path) stops the start with a message naming the file. So does a folder that can't be created, a chosen folder whose parent is missing, or one that refuses writes: a small probe file is written and removed at each start. The test override is never excluded from backups. The engine's own default without `--data-dir` is the same folder. Choosing a folder in Settings arrives with #155.
+
+### Measured
+
+Synthetic headerless objects, i9-13900K (32 threads), btrfs on LUKS on NVMe, page cache warm; `tools/benchmarks/ObjectStore` ([README](../tools/benchmarks/ObjectStore/README.md)).
+
+| Measure | Result |
+| --- | --- |
+| Put, 20,000 objects (mean 84 KiB, 1.6 GiB), 1 caller, batches of 128 | 2,997 obj/s, 246 MiB/s |
+| Same, 8 callers of 16 / 32 callers of 4 | 4,752 obj/s, 390 MiB/s / 4,671 obj/s, 383 MiB/s |
+| Index at 30M rows | 2,114 MiB, 73.9 B/row |
+| Has at 30M rows, present / absent key | p50 4.7 / 4.1 µs, p99 6.6 / 5.8 µs |
+| Load of 30M 17-byte objects (8 callers) | 1,238 s, 24,235 obj/s |
+| Scan of the 30M store | 806 s, identical rows (`ObjectStoreScaleTests`) |
+| Reopen recovering 128 synced, uncommitted entries | 0.06 s |
+| Scan / Verify / open with the index deleted, 4 GiB in 48,896 objects | 4.2 s / 4.6 s / 4.2 s |
+
+Every object pays three hashes on Put (its key's MD5, SHA-256, CRC-32C), about 520 MiB/s on one core; one fsync is about 6.6 ms here. The 30M-row checks are an opt-in test, not part of `npm test` ([TESTING](TESTING.md#environment-variables)).
 
 ## Identity and provenance
 

@@ -70,12 +70,19 @@ Simulated I/O failures, process termination and physical full-volume/power-loss 
 
 | Variable | Used by | Effect |
 | --- | --- | --- |
-| `VIBEMINER_DATA_DIR` | Desktop main | Engine data directory instead of the app profile's `engine-v1`. Every test and QA run sets it. |
+| `VIBEMINER_DATA_DIR` | Desktop main | Engine data folder instead of the chosen or per-OS default one ([D128](DECISIONS.md)). Every test and QA run sets it. |
+| `VIBEMINER_OBJECT_STORE_SCALE` | `tests/backend` (`ObjectStoreScaleTests`) | `N` runs the object store scale checks over N million objects: lookups under 10 µs, Read, and the open-time index check. `3` (about one Retail build) for everyday checks; `10` for sign-off and for changes to index, lookup or rebuild code (builds share 97-99.5% of their objects, so even heavy real use lands around 5-10M unique objects); `30` is an optional extreme run that nothing requires. Skipped when unset. See [scale store](#object-store-scale-store). |
+| `VIBEMINER_OBJECT_STORE_SCALE_REBUILD` | `ObjectStoreScaleTests` | `1` rebuilds the cached scale store even when it matches. |
+| `VIBEMINER_OBJECT_STORE_SCALE_SCAN` | `ObjectStoreScaleTests` | `1` also runs the Scan rebuild at scale (about 13 minutes at 30M, proportionally less below), on a copy. Only needed when the rebuild code changes. |
 | `VIBEMINER_ENGINE_PATH` | Desktop main | Engine binary or DLL to launch |
 | `VIBEMINER_DOTNET` | Desktop main, contract tests, `tools/dotnet.mjs` | `dotnet` executable to use |
 | `VIBEMINER_CONTRACT_HOST_ASSEMBLY` | `tests/contracts/engine-contract.test.mjs` | Host DLL for the actual-Host contract check. Set it when testing an isolated build, or the check runs against (or refuses) the normal output. |
 | `VIBEMINER_REPO_ROOT` | `tests/backend` (`RepositoryPaths`) | Fallback source tree for authored files such as `contracts/examples/`. Backend tests normally use the root embedded at build time, so only set it if that tree has moved or gone. |
 | `VIBEMINER_AUTHORED_FIXTURES` | Desktop main, Electron tests | `1` makes the UI label its data "Authored test data" when running against the authored backend fixture |
+
+### Object store scale store
+
+The opt-in scale checks and `tools/benchmarks/ObjectStore lookups` share one synthetic store per size, built once in the **main checkout's** gitignored `.local/scale-store/<N>M/` (found through `git rev-parse --git-common-dir`, so every worktree reuses it). It is reused while its recorded format and object count match, and rebuilt when they don't or when `VIBEMINER_OBJECT_STORE_SCALE_REBUILD=1` asks. A build goes to a private folder and is moved into place only when complete. Reads open it read-only and share it; anything that writes (the Scan check) works on a reflink copy (`cp --reflink=auto`, a plain copy where the file system has none). Building takes about 2 minutes at 3M, 7 at 10M and 20 at 30M; the stores are about 0.6, 2 and 6 GB.
 
 ### Offline checks
 

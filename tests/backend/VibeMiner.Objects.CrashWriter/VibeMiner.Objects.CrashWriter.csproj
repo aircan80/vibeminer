@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><IsPackable>false</IsPackable></PropertyGroup><ItemGroup>
+  <!-- Child process for the object store's SIGKILL tests, and the synthetic objects the tests share. -->
+  <ProjectReference Include="../../../src/backend/VibeMiner.Objects/VibeMiner.Objects.csproj" />
+</ItemGroup></Project>

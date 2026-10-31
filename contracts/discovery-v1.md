@@ -126,6 +126,6 @@ Input limits: 1 MiB/document, 64 columns, 10,000 data rows, 16,384 characters/li
 
 ## Host and data lifecycle
 
-Host accepts optional `--data-dir <absolute-path>` for isolated tests/development. Electron supplies its app-owned `userData/engine-v1` location; never open the Java archive by default. Tests use temporary directories. Normal shutdown cancels and awaits active request work before closing the catalog. Unexpected exit rejects all pending frontend consumers. Transport/recovery errors are safe stable codes rather than exception-string parsing.
+Host accepts optional `--data-dir <absolute-path>` for isolated tests/development. Electron supplies its data folder (D128: `VIBEMINER_DATA_DIR`, the user's saved choice, or the per-OS default such as `~/.local/share/VibeMiner`); never open the Java archive by default. Tests use temporary directories. Normal shutdown cancels and awaits active request work before closing the catalog. Unexpected exit rejects all pending frontend consumers. Transport/recovery errors are safe stable codes rather than exception-string parsing.
 
 The UI preserves the current filters, selection and saved rows during refresh, supports explicit stopping/cancellation, and fences late results by request generation. Refresh preserves a valid selection. Discovery queries do not initialize payload acquisition or mark metadata ready. Open Build stays disabled with a visible reason until real opening is implemented.

@@ -1,0 +1,690 @@
+# Object store format 1 (layer 1)
+
+The complete, language-neutral specification of VibeMiner's layer 1 object store: what is on disk, how it is checked, and how a writer and readers behave. An implementation that follows it reads and writes the same files as the reference ([`src/backend/VibeMiner.Objects`](../../src/backend/VibeMiner.Objects/)). Why it is built this way is in [STORAGE](../STORAGE.md#layer-1-the-object-store) and decisions D121-D131 in [DECISIONS](../DECISIONS.md).
+
+Conventions:
+- **LE** and **BE** mean little- and big-endian. All integers in packs, entries and history records are little-endian unless a row says BE (BE fields are inside Blizzard formats).
+- `u8 u16 u32 u64` are unsigned, `i64` is two's-complement signed.
+- Offsets are in bytes from the start of the structure.
+- "Unix ms" is milliseconds since 1970-01-01T00:00:00Z.
+
+## 1. Folder layout
+
+The store is one folder, `cdn-store-v1/`, inside the data folder. The folder name carries the store generation: a format that can't be read by this specification gets a new folder name.
+
+| Path | Role |
+| --- | --- |
+| `writer.lock` | Held with an exclusive OS lock (POSIX `flock(LOCK_EX)`, Windows share-none) for the whole life of the one writer. Its content is unused (empty). |
+| `objects.sqlite3` | The index (section 5), with SQLite's `objects.sqlite3-wal` and `objects.sqlite3-shm`. A cache of the packs: everything in it except `last_read` can be rebuilt from them. |
+| `objects.sqlite3.rebuild` | Present only while an open rebuilds a missing or damaged index (plus its `-wal`/`-shm`). Deleted at the next open if left behind. |
+| `packs/pack-NNNNNN.vmp` | Pack files. `NNNNNN` is the pack number, 6 decimal digits, 000001 upwards, never reused. |
+| `staging/TTNNKKKK….part` | One large object arriving in pieces: `TT` key type and `NN` namespace as 2 lowercase hex digits each, then the 32 lowercase hex digits of the key. |
+
+Nothing else is written there. A reader that finds other files ignores them.
+
+## 2. Packs and entries
+
+### 2.1 CRC-32C
+
+Every checksum here is **CRC-32C (Castagnoli)**:
+- polynomial 0x1EDC6F41 (reflected 0x82F63B78);
+- initial value 0xFFFFFFFF, input and output reflected, final XOR 0xFFFFFFFF;
+- check value for the ASCII bytes `123456789`: **0xE3069283**.
+
+`CRC(b)` below means that function over the byte sequence `b`.
+
+### 2.2 Pack file
+
+A pack is a 64-byte header followed by entries back to back, with no padding and no trailer. A pack only grows by appending, except when recovery cuts off a torn end (section 6.3) or a write error cuts back to the last commit.
+
+| Offset | Size | Type | Field |
+| --- | --- | --- | --- |
+| 0 | 4 | bytes | Magic `VMPK` (0x56 0x4D 0x50 0x4B) |
+| 4 | 2 | u16 LE | Format version, 1 |
+| 6 | 2 | u16 LE | Header length, 64 |
+| 8 | 4 | u32 LE | Pack number; must equal the number in the file name |
+| 12 | 4 | u32 LE | Reserved, 0 |
+| 16 | 16 | bytes | Store id: 16 random bytes chosen when the store was created, the same in every pack of a store |
+| 32 | 8 | i64 LE | Created, Unix ms |
+| 40 | 20 | bytes | Reserved, all 0 |
+| 60 | 4 | u32 LE | `CRC(bytes 0..59)` |
+
+Reading a pack header:
+1. Shorter than 64 bytes, wrong magic or wrong CRC: **torn** (unreadable).
+2. Otherwise version ≠ 1, header length ≠ 64, or any reserved byte ≠ 0: **newer format**.
+3. Otherwise a pack number different from the file name: unreadable (treated as torn).
+
+### 2.3 Entry
+
+An entry is a 96-byte header, the payload (the object's bytes exactly as served), then the block table:
+
+`entry size = 96 + L + 4 × ceil(L / 65536)`, where L is the payload length.
+
+| Offset | Size | Type | Field |
+| --- | --- | --- | --- |
+| 0 | 4 | bytes | Magic `VMOE` (0x56 0x4D 0x4F 0x45) |
+| 4 | 1 | u8 | Entry format, 1 |
+| 5 | 1 | u8 | Key type (section 3) |
+| 6 | 1 | u8 | Namespace (section 3) |
+| 7 | 1 | u8 | Flags: bit 0 = tombstone; bits 1-7 must be 0 |
+| 8 | 16 | bytes | Key |
+| 24 | 8 | u64 LE | Payload length L. 0 only for a tombstone; at most 536,870,912 (512 MiB) |
+| 32 | 32 | bytes | SHA-256 of the payload (of zero bytes for a tombstone). Local integrity only, not identity |
+| 64 | 8 | i64 LE | Stored at, Unix ms |
+| 72 | 1 | u8 | Origin: 0 unknown, 1 CDN, 2 shared store |
+| 73 | 1 | u8 | Block shift, 16 (blocks of 65,536 bytes) |
+| 74 | 2 | u16 LE | Reserved, 0 |
+| 76 | 4 | u32 LE | Reserved, 0 |
+| 80 | 8 | u64 LE | Store sequence number |
+| 88 | 4 | u32 LE | Reserved, 0 |
+| 92 | 4 | u32 LE | `CRC(bytes 0..91)` |
+
+**Block table.** Right after the payload come `ceil(L / 65536)` u32 LE values: `CRC` of each 65,536-byte block of the payload in order, the last block short. A tombstone has no payload and no table.
+
+**Sequence numbers** are unique and increase in the order entries are appended, store-wide across packs. Gaps are allowed. Compaction copies entries with their sequence numbers unchanged, so the order of events is the order of sequence numbers, not of pack numbers.
+
+**Tombstones** (flag bit 0, L = 0) record a Delete. They are never removed by compaction, so a rebuild can't bring a deleted object back.
+
+Reading an entry header, in order:
+1. Fewer than 96 bytes left in the pack, wrong magic or wrong CRC: **torn**.
+2. Otherwise any of these is **newer format**: entry format ≠ 1, a flag bit other than bit 0, block shift ≠ 16, origin > 2, a key type outside 1-6, or any reserved byte ≠ 0.
+3. Otherwise any of these is **torn**: L > 512 MiB, a tombstone with L ≠ 0, a non-tombstone with L = 0, or the entry size running past the end of the pack.
+
+The namespace isn't checked when reading; Put refuses namespaces other than 0 (section 4).
+
+**Versioning rule.** A header with a valid checksum that this reader doesn't fully understand was written by a newer writer. It is refused as `OBJECT_STORE_NEWER_FORMAT` before anything is written, and it is never truncated.
+
+## 3. Keys
+
+A key is three things: a key type, a namespace byte and a full 16-byte key.
+
+| Type | Name | 16-byte key |
+| --- | --- | --- |
+| 1 | Config | MD5 of the whole file (build config, CDN config, patch config) |
+| 2 | ArchiveIndex | MD5 of the last 28 bytes (the footer) of a native archive `.index` |
+| 3 | FileIndex | MD5 of the footer of the loose-file `file-index` |
+| 4 | Encoded | The EKey of a BLTE object: MD5 of its BLTE header, or of the whole object when headerless |
+| 5 | HistoryDocument | MD5 of one raw version-service reply |
+| 6 | HistoryRecord | MD5 of a history record (section 4.6) |
+
+Types 0 and 7-255 are spare: Put refuses them, and a reader treats one in an entry header as newer format.
+
+Namespace 0 is the product's CDN path (`config/` and `data/`; patch configs are type 1 in namespace 0). Namespaces 1-255 are reserved, for `patch/` objects and the product-config path, and refused by Put.
+
+The **index key** is 18 bytes: `[type, namespace, key[0..15]]`. Index rows sort by it, so by type first.
+
+Text form, used in logs: `Type/namespace/32 lowercase hex`, for example `Config/0/3a8e…`.
+
+## 4. Verification per key type
+
+Before anything is appended, an object is checked against its key and its declared length: the length its source declared (EN, an archive index entry, the received length). A config's `*-index-size` hint is never a declared length. A check returns nothing (valid) or a refusal, a code and a message; refusals are never stored.
+
+Order of checks for a whole object in memory (Put, and `Check` in section 10):
+1. A key type outside 1-6: `OBJECT_KEY_TYPE_UNSUPPORTED`.
+2. A namespace ≠ 0: `OBJECT_NAMESPACE_UNSUPPORTED`.
+3. A declared length of 0, or over the type's limit (section 11): `OBJECT_TOO_LARGE`.
+4. Bytes not exactly the declared length: `OBJECT_SIZE_MISMATCH`.
+5. A declared length over 64 MiB (a whole Put holds at most that; larger encoded objects are staged): `OBJECT_TOO_LARGE`.
+6. The type's own check, below.
+
+An incremental check (staging, and `Begin` in section 10) applies 1-3, then feeds bytes in order. More bytes than declared, or fewer at the end, is `OBJECT_SIZE_MISMATCH`.
+
+### 4.1 Config (1) and HistoryDocument (5)
+
+`MD5(all bytes) = key`, else `OBJECT_KEY_MISMATCH`. No grammar is checked here.
+
+### 4.2 ArchiveIndex (2) and FileIndex (3)
+
+The offset width W is 4 for ArchiveIndex and 0 for FileIndex. With `F` the last 28 bytes and `N` the total length:
+1. `N < 28`: `OBJECT_INDEX_INVALID`.
+2. `MD5(F) ≠ key`: `OBJECT_KEY_MISMATCH`.
+3. Footer checksum: take `F[8..27]` (20 bytes), zero its last 8 bytes, MD5 it; the first 8 bytes of that digest must equal `F[20..27]`. Else `OBJECT_INDEX_INVALID`.
+4. Footer layout: `F[8]` must be version 1, `F[9]` and `F[10]` 0, `F[11]` the page size in KiB (4), `F[12]` the offset width W, `F[13]` the size width (4), `F[14]` the key width (16) and `F[15]` the checksum width (8). Anything else, an archive-group index with W = 6 included, is `OBJECT_INDEX_UNSUPPORTED`.
+5. Geometry:
+   - entries `E = u32 LE at F[16..19]`; record size `R = 16 + 4 + W`;
+   - entries per page `P = floor(4096 / R)`: 170 for W = 4, 204 for W = 0;
+   - pages `G = ceil(E / P)`;
+   - `N` must equal `G × 4096 + G × 24 + 28`, else `OBJECT_INDEX_INVALID`.
+6. TOC: the `G × 24` bytes at offset `G × 4096`. The first 8 bytes of `MD5(TOC)` must equal `F[0..7]`, else `OBJECT_INDEX_INVALID`.
+7. Every page p (4,096 bytes at `p × 4096`): the first 8 bytes of `MD5(page)` must equal the 8 bytes at TOC offset `G × 16 + p × 8`, else `OBJECT_INDEX_INVALID`.
+
+An index with 0 entries is exactly its 28-byte footer and is valid. Entry ordering inside pages is not checked here; the hashes prove the bytes are the ones served.
+
+### 4.3 Encoded (4): BLTE
+
+First 8 bytes: `BLTE`, then the header length `H` as u32 BE. Not `BLTE`: `OBJECT_BLTE_INVALID`.
+
+**Headerless (H = 0):**
+- The object must be at least 9 bytes (the prefix and one chunk mode byte), else `OBJECT_BLTE_INVALID`.
+- `MD5(whole object, prefix included) = key`, else `OBJECT_KEY_MISMATCH`, decided at the end.
+- There is no partial proof, so a staged headerless object resumes from 0.
+
+**Chunked (H > 0):**
+1. `H` must be between 36 (12 + 24) and 12 + 24 × 65,536, and less than the declared length. Else `OBJECT_BLTE_INVALID`.
+2. `MD5(bytes 0..H-1) = key`, else `OBJECT_KEY_MISMATCH`.
+3. Byte 8 (table format) must be 0x0F, else `OBJECT_BLTE_UNSUPPORTED`.
+4. Chunk count `C = u24 BE at bytes 9..11`, and `H = 12 + 24 × C` with `C ≥ 1`. Else `OBJECT_BLTE_INVALID`.
+5. Chunk descriptor i, at `12 + 24 i`:
+   - u32 BE encoded size, which must be ≥ 1, else `OBJECT_BLTE_INVALID`;
+   - u32 BE decoded size, not checked;
+   - 16 bytes MD5 of the chunk's encoded bytes.
+6. `H + Σ encoded sizes` must equal the declared length, else `OBJECT_SIZE_MISMATCH`.
+7. The chunks follow in order. The MD5 of each chunk's encoded bytes (mode byte included) must equal its descriptor, else `OBJECT_BLTE_INVALID`, decided as soon as the chunk's last byte arrives.
+8. **Proven length:** `H` plus the sizes of the chunks proven so far, and 0 until the header is proven.
+
+Chunk modes (`N`, `Z`, `E`, others) are opaque. An encrypted (`E`) chunk is checked by its MD5 like any other and stored as served; nothing is decrypted, and nothing is zero-filled.
+
+### 4.4 HistoryRecord (6)
+
+1. `MD5(record) = key`, else `OBJECT_KEY_MISMATCH`.
+2. The record follows the grammar below, else `OBJECT_HISTORY_INVALID`.
+3. Put only: its document (type 5, namespace 0) must already be stored, or come earlier in the same batch. Else `OBJECT_HISTORY_DOCUMENT_MISSING`. This depends on the store, not the bytes, so a bytes-only check doesn't report it.
+
+### 4.5 Spare types
+
+Types outside 1-6 are refused (`OBJECT_KEY_TYPE_UNSUPPORTED`). Adding a type later doesn't change this format; readers that predate it treat it as newer.
+
+### 4.6 History record format 1
+
+| Offset | Size | Type | Field |
+| --- | --- | --- | --- |
+| 0 | 1 | u8 | Version, 1 |
+| 1 | 1 | u8 | Kind: 1 versions, 2 cdns, 3 bgdl |
+| 2 | 2 | u16 LE | Reserved, 0 |
+| 4 | 8 | i64 LE | Observed at, Unix ms |
+| 12 | 16 | bytes | Document key (the MD5 of the reply bytes) |
+| 28 | 1 | u8 | Product length p, 1-64 |
+| 29 | p | ASCII | Product, characters `a-z 0-9 _ -` |
+| 29+p | 1 | u8 | Region length r, 1-16 |
+| 30+p | r | ASCII | Region, characters `a-z 0-9` |
+| 30+p+r | 2 | u16 LE | URL length u, 0-1024 |
+| 32+p+r | u | UTF-8 | Request URL, strict UTF-8 |
+
+The record must end exactly after the URL. The shortest is 34 bytes and the longest 1,136.
+
+## 5. `objects.sqlite3`
+
+SQLite 3, WAL journal, `PRAGMA user_version = 1`. The writer runs `synchronous=NORMAL` and switches to `FULL` around the commits listed in section 6.12. Exact DDL:
+
+```sql
+CREATE TABLE store(id INTEGER PRIMARY KEY CHECK(id = 1), store_id BLOB NOT NULL CHECK(length(store_id) = 16),
+    format INTEGER NOT NULL, created_at INTEGER NOT NULL, next_seq INTEGER NOT NULL,
+    object_count INTEGER NOT NULL, object_digest INTEGER NOT NULL, history_count INTEGER NOT NULL, history_digest INTEGER NOT NULL,
+    row_check INTEGER NOT NULL);
+CREATE TABLE packs(seq INTEGER PRIMARY KEY, state INTEGER NOT NULL, committed_length INTEGER NOT NULL, live_bytes INTEGER NOT NULL,
+    row_check INTEGER NOT NULL);
+CREATE TABLE objects(k BLOB PRIMARY KEY, pack INTEGER NOT NULL, offset INTEGER NOT NULL, length INTEGER NOT NULL,
+    sha256 BLOB NOT NULL, last_read INTEGER) WITHOUT ROWID;
+CREATE TABLE history(record BLOB PRIMARY KEY, observed_at INTEGER NOT NULL, product TEXT NOT NULL, region TEXT NOT NULL,
+    kind INTEGER NOT NULL, document BLOB NOT NULL, url TEXT NOT NULL) WITHOUT ROWID;
+CREATE INDEX history_order ON history(product, region, kind, observed_at, record);
+CREATE INDEX history_time ON history(observed_at, record);
+```
+
+### 5.1 Columns
+
+| Table.column | Meaning |
+| --- | --- |
+| `store.id` | Always 1: the table has exactly one row |
+| `store.store_id` | The store id in every pack header |
+| `store.format` | 1 |
+| `store.created_at` | Unix ms |
+| `store.next_seq` | The sequence number the next entry gets: at least one more than any committed entry's |
+| `store.object_count`, `object_digest` | The number of `objects` rows, and the XOR of their row values (5.3) |
+| `store.history_count`, `history_digest` | The same over `history` rows |
+| `store.row_check` | `CRC` of the store row (5.2) |
+| `packs.seq` | Pack number |
+| `packs.state` | 0 active (the one being appended to; at most one), 1 sealed, 2 compacting (a compaction target not yet switched in), 3 retired (replaced by compaction, its file about to be deleted) |
+| `packs.committed_length` | Bytes of the pack covered by committed rows; anything past it is the tail |
+| `packs.live_bytes` | Sum of entry sizes of the pack's live rows, plus 96 per tombstone it holds; used to choose packs for compaction. Not covered by `row_check` |
+| `packs.row_check` | `CRC` of the pack row (5.2) |
+| `objects.k` | 18-byte index key (section 3) |
+| `objects.pack`, `offset` | Where the entry's header starts |
+| `objects.length` | Payload length L |
+| `objects.sha256` | The entry header's SHA-256 |
+| `objects.last_read` | Unix day (`floor(unix seconds / 86400)`) of the last read, or NULL; best effort; not rebuilt by Scan unless carried over |
+| `history.record` | The record's 16-byte key |
+| `history.observed_at`, `product`, `region`, `kind`, `document`, `url` | The record's fields; `document` is the 16-byte document key |
+
+### 5.2 Row checks
+
+All integers are written as i64 LE, then `CRC` is taken over the concatenation. The result, 0 to 2^32−1, is stored as an INTEGER.
+
+- `packs.row_check = CRC(seq ‖ state ‖ committed_length)`, 24 bytes.
+- `store.row_check = CRC(store_id[16] ‖ format ‖ created_at ‖ next_seq ‖ object_count ‖ object_digest ‖ history_count ‖ history_digest)`, 72 bytes.
+
+Every write to these rows recomputes `row_check` in the same statement.
+
+### 5.3 Totals digest
+
+`Mix(b)` turns a byte string into a signed 64-bit value. Arithmetic is modulo 2^64:
+1. `x = (CRC(b) << 32) | CRC(reverse(b))`, where `reverse` is the bytes in reverse order.
+2. `x = x + 0x9E3779B97F4A7C15`
+3. `x = (x XOR (x >> 30)) × 0xBF58476D1CE4E5B9`
+4. `x = (x XOR (x >> 27)) × 0x94D049BB133111EB`
+5. `x = x XOR (x >> 31)`, read as i64.
+
+Row values:
+- Object row: `Mix(k[18] ‖ i64 LE pack ‖ i64 LE offset ‖ i64 LE length ‖ sha256[32])`.
+- History row: `Mix(record[16] ‖ document[16] ‖ i64 LE observed_at ‖ i64 LE kind ‖ UTF-8(product + "\n" + region + "\n" + url))`.
+
+A table's digest is the XOR of its row values (0 for an empty table). It is updated incrementally: XOR a row's value in when it is inserted, out when it is deleted, and both out and in when compaction moves it.
+
+## 6. Algorithms
+
+### 6.1 Put and group commit
+
+**Put(batch, commitNow)**
+1. The batch must be at most 4,096 objects and 256 MiB in total, else `OBJECT_STORE_LIMIT` (thrown).
+2. Check each object (section 4). A refused object gets its code and goes no further.
+3. Compute each object's SHA-256 and block table, then hand the batch to the writer queue.
+4. For each object, in order, the writer:
+   - marks it Canceled if the caller canceled before it got here;
+   - marks it AlreadyPresent if its key has a committed row or is pending in the current batch;
+   - refuses a history record whose document is neither stored nor pending (`OBJECT_HISTORY_DOCUMENT_MISSING`);
+   - otherwise makes room (6.2), writes the entry at the end of the active pack with the next sequence number, and holds it pending.
+5. Put returns when every object it appended is committed. An appended object is committed even if the caller canceled meanwhile.
+
+**Closing a batch.** A batch closes when any of these holds:
+- 128 pending objects, or 16 MiB of pending entry bytes;
+- after a request is processed, its oldest pending entry has waited 250 ms;
+- the writer has nothing else queued;
+- the request asked for `commitNow`, or a pack roll, Delete or maintenance needs it.
+
+**Closing, in this order:**
+1. `fsync` the active pack.
+2. One SQLite transaction, `synchronous=NORMAL`:
+   - insert the rows (an object row, and a history row when a history record is inserted);
+   - remove the rows tombstones delete;
+   - set the pack's `committed_length` to the end of the last entry, with its `row_check`;
+   - add to `live_bytes`;
+   - set `next_seq` and the totals in the store row, with its `row_check`;
+   - record queued read days in `last_read`.
+3. Commit.
+
+Only now are the objects visible to Has and Read, and their Puts complete.
+
+**On a write or SQLite error,** every pending caller fails (`OBJECT_STORE_WRITE_FAILED`, or `OBJECT_STORE_DISK_FULL`) and the pack is cut back to `committed_length` and synced. If that cut fails too, the writer stops until the store is reopened.
+
+### 6.2 Pack roll
+
+There is no active pack, or the next entry would take the pack past its limit (2 GiB by default) while the pack already holds an entry. Then:
+1. Close the pending batch, if any.
+2. Create the next pack file with its header, `fsync` it, and `fsync` the `packs/` folder.
+3. One transaction with `synchronous=FULL`: mark the old active pack sealed, and insert the new pack as active with `committed_length` 64. Both rows get their row checks.
+
+An entry larger than the limit goes alone into a fresh pack.
+
+### 6.3 Open, validation, recovery
+
+**Writer open:**
+1. Create `packs/` and `staging/`. Take `writer.lock`, else `OBJECT_STORE_BUSY`.
+2. Read `user_version` without writing. Above 1: `OBJECT_STORE_NEWER_FORMAT`. If it can't be read, the index is unusable.
+3. Read every `pack-*.vmp` header (2.2):
+   - any newer header: `OBJECT_STORE_NEWER_FORMAT`;
+   - valid headers from two store ids: `OBJECT_STORE_FOREIGN_PACK`.
+4. If `user_version` = 1, **validate** the index on a read-only connection. The index is unusable when:
+   - `PRAGMA integrity_check` isn't `ok`. This also finds rows out of key order; `quick_check` does not.
+   - The four tables don't have exactly the columns of section 5, in order.
+   - There isn't exactly one store row, or that row has a wrong type, `id` ≠ 1, a `store_id` that isn't 16 bytes, `format` ≠ 1, `next_seq` < 1, or a bad `row_check`.
+   - A pack row has `seq` < 1, a state outside 0-3, `committed_length` < 64, or a bad `row_check`; or more than one pack is active.
+   - Recounting the `objects` rows and recomputing their digest (5.3) disagrees with the store row; the same for `history`.
+   - Its store id differs from the one the packs carry.
+5. **Unusable index, or none** (`user_version` 0 or missing):
+   - With no readable pack, delete the index files and any pack file of at most 64 bytes, then create a fresh index: a random store id, `next_seq` 1, zero totals.
+   - Otherwise rebuild it (6.6) into `objects.sqlite3.rebuild`. Checkpoint it, delete the old index's `-wal`/`-shm`, move the rebuilt file over `objects.sqlite3`, and `fsync` the folder.
+6. If nothing was rebuilt, walk the active pack's tail headers (from `committed_length`) without writing. A newer entry there means `OBJECT_STORE_NEWER_FORMAT`. Then delete leftover `.rebuild` files.
+7. Open the writer connection and load the store row.
+8. Clean up the packs:
+   - For each pack in state compacting or retired, delete its file, `fsync` `packs/`, and delete its row.
+   - A pack file with no row and at most 64 bytes is deleted; any other unlisted pack is reported and left alone.
+   - A listed pack whose file is missing is reported; its objects read Lost, and an active one is sealed.
+   - A sealed pack shorter or longer than `committed_length` is reported and left alone.
+   - An active pack shorter than `committed_length` is reported and sealed.
+   - If the active pack is longer than `committed_length`, recover its tail (below).
+9. If step 7 or 8 fails with an index error and nothing was rebuilt yet, close everything, rebuild (step 5), and run steps 7 and 8 once more.
+10. Delete staged files not written for 7 days, and start the writer.
+
+**Tail recovery** walks the active pack from `committed_length`, entry by entry:
+1. A newer header: `OBJECT_STORE_NEWER_FORMAT`. A torn header: stop.
+2. Check the entry in full: SHA-256, block table and its key type's check (section 4). A tombstone has no bytes to check.
+3. If the header is sound but the bytes fail (SHA-256 or blocks), skip the entry and remember it. When a later sound entry follows, the damaged ones stay in the pack, reported and not indexed.
+4. An entry that fails its key type's check, or a history record whose document isn't stored, is **refused**. It stays in the pack unindexed; after the walk it gets a tombstone (see "after the walk").
+5. A tombstone:
+   - if its key has a copy earlier in this tail, that copy is dropped;
+   - otherwise, if the key has a committed row, the row is removed;
+   - either way, it counts 96 kept bytes.
+6. A copy of a key that is already stored or already recovered: skipped. The first copy wins.
+7. Anything else is recovered.
+
+After the walk:
+- **Cut.** The pack is cut after the last sound entry, so only a torn end goes. The cut is `fsync`ed.
+- **Refused keys.** Each refused key gets a tombstone appended. If a sound later copy of that key was recovered, it is taken out of the batch and appended again after the tombstone: payload at most 64 MiB, origin kept. This way a Scan, which runs no key checks, rebuilds the same index.
+- **Commit.** The recovered rows commit as one batch (6.1).
+
+### 6.4 Read
+
+**Whole read (key):**
+1. Look up the row. None: Absent.
+2. A row that can't name an entry is Corrupt: pack < 1, offset < 64, length outside 1-512 MiB, or a SHA-256 that isn't 32 bytes.
+3. Length over 64 MiB: `OBJECT_STORE_LIMIT`, thrown (read by range instead).
+4. Open the pack. If it's missing, look the row up once more (compaction may have moved it); still missing: Lost.
+5. Read the whole entry in one read. Short, a header that doesn't read valid, or a header that disagrees with the row (key, length, SHA-256, a tombstone): Corrupt.
+6. Check every block's CRC. Then, if L ≤ 1 MiB and this object hasn't been checked in this session, check its SHA-256. The session set holds at most 1,048,576 entries and is cleared when full.
+7. Return the payload, marked Present. Queue today's day for `last_read`, at most 65,536 queued keys.
+
+Corrupt and Lost never return bytes.
+
+**Range read (key, offset, n):**
+1. `offset < 0` is the caller's error; `n` over 64 MiB is `OBJECT_STORE_LIMIT`.
+2. Steps 1, 2 and 4 of a whole read.
+3. Read the 96-byte header and check it against the row as in step 5.
+4. `offset + n > L` is the caller's error.
+5. For blocks `b0 = floor(offset / 65536)` to `b1 = floor((offset + n − 1) / 65536)`, read their table entries and their bytes, and check each block's CRC. Any mismatch: Corrupt, nothing copied.
+6. Copy the range. Nothing outside those blocks is read.
+
+### 6.5 Delete (keys)
+
+For each key:
+- A history type: Refused (`OBJECT_DELETE_REFUSED`).
+- Pending in the current batch: close the batch first.
+- No row: Absent.
+- Otherwise append a tombstone with the next sequence number.
+
+The batch closes at the end of the request, removing the rows, their history rows, and their value from the totals, in that transaction.
+
+### 6.6 Scan (rebuild from the packs)
+
+On a running store:
+1. Seal the active pack (a `synchronous=FULL` transaction).
+2. In one transaction on the live index:
+   - save every non-NULL `last_read` aside, then empty `objects`, `history` and `packs`;
+   - replay (below);
+   - put the saved `last_read` values back;
+   - commit, then checkpoint.
+
+Readers in every process see the old index until the commit.
+
+At open, the replay runs into a new file instead (6.3, step 5).
+
+**Replay:**
+1. Open every pack with a valid header (all with one store id, else `OBJECT_STORE_FOREIGN_PACK`) and walk each from offset 64.
+2. Merge the walks by `(sequence number, pack number)`, ascending.
+3. For each entry, check its SHA-256 and block table; no key type check. One that fails is left out and reported.
+4. A tombstone removes its key's row and history row, and counts 96 kept bytes for its pack.
+5. A key that already has a row is a duplicate, skipped.
+6. Anything else inserts its row. A history record also inserts its history row; one that doesn't parse is left out and reported.
+7. A newer header refuses the Scan (`OBJECT_STORE_NEWER_FORMAT`). A torn header ends that pack's walk; the rest of that pack is unreachable.
+8. Insert every pack as sealed, with `committed_length` at the end of its last whole entry. Then:
+   - set `live_bytes` from its rows' entry sizes plus its tombstones;
+   - set `next_seq` to the highest sequence number + 1;
+   - measure the totals from the rows written.
+
+Afterwards the next Put opens a new pack. Scan rebuilds exactly the index the writer kept: the same object and history rows, apart from `last_read`.
+
+### 6.7 Verify (full)
+
+1. Page through `objects` by key, 1,024 rows at a time. Each page must move past the cursor; a key not above the previous one is `OBJECT_STORE_INDEX_UNREADABLE`.
+2. Within a page, by pack and offset, check each row as a read would: header against the row, every block CRC and the SHA-256, plus the key type's check when `full`.
+3. A failure counts only if the row still points where it did (compaction may have moved it).
+4. Report the counts of checked, Corrupt and Lost objects, with at most 1,000 keys of each.
+
+### 6.8 Compact
+
+Candidates are sealed packs where:
+- `dead = committed_length − 64 − live_bytes` is greater than 0;
+- `dead` is at least the threshold fraction (25% by default) of `committed_length − 64`;
+- the pack isn't already known in this session to hold a corrupt entry.
+
+The most dead bytes go first, up to a maximum number of packs.
+
+For each pack:
+1. Close the pending batch.
+2. Insert the target pack (the next pack number) as compacting, in a `synchronous=FULL` transaction.
+3. Create the target with its header.
+4. Walk the source up to `committed_length`:
+   - every tombstone is copied;
+   - an entry is live only if its row points at exactly this pack and offset, and only live entries are copied;
+   - each copy writes the payload (checking its SHA-256 and blocks as it goes), then its table, then its original header, unchanged;
+   - a torn or newer header aborts.
+5. On a corrupt live entry or an abort, delete the target file and its row and leave the source as it is. A corrupt entry also counts the pack as skipped.
+6. `fsync` the target and the `packs/` folder.
+7. **Switch**, in one `synchronous=FULL` transaction:
+   - move each live row to its new offset in the target;
+   - mark the target sealed, with its `committed_length`, its `live_bytes` (entries plus tombstones) and its row check;
+   - mark the source retired;
+   - update the store row's object digest for every moved row.
+8. Delete the source file and `fsync` `packs/`.
+9. Delete the source's row.
+
+Cancellation or a failure before the switch deletes the target file and its row.
+
+### 6.9 Staging (large encoded objects)
+
+**Start(key, declared length):**
+1. The key must be Encoded, the namespace 0, and the declared length 1 B to 512 MiB.
+2. At most 16 stagings may be open, with at most 2 GiB declared in all (`OBJECT_STORE_LIMIT`), and one per key.
+3. Open or create the staged file.
+4. Resume: check what is already in the file and keep only its proven length (4.3). The rest, which may be garbage written before a crash, is cut off.
+
+**Append(bytes):** write them at the current length, then feed them to the check. If the check fails, cut the file back to the proven length and fail with `OBJECT_STAGING_REJECTED`. After that the staging must be started again.
+
+**Commit:**
+1. The length must equal the declared length.
+2. Close the file and hand it to the writer. The writer:
+   - copies the file into the pack in one pass that runs the whole check of 4.3 again and computes the SHA-256 and block table;
+   - writes the payload, then the table, then the header last;
+   - closes the batch at once.
+3. A failed check, or a file that can't be read, refuses only this object (`OBJECT_STAGING_REJECTED` or the check's code). The pack is cut back to where the entry began, and the staged file is deleted.
+
+**Dispose** keeps the file for a later resume. **Abandon** deletes it.
+
+### 6.10 Read-only second store
+
+**Open:**
+1. The index must exist, else `OBJECT_STORE_MISSING`. A `user_version` above 1 is `OBJECT_STORE_NEWER_FORMAT`; below 1 is `OBJECT_STORE_MISSING`.
+2. Read every pack header: a newer one is `OBJECT_STORE_NEWER_FORMAT`, two store ids are `OBJECT_STORE_FOREIGN_PACK`.
+3. Validate the index as in 6.3 step 4. Unusable is `OBJECT_STORE_INDEX_UNREADABLE`, since a read-only store can't rebuild.
+
+**Then:**
+- It offers Has, Read, ReadRange, the history read and Verify, and nothing that writes.
+- It never takes the lock, recovers, records reads or writes a byte.
+- It sees exactly what that store's writer has committed.
+- SQLite may create the index's `-wal` and `-shm`.
+
+A layered reader asks the profile's own store first and the second store only for keys the first reports Absent.
+
+### 6.11 History log
+
+**Append(observation):**
+1. Compute the document key `D = MD5(reply)`.
+2. Build the record (4.6) and compute its key `R = MD5(record)`.
+3. Put `[document D, record R]` as one batch with `commitNow`.
+
+The same reply observed again is a new record sharing the document. The same observation twice is one entry. History entries are never deleted.
+
+**Read(query):**
+- filters: product, region and kind;
+- order: observed time, then record key, ascending;
+- paging: a page continues strictly after the query's `after` entry, 1 to 10,000 entries per page;
+- a page that doesn't run forward is `OBJECT_STORE_INDEX_UNREADABLE`.
+
+### 6.12 Which commits are `synchronous=FULL`
+
+`FULL` makes the commit, and every earlier one in the WAL, durable before it returns. These use it:
+- the pack roll (6.2);
+- the compaction listing and switch (6.8);
+- Scan's seal of the active pack (6.6).
+
+Losing any of these to power loss could not be undone by recovery. A lost roll leaves a pack unlisted, with every later commit unreachable. A lost switch would keep the delete of the source but not the move.
+
+Batches use `NORMAL`. Power loss can then only drop batch commits for the active pack's tail, which was `fsync`ed first and which tail recovery reads back.
+
+## 7. Durability and crash model
+
+**What is durable when:**
+- An object is durable once its batch's pack `fsync` returns. Its commit makes it visible.
+- After power loss, any batch commits not yet written to the WAL's disk copy are rebuilt from the synced tail when the store next opens.
+
+**A crash at each step leaves:**
+
+| Crash point | Left behind | Next open |
+| --- | --- | --- |
+| Before or during an entry's write | A torn or partial tail | Cut off; nothing committed is lost |
+| Entry written, before the pack `fsync` | Unsynced tail | Whole entries recovered, the torn rest cut |
+| After the `fsync`, before or inside the commit | A synced tail, the transaction rolled back | Recovered by tail recovery |
+| After the commit, before the caller hears | Committed | Present |
+| Pack file created, before its row | An unlisted pack of 64 bytes | Deleted |
+| Compaction target listed or copied, before the switch | A compacting row and target file | Target deleted, source intact |
+| After the switch, before the source is deleted | A retired row and the source file | Source deleted |
+| Index rebuild at open, before the move | `objects.sqlite3.rebuild` | Deleted; old index, or rebuilt again |
+| Staging append | Staged file with unproven bytes | Resume keeps only proven chunks |
+
+The reference tests cover these by process kill (an in-process fault hook and real SIGKILL at every step), and by an index restored to its state after the last durable commit. A real power cut is not tested.
+
+## 8. Concurrency model
+
+- **One writer process** holds `writer.lock`. A second writer gets `OBJECT_STORE_BUSY`.
+- **One writer task** in that process does every pack and index write, in request order, from a bounded queue of 64 requests. Queuing waits for room. Put verification runs on the callers, with at most half the CPUs verifying at once.
+- **Readers in any process** use their own read-only SQLite connections (a bounded pool of 8). Point lookups run on the calling thread. A reader sees the index as of the last commit; nothing pending is visible.
+- **Pack read handles** are cached, at most 64 by default, and leased for each read. The least recently used unleased handle is closed when the cache is full, and a handle being acquired is never evicted. Readers open packs with read+write+delete sharing, so the writer can append and compaction can delete while they read.
+- **Compaction races:** a read whose pack has just been deleted looks its row up once more. On Linux and macOS, a read already in flight finishes on its open handle.
+- **Maintenance** (Scan, Compact) runs as requests on the writer task, so it never overlaps a batch.
+
+## 9. Error and state codes
+
+**Thrown (store level):**
+
+| Code | When |
+| --- | --- |
+| `OBJECT_STORE_NEWER_FORMAT` | A pack, entry or index written by a newer format. Nothing is changed |
+| `OBJECT_STORE_FOREIGN_PACK` | Packs from two stores in one folder |
+| `OBJECT_STORE_BUSY` | Another writer holds the lock |
+| `OBJECT_STORE_READ_ONLY` | A write reached a store opened read-only (unreachable through the read-only interface) |
+| `OBJECT_STORE_MISSING` | A read-only open found no complete store |
+| `OBJECT_STORE_INDEX_UNREADABLE` | A read-only open found an unusable index, or a damaged index was met in use. A Scan rebuilds it |
+| `OBJECT_STORE_WRITE_FAILED` | A pack or index write failed; what was pending failed with it |
+| `OBJECT_STORE_DISK_FULL` | As write failed, on a full volume |
+| `OBJECT_STORE_CLOSED` | The store was closed (or stopped by a crash) before the operation finished |
+| `OBJECT_STORE_LIMIT` | A call over a fixed bound: batch, whole read, range, staging budget |
+| `OBJECT_STAGING_REJECTED` | Staged bytes failed a chunk check, or the staged file couldn't be read |
+
+**Per-object refusals (returned, never stored):**
+
+| Code | When |
+| --- | --- |
+| `OBJECT_KEY_TYPE_UNSUPPORTED` | Key type outside 1-6 |
+| `OBJECT_NAMESPACE_UNSUPPORTED` | Namespace ≠ 0 |
+| `OBJECT_TOO_LARGE` | Declared length 0 or over the type's limit, or over 64 MiB for a whole Put |
+| `OBJECT_SIZE_MISMATCH` | Bytes not the declared length, or BLTE chunk sizes not adding up |
+| `OBJECT_KEY_MISMATCH` | The bytes' MD5 isn't the key |
+| `OBJECT_BLTE_INVALID` | Not BLTE, a bad header length or chunk table, a chunk MD5 mismatch |
+| `OBJECT_BLTE_UNSUPPORTED` | A chunk table format other than 0x0F |
+| `OBJECT_INDEX_INVALID` | Bad index length, footer checksum, geometry, TOC or page hash |
+| `OBJECT_INDEX_UNSUPPORTED` | Another index version, page size or field widths for the key type |
+| `OBJECT_HISTORY_INVALID` | A history record that doesn't follow format 1 |
+| `OBJECT_HISTORY_DOCUMENT_MISSING` | A record whose document isn't stored |
+| `OBJECT_DELETE_REFUSED` | Delete of a history entry |
+
+**Read states:**
+- Present: the bytes passed every check.
+- Absent: no committed row.
+- Corrupt: a row exists, but the bytes are truncated or fail a check, or the row is damaged.
+- Lost: a row exists, but its pack file is gone.
+
+**Put outcomes:** Stored, AlreadyPresent, Refused (with a code), or Canceled (canceled before it was appended).
+
+**Delete outcomes:** Deleted, Absent, or Refused.
+
+## 10. Interfaces
+
+The calls are split by role. Each lists its inputs, outputs and guarantees.
+
+**IObjectReader**, implemented by the store, the read-only store and the layered reader:
+- **Has(key)** gives true when a committed row exists. It reads no bytes.
+- **Read(key)** gives a state and, only for Present, the payload and its facts: length, origin, stored time. Objects over 64 MiB are a limit error.
+- **ReadRange(key, offset, buffer)** fills the buffer from `offset` and gives a state. It reads only the blocks under the range. A range past the end, or a negative offset, is a caller error.
+
+**IObjectWriter**, implemented by the writer store only:
+- **Put(batch, commitNow)** gives one outcome per object. It returns when every stored object is committed.
+- **Delete(keys)** gives one outcome per key.
+- **Stage(key, declared length, origin)** gives a staging with Length, Append, Commit (an outcome), Abandon and Dispose (6.9).
+
+**IHistoryReader**, implemented by the store and the read-only store:
+- **ReadHistory(query)** gives a page of entries: kind, product, region, observed time, URL, document key and record key (6.11).
+
+**IHistoryLog**, an IHistoryReader plus:
+- **AppendHistory(observation)** takes the kind, product, region, observed time, URL and raw reply. It gives the outcomes of the document and the record.
+
+**IObjectStoreMaintenance**, implemented by the writer store only:
+- **Scan()** gives counts of packs, entries, live rows, duplicates, tombstones, corrupt and unverifiable entries, and problems.
+- **Verify(full)** gives counts of checked, corrupt and lost objects, with keys.
+- **Compact(fraction, max packs)** gives the packs compacted and skipped, the bytes before and after, and the rows moved.
+
+**IObjectVerifier**: one instance, the same one Put and staging use.
+- **Check(key, bytes, declared length)** gives nothing, or the refusal (code and message) that Put would give for those bytes, in the order of section 4. The one exception is `OBJECT_HISTORY_DOCUMENT_MISSING`, which depends on the store.
+- **Begin(key, declared length)** gives an incremental check for an object up to its type's limit:
+  - **Append(bytes)** gives a refusal as soon as the bytes can't match; once refused, it stays refused;
+  - **Complete()** gives nothing or a refusal;
+  - **ProvenLength** is the bytes proven so far.
+
+## 11. Limits
+
+| Bound | Value |
+| --- | --- |
+| Payload of one entry | 512 MiB (536,870,912 bytes) |
+| Config / HistoryDocument / indexes / HistoryRecord | 16 MiB / 16 MiB / 64 MiB / 1,136 bytes |
+| Whole Put object, whole read, range read | 64 MiB |
+| Put batch | 4,096 objects and 256 MiB |
+| Delete batch | 4,096 keys |
+| Pack size | 2 GiB by default; an entry larger than that goes alone into a fresh pack |
+| Batch close | 128 objects, 16 MiB, 250 ms, or an empty queue |
+| Writer queue | 64 requests |
+| Read connections / pack handles | 8 / 64 |
+| Session SHA-256 check | Objects up to 1 MiB; set of 1,048,576 entries |
+| Read-day queue | 65,536 keys |
+| Staging | 16 at once, 2 GiB declared in all, files kept 7 days |
+| History page | 1 to 10,000 entries |
+| BLTE chunks | 1 to 65,536 |
+| Pack numbers | 1 to 999,999 |
+
+## 12. Worked example
+
+One Put of a 21-byte config into a new store, with the clock fixed at 2026-10-31T00:00:00Z (Unix ms 1,793,404,800,000 = 0x000001A18F418C00):
+- **Bytes:** the ASCII text `build-name = example` and a newline.
+- **Key:** MD5 = `0ed94175af8022f25c2104eca1211bc6`.
+- **SHA-256:** `99e4c2425650c17f101a8cf51526a45a6514410e4be60779475446c511519ccc`.
+
+`packs/pack-000001.vmp` is 185 bytes. The store id (bytes 0x10-0x1F) is random, so it differs in every store:
+
+```
+00000000  56 4d 50 4b 01 00 40 00 01 00 00 00 00 00 00 00   "VMPK", version 1, header 64, pack 1, reserved
+00000010  84 81 e6 d6 5d 09 61 c8 d1 de dc 35 a8 4e 5b 91   store id (random)
+00000020  00 8c 41 8f a1 01 00 00 00 00 00 00 00 00 00 00   created (Unix ms, LE), reserved
+00000030  00 00 00 00 00 00 00 00 00 00 00 00 97 02 14 c5   reserved, CRC-32C of bytes 0-59 (depends on the store id)
+```
+
+The entry starts at offset 64 (0x40):
+
+```
+00000040  56 4d 4f 45 01 01 00 00 0e d9 41 75 af 80 22 f2   "VMOE", format 1, type 1 (Config), namespace 0, flags 0, key…
+00000050  5c 21 04 ec a1 21 1b c6 15 00 00 00 00 00 00 00   …key, payload length 21 (LE)
+00000060  99 e4 c2 42 56 50 c1 7f 10 1a 8c f5 15 26 a4 5a   SHA-256 of the payload…
+00000070  65 14 41 0e 4b e6 07 79 47 54 46 c5 11 51 9c cc   …SHA-256
+00000080  00 8c 41 8f a1 01 00 00 01 10 00 00 00 00 00 00   stored at (Unix ms), origin 1 (CDN), block shift 16, reserved
+00000090  01 00 00 00 00 00 00 00 00 00 00 00 cb 7b 1d 6d   sequence 1, reserved, CRC-32C of bytes 0-91 = 0x6D1D7BCB
+000000a0  62 75 69 6c 64 2d 6e 61 6d 65 20 3d 20 65 78 61   payload "build-name = exa…
+000000b0  6d 70 6c 65 0a 73 a2 d0 a8                        …mple\n", block table: CRC-32C of the one block = 0xA8D0A273
+```
+
+Entry size: 96 + 21 + 4 × 1 = 121 bytes, so the pack ends at 64 + 121 = 185.
+
+The index after the commit:
+
+| Row | Values |
+| --- | --- |
+| `objects` | `k` = `01 00 0e d9 41 75 af 80 22 f2 5c 21 04 ec a1 21 1b c6`, `pack` 1, `offset` 64, `length` 21, `sha256` as above, `last_read` NULL |
+| `packs` | `seq` 1, `state` 0 (active), `committed_length` 185, `live_bytes` 121, `row_check` 2294590932 (0x88C4ADD4 = `CRC(i64 1 ‖ i64 0 ‖ i64 185)`) |
+| `store` | `next_seq` 2, `object_count` 1, `object_digest` 8803469163995718811 (0x7A2C348FD711E49B, the one row's `Mix`), `history_count` 0, `history_digest` 0 |
+
+The CRC values and the digest above were recomputed from this specification alone, with an independent bitwise CRC-32C (reflected polynomial 0x82F63B78) and the `Mix` steps of 5.3.

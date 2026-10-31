@@ -8,7 +8,7 @@ dotnet test VibeMiner.slnx
 dotnet src/backend/VibeMiner.Host/bin/Debug/net10.0/VibeMiner.Host.dll --data-dir /absolute/app-owned/development-directory
 ```
 
-The host exchanges protocol-v1 NDJSON on stdin/stdout; diagnostics use stderr. See [the canonical contract](../../contracts/discovery-v1.md). Electron supplies its app-owned data path. With no override, standalone development uses the OS local-application-data directory under `VibeMiner/engine-v1`. It never opens the Java archive or a game installation.
+The host exchanges protocol-v1 NDJSON on stdin/stdout; diagnostics use stderr. See [the canonical contract](../../contracts/discovery-v1.md). Electron supplies its app-owned data path. With no override, standalone development uses the OS local-application-data directory under `VibeMiner`, the desktop's default data folder (D128). It never opens the Java archive or a game installation.
 
 `products.list` and `discovery.read` perform no network access. Explicit `discovery.refresh` fetches one fixed official `/versions` and `/cdns` pair, retains all valid bounded versions-advertised regions, and reports unavailable/ambiguous routes without losing advertisements. This slice acquires text metadata only. Discovery observations never establish local preparation or payload availability.
 
