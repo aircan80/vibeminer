@@ -93,7 +93,7 @@ Use component tests for view state and interaction; use real Electron checks for
 
 ### System fonts
 
-The app uses `system-ui` and `ui-monospace`, so its layout follows the machine's fonts. The Ubuntu CI runner resolves them to DejaVu Sans and DejaVu Sans Mono, about a tenth wider than Fedora's Noto Sans. Fit specs that pass locally can fail there; at 1280×800 and 200% the build header's fields wrap to two lines (#126). To run e2e with CI's fonts on a machine without DejaVu, put the DejaVu TTFs (`npm pack dejavu-fonts-ttf`) in a folder under `.local/` and point `FONTCONFIG_FILE` at a `fonts.conf` that lists only that folder and aliases `sans-serif`, `system-ui`, `monospace` and `ui-monospace` to DejaVu. Say which fonts a fit result was measured with.
+The app uses `system-ui` and `ui-monospace`, so its layout follows the machine's fonts. The Ubuntu CI runner resolves them to DejaVu Sans and DejaVu Sans Mono, about a tenth wider than Fedora's Noto Sans. Fit specs that pass locally can fail there; at 1280×800 and 200% the build header's fields wrap to two lines (#126). To run e2e with CI's fonts on a machine without DejaVu, put the DejaVu TTFs (`npm pack dejavu-fonts-ttf`) in a folder under `.local/` and point `FONTCONFIG_FILE` at a `fonts.conf` that lists only that folder and aliases `sans-serif`, `system-ui`, `monospace` and `ui-monospace` to DejaVu. Say which fonts a fit result was measured with. `widerSystemFont` in `tests/desktop/helpers.ts` puts an installed sans in system-ui's place, each weight scaled to the width DejaVu Sans renders a reference line at 15px (a no-op where DejaVu is the system font), so a fit spec can catch a font-bound column on any machine (#130).
 
 ### Parallel e2e runs
 

@@ -1,7 +1,7 @@
 import { test, expect, type Page, type ElectronApplication } from '@playwright/test';
 import { mkdir, writeFile, unlink, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { launch, root } from './helpers';
+import { launch, root, widerSystemFont } from './helpers';
 import { activityTask, closeActivity } from './activity-helpers';
 
 async function capture(page: Page, app: ElectronApplication, state: string) {
@@ -259,11 +259,13 @@ test('the Object column shows seven-digit ordinals whole at every size and text 
     await writeFile(path.join(session.data, 'measured-scope'), 'measured');
     await expect(page.getByText('Object 2879941', { exact: true })).toBeVisible({ timeout: 40_000 });
     await expect(page.getByRole('heading', { name: 'Encoded object 2879941' })).toBeVisible();
-    for (const [width, height] of [[1280, 800], [1440, 1100], [600, 480]] as const) for (const scale of [1, 2]) {
+    // Then again in a wider system font, as on Ubuntu (DejaVu Sans), where a 7rem Object cut every ordinal at 1280×800 (#130).
+    for (const font of ['system', 'wider'] as const) for (const [width, height] of [[1280, 800], [1440, 1100], [600, 480]] as const) for (const scale of [1, 2]) {
+      if (font === 'wider' && width === 1280 && scale === 1) await widerSystemFont(page);
       await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height), { width, height });
-      await page.evaluate(font => { document.documentElement.style.fontSize = `${font}px`; }, 15 * scale);
+      await page.evaluate(px => { document.documentElement.style.fontSize = `${px}px`; }, 15 * scale);
       await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
-      const label = `${width}×${height} at ${scale * 100}%`;
+      const label = `${width}×${height} at ${scale * 100}% in the ${font} font`;
       const cells = await page.locator('.dh-files:not([hidden]) .dh-list-scroll [role="option"] .dh-fid').evaluateAll(cells => cells.map(cell => {
         const range = document.createRange(); range.selectNodeContents(cell);
         const text = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
@@ -287,7 +289,11 @@ test('the Object column shows seven-digit ordinals whole at every size and text 
       expect(keys.length, label).toBe(cells.length);
       expect(keys.filter(key => key.cut || !/^[0-9a-f]{32}$/.test(key.text)).map(key => key.text), `${label}: cut keys`).toEqual([]);
       if (width === 600 && scale === 1) expect(keys.filter(key => key.lines !== 1).map(key => key.text), `${label}: wrapped keys`).toEqual([]);
-      await page.screenshot({ path: path.join(root, 'artifacts/size-first', `download-objects-long-ordinals-${width}x${height}-${scale * 100}.png`) });
+      // From 1280 wide the other columns keep room too: every column header is whole (#130).
+      if (width !== 600) {
+        expect(await page.locator('.dh-files:not([hidden]) .dh-fthead > span').evaluateAll(spans => spans.filter(span => span.scrollWidth > span.clientWidth + 1).map(span => span.textContent)), `${label}: cut column headers`).toEqual([]);
+      }
+      await page.screenshot({ path: path.join(root, 'artifacts/size-first', `download-objects-long-ordinals-${width}x${height}-${scale * 100}${font === 'wider' ? '-wider' : ''}.png`) });
     }
   } finally { await session.close(); }
 });

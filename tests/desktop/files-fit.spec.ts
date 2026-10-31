@@ -1,7 +1,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { launch, root, size, text } from './helpers';
+import { launch, root, size, text, widerSystemFont } from './helpers';
 
 // D071 (#35): every way into Files × every file list state × both reference sizes × 100% and 200% text. Each combination
 // keeps a whole row in view under the notes, nothing in the pane overflows, and the footer with its page controls sits
@@ -75,8 +75,8 @@ async function reach(page: Page, data: string, entry: Entry, state: State) {
   if (state === 'failed' || state === 'full' || state === 'unsupported') await expect(page.getByRole('note', { name: 'File list not prepared' })).toBeVisible();
 }
 
-async function fits(page: Page, app: ElectronApplication, entry: Entry, state: State, width: number, height: number, scale: number, twoLine = false) {
-  const label = `${entry} · ${state} · ${width}×${height} · ${scale * 100}%${twoLine ? ' · two-line header' : ''}`;
+async function fits(page: Page, app: ElectronApplication, entry: Entry, state: State, width: number, height: number, scale: number, variant: '' | 'two-line header' | 'wider font' = '') {
+  const label = `${entry} · ${state} · ${width}×${height} · ${scale * 100}%${variant ? ` · ${variant}` : ''}`;
   await size(app, width, height); await text(page, scale);
   // The compact layout follows the text size on its next frame; measure it, not the frame before.
   await page.waitForFunction(compact => !!document.querySelector('.desktop-home.dh-compact') === compact, scale === 2);
@@ -105,11 +105,13 @@ async function fits(page: Page, app: ElectronApplication, entry: Entry, state: S
         const r = note.getBoundingClientRect(), cs = getComputedStyle(note), shown = [...note.children].filter(c => c.getClientRects().length > 0);
         return shown.length ? r.bottom - parseFloat(cs.borderBottomWidth) - parseFloat(cs.paddingBottom) - Math.max(...shown.map(c => c.getBoundingClientRect().bottom)) : 0;
       })() : null,
+      // Column headers that don't fit their column (#130).
+      cutHeads: [...pane.querySelectorAll<HTMLElement>('.dh-fthead > span')].filter(s => s.getClientRects().length && s.scrollWidth > s.clientWidth + 1).map(s => s.textContent),
       parts: [...pane.children].map(c => `${c.className}:${Math.round(c.getBoundingClientRect().height)}`).join(' '),
     };
   });
   const directory = path.join(root, 'artifacts/files-fit'); await mkdir(directory, { recursive: true });
-  await page.screenshot({ path: path.join(directory, `${entry}-${state}-${width}x${height}-${scale * 100}.png`) });
+  await page.screenshot({ path: path.join(directory, `${entry}-${state}-${width}x${height}-${scale * 100}${variant ? `-${variant.replace(/ /g, '-')}` : ''}.png`) });
   const pane = page.locator('.dh-files .dh-pane.dh-list'), shown = words[state];
   if (shown) {
     await expect(pane.getByText(scale === 2 ? shown.compact : shown.wide, { exact: false }).first(), label).toBeVisible();
@@ -130,6 +132,7 @@ async function fits(page: Page, app: ElectronApplication, entry: Entry, state: S
   if (g.pagesBottom !== null) expect(g.pagesBottom, `${label}: page controls under the status bar`).toBeLessThanOrEqual(g.statusTop + 1);
   expect(g.pageScroll, `${label}: the page scrolls`).toBeLessThanOrEqual(0);
   expect(g.sideways, `${label}: the page scrolls sideways`).toBeLessThanOrEqual(1);
+  expect(g.cutHeads, `${label}: cut column headers`).toEqual([]);
   // The ready note keeps the preparing note's height only at the layout it was measured at; after a resize it fits its text.
   if (g.blank !== null) expect(g.blank, `${label}: ${Math.round(g.blank)}px empty under the note`).toBeLessThanOrEqual(1);
   // A followed FileDataID's notice lines up with the note under it, and is one line at 200%.
@@ -151,8 +154,11 @@ for (const entry of entries) for (const state of states) {
       await page.evaluate(() => { const s = document.createElement('style'); s.id = 'two-line-header'; s.textContent = '.desktop-home.dh-compact .dh-idfields>.dh-idf:last-child{flex-basis:100%}'; document.head.append(s); });
       await size(app, 1280, 800); await text(page, 2); await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-compact'));
       expect(await page.evaluate(() => { const f = [...document.querySelectorAll('.dh-idfields>.dh-idf')].filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().top); return f.at(-1)! - f[0]; }), 'Download mode on a second header line').toBeGreaterThan(10);
-      await fits(page, app, entry, state, 1280, 800, 2, true);
+      await fits(page, app, entry, state, 1280, 800, 2, 'two-line header');
       await page.evaluate(() => document.getElementById('two-line-header')!.remove());
+      // #130: and in a wider system font, where the compact object columns left Local status too narrow and its rows wrapped.
+      await widerSystemFont(page);
+      for (const [width, height] of sizes) for (const scale of scales) await fits(page, app, entry, state, width, height, scale, 'wider font');
       if (state === 'full' || state === 'unsupported') {
         // In a narrower window the failed note's code goes first; its message and next step stay.
         await size(app, 900, 800); await text(page, 2); await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-compact'));

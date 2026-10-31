@@ -156,7 +156,10 @@
 .discovery-screen .dv-compact .dv-toolbar .dv-field{flex:1 1 7.466667rem}
 .discovery-screen .dv-compact .dv-chip-long{display:none}
 .discovery-screen .dv-compact .dv-chip-short{display:inline}
-.discovery-screen .dv-compact .dv-cols{grid-template-columns:minmax(5.133333rem,1fr) minmax(6.533333rem,1.3fr) minmax(5.133333rem,1fr) minmax(5.6rem,1.1fr)}
+/* Version keeps room for a version and its Current label, and In VibeMiner for its New to VibeMiner label, in rch, the
+   root font's digit width, so they follow the system font: "12.1.5.70448 Current" is 16rch in both Noto Sans and the
+   wider DejaVu Sans, 138px and 161px at 100% (#130). rch, unlike ch, is the same in the smaller header text. */
+.discovery-screen .dv-compact .dv-cols{grid-template-columns:minmax(5.133333rem,1fr) minmax(18.5rch,1.3fr) minmax(5.133333rem,1fr) minmax(max(5.6rem,14rch),1.1fr)}
 .discovery-screen .dv-compact .dv-cols>:nth-child(3){display:none}
 .discovery-screen .dv-compact .dv-list{overflow-x:hidden}
 /* The stacked inspector never shrinks below its header, a few lines of details and its actions (#52). When the list and the inspector don't both fit, the area between toolbar and status bar scrolls instead of overlapping them. */

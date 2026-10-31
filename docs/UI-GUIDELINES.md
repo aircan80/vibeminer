@@ -49,6 +49,7 @@ Items, with its effects, follows [items view](design/items-view/README.md) with 
 
 - Breakpoints must be text-relative: container queries or rem/em media queries. A px media query alone won't trigger at 200% text on a wide window.
 - At 200%, columns stack and toolbars wrap. Never shrink type to keep columns side by side. Vertical scrolling is fine.
+- A column that must hold a known text whole, such as a seven-digit Object ordinal or a version with its Current label, takes its width in `rch` (the root font's digit width), not rem, so it follows the system font: DejaVu Sans is about a tenth wider than Noto Sans (#130). `rch` rather than `ch` keeps a header in smaller text on its rows' columns.
 - The page never scrolls horizontally. Wide data tables scroll inside a labelled, keyboard-reachable region.
 - Long IDs, hashes, URLs and raw hex wrap (`overflow-wrap:anywhere`), stay selectable or copyable, and are never elided. A short prefix (`a1a1a1a1…`) is fine as a visual cue in a list, as long as the full value is in the inspector.
 - Short status words and control labels never break mid-word.

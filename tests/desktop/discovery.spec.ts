@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { launch, root } from './helpers';
+import { launch, root, widerSystemFont } from './helpers';
 
 async function calls(directory: string) {
   return (await readFile(path.join(directory, 'requests.ndjson'), 'utf8')).trim().split('\n').map(x => JSON.parse(x) as { method: string; params: Record<string, unknown> });
@@ -478,8 +478,10 @@ test('nothing overlaps or is cut off from the smallest window to the reference s
       expect(fit.top, what).toBeGreaterThanOrEqual(fit.viewTop - 1);
       expect(fit.bottom, what).toBeLessThanOrEqual(fit.viewBottom + 1);
     };
-    for (const [width, height] of [[600, 480], [1280, 800], [1440, 1100]]) for (const scale of [1, 1.5, 2]) {
-      const label = `${width}x${height} at ${scale * 100}% text`, rem = base * scale;
+    // Then again in a wider system font, as on Ubuntu (DejaVu Sans), where Version and its Current label were cut at 600x480 (#130).
+    for (const font of ['system', 'wider'] as const) for (const [width, height] of [[600, 480], [1280, 800], [1440, 1100]]) for (const scale of [1, 1.5, 2]) {
+      const label = `${width}x${height} at ${scale * 100}% text in the ${font} font`, rem = base * scale;
+      if (font === 'wider' && width === 600 && scale === 1) await widerSystemFont(page);
       // Stacked below 65.333333rem of width, two-line rows below 28rem, one shared scrolling area below 25rem of height.
       const compact = width < 65.333333 * rem, expected = { compact, narrow: compact && width < 28 * rem, shared: compact && height < 25 * rem };
       expect(expected.shared, label).toBe(width === 600 && scale > 1);
@@ -542,7 +544,7 @@ test('nothing overlaps or is cut off from the smallest window to the reference s
       await expect(page.locator('.dv-open'), label).toBeFocused();
       expect(await page.locator('.dv-open').evaluate(element => element.matches(':focus-visible')), label).toBe(true);
       whole(await visible('.dv-open', true), `Open build focus ring, ${label}`);
-      await page.screenshot({ path: path.join(root, `artifacts/electron-tests/discovery-fit-${width}x${height}-${scale * 100}.png`) });
+      await page.screenshot({ path: path.join(root, `artifacts/electron-tests/discovery-fit-${width}x${height}-${scale * 100}${font === 'wider' ? '-wider' : ''}.png`) });
       // The shared area has a jump to the inspector and a return to the selected row; the other layouts show both at once and need neither.
       const jump = page.getByRole('button', { name: 'View selected build', exact: true }), back = page.getByRole('button', { name: 'Return to build list', exact: true });
       if (!expected.shared) { await expect(jump, label).toHaveCount(0); await expect(back, label).toHaveCount(0); continue; }
