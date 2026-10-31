@@ -75,8 +75,8 @@ async function reach(page: Page, data: string, entry: Entry, state: State) {
   if (state === 'failed' || state === 'full' || state === 'unsupported') await expect(page.getByRole('note', { name: 'File list not prepared' })).toBeVisible();
 }
 
-async function fits(page: Page, app: ElectronApplication, entry: Entry, state: State, width: number, height: number, scale: number) {
-  const label = `${entry} · ${state} · ${width}×${height} · ${scale * 100}%`;
+async function fits(page: Page, app: ElectronApplication, entry: Entry, state: State, width: number, height: number, scale: number, twoLine = false) {
+  const label = `${entry} · ${state} · ${width}×${height} · ${scale * 100}%${twoLine ? ' · two-line header' : ''}`;
   await size(app, width, height); await text(page, scale);
   // The compact layout follows the text size on its next frame; measure it, not the frame before.
   await page.waitForFunction(compact => !!document.querySelector('.desktop-home.dh-compact') === compact, scale === 2);
@@ -100,6 +100,11 @@ async function fits(page: Page, app: ElectronApplication, entry: Entry, state: S
       pageScroll: document.documentElement.scrollHeight - innerHeight, sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       edges: notice && note ? [notice.getBoundingClientRect().left - note.getBoundingClientRect().left, notice.getBoundingClientRect().right - note.getBoundingClientRect().right] : null,
       lines: line ? line.getBoundingClientRect().height / parseFloat(getComputedStyle(line).fontSize) : null,
+      // Space under the note's last shown line: a height kept from another layout (#126) shows up here.
+      blank: note ? (() => {
+        const r = note.getBoundingClientRect(), cs = getComputedStyle(note), shown = [...note.children].filter(c => c.getClientRects().length > 0);
+        return shown.length ? r.bottom - parseFloat(cs.borderBottomWidth) - parseFloat(cs.paddingBottom) - Math.max(...shown.map(c => c.getBoundingClientRect().bottom)) : 0;
+      })() : null,
       parts: [...pane.children].map(c => `${c.className}:${Math.round(c.getBoundingClientRect().height)}`).join(' '),
     };
   });
@@ -109,6 +114,11 @@ async function fits(page: Page, app: ElectronApplication, entry: Entry, state: S
   if (shown) {
     await expect(pane.getByText(scale === 2 ? shown.compact : shown.wide, { exact: false }).first(), label).toBeVisible();
     await expect(pane.getByText(scale === 2 ? shown.wide : shown.compact, { exact: false }).first(), label).toBeHidden();
+  }
+  // At 200% a failed note drops its code below 42rem, so at 1280 wide its message stays beside the title in a wider font (#126).
+  if ((state === 'failed' || state === 'full' || state === 'unsupported') && scale === 2) {
+    const code = pane.locator('.dh-catalog-missing .dh-note-code');
+    if (width === 1280) await expect(code, label).toBeHidden(); else await expect(code, label).toBeVisible();
   }
   // Show file list is in the footer at 100% and in the ready note at 200%, so the footer keeps one row.
   if (state === 'ready-offered') await expect(pane.locator(scale === 2 ? '.dh-catalog-missing' : '.dh-pane-foot').getByRole('button', { name: 'Show file list' }), label).toBeVisible();
@@ -120,6 +130,8 @@ async function fits(page: Page, app: ElectronApplication, entry: Entry, state: S
   if (g.pagesBottom !== null) expect(g.pagesBottom, `${label}: page controls under the status bar`).toBeLessThanOrEqual(g.statusTop + 1);
   expect(g.pageScroll, `${label}: the page scrolls`).toBeLessThanOrEqual(0);
   expect(g.sideways, `${label}: the page scrolls sideways`).toBeLessThanOrEqual(1);
+  // The ready note keeps the preparing note's height only at the layout it was measured at; after a resize it fits its text.
+  if (g.blank !== null) expect(g.blank, `${label}: ${Math.round(g.blank)}px empty under the note`).toBeLessThanOrEqual(1);
   // A followed FileDataID's notice lines up with the note under it, and is one line at 200%.
   if (g.edges) for (const edge of g.edges) expect(Math.abs(edge), `${label}: notice and note edges differ by ${edge}px`).toBeLessThanOrEqual(1);
   if (g.lines !== null && scale === 2) expect(g.lines, `${label}: the Follow notice wraps`).toBeLessThan(1.8);
@@ -134,6 +146,13 @@ for (const entry of entries) for (const state of states) {
       await enter(page, app, data, entry);
       await reach(page, data, entry, state);
       for (const [width, height] of sizes) for (const scale of scales) await fits(page, app, entry, state, width, height, scale);
+      // #126: in a wider system font (Ubuntu's DejaVu Sans) the build header's fields wrap to two lines at 1280×800 and 200%.
+      // Putting Download mode on its own line does the same in any font; a row still fits under the notes.
+      await page.evaluate(() => { const s = document.createElement('style'); s.id = 'two-line-header'; s.textContent = '.desktop-home.dh-compact .dh-idfields>.dh-idf:last-child{flex-basis:100%}'; document.head.append(s); });
+      await size(app, 1280, 800); await text(page, 2); await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-compact'));
+      expect(await page.evaluate(() => { const f = [...document.querySelectorAll('.dh-idfields>.dh-idf')].filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().top); return f.at(-1)! - f[0]; }), 'Download mode on a second header line').toBeGreaterThan(10);
+      await fits(page, app, entry, state, 1280, 800, 2, true);
+      await page.evaluate(() => document.getElementById('two-line-header')!.remove());
       if (state === 'full' || state === 'unsupported') {
         // In a narrower window the failed note's code goes first; its message and next step stay.
         await size(app, 900, 800); await text(page, 2); await page.waitForFunction(() => !!document.querySelector('.desktop-home.dh-compact'));

@@ -91,6 +91,10 @@ When a result must be attributable to an exact commit:
 
 Use component tests for view state and interaction; use real Electron checks for focus, keyboard, navigation, stale results and responsive progress. Compare screenshots with the guided discovery reference at 1280×800 and 1440×1100, at 100% and 200% text. Verify offline, empty, loading, failure/retry, unsupported and canceled states.
 
+### System fonts
+
+The app uses `system-ui` and `ui-monospace`, so its layout follows the machine's fonts. The Ubuntu CI runner resolves them to DejaVu Sans and DejaVu Sans Mono, about a tenth wider than Fedora's Noto Sans. Fit specs that pass locally can fail there; at 1280×800 and 200% the build header's fields wrap to two lines (#126). To run e2e with CI's fonts on a machine without DejaVu, put the DejaVu TTFs (`npm pack dejavu-fonts-ttf`) in a folder under `.local/` and point `FONTCONFIG_FILE` at a `fonts.conf` that lists only that folder and aliases `sans-serif`, `system-ui`, `monospace` and `ui-monospace` to DejaVu. Say which fonts a fit result was measured with.
+
 ### Parallel e2e runs
 
 `npm run test:e2e` runs through `tools/e2e-lock.mjs`, which takes one of N slots shared by every worktree of the checkout. Slots are lock files under `git rev-parse --git-common-dir`: slot 1 is `vibeminer-e2e.lock`, the single lock that checkouts from before #121 take, so they still wait for it; slot n is `vibeminer-e2e-<n>.lock`. When every slot is taken, a run prints the holders' pids, worktrees and start times once, then waits and starts when one frees up. Just run the command; don't write your own wait loop.

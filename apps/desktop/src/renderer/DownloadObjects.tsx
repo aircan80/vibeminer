@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { DownloadCheckResult, DownloadCheckSummary, DownloadObjectEntry, DownloadPage, DownloadSummary, FileCatalogStatus, WorkspaceSnapshot } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
 import { downloadPageMatches, type DownloadReadParams } from '../shared/download';
@@ -328,10 +328,27 @@ export function catalogTaskStage(catalog: FileCatalogStatus): string {
 // rows in view. Once the catalog is ready the box keeps its height, so the rows below never move (the hand-off is in the
 // footer). With no catalog status at all (an engine without file-catalog-v1) it keeps the earlier "not prepared" note.
 export function CatalogNotPrepared({ withObjects = false, problem, catalog = null, onReopen }: { withObjects?: boolean; problem?: string; catalog?: CatalogView | null; onReopen?: () => void }) {
-  const box = useRef<HTMLDivElement>(null), height = useRef(0), moveFocus = useRef(false), seen = useRef(0);
+  const box = useRef<HTMLDivElement | null>(null), moveFocus = useRef(false), seen = useRef(0);
   const [finished, setFinished] = useState(0);
-  const status = catalog?.status ?? null;
-  useLayoutEffect(() => { if (status?.state !== 'ready' && box.current) height.current = box.current.getBoundingClientRect().height; });
+  const status = catalog?.status ?? null, ready = status?.state === 'ready';
+  // The height the ready note keeps, and the width it was measured at. It is measured on every render and resize until the
+  // list is ready. A resize or text size change after that moves the rows anyway, so the ready note then lets go of the
+  // height instead of keeping one from another layout as empty space (#126).
+  const held = useRef<{ height: number; width: number } | null>(null), readyNow = useRef(ready);
+  const [holding, setHolding] = useState(true);
+  readyNow.current = ready;
+  const measure = (el: HTMLElement) => { const r = el.getBoundingClientRect(); held.current = { height: r.height, width: r.width }; };
+  useLayoutEffect(() => { if (ready) return; if (box.current) measure(box.current); if (!holding) setHolding(true); });
+  const observer = useRef<ResizeObserver | null>(null);
+  const boxRef = useCallback((el: HTMLDivElement | null) => {
+    observer.current?.disconnect(); observer.current = null; box.current = el;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    observer.current = new ResizeObserver(() => {
+      if (!readyNow.current) { measure(el); return; }
+      if (held.current && Math.abs(el.getBoundingClientRect().width - held.current.width) > 0.5) setHolding(false);
+    });
+    observer.current.observe(el);
+  }, []);
   // An action here (Stop, Resume, Retry, Retry status) replaces its own button once the new state arrives. Focus then goes
   // to the button that took its place, or to the note itself, never to the document body. A user who moved focus elsewhere
   // meanwhile keeps it there. Once the action's status read has finished the request is over: an action that failed
@@ -369,8 +386,8 @@ export function CatalogNotPrepared({ withObjects = false, problem, catalog = nul
   const code = problem && <> <code>({problem})</code></>;
   const name = status?.buildVersion ? ` for ${status.buildVersion}` : '';
   const frame = (title: string, tone: '' | ' dh-plain' | ' dh-warn', body: ReactNode, role: 'note' | 'status' = 'note') =>
-    <div className="dh-local-wait dh-catalog-missing"><div ref={box} tabIndex={-1} onFocus={onFocus} onBlur={onBlur} className={`dh-state-box dh-inline-head${tone}`} role={role} aria-labelledby="files-catalog-missing"
-      style={status?.state === 'ready' && height.current ? { minHeight: height.current } : undefined}><strong id="files-catalog-missing">{title}</strong>{body}{stale}</div></div>;
+    <div className="dh-local-wait dh-catalog-missing"><div ref={boxRef} tabIndex={-1} onFocus={onFocus} onBlur={onBlur} className={`dh-state-box dh-inline-head${tone}`} role={role} aria-labelledby="files-catalog-missing"
+      style={ready && holding && held.current ? { minHeight: held.current.height } : undefined}><strong id="files-catalog-missing">{title}</strong>{body}{stale}</div></div>;
   const actions = (children: ReactNode) => <div className="dh-row">{children}</div>;
   // A status read that failed after an earlier one succeeded: the last status stays, marked as not updated, with Retry.
   const unconfirmed = !!(catalog && status && catalog.error);

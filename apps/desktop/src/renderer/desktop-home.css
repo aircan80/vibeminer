@@ -296,9 +296,10 @@
 .desktop-home.dh-compact .dh-catalog-stale{display:none}
 .desktop-home.dh-compact .dh-note-long{display:none}
 .desktop-home.dh-compact .dh-note-short{display:block}
-/* A failed note's 200% form keeps its message and next step; its code goes first once the note gets narrow. */
+/* A failed note's 200% form keeps its message and next step; its code goes first once the note gets narrow. Below 42rem
+   (1280 wide at 200%) the code would push the message under the title in a wider system font such as DejaVu Sans (#126). */
 .desktop-home .dh-local-wait.dh-catalog-missing{container:catalog-note/inline-size}
-@container catalog-note (max-width:40rem){.desktop-home.dh-compact .dh-note-fit .dh-note-code{display:none}}
+@container catalog-note (max-width:42rem){.desktop-home.dh-compact .dh-note-fit .dh-note-code{display:none}}
 /* At 200% the file list notes sit tighter and put their one short line beside the title, with the actions below, so an
    object row stays in view under them, also below a followed FileDataID's notice. */
 .desktop-home.dh-compact .dh-local-wait.dh-catalog-missing{margin:.28rem .802667rem}
@@ -317,6 +318,10 @@
 .desktop-home.dh-compact .dh-files .dh-notice.file-target{margin-top:.28rem;padding:.28rem .56rem}
 .desktop-home.dh-compact .dh-files .dh-notice.file-target .dh-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .desktop-home.dh-compact .dh-files .dh-notice.file-target .dh-text>strong{display:inline}
+/* At 200% the list's head drops the reference's minimum height and sits tighter, as Tables' records head does, so a row
+   still fits under both when the build header wraps to two lines (a wider system font such as DejaVu Sans, #126). Its
+   one or two rows keep their natural height, so the title stays put when the view switches. */
+.desktop-home.dh-compact .dh-files .dh-list>.dh-files-filters{padding-top:.233333rem;padding-bottom:.233333rem;min-height:0}
 /* The segmented group clips overflow, so its focus ring sits inside each button, as on the area buttons. */
 .desktop-home .dh-segmented button:focus-visible{outline-offset:-3px}
 .desktop-home .dh-list-scroll{position:relative;flex:1 1 auto;overflow:auto;min-height:5.6rem;background:var(--paper);scroll-padding-top:var(--thead)}
