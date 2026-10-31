@@ -1,12 +1,13 @@
 import {activityTask,closeActivity,currentStage} from './activity-helpers';
 import {test,expect,type Page,type ElectronApplication} from '@playwright/test';
-import {mkdir,writeFile,readFile,stat} from 'node:fs/promises';
+import {mkdir,writeFile,stat} from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import {launch,root} from './helpers';
 import {pngSha} from './fixtures/icons.mjs';
 const rows='#items-listbox [role="option"]';
 async function opened(auto=true,capability=true){const s=await launch(true,false,false,true,capability);await s.page.locator('.build-row').first().click();await s.page.getByRole('button',{name: 'Open build',exact:true}).click();await writeFile(path.join(s.data,'release-open'),'release');await expect(s.page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();await writeFile(path.join(s.data,'cached-items'),'cached');if(auto)await writeFile(path.join(s.data,'icons-auto'),'auto');await s.page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Items',exact:true}).click();await expect(s.page.locator(rows)).toHaveCount(50);return s;}
-async function calls(data:string){return(await readFile(path.join(data,'requests.ndjson'),'utf8')).trim().split('\n').map(x=>JSON.parse(x));}
+async function calls(data:string){return(await readRequests(data));}
 async function listPane(page:Page){const list=page.getByRole('button',{name:'Items list',exact:true});if(await list.isVisible())await list.click();}
 async function exact(page:Page,id:string){await listPane(page);await page.getByRole('button',{name:'Item ID',exact:true}).click();await page.getByRole('searchbox',{name:'Exact Item ID',exact:true}).fill(id);await page.getByRole('button',{name:'Search',exact:true}).click();await expect(page.locator('.iv-applied')).toContainText(`Exact Item ID ${id}`);await page.locator(rows).first().evaluate(el=>el.scrollIntoView({block:'center'}));}
 async function select(page:Page,id:string){await page.locator(`#iv-opt-${id}`).click();await expect(page.locator(`#iv-opt-${id}`)).toHaveAttribute('aria-selected','true');await expect(page.locator('.iv-dhead')).toBeVisible();}

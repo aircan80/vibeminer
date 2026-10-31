@@ -1,10 +1,11 @@
 import {test,expect,type Page,type ElectronApplication,type Locator} from '@playwright/test';
 import {mkdir,writeFile,readFile,unlink} from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import {launch,root} from './helpers';
 import {activityTask} from './activity-helpers';
 async function opened(cached=true,enabled:false|true|'split'=true,icons=false){const s=await launch(true,false,false,true,icons,false,false,false,enabled);await s.page.locator('.build-row').first().click();await s.page.getByRole('button',{name: 'Open build',exact:true}).click();await writeFile(path.join(s.data,'release-open'),'release');await expect(s.page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();await writeFile(path.join(s.data,'cached-items'),'cached');if(cached)for(const phase of['links','inputs','names'])await writeFile(path.join(s.data,`cached-effects-${phase}`),'cached');await s.page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Items',exact:true}).click();return s;}
-async function calls(data:string){return(await readFile(path.join(data,'requests.ndjson'),'utf8')).trim().split('\n').map(x=>JSON.parse(x));}
+async function calls(data:string){return(await readRequests(data));}
 // Exact ID search, then the row: in the one-pane layout (200% text) choosing it shows the Selected item pane.
 async function select(page:Page,id='0'){const list=page.getByRole('button',{name:'Items list',exact:true});if(await list.isVisible())await list.click();await page.getByRole('button',{name:'Item ID',exact:true}).click();await page.getByRole('searchbox',{name:'Exact Item ID',exact:true}).fill(id);await page.getByRole('button',{name:'Search',exact:true}).click();await expect(page.locator('.iv-applied')).toContainText(`Exact Item ID ${id}`);await page.locator(`#iv-opt-${id}`).click();await expect(page.locator(`#iv-opt-${id}`)).toHaveAttribute('aria-selected','true');}
 const panel=(page:Page)=>page.locator('.item-effects:visible');

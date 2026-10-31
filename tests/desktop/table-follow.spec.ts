@@ -1,5 +1,6 @@
 import { test, expect, type Page, type ElectronApplication } from '@playwright/test';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import { launch, root } from './helpers';
 
@@ -19,7 +20,7 @@ async function captures(page: Page, app: ElectronApplication, state: string) {
 }
 const record = (page: Page, id: string) => page.getByRole('button', { name: `Inspect record ${id}`, exact: true });
 const crumbs = (page: Page) => page.locator('.tables-explorer .crumb');
-const requests = async (data: string) => (await readFile(path.join(data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+const requests = async (data: string) => (await readRequests(data));
 
 async function openItem(page: Page, app: ElectronApplication, data: string, catalog = false) {
   if (catalog) await writeFile(path.join(data, 'inventory-workspace'), 'on');

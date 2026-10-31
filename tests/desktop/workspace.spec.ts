@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { launch, root } from './helpers';
 
 async function requests(directory: string) {
-  return (await readFile(path.join(directory, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  return (await readRequests(directory));
 }
 
 test('Open verifies an exact context, preserves discovery on Back, and exposes honest Home', async () => {

@@ -1,5 +1,6 @@
 import { test, expect, type Page, type ElectronApplication } from '@playwright/test';
-import { mkdir, writeFile, unlink, readFile } from 'node:fs/promises';
+import { mkdir, writeFile, unlink } from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import { launch, root } from './helpers';
 import { activityTask, closeActivity } from './activity-helpers';
@@ -31,7 +32,7 @@ test('unknown download sizing enters honest Home and restores Discovery without 
     await expect(session.page.getByRole('button', { name: 'Download all', exact: true })).toHaveCount(0);
     await capture(session.page, session.app, 'download-unavailable');
     await session.page.getByRole('button', { name: /Choose build/ }).click(); await expect(open).toBeFocused();
-    const calls = (await readFile(path.join(session.data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const calls = (await readRequests(session.data));
     expect(calls.filter(call => call.method === 'discovery.refresh' || call.method === 'download.read')).toHaveLength(0);
   } finally { await session.close(); }
 });
@@ -44,7 +45,7 @@ test('Downloaded on Discovery picks up an object stored while you watch, without
     await expect(page.getByRole('heading', { name: 'Build overview' })).toBeVisible();
     await page.getByRole('button', { name: /Choose build/ }).click();
     const row = page.locator('.build-row').first(); await expect(row).toContainText('0%');
-    const calls = async (method: string) => (await readFile(path.join(session.data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(call => call.method === method);
+    const calls = async (method: string) => (await readRequests(session.data)).filter(call => call.method === method);
     // Nothing is moving: one engine wait stands open and the figures are not read again on a timer.
     await expect.poll(async () => (await calls('download.changes')).length).toBeGreaterThan(0);
     await page.waitForTimeout(1500);
@@ -126,7 +127,7 @@ test('Files switches to the measured ledger in place and a Check covers the file
   const session = await launch(true);
   try {
     const { page, app } = session;
-    const calls = async (method: string) => (await readFile(path.join(session.data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(call => call.method === method);
+    const calls = async (method: string) => (await readRequests(session.data)).filter(call => call.method === method);
     // Wide enough that the list and the object inspector sit side by side.
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 1100));
     await page.locator('.build-row').first().click(); await page.getByRole('button', { name: 'Open build', exact: true }).click();

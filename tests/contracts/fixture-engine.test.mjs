@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -65,5 +65,28 @@ test('a settings.json still being written reads as absent', async () => {
     const read = (await request('settings.read')).result;
     assert.equal(read.file, 'read');
     assert.equal(read.fetchTableDefinitions.value, false);
+  });
+});
+
+// The specs read requests.ndjson while the engine may be mid-append (#142).
+const { parseNdjson, readRequests } = await import(new URL('../desktop/fixtures/requests.mjs', import.meta.url));
+
+test('the request log skips only a last line still being written', () => {
+  assert.deepEqual(parseNdjson(''), []);
+  assert.deepEqual(parseNdjson('{"id":"a"}\n{"id":"b"}\n'), [{ id: 'a' }, { id: 'b' }]);
+  for (const partial of ['{', '{"id":"b","meth', '{"id":"b"}']) assert.deepEqual(parseNdjson(`{"id":"a"}\n${partial}`), [{ id: 'a' }], partial);
+  // A complete line that is not JSON, blank lines included, still throws.
+  for (const text of ['{"id":"a"}\n{"id":\n{"id":"c"}\n', '{"id":"a"}\n\n{"id":"c"}\n', '{"id":"a"}\n{"id":"b","meth\n']) assert.throws(() => parseNdjson(text), /ndjson line 2 is not JSON/, JSON.stringify(text));
+});
+
+test('the request log reads a live engine log with a half-written last line', async () => {
+  await withEngine(async ({ directory, request }) => {
+    await request('settings.read');
+    const logged = await readRequests(directory);
+    assert.deepEqual(logged.map(entry => entry.method), ['settings.read']);
+    await appendFile(path.join(directory, 'requests.ndjson'), '{"id":"t9","method":"sett');
+    assert.deepEqual(await readRequests(directory), logged);
+    await appendFile(path.join(directory, 'requests.ndjson'), 'ings.read"}\nnot json\n');
+    await assert.rejects(readRequests(directory), /ndjson line 3 is not JSON/);
   });
 });

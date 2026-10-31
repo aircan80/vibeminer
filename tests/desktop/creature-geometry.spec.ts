@@ -1,12 +1,13 @@
 import {test,expect,type Page,type ElectronApplication,type Locator} from '@playwright/test';
 import {writeFile,readFile,mkdir,unlink} from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {existsSync} from 'node:fs';
 import path from 'node:path';
 import {launch,root,size,text} from './helpers';
 // #59: Creatures → slot metadata → Geometry → verified VMG1 body drawn by the real main protocol and WebGL scene.
-const methods=async(data:string)=>(await readFile(path.join(data,'requests.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line) as {method:string;params:Record<string,unknown>});
+const methods=async(data:string)=>(await readRequests(data));
 async function opened(state='ready',textured:boolean|'notPrepared'=false,extra:Parameters<typeof launch>[14]={}){
  const s=await launch(true,false,false,true,false,false,true,true,false,false,false,false,true,false,extra);
  try{

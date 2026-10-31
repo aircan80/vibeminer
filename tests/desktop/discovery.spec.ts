@@ -1,11 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { launch, root } from './helpers';
 
 async function calls(directory: string) {
-  return (await readFile(path.join(directory, 'requests.ndjson'), 'utf8')).trim().split('\n').map(x => JSON.parse(x) as { method: string; params: Record<string, unknown> });
+  return (await readRequests(directory));
 }
 
 test('real Electron and C# open fresh discovery without an implicit remote check', async () => {

@@ -1,5 +1,6 @@
 import {test,expect,type Page,type ElectronApplication,type Locator} from '@playwright/test';
-import {writeFile,readFile,mkdir} from 'node:fs/promises';
+import {writeFile,mkdir} from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import {launch,root,size,text} from './helpers';
 import {activityTask} from './activity-helpers';
@@ -18,7 +19,7 @@ async function opened({cachedDisplay=false,state}:{cachedDisplay?:boolean;state?
 }
 async function creature(page:Page,id='0'){await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Creatures',exact:true}).click();await page.getByRole('option',{name:new RegExp(`^Authored creature ${id}`)}).click();return page.getByRole('region',{name:'Displays'});}
 const card=(page:Page,slot:number)=>page.getByRole('article',{name:new RegExp(`^Slot ${slot} · Display`)});
-const requests=async(data:string)=>(await readFile(path.join(data,'requests.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line) as {method:string;params:Record<string,unknown>});
+const requests=async(data:string)=>(await readRequests(data));
 async function captures(page:Page,app:ElectronApplication,state:string,anchor:Locator){
  const out=path.join(root,'artifacts/creature-displays');await mkdir(out,{recursive:true});
  for(const[width,height]of[[1280,800],[1440,1100]]){await size(app,width,height);await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(width);

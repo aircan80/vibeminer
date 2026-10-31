@@ -1,5 +1,6 @@
 import {test,expect,type Page,type ElectronApplication,type Locator} from '@playwright/test';
-import {writeFile,readFile,mkdir} from 'node:fs/promises';
+import {writeFile,mkdir} from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import {launch,root,size,text} from './helpers';
 // Creatures view (docs/design/creatures-view, #62): the list and the selected creature's record, with Tables links and returns.
@@ -13,7 +14,7 @@ async function opened({cached=true,partial=true,fetched=false}:{cached?:boolean;
   await s.page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Creatures',exact:true}).click();return s;
  }catch(error){await s.close();throw error;}
 }
-const requests=async(data:string)=>(await readFile(path.join(data,'requests.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line) as {method:string;params:Record<string,unknown>});
+const requests=async(data:string)=>(await readRequests(data));
 async function captures(page:Page,app:ElectronApplication,state:string,anchor:Locator){
  const out=path.join(root,'artifacts/creatures');await mkdir(out,{recursive:true});
  for(const[width,height]of[[1280,800],[1440,1100]]){await size(app,width,height);await expect.poll(()=>page.evaluate(()=>innerWidth)).toBe(width);

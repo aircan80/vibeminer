@@ -1,11 +1,12 @@
 import {activityTask,closeActivity,currentStage} from './activity-helpers';
 import {test,expect,type Page,type ElectronApplication} from '@playwright/test';
-import {writeFile,readFile,mkdir} from 'node:fs/promises';
+import {writeFile,mkdir} from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import {launch,root} from './helpers';
 // Class and Subclass labels (items.classifications) are asked for the selected item and shown in its Item section (docs/design/items-view).
 async function opened(mode:'class'|'subclass'='subclass',auto=true){const s=await launch(true,false,false,true,true,mode);try{await s.page.locator('.build-row').first().click();await s.page.getByRole('button',{name: 'Open build',exact:true}).click();await writeFile(path.join(s.data,'release-open'),'release');await expect(s.page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();await writeFile(path.join(s.data,'cached-items'),'cached');await writeFile(path.join(s.data,'icons-auto'),'auto');if(auto)await writeFile(path.join(s.data,'labels-auto'),'auto');await s.page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Items',exact:true}).click();await expect(s.page.locator('#items-listbox [role="option"]')).toHaveCount(50);return s;}catch(error){await s.close();throw error;}}
-const requests=async(data:string)=>(await readFile(path.join(data,'requests.ndjson'),'utf8')).trim().split('\n').map(x=>JSON.parse(x));
+const requests=async(data:string)=>(await readRequests(data));
 async function listPane(page:Page){const list=page.getByRole('button',{name:'Items list',exact:true});if(await list.isVisible())await list.click();}
 async function exact(page:Page,id:string){await listPane(page);await page.getByRole('button',{name:'Item ID',exact:true}).click();await page.getByRole('searchbox',{name:'Exact Item ID',exact:true}).fill(id);await page.getByRole('button',{name:'Search',exact:true}).click();await expect(page.locator('#items-listbox [role="option"]')).toHaveCount(1);await expect(page.locator('.iv-applied')).toContainText(`Exact Item ID ${id}`);}
 async function select(page:Page,id:string){await page.locator(`#iv-opt-${id}`).click();await expect(page.locator(`#iv-opt-${id}`)).toHaveAttribute('aria-selected','true');}

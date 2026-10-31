@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import { launch, root } from './helpers';
 
@@ -34,7 +35,7 @@ test('preparation numbers actual stages, preserves them on reattach, and retires
     await expect(page.getByRole('button', { name: 'Open build', exact: true })).toBeFocused();
     await page.getByRole('button', { name: 'Open build', exact: true }).click();
     await expect(phase).toContainText('[3/5] Building download ledger');
-    const calls = (await readFile(path.join(session.data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const calls = (await readRequests(session.data));
     expect(calls.filter(call => call.method === 'workspace.open')).toHaveLength(1);
     for (const [width, height] of [[1280, 800], [1440, 1100]]) {
       await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height), { width, height });

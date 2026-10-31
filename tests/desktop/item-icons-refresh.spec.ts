@@ -1,11 +1,12 @@
 import {test,expect,type Page} from '@playwright/test';
-import {writeFile,readFile} from 'node:fs/promises';
+import {writeFile} from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import {launch} from './helpers';
 // #92: a shown icon outlives its image URL. Main hands out 4 s URLs here (90 s in the app) so the refresh is observable.
 const rows='#items-listbox [role="option"]',lifetime=4000;
 async function opened(){process.env.VIBEMINER_FIXTURE_ICON_URL_LIFETIME_MS=String(lifetime);try{const s=await launch(true,false,false,true,true);await s.page.locator('.build-row').first().click();await s.page.getByRole('button',{name:'Open build',exact:true}).click();await writeFile(path.join(s.data,'release-open'),'release');await expect(s.page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();await writeFile(path.join(s.data,'cached-items'),'cached');await writeFile(path.join(s.data,'icons-auto'),'auto');await s.page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Items',exact:true}).click();await expect(s.page.locator(rows)).toHaveCount(50);return s;}finally{delete process.env.VIBEMINER_FIXTURE_ICON_URL_LIFETIME_MS;}}
-async function batches(data:string){return(await readFile(path.join(data,'requests.ndjson'),'utf8')).trim().split('\n').map(x=>JSON.parse(x)).filter(r=>r.method==='items.icons').length;}
+async function batches(data:string){return(await readRequests(data)).filter(r=>r.method==='items.icons').length;}
 const frame=(page:Page)=>page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
 const loaded=(page:Page,id:string)=>expect.poll(()=>page.locator(`#iv-opt-${id} .item-icon-box img`).evaluateAll(i=>i.length===1&&(i[0] as HTMLImageElement).complete&&(i[0] as HTMLImageElement).naturalWidth===64),{timeout:8000}).toBe(true);
 const src=(page:Page,id:string)=>page.locator(`#iv-opt-${id} .item-icon-box img`).getAttribute('src');

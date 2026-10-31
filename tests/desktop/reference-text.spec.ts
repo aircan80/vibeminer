@@ -1,5 +1,6 @@
 import { test, expect, type Page, type ElectronApplication } from '@playwright/test';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import { launch, root } from './helpers';
 import { activityTask, closeActivity } from './activity-helpers';
@@ -100,7 +101,7 @@ test('Item ClassID shows pending text, prepares ItemClass automatically and fill
     await page.getByRole('button', { name: 'Apply record ID', exact: true }).click();
     await expect(classCell(page, '7')).toHaveText('9 · Authored clear value 6');
 
-    const requests = (await readFile(path.join(data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const requests = (await readRequests(data));
     expect(requests.filter(r => r.method === 'tables.prepare' && r.params.tableId === 'b977271e')).toHaveLength(1);
     const text = requests.filter(r => r.method === 'tables.referenceText');
     expect(text.every(r => r.params.tableId === '50238ec2' && r.params.researchLocale === 'enUS' && !('values' in r.params))).toBe(true);
@@ -133,7 +134,7 @@ test('a failed text table latches as unavailable and raw values stay usable', as
     await bothFonts(app, page, 'protected');
     await page.getByRole('button', { name: 'Next page of records', exact: true }).click();
     await expect(classCell(page, '50')).toHaveText('52 · not readable (protected)');
-    const requests = (await readFile(path.join(data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const requests = (await readRequests(data));
     expect(requests.filter(r => r.method === 'tables.prepare' && r.params.tableId === 'b977271e')).toHaveLength(1);
   } finally { await session.close(); }
 });
@@ -185,7 +186,7 @@ test('a large text table waits for Load text, then loads at interactive priority
     const load = notice.getByRole('button', { name: 'Load text (≈8.0 MB)', exact: true });
     await expect(load).toHaveAttribute('aria-disabled', 'false');
     await captures(page, app, 'on-request');
-    const before = (await readFile(path.join(data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const before = (await readRequests(data));
     expect(before.filter(r => r.method === 'tables.prepare' && r.params.tableId === 'b977271e')).toHaveLength(0);
     // At 200% text, in both fonts, Load text stays whole without a scroll box and the first row stays whole.
     await bothFonts(app, page, 'load text');
@@ -209,7 +210,7 @@ test('a large text table waits for Load text, then loads at interactive priority
     await expect(classCell(page, '1')).toHaveText('3 · Authored clear value 0');
     await expect(notice).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Item admitted table rows', exact: true })).toBeFocused();
-    const after = (await readFile(path.join(data, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const after = (await readRequests(data));
     expect(after.filter(r => r.method === 'tables.prepare' && r.params.tableId === 'b977271e')).toHaveLength(2);
   } finally { await session.close(); }
 });

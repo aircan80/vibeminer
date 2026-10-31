@@ -1,5 +1,6 @@
 import { test, expect, type Page, type ElectronApplication } from '@playwright/test';
-import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
+import { mkdir, writeFile, unlink } from 'node:fs/promises';
+import {readRequests} from './fixtures/requests.mjs';
 import path from 'node:path';
 import { launch, root } from './helpers';
 
@@ -13,7 +14,7 @@ async function opened() {
   return session;
 }
 async function calls(directory: string) {
-  return (await readFile(path.join(directory, 'requests.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  return (await readRequests(directory));
 }
 function definition(page: Page, name: string) {
   return page.locator('.tableitem').filter({ has: page.getByText(name, { exact: true }) });
