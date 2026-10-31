@@ -405,11 +405,17 @@ test('a table stopped because fetching is off prepares again when reopened after
   const session = await tables(['table-fetched'], { values: { fetchTableDefinitions: false }, changedAt: '2026-10-25T12:00:00Z' });
   try {
     const { page } = session;
+    // The inspector reads the definition again after the load stops (#81). Held a while, that read sees the new
+    // setting, so a reopening that compared with the definition instead of the stop missed the change (#132).
+    await writeFile(path.join(session.data, 'table-definition-delay.json'), '1500');
     await writeFile(path.join(session.data, 'release-table'), 'release');
     await pick(page, 'ItemClass');
     await expect(page.locator('.dh-data:not([hidden]) .dh-state-box')).toContainText(offInSettings);
     // The setting changes without a Settings change event; the next opening notices.
     await writeFile(path.join(session.data, 'settings.json'), JSON.stringify({ values: { fetchTableDefinitions: true }, changedAt: '2026-10-25T12:05:00Z' }));
+    // That read lands under the new setting; the stop still says what it stopped under and offers its Settings step.
+    await expect(page.locator('.dh-tables .dh-inspector .definition-match')).toHaveText('Build not listed · no bundled layout on its version line; opening Data fetches a newer definition from WoWDBDefs');
+    await expect(page.locator('.dh-data:not([hidden]) .dh-state-box').getByRole('button', { name: 'Open Settings', exact: true })).toBeVisible();
     await pick(page, 'Item');
     await expect(page.getByRole('button', { name: 'Inspect record 0', exact: true })).toBeVisible();
     await pick(page, 'ItemClass');

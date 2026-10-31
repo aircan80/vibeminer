@@ -434,10 +434,12 @@ async function dispatch(request) {
           else value.schemaMatch='layoutOnly';
         }
         if(existsSync(path.join(directory,'table-fetched'))&&params.tableId==='b977271e'){
-          if(!fetchEnabled())return fail(id,'SCHEMA_BUILD_NOT_LISTED',`The pinned ItemClass definition doesn’t list build ${opened.get(contextKey).build.version} or any layout on its version line. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest ItemClass definition. Tables the bundled definitions cover still open.`,false);
+          // As the engine does (D101), each stop says which table and how the fetch switch read then.
+          const stop=(code,message,retryable,fetch)=>send({id,error:{code,message,retryable,definition:{tableId:params.tableId,definitionFetch:fetch}}});
+          if(!fetchEnabled())return stop('SCHEMA_BUILD_NOT_LISTED',`The pinned ItemClass definition doesn’t list build ${opened.get(contextKey).build.version} or any layout on its version line. Fetching newer table definitions from WoWDBDefs is off in Settings; turn it on to try the newest ItemClass definition. Tables the bundled definitions cover still open.`,false,'off');
           send({type:'progress',requestId:id,sequence:2,stage:'Checking WoWDBDefs for the newest ItemClass definition',region:params.sourceRegion,completed:null,total:null,unit:null});
-          {const e=control('table-fetch-error.json');if(e)return fail(id,e.code,e.message,e.retryable);}
-          if(existsSync(path.join(directory,'table-fetch-offline')))return fail(id,'DEFINITION_FETCH_OFFLINE',`VibeMiner couldn’t reach WoWDBDefs on GitHub to fetch a newer ItemClass definition. The pinned ItemClass definition doesn’t list build ${opened.get(contextKey).build.version} or any layout on its version line, so this table can’t open. Tables the bundled definitions cover still open. Check the connection, then use Retry table data, or turn off Fetch newer table definitions in Settings.`,true);
+          {const e=control('table-fetch-error.json');if(e)return stop(e.code,e.message,e.retryable,'on');}
+          if(existsSync(path.join(directory,'table-fetch-offline')))return stop('DEFINITION_FETCH_OFFLINE',`VibeMiner couldn’t reach WoWDBDefs on GitHub to fetch a newer ItemClass definition. The pinned ItemClass definition doesn’t list build ${opened.get(contextKey).build.version} or any layout on its version line, so this table can’t open. Tables the bundled definitions cover still open. Check the connection, then use Retry table data, or turn off Fetch newer table definitions in Settings.`,true,'on');
           Object.assign(value,{definitionSha256:FETCHED_SHA,providerRevision:FETCHED.revision,fetchedDefinition:FETCHED,fetchedBecause:value.schemaMatch==='layoutOnly'?'layoutMatch':existsSync(path.join(directory,'table-fetched-layout'))?'layoutNotBundled':'exactBuild',bundledFallback:false});
         }
         // D079 (#53): the authored ClassID came from a 32-bit pallet and keeps its low 8 bits.
@@ -479,6 +481,8 @@ async function dispatch(request) {
       return reply(id, { productId: params.productId, buildIdentity: params.buildIdentity, sourceRegion: params.sourceRegion, provider: tablesProvider, query, entries, totalCount: String(filtered.length), nextCursor: end < filtered.length ? String(end) : null });
     }
     if (existsSync(path.join(directory, `hold-definition-${params.tableId}`))) await waitForRelease(`release-definition-${params.tableId}`, shutdown.signal);
+    // table-definition-delay.json holds each tables.definition this many ms before it reads the authored state, Settings included (#132).
+    {const delay=control('table-definition-delay.json');if(delay)await new Promise(r=>setTimeout(r,delay));}
     if (existsSync(path.join(directory, 'table-definition-error'))) return fail(id, 'DEFINITION_READ_FAILED', 'Authored local definition read failed.');
     const entry = tableEntries.find(entry => entry.tableId === params.tableId);
     if (!entry) return fail(id, 'TABLE_NOT_IN_PROVIDER', 'This exact provider table is not listed.');
