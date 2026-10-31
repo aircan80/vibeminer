@@ -13,7 +13,7 @@ import {emptyCreatureView,type CreatureView} from './creature-view';
 import type {CreatureDisplays,DisplayIntent} from './useCreatureDisplay';
 import type {GeometryFlow} from './useCreatureGeometry';
 import {CreatureGeometryView} from './CreatureGeometryView';
-import {geometryBusy} from './geometry-session';
+import {GEOMETRY_NO_WEBGL,geometryBusy,geometryNoWebglWord} from './geometry-session';
 import {geometryAnchorFromDisplay,geometryIntentKey,type GeometryReturnOrigin} from './geometry-state';
 import {geometrySelectionKey} from '../shared/creature-geometry';
 import {measuredStage,type TableFailure,type TableLoading} from './useTableLoading';
@@ -417,13 +417,14 @@ function PreviewBox({preview,params,metadata,loading,name,slot,displayId,auto,ac
  if(mine&&!outcome&&opOther&&mine.phase==='waiting')return <div className="cv-preview"><div ref={statusRef} tabIndex={-1} className="cv-pbox cv-pending" role="status"><span>Waiting for another model<br/><span className="cv-pstage">Creature {opOther.intent.selection.creatureId} · slot {opOther.intent.selection.slot} is loading first</span></span></div><button type="button" className="dh-btn dh-small" aria-disabled={opOther.status==='stopping'} onClick={()=>{if(opOther.status!=='stopping')flow.session.stopPreparation(opOther.id);}}>Stop that model</button></div>;
  if(mine&&!outcome)return <div className="cv-preview"><div ref={statusRef} tabIndex={-1} className="cv-pbox cv-pending" role="status"><span><span className="dh-pulse" aria-hidden="true"/> Loading model<br/><span className="cv-pstage">{mine.message}</span></span></div></div>;
  if(busy&&busyTries<BUSY_TRIES)return <div className="cv-preview"><div ref={statusRef} tabIndex={-1} className="cv-pbox cv-pending" role="status"><span><span className="dh-pulse" aria-hidden="true"/> Waiting for the engine<br/><span className="cv-pstage">It is busy with other reads; this model is asked for again by itself</span></span></div></div>;
- if(outcome&&!notKept&&result?.state!=='ready'){
+ // #131: ready geometry that could not be drawn (no WebGL, a lost context) is an outcome too, never a silent Show model again.
+ if(outcome&&!notKept&&(result?.state!=='ready'||!!outcome.error)){
   // #116: the engine picks a result problem's headline, such as a model or build list too large. A request error has only its
   // code (the camera's own refusal among them), so it still reads as encrypted or unsupported from that.
   const error=outcome.error?.code,headline:CreatureGeometryHeadline=error!==undefined?/ENCRYPT|KEY_UNAVAILABLE|PROTECTED/.test(error)?'encrypted':/UNSUPPORTED/.test(error)?'unsupported':'notDrawn':result?.problem?.headline??'notDrawn';
   // #98: a state with no problem still names itself, so no outcome is left without a reason.
   const empty=result?.state==='noDeclaredTriangles';
-  const word=busy?'Engine still busy':headline!=='notDrawn'?HEADLINES[headline]:empty?'Nothing to draw':outcome.message==='Geometry preparation stopped'?'Loading stopped':HEADLINES.notDrawn;
+  const word=busy?'Engine still busy':error===GEOMETRY_NO_WEBGL?geometryNoWebglWord:headline!=='notDrawn'?HEADLINES[headline]:empty?'Nothing to draw':outcome.message==='Geometry preparation stopped'?'Loading stopped':HEADLINES.notDrawn;
   return <div className="cv-preview"><div ref={statusRef} tabIndex={-1} className="cv-pbox cv-off" role="img" aria-label={word}>{word}</div><p className="cv-pnote">{problem?<><code>{problem.code}</code> {problem.message}</>:result&&<><code>{result.state}</code> {outcome.message}</>}</p>{(problem?.retryable||word==='Loading stopped')&&<button ref={showRef} type="button" className="dh-btn dh-small" onClick={()=>{focusNext.current='stop';setBusyTries(0);flow.session.retry();}}>Retry model</button>}</div>;
  }
  return <div className="cv-preview"><div className="cv-pbox cv-idle" aria-hidden="true">No preview yet</div><button ref={showRef} type="button" className="dh-btn dh-small" aria-label={`Show model preview for display ${displayId}`} onClick={e=>{focusNext.current='stop';setBusyTries(0);preview.show(params,metadata!,name,e.currentTarget);}}>Show model</button></div>;

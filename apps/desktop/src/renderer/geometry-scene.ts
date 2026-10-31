@@ -13,7 +13,7 @@ type ValidatedLines = Extract<GeometryValidationResult, { state: 'valid' }>['val
 type ValidatedGeometry = ValidatedLines | ValidatedAppearance;
 const isAppearance = (input: ValidatedGeometry): input is ValidatedAppearance => (input as { kind?: unknown }).kind === 'appearance';
 type Refusal = 'disposed' | 'busy' | 'stale' | 'invalidIdentity' | 'invalidGeometry' | 'retirementRequired'
-  | 'cameraFitUnsupported' | 'webglUnsupported' | 'resourceLimit' | 'renderFailed' | 'cleanupFailed' | 'observerFailed';
+  | 'cameraFitUnsupported' | 'webglUnavailable' | 'webglUnsupported' | 'resourceLimit' | 'renderFailed' | 'cleanupFailed' | 'observerFailed';
 export type GeometrySceneStatus = Readonly<{ code: 'drawn' | 'contextLost' | 'stale' | 'cameraFitUnsupported' | 'renderFailed' | 'cleanupFailed' }>;
 type Refused = Readonly<{ state: 'refused'; code: Refusal }>;
 type Disposed = Readonly<{ state: 'disposed'; notice: GeometrySceneDisposal }> | Refused;
@@ -351,8 +351,10 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
       retireView(); if (mismatch) return refused('invalidIdentity'); return notice(identity, 'view');
     },
   });
+  // #131: Chromium gave no WebGL 2 context at all (no GPU and no software fallback). Every other creation failure stays webglUnsupported.
+  let noContext = false;
   try {
-    if (acquireContext) { constructingContext = acquireContext(); if (!constructingContext) throw new Error('WebGL2 unavailable'); }
+    if (acquireContext) { constructingContext = acquireContext(); if (!constructingContext) { noContext = true; throw new Error('WebGL2 unavailable'); } }
     graphics = factory({ canvas, ...(constructingContext ? { context: constructingContext } : {}),
       alpha: false, depth: true, stencil: false, antialias: false, preserveDrawingBuffer: false });
     constructingContext = null; // The constructed renderer now owns the exact context.
@@ -368,6 +370,6 @@ function create(canvas: HTMLCanvasElement, options: GeometrySceneOptions, factor
     canvas.addEventListener('webglcontextlost', lost); lossListener = true;
     return { state: 'available', owner };
   } catch {
-    retireView(); return { state: 'refused', code: cleanupFailed ? 'cleanupFailed' : 'webglUnsupported', ...(cleanupFailed ? { owner } : {}) };
+    retireView(); return { state: 'refused', code: cleanupFailed ? 'cleanupFailed' : noContext ? 'webglUnavailable' : 'webglUnsupported', ...(cleanupFailed ? { owner } : {}) };
   }
 }

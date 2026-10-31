@@ -81,6 +81,22 @@ describe('owned geometry presentation',()=>{
   const h=setup();h.reserve.mockReturnValue(null as never);vi.mocked(h.bridge.creatureGeometryRead!).mockResolvedValue(ok(h.missing));h.start();await until(h.session,()=>h.session.snapshot().view?.phase==='waiting');expect(h.reserve).toHaveBeenCalledTimes(1);
   h.session.stopPreparation();await h.session.leave('return');h.session.updateAdmission({tryReserve:()=>h.releaseCredit,revision:1});expect(h.bridge.creatureGeometryPrepare).not.toHaveBeenCalled();h.start();expect(h.bridge.geometryViewEnter).toHaveBeenCalledTimes(1);
  });
+ // #131: a machine with no WebGL 2 (no GPU and no software fallback) names that, offers no Retry, and still retires the view.
+ it('names a refused WebGL context as no WebGL on this computer, without Retry, and releases the view',async()=>{
+  const h=setup();h.scene.mockImplementation(()=>({state:'refused',code:'webglUnavailable'}) as never);h.start();await until(h.session,()=>!!h.session.snapshot().view?.canMount);
+  h.session.attachCanvas(1,document.createElement('canvas'));await until(h.session,()=>h.session.snapshot().view?.phase==='outcome'&&!h.session.snapshot().iconsSuspended);
+  const v=h.session.snapshot().view!;expect(v.message).toBe('3D drawing unavailable');expect(v.canMount).toBe(false);
+  expect(v.error).toEqual({code:'GEOMETRY_WEBGL_UNAVAILABLE',message:"VibeMiner gets no WebGL 2 graphics on this computer, so models can't be drawn. The creature, display and source details still work.",retryable:false});
+  expect(h.bridge.geometryViewSceneDisposed).toHaveBeenCalledTimes(1);
+  // The same selection entered again (not a fresh Show model) replays that outcome by name without reading or drawing again.
+  h.session.enter(h.intent);expect(h.session.snapshot().view).toMatchObject({phase:'outcome',message:'3D drawing unavailable',error:{code:'GEOMETRY_WEBGL_UNAVAILABLE'}});expect(h.bridge.geometryViewEnter).toHaveBeenCalledTimes(1);
+ });
+ // Any other creation refusal (a lost or mismatched context, a renderer that throws) may pass: it stays retryable and never claims no WebGL.
+ it('keeps another WebGL creation refusal retryable and does not call it no WebGL',async()=>{
+  const h=setup();h.scene.mockImplementation(()=>({state:'refused',code:'webglUnsupported'}) as never);h.start();await until(h.session,()=>!!h.session.snapshot().view?.canMount);
+  h.session.attachCanvas(1,document.createElement('canvas'));await until(h.session,()=>h.session.snapshot().view?.phase==='outcome'&&!h.session.snapshot().iconsSuspended);
+  expect(h.session.snapshot().view).toMatchObject({message:'Geometry needs attention',error:{code:'GEOMETRY_SCENE_WEBGLUNSUPPORTED',retryable:true}});
+ });
  it('retains cleanupFailed returned owner/debt and blocks another selection without a false ACK',async()=>{
   const h=setup();h.expectDebt();h.scene.mockImplementation((_,options)=>{options.onStatus({code:'cleanupFailed'});return{state:'refused',code:'cleanupFailed',owner:h.owner} as never;});h.start();await until(h.session,()=>!!h.session.snapshot().view?.canMount);h.session.attachCanvas(1,document.createElement('canvas'));await until(h.session,()=>h.session.snapshot().retirement?.phase==='blocked');expect(h.bridge.geometryViewSceneDisposed).not.toHaveBeenCalled();expect(h.session.snapshot().iconsSuspended).toBe(true);h.session.enter({...h.intent,selection:{...h.intent.selection,slot:1}});await Promise.resolve();expect(h.bridge.geometryViewEnter).toHaveBeenCalledTimes(1);
  });

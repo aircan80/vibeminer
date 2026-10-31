@@ -20,6 +20,9 @@ export interface GeometrySessionDependencies{
 }
 const unavailable:GeometryFailure=Object.freeze({code:'ENGINE_UNAVAILABLE',message:'Geometry could not finish. Retained source metadata remains usable.',retryable:true});
 const failure=(code:string,message:string,retryable=false):GeometryFailure=>Object.freeze({code,message,retryable});
+/** D114 (#131): Chromium gave no WebGL 2 context, even through its software fallback. Retrying in this run doesn't help. */
+export const GEOMETRY_NO_WEBGL='GEOMETRY_WEBGL_UNAVAILABLE',geometryNoWebglWord='3D drawing unavailable';
+const noWebgl=failure(GEOMETRY_NO_WEBGL,'VibeMiner gets no WebGL 2 graphics on this computer, so models can\'t be drawn. The creature, display and source details still work.');
 /** The engine's bounded read or preparation capacity was full: retryable, and never an outcome of the source. */
 export const geometryBusy=(error:{code:string;retryable?:boolean}|null|undefined)=>!!error&&error.retryable!==false&&/(^|_)BUSY$/.test(error.code);
 /** Displayed canvas size × devicePixelRatio; an unlaid-out canvas keeps the original default. */
@@ -93,7 +96,7 @@ export class GeometrySession{
   const intent=this.desired;if(!intent||this.active||this.closing)return;
   const decision=this.decisions.get(geometryIntentKey(intent));
   // A local-only look never replays a remembered Stop or failure: it reads what is kept, draws it, and leaves the decision for Show model (#62, #99).
-  if(!this.desiredLocal&&(decision||this.decisions.size>=256)){const error=decision?.error??(decision?null:failure('GEOMETRY_CONTROL_RESOURCE_LIMIT','The session limit for remembered stopped or failed geometry requests was reached. Existing decisions are preserved.',false));this.publish({view:Object.freeze({intent,generation:++this.generation,phase:'outcome',message:decision?.kind==='stopped'?'Geometry preparation stopped':'Geometry needs attention',result:null,error,canMount:false,sections:[],sectionOffset:0})});return;}
+  if(!this.desiredLocal&&(decision||this.decisions.size>=256)){const error=decision?.error??(decision?null:failure('GEOMETRY_CONTROL_RESOURCE_LIMIT','The session limit for remembered stopped or failed geometry requests was reached. Existing decisions are preserved.',false));this.publish({view:Object.freeze({intent,generation:++this.generation,phase:'outcome',message:decision?.kind==='stopped'?'Geometry preparation stopped':error?.code===GEOMETRY_NO_WEBGL?geometryNoWebglWord:'Geometry needs attention',result:null,error,canMount:false,sections:[],sectionOffset:0})});return;}
   const previous=this.operation;
   if(previous&&geometryIntentKey(previous.snapshot.intent)===geometryIntentKey(intent)&&previous.snapshot.status==='succeeded'&&previous.result&&previous.result.state!=='ready'){
    if(!creatureGeometryMatches(previous.result,intent.selection)||!geometryAnchorMatches(intent.anchor,previous.result)){
@@ -204,9 +207,10 @@ export class GeometrySession{
  private remember(intent:GeometryIntent,decision:Decision){const key=geometryIntentKey(intent);if(this.decisions.has(key)||this.decisions.size<256)this.decisions.set(key,decision);}
  private failView(v:View,error:GeometryFailure){
   // A local-only look that can't read is simply "not looked": nothing is remembered and nothing claims a failure (#62 QA).
-  if(v.localOnly){this.viewState(v,{phase:'outcome',message:'Geometry is not kept for this display',result:null,error:null,canMount:false});return;}
+  // No WebGL is the exception (#131): Show model could only fail the same way, so the kept model's card says so at once.
+  if(v.localOnly&&error.code!==GEOMETRY_NO_WEBGL){this.viewState(v,{phase:'outcome',message:'Geometry is not kept for this display',result:null,error:null,canMount:false});return;}
   // A busy engine isn't a decision either: the same selection may ask again at once.
-  if(!geometryBusy(error))this.remember(v.intent,{kind:'failed',error});this.viewState(v,{phase:'outcome',message:error.code==='CANCELED'?'Geometry preparation stopped':'Geometry needs attention',error,canMount:false});}
+  if(!geometryBusy(error))this.remember(v.intent,{kind:'failed',error});this.viewState(v,{phase:'outcome',message:error.code==='CANCELED'?'Geometry preparation stopped':error.code===GEOMETRY_NO_WEBGL?geometryNoWebglWord:'Geometry needs attention',error,canMount:false});}
  iconsHiddenCommitted(generation:number){const v=this.active;if(v?.generation===generation&&!v.revoked){v.iconsCommitted=true;v.icons.resolve();}}
  attachCanvas(generation:number,canvas:HTMLCanvasElement):()=>void{
   const v=this.active;if(!v||v.generation!==generation||!this.current(v)||!v.iconsCommitted||!v.validated||!v.ack||!v.identity)return()=>{};
@@ -229,7 +233,7 @@ export class GeometrySession{
   try{
    const created=this.createScene(canvas,{size:backingSize(canvas),viewId:v.identity.viewId,viewGeneration:v.generation,isCurrent:()=>this.current(v),confirmRetirement:(identity,reply)=>{if(v.confirmed||reply!==v.ack||!v.identity||!this.sameIdentity(v.identity,identity)||!this.current(v))return false;v.confirmed=true;return true;},onStatus:status=>{v.sceneStatus=status;if(!v.inSceneCall)this.sceneStatus(v,status);}});
    v.owner=created.state==='available'?created.owner:created.owner??null;v.mountedCanvas=v.owner?canvas:null;
-   if(created.state!=='available'){if(created.code==='cleanupFailed')v.debt=true;throw failure('GEOMETRY_SCENE_'+created.code.toUpperCase(),'Geometry could not be drawn safely.',created.code!=='cleanupFailed');}
+   if(created.state!=='available'){if(created.code==='cleanupFailed')v.debt=true;throw created.code==='webglUnavailable'?noWebgl:failure('GEOMETRY_SCENE_'+created.code.toUpperCase(),'Geometry could not be drawn safely.',created.code!=='cleanupFailed');}
    if(!this.current(v)||v.sceneStatus&&['contextLost','stale','renderFailed','cleanupFailed'].includes(v.sceneStatus.code)){if(v.sceneStatus?.code==='cleanupFailed')v.debt=true;throw failure('GEOMETRY_SCENE_RETIRED','The graphics owner retired during creation.',true);}
    const mounted=v.owner!.mount(v.validated,v.identity,v.ack);
    if(mounted.state!=='mounted'){if(mounted.code==='cleanupFailed')v.debt=true;throw failure('GEOMETRY_SCENE_'+mounted.code.toUpperCase(),'Geometry could not be drawn safely.',false);}

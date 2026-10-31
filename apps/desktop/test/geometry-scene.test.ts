@@ -286,6 +286,13 @@ describe('bounded Three diagnostic scene owner', () => {
     expect(result).toMatchObject({ state: 'refused', code: 'webglUnsupported' }); expect(lose).toHaveBeenCalledOnce();
     expect(canvas.width).toBe(0); expect(canvas.height).toBe(0);
   });
+  // #131: only a missing context is webglUnavailable; the case above (a context Three can't use) stays webglUnsupported.
+  it('names a missing WebGL 2 context webglUnavailable and constructs no renderer', () => {
+    const canvas = document.createElement('canvas'), get = vi.spyOn(canvas, 'getContext').mockReturnValue(null);
+    const result = createGeometryScene(canvas, { viewId: 'aa'.repeat(16), viewGeneration: 1, isCurrent: () => true,
+      confirmRetirement: () => true, onStatus: () => {} });
+    expect(get).toHaveBeenCalledOnce(); expect(result).toEqual({ state: 'refused', code: 'webglUnavailable' });
+  });
 });
 
 describe('backing store follows the displayed size (#59)', () => {

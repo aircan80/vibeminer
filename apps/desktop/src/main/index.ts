@@ -29,6 +29,11 @@ import { validDownloadRead, validDownloadCheck } from '../shared/download';
 import { validSummariesParams, validChangesParams } from '../shared/download-summary';
 import { validInventoryRead, validInventoryFiles, validInventoryFile, validFileCatalog, validFileCatalogSet } from '../shared/inventory';
 import type { BridgeReply } from '../shared/bridge';
+// D114 (#131): with no usable GPU (none, blocklisted or crashed) Chromium gives WebGL no context unless SwiftShader is allowed,
+// and the geometry view could never draw. The "unsafe" in the switch is about web pages reaching SwiftShader's JIT; this window
+// only runs the app's own bundle (navigation and new windows are denied, script-src 'self'), so it doesn't apply. A real GPU
+// is still used when there is one. Authored-fixture e2e runs may turn the fallback off to check the no-WebGL state.
+if(!(process.env.VIBEMINER_AUTHORED_FIXTURES==='1'&&process.env.VIBEMINER_FIXTURE_NO_SOFTWARE_WEBGL==='1'))app.commandLine.appendSwitch('enable-unsafe-swiftshader');
 protocol.registerSchemesAsPrivileged([{scheme:'vibeminer-image',privileges:{standard:true,secure:true}},{scheme:'vibeminer-geometry',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true}}]);
 let engine: EngineClient;
 let icons:IconsController;

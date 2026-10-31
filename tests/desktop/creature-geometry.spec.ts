@@ -7,8 +7,8 @@ import path from 'node:path';
 import {launch,root,size,text} from './helpers';
 // #59: Creatures → slot metadata → Geometry → verified VMG1 body drawn by the real main protocol and WebGL scene.
 const methods=async(data:string)=>(await readFile(path.join(data,'requests.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line) as {method:string;params:Record<string,unknown>});
-async function opened(state='ready',textured:boolean|'notPrepared'=false){
- const s=await launch(true,false,false,true,false,false,true,true,false,false,false,false,true);
+async function opened(state='ready',textured:boolean|'notPrepared'=false,extra:Parameters<typeof launch>[14]={}){
+ const s=await launch(true,false,false,true,false,false,true,true,false,false,false,false,true,false,extra);
  try{
   await size(s.app,1280,800);
   const{page}=s;await page.locator('.build-row').first().click();await page.getByRole('button',{name:'Open build',exact:true}).click();await writeFile(path.join(s.data,'release-open'),'release');
@@ -52,6 +52,43 @@ test('Show model prepares and draws the preview, Open geometry view shows the fu
  await page.getByRole('navigation',{name:'Build areas'}).getByRole('button',{name:'Creatures',exact:true}).click();
  await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});
  calls=await methods(s.data);expect(calls.filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(1);
+}finally{await s.close();}});
+// #131: CI runners have no GPU. Chromium then gives WebGL no context unless its software fallback (SwiftShader) is allowed, which
+// main does (D114). --disable-gpu stands in for a machine with no GPU; the renderer string proves the drawing went through SwiftShader.
+const webgl2Renderer=(page:Page)=>page.evaluate(()=>{const c=document.createElement('canvas'),g=c.getContext('webgl2');if(!g)return null;
+ const name=String(g.getParameter(g.getExtension('WEBGL_debug_renderer_info')?.UNMASKED_RENDERER_WEBGL??g.RENDERER));g.getExtension('WEBGL_lose_context')?.loseContext();return name;});
+test('With no GPU the software WebGL fallback still draws the model (#131)',async()=>{test.setTimeout(120000);const s=await opened('ready',false,{args:['--disable-gpu']});try{
+ const{page}=s;expect(await webgl2Renderer(page)).toMatch(/SwiftShader/);
+ await show(page).click();await expect(card(page).locator('.cv-pbox canvas')).toHaveCount(1,{timeout:20000});await expect(openView(page)).toBeFocused();
+ await openView(page).click();await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toBeVisible({timeout:20000});
+ // Drawn means pixels: a camera move changes what the canvas shows.
+ const canvas=page.locator('.creature-geometry canvas'),before=await canvas.screenshot();
+ await page.getByRole('button',{name:'Rotate left',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Unposed source edges drawn'})).toBeVisible();
+ await expect.poll(async()=>Buffer.compare(before,await canvas.screenshot())).not.toBe(0);
+}finally{await s.close();}});
+const noWebgl=async(page:Page)=>{
+ await expect(card(page).getByRole('img',{name:'3D drawing unavailable',exact:true})).toBeVisible({timeout:20000});
+ await expect(card(page).locator('.cv-pnote')).toHaveText("GEOMETRY_WEBGL_UNAVAILABLE VibeMiner gets no WebGL 2 graphics on this computer, so models can't be drawn. The creature, display and source details still work.");
+ await expect(card(page)).not.toContainText('Unsupported model');await expect(card(page)).not.toContainText('No preview yet');
+ await expect(card(page).locator('canvas')).toHaveCount(0);await expect(card(page).getByRole('button',{name:'Retry model'})).toHaveCount(0);await expect(openView(page)).toHaveCount(0);
+ await expect(card(page)).toContainText('FileDataID 123456');};
+const noWebglLaunch={args:['--disable-gpu'],env:{VIBEMINER_FIXTURE_NO_SOFTWARE_WEBGL:'1'}};
+test('With no WebGL at all Show model says 3D drawing is unavailable, offers no Retry, and the rest of Creatures still works (#131)',async()=>{test.setTimeout(120000);
+ const s=await opened('ready',false,noWebglLaunch);try{
+ const{page}=s;expect(await webgl2Renderer(page)).toBeNull();
+ await show(page).click();await noWebgl(page);await expect(card(page).locator('.cv-pbox')).toBeFocused();
+ await capture(page,s.app,'no-webgl',card(page),true);
+ // The rest of the view keeps working: another creature opens and its displays load, and coming back still names the outcome.
+ await page.getByRole('option',{name:/^Authored creature 6/}).click();await expect(page.getByRole('article',{name:/^Slot 0 · Display/})).toBeVisible();
+ await page.getByRole('option',{name:/^Authored creature 0/}).click();await expect(card(page)).toContainText('FileDataID 123456');
+ // The model is kept now, so the card says so again by itself, without another Show model.
+ await noWebgl(page);
+}finally{await s.close();}});
+test('With no WebGL at all a kept model\'s card says 3D drawing is unavailable by itself (#131)',async()=>{test.setTimeout(120000);
+ const s=await opened('ready',false,noWebglLaunch);try{
+ const{page}=s;await writeFile(path.join(s.data,'cached-geometry'),'cached');
+ await page.getByRole('option',{name:/^Authored creature 6/}).click();await page.getByRole('option',{name:/^Authored creature 0/}).click();
+ await noWebgl(page);expect((await methods(s.data)).filter(r=>r.method==='creatures.geometry.prepare')).toHaveLength(0);
 }finally{await s.close();}});
 test('A kept model draws by itself for the first resolved display',async()=>{test.setTimeout(90000);const s=await opened();try{
  const{page}=s;await writeFile(path.join(s.data,'cached-geometry'),'cached');
