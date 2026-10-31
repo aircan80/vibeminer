@@ -12,6 +12,8 @@ async function opened(geometry='ready'){
   await page.locator('.build-row').first().click();await page.getByRole('button',{name:'Open build',exact:true}).click();await writeFile(path.join(s.data,'release-open'),'release');
   await expect(page.getByRole('heading',{name:'Build overview',exact:true})).toBeVisible();
   await page.getByRole('switch').click();
+  // retention.set removes retention-state.json, so write it only after the set reply shows (#123).
+  await expect(page.locator('.retention-state')).toHaveText('Download all queued');
   await writeFile(path.join(s.data,'retention-state.json'),JSON.stringify({state:'running',progress:{stage:'Retaining encoded content',unit:'bytes',completed:'7',total:null}}));
   await expect(page.locator('.dv-chip:visible')).toHaveCount(1);
   await writeFile(path.join(s.data,'cached-creatures'),'cached');await writeFile(path.join(s.data,'cached-display'),'cached');await writeFile(path.join(s.data,'geometry-state.json'),JSON.stringify({state:geometry,textured:false}));

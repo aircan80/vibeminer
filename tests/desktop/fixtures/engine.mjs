@@ -310,6 +310,8 @@ async function dispatch(request) {
     if(method==='items.facts'&&process.env.VIBEMINER_FIXTURE_FACTS!=='0'){if(existsSync(path.join(directory,'hold-item-facts')))await waitForRelease('release-item-facts',shutdown.signal);if(existsSync(path.join(directory,'items-facts-error')))return fail(id,'LOCAL_ITEM_READ_FAILED','Authored item facts could not be read.');return reply(id,itemFacts(value,params,iconsEnabled));}
   }
   if(method.startsWith('retention.')&&retentionEnabled){
+    // retention-set-delay.json holds each retention.set this many ms before it reads the authored state (#123).
+    if(method==='retention.set'){const delay=control('retention-set-delay.json');if(delay)await new Promise(r=>setTimeout(r,delay));}
     if(existsSync(path.join(directory,'retention-read-error'))&&method!=='retention.set')return fail(id,'LOCAL_STATUS_UNAVAILABLE','Authored local status read is unavailable.');
     if(method==='retention.list')return reply(id,{jobs:[...retentionJobs.values()].map(s=>retentionSnapshot(s.target)).filter(s=>s.jobId&&(s.mode==='downloadAll'||s.state==='stopping'))});
     const {action,expectedRevision,...target}=params;
