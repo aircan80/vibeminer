@@ -25,19 +25,50 @@ export async function launchApp({ executablePath, appPath, directory, env, offli
   return { application, page };
 }
 
-/** Discovery on an empty catalog: the full product filter, no saved builds and no implicit remote check. */
+/** The pane's Refresh button; the new and the old list both label it Refresh builds. */
+const refreshButton = page => page.locator('.dv-pane-head').getByRole('button', { name: 'Refresh builds', exact: true });
+
+/**
+ * Discovery on a fresh profile (#205): the layer 3 build list, empty, with every reviewed product, Refresh ready and no
+ * implicit remote check. The engine's own reply proves the real registry and a writable build store.
+ */
 export async function expectEmptyDiscovery(page, { productCount = registeredProducts } = {}) {
+  await expect(page.getByRole('heading', { name: 'Builds', exact: true })).toBeVisible();
+  await expect(page.locator('.dv-empty')).toHaveText('No builds stored yetRefresh asks the version service.');
+  await expect(page.getByRole('listbox', { name: 'Builds' }).getByRole('option')).toHaveCount(0);
+  await expect(refreshButton(page)).toBeEnabled();
+  await expect(refreshButton(page)).toHaveText(/Refresh builds/);
+  await expect(page.locator('.dv-statusbar').getByRole('status')).toHaveText('Not refreshed this session.');
+  await expect(page.locator('.dv-statusbar')).toContainText('Not checked yet');
+  await expect(page.getByRole('button', { name: 'Old build list', exact: true })).toBeEnabled();
+  const catalog = await page.evaluate(async () => {
+    const reply = await window.discovery.catalogList();
+    if (!reply.ok) throw new Error(`${reply.error.message} (${reply.error.code})`);
+    return { access: reply.value.access, products: reply.value.products.length, builds: reply.value.products.reduce((sum, product) => sum + product.buildCount, 0) };
+  });
+  expect(catalog).toEqual({ access: 'writer', products: productCount, builds: 0 });
+}
+
+/**
+ * Switch this session to the old build list, which still opens builds (#205). Opening on the new storage isn't there yet,
+ * so the open and saved-history steps run here. The app starts on the new list again after a restart.
+ */
+export async function switchToOldList(page) {
+  await page.getByRole('button', { name: 'Old build list', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'New build list', exact: true })).toBeFocused();
+}
+
+/** The old list on an empty catalog: the full product filter, no saved builds and no implicit remote check. */
+export async function expectEmptyOldList(page, { productCount = registeredProducts } = {}) {
   await expect(page.getByRole('heading', { name: 'Builds', exact: true })).toBeVisible();
   await expect(page.getByLabel('Product', { exact: true }).locator('option')).toHaveCount(productCount + 1);
   await expect(page.getByRole('heading', { name: 'No saved builds yet' })).toBeVisible();
   await expect(refreshButton(page)).toBeEnabled();
-  await expect(page.getByRole('status')).toHaveText('Not refreshed this session.');
+  await expect(page.locator('.dv-statusbar').getByRole('status')).toHaveText('Not refreshed this session.');
   await expect(page.locator('.dv-statusbar')).toContainText('Not checked yet');
 }
 
-const refreshButton = page => page.locator('.dv-pane-head').getByRole('button', { name: 'Refresh builds', exact: true });
-
-/** One explicit check of every product. Regional problems still count as a completed check. */
+/** One explicit check of every product on the old list. Regional problems still count as a completed check. */
 export async function refreshBuilds(page, { timeout }) {
   await refreshButton(page).click();
   await expect(page.getByRole('status')).toContainText(/^(Discovery complete|Check completed with problems)/, { timeout });
@@ -117,7 +148,7 @@ export async function expectHomeDetails(page, workspace) {
   await expect(source).toBeHidden();
 }
 
-/** Discovery after a restart: the saved catalog and exact selection, without a new check. */
+/** The old list after a restart: the saved catalog and exact selection, without a new check. */
 export async function expectStoredDiscovery(page, { catalog, selected }) {
   await expect(page.getByRole('status')).toHaveText('Not refreshed this session.');
   const rows = page.locator('.build-row');

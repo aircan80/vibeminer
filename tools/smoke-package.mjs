@@ -6,7 +6,7 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expectEmptyDiscovery, expectHome, expectHomeDetails, expectStoredDiscovery, launchApp, openBuild, readCatalog, refreshBuilds, selectBuild } from './smoke-steps.mjs';
+import { expectEmptyDiscovery, expectEmptyOldList, expectHome, expectHomeDetails, expectStoredDiscovery, launchApp, openBuild, readCatalog, refreshBuilds, selectBuild, switchToOldList } from './smoke-steps.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const live = process.argv.includes('--live');
@@ -38,6 +38,9 @@ try {
   });
   expect(icon).toEqual({ empty: false, size: { width: 512, height: 512 } });
   await expectEmptyDiscovery(page);
+  // Discovery starts on the new list (#205); builds open through the old list until opening on the new storage lands.
+  await switchToOldList(page);
+  await expectEmptyOldList(page);
   if (live) {
     await refreshBuilds(page, { timeout: refreshTimeout });
     record.opening = await selectBuild(page, { productId: 'wow' });
@@ -51,6 +54,8 @@ try {
   }
   await application.close(); application = undefined;
   ({ application, page } = await launch(true));
+  await expectEmptyDiscovery(page);
+  await switchToOldList(page);
   if (live) {
     await expectStoredDiscovery(page, { catalog: record.catalog, selected: record.opening });
     await page.screenshot({ path: path.join(evidence, 'offline-reopen.png'), fullPage: true });
@@ -61,7 +66,7 @@ try {
     expect(retained(reopened.configurations)).toEqual(retained(record.workspace.configurations));
     await expectHomeDetails(page, reopened);
     await page.screenshot({ path: path.join(evidence, 'offline-home.png'), fullPage: true });
-  } else await expectEmptyDiscovery(page);
+  } else await expectEmptyOldList(page);
   await application.close(); application = undefined;
   record.completedAt = new Date().toISOString(); record.outcome = 'passed';
   await writeFile(path.join(evidence, live ? 'live-result.json' : 'fresh-result.json'), JSON.stringify(record, null, 2) + '\n');

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { root } from './helpers';
-import { expectEmptyDiscovery, expectHome, expectHomeDetails, expectStoredDiscovery, launchApp, openBuild, readCatalog, refreshBuilds, selectBuild } from '../../tools/smoke-steps.mjs';
+import { expectEmptyDiscovery, expectEmptyOldList, expectHome, expectHomeDetails, expectStoredDiscovery, launchApp, openBuild, readCatalog, refreshBuilds, selectBuild, switchToOldList } from '../../tools/smoke-steps.mjs';
 
 // Runs the package smoke check's own steps against the unpackaged app, so `npm run smoke:package` can't drift from the screens unnoticed.
 const appPath = process.env.VIBEMINER_DESKTOP_TEST_APP_PATH ?? path.join(root, 'apps/desktop');
@@ -21,16 +21,23 @@ async function session<T>(work: (launch: (offline: boolean, env?: Record<string,
 
 test('fresh package smoke steps pass on the real engine, then again with HTTP proxies blocked', async () => {
   await session(async launch => {
-    await expectEmptyDiscovery((await launch(false)).page);
-    await expectEmptyDiscovery((await launch(true)).page);
+    for (const offline of [false, true]) {
+      const { page } = await launch(offline);
+      await expectEmptyDiscovery(page);
+      await switchToOldList(page);
+      await expectEmptyOldList(page);
+    }
   });
 });
 
 test('live package smoke steps pass on the authored engine: refresh, open, offline reopen with saved selection and Home', async () => {
   await session(async (launch, directory) => {
-    const fixture = { VIBEMINER_ENGINE_PATH: path.join(root, 'tests/desktop/fixtures/engine.mjs'), VIBEMINER_FIXTURE_CONTROL_DIR: directory, VIBEMINER_AUTHORED_FIXTURES: '1', VIBEMINER_FIXTURE_PERSIST: '1' };
+    const fixture = { VIBEMINER_ENGINE_PATH: path.join(root, 'tests/desktop/fixtures/engine.mjs'), VIBEMINER_FIXTURE_CONTROL_DIR: directory, VIBEMINER_AUTHORED_FIXTURES: '1', VIBEMINER_FIXTURE_PERSIST: '1', VIBEMINER_FIXTURE_BUILD_CATALOG: 'empty' };
     for (const release of ['release-wow', 'release-wowt', 'release-open']) await writeFile(path.join(directory, release), 'release');
     let { page } = await launch(false, fixture);
+    // Like the real engine, the authored one starts on the empty new list; builds open through the old list.
+    await expectEmptyDiscovery(page);
+    await switchToOldList(page);
     await refreshBuilds(page, { timeout: 8_000 });
     const opening = await selectBuild(page, { productId: 'wow' });
     expect(opening.productId).toBe('wow');
@@ -41,6 +48,8 @@ test('live package smoke steps pass on the authored engine: refresh, open, offli
     // The authored refresh adds a wowt build to the two saved wow builds.
     expect(catalog.builds.map(build => build.productId).sort()).toEqual(['wow', 'wow', 'wowt']);
     ({ page } = await launch(true, fixture));
+    await expectEmptyDiscovery(page);
+    await switchToOldList(page);
     await expectStoredDiscovery(page, { catalog, selected: opening });
     await openBuild(page, { timeout: 8_000 });
     await expectHomeDetails(page, await expectHome(page, opening));
