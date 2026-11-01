@@ -136,6 +136,34 @@ public sealed class FilesSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task LayerSixReusesTheSessionsTablesFileSystemAndImages()
+    {
+        // #204: each :items or :creatures load gets layer 6 over the session's one tables composition, its one read-only file
+        // system and its BLP images; the lease opens no build and closes only its own holds.
+        session.OpenGeneratedStore = (_, _) => Task.FromResult<VibeMiner.Generated.IGeneratedStore>(new VibeMiner.Generated.Testing.InMemoryGeneratedStore());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => session.ComposeConceptsAsync(session, default));
+        int leased = 0, released = 0;
+        var tables = new VibeMiner.Formats.Testing.InMemoryTables();
+        session.OpenTables = (_, _) => { leased++; return Task.FromResult(new TablesLease(tables, () => { released++; return ValueTask.CompletedTask; })); };
+        session.UseConcepts();
+        var first = await session.OpenConcepts!(session, default);
+        var second = await session.OpenConcepts!(session, default);
+        Assert.Equal(1, made);
+        Assert.Equal(0, files.Opens);
+        Assert.Equal(1, stores.Open);
+        // Layer 6 opens through the session's tables: a build they don't know answers as layer 5 does.
+        Assert.Equal(FilesOpenState.NeedsNetwork, (await first.Items.ForAsync(A, "enUS", default)).State);
+        await first.DisposeAsync();
+        await first.DisposeAsync();
+        await second.DisposeAsync();
+        Assert.Equal((2, 2), (leased, released));
+        // The cache keeps the read-only store until the session closes.
+        Assert.Equal(1, stores.Open);
+        await session.DisposeAsync();
+        Assert.Equal(0, stores.Open);
+    }
+
+    [Fact]
     public async Task FilesThenTablesShareOneGeneratedStore()
     {
         await using var real = new BrowseSession(stores, new DataFolder(data, DataFolderSource.Override), Path.Combine(data, ObjectStore.DefaultFolderName));

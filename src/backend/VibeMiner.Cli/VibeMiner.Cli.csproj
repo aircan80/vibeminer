@@ -9,6 +9,8 @@
   <!-- Layer 4 files for the browse Files views (#175): one read-only file system per session. -->
   <ProjectReference Include="../VibeMiner.Files/VibeMiner.Files.csproj" />
   <ProjectReference Include="../VibeMiner.Formats/VibeMiner.Formats.csproj" />
+  <!-- Layer 6 items, item effects and creatures for :items, :creatures and concepts states (#204). -->
+  <ProjectReference Include="../VibeMiner.Concepts/VibeMiner.Concepts.csproj" />
   <!-- The layer 1 generated store (D210) the browse session opens for the persisted listfile names index (#186). -->
   <ProjectReference Include="../VibeMiner.Generated/VibeMiner.Generated.csproj" />
   <!-- Terminal tables, progress and panels for the text output only (D151). Not in the desktop package. -->

@@ -127,5 +127,7 @@ internal sealed class ViewRegistry
         .Add(new("builds", "builds per product from the history log; r refreshes", () => new BuildsView()))
         .Add(new("settings", "the data folder, its sizes, the last scrub and measured builds (read-only)", () => new SettingsView()))
         .Add(new("files", "a build's files; f in :builds opens one", () => new FilesView()))
-        .Add(new("tables", "a current build's tables (enUS): state, schema, rows, references", () => new TablesView()));
+        .Add(new("tables", "a current build's tables (enUS): state, schema, rows, references", () => new TablesView()))
+        .Add(new("items", "a current build's items (enUS): names, icon, facts, labels, effects", () => new ConceptBuildsView(ConceptKind.Items)))
+        .Add(new("creatures", "a current build's creatures (enUS): names, display chains, models", () => new ConceptBuildsView(ConceptKind.Creatures)));
 }

@@ -133,6 +133,18 @@ public static class ItemFacts
     };
 
     /// <summary>
+    /// How the item's ItemSparse lookup went, from its name state, which already says so: Valid, Empty and Invalid names come from
+    /// a found row (Present). Never Missing unless ItemSparse is complete.
+    /// </summary>
+    public static ItemSparseState SparseState(ItemNameState name) => name switch
+    {
+        ItemNameState.MissingSparse => ItemSparseState.Missing,
+        ItemNameState.SparseProtected => ItemSparseState.Protected,
+        ItemNameState.SparseUnknown => ItemSparseState.Unknown,
+        _ => ItemSparseState.Present,
+    };
+
+    /// <summary>
     /// The facts of an Item row and its ItemSparse row. <paramref name="sparseColumns"/> is null when ItemSparse isn't readable;
     /// <paramref name="sparse"/> is the found row, else <paramref name="sparseState"/> says why there is none.
     /// </summary>

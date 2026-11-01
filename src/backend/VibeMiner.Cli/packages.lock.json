@@ -267,6 +267,12 @@
           "VibeMiner.Objects": "[1.0.0, )"
         }
       },
+      "vibeminer.concepts": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Formats": "[1.0.0, )"
+        }
+      },
       "vibeminer.files": {
         "type": "Project",
         "dependencies": {

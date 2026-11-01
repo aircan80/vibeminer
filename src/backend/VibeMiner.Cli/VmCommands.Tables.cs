@@ -37,15 +37,8 @@ internal sealed partial class VmCommands
         }
         try
         {
-            var catalog = await store.CatalogAsync(ct).ConfigureAwait(false);
-            var list = await catalog.ListBuildsAsync(product, ct).ConfigureAwait(false);
-            var current = list.Builds.Where(b => b.Current).ToList();
-            var build = current.FirstOrDefault(b => b.Regions.Any(g => g.Current && g.Region == "us")) ?? current.FirstOrDefault();
-            var region = build is null ? null
-                : build.Regions.FirstOrDefault(g => g.Current && g.Region == "us") ?? build.Regions.FirstOrDefault(g => g.Current) ?? build.Regions.FirstOrDefault();
-            if (build is null || region is null)
+            if (await CurrentBuildAsync(store, product, ct).ConfigureAwait(false) is not ({ } build, { } buildRef))
                 return await Fail("TABLES_NO_CURRENT_BUILD", $"The history log lists no current build for {product}. Run vm builds refresh {product} first.");
-            var buildRef = new BuildRef(build.Product, build.BuildConfig, region.CdnConfig, region.Region);
 
             var lease = await composeTables(store, folder.Path, fetchDefinitions, ct).ConfigureAwait(false);
             var handle = store;
@@ -54,6 +47,19 @@ internal sealed partial class VmCommands
                 return await CheckAll(storeFolder, handle.Writer, lease.Tables, build, buildRef, ct).ConfigureAwait(false);
         }
         finally { if (store is not null) await store.DisposeAsync().ConfigureAwait(false); }
+    }
+
+    /// <summary>The product's current build in its <c>us</c> region when current, else the first current one; null when none is current.</summary>
+    private static async Task<(CatalogBuild Build, BuildRef Ref)?> CurrentBuildAsync(IStoreHandle store, string product, CancellationToken ct)
+    {
+        var catalog = await store.CatalogAsync(ct).ConfigureAwait(false);
+        var list = await catalog.ListBuildsAsync(product, ct).ConfigureAwait(false);
+        var current = list.Builds.Where(b => b.Current).ToList();
+        var build = current.FirstOrDefault(b => b.Regions.Any(g => g.Current && g.Region == "us")) ?? current.FirstOrDefault();
+        var region = build is null ? null
+            : build.Regions.FirstOrDefault(g => g.Current && g.Region == "us") ?? build.Regions.FirstOrDefault(g => g.Current) ?? build.Regions.FirstOrDefault();
+        if (build is null || region is null) return null;
+        return (build, new BuildRef(build.Product, build.BuildConfig, region.CdnConfig, region.Region));
     }
 
     private sealed record PageTiming(string Name, uint FileDataId, TableState State, TablePageState PageState, int Rows, double FirstMs, double SecondMs);

@@ -112,15 +112,31 @@ internal sealed class TablesView : BrowseView
 {
     public override string Title => "tables";
 
-    private static readonly string[] Columns = ["Product", "Version", "Region", "Build config"];
+    internal static readonly string[] Columns = ["Product", "Version", "Region", "Build config"];
 
     public override async Task<ViewContent> LoadAsync(BrowseSession session, CancellationToken ct)
+    {
+        var (rows, missing) = await CurrentBuildRowsAsync(session, (build, title) => new TableListView(build, title, TablesAccess.Locale), ct).ConfigureAwait(false);
+        if (missing is not null) return new(Columns, [], missing);
+        var note = rows.Count == 0 ? "No current builds in the history log. r in :builds fetches them."
+            : $"{rows.Count:N0} current builds. Enter lists a build's tables ({TablesAccess.Locale}).";
+        if (session.OpenTables is null) note += " " + TablesAccess.NotWired;
+        return new(Columns, rows, note);
+    }
+
+    /// <summary>
+    /// The current builds of every reviewed product, one row each (product, version, region, build config), Enter opening
+    /// <paramref name="drill"/> for the build in the region <see cref="BrowseSession.ChooseRegionAsync"/> picks; a build with no
+    /// usable region doesn't open. A missing store comes back as its note instead. Read-only. <c>:items</c> and <c>:creatures</c> use it too.
+    /// </summary>
+    internal static async Task<(List<BrowseRow> Rows, string? Missing)> CurrentBuildRowsAsync(BrowseSession session, Func<BuildRef, string, BrowseView> drill,
+        CancellationToken ct)
     {
         IStoreHandle store;
         try { store = await session.OpenReadAsync(ct).ConfigureAwait(false); }
         catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.Missing)
         {
-            return new(Columns, [], $"No object store at {session.StoreFolder} yet. r in :builds fetches builds and creates it.");
+            return ([], $"No object store at {session.StoreFolder} yet. r in :builds fetches builds and creates it.");
         }
         var rows = new List<BrowseRow>();
         await using (store)
@@ -139,15 +155,11 @@ internal sealed class TablesView : BrowseView
                     }
                     var buildRef = new BuildRef(build.Product, build.BuildConfig, region.CdnConfig, region.Region);
                     var title = $"{product.Id} {build.VersionsName}";
-                    rows.Add(new([product.Id, build.VersionsName, region.Region, build.BuildConfig],
-                        () => new TableListView(buildRef, title, TablesAccess.Locale)));
+                    rows.Add(new([product.Id, build.VersionsName, region.Region, build.BuildConfig], () => drill(buildRef, title)));
                 }
             }
         }
-        var note = rows.Count == 0 ? "No current builds in the history log. r in :builds fetches them."
-            : $"{rows.Count:N0} current builds. Enter lists a build's tables ({TablesAccess.Locale}).";
-        if (session.OpenTables is null) note += " " + TablesAccess.NotWired;
-        return new(Columns, rows, note);
+        return (rows, null);
     }
 }
 

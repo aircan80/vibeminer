@@ -18,14 +18,17 @@ namespace VibeMiner.Cli;
 /// JSON document to <c>json</c> instead. Exit codes: 0 done, 1 failed (including a scrub that found damage), 2 bad usage, 130 canceled.
 /// <c>browse</c> hands the session to <c>browse</c>, the full-screen browser (#182), which is null when there's no terminal.
 /// <c>tables</c> composes layer 5 over an open store handle (data folder, fetch definitions); by default
-/// <see cref="TablesComposition.LeaseAsync"/>, a test seam otherwise. Its lease closes the handle too.
+/// <see cref="TablesComposition.LeaseAsync"/>, a test seam otherwise. Its lease closes the handle too. <c>concepts</c> does the same for
+/// layer 6 (<see cref="ConceptsComposition.LeaseAsync"/>).
 /// </summary>
 internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpener stores, IAnsiConsole output, IAnsiConsole error, TextWriter jsonOutput,
     Func<BrowseSession, CancellationToken, Task<int>>? browse = null, TimeProvider? time = null,
-    Func<IStoreHandle, string, bool, CancellationToken, Task<TablesLease>>? tables = null)
+    Func<IStoreHandle, string, bool, CancellationToken, Task<TablesLease>>? tables = null,
+    Func<IStoreHandle, string, CancellationToken, Task<ConceptsLease>>? concepts = null)
 {
     private readonly TimeProvider clock = time ?? TimeProvider.System;
     private readonly Func<IStoreHandle, string, bool, CancellationToken, Task<TablesLease>> composeTables = tables ?? TablesComposition.LeaseAsync;
+    private readonly Func<IStoreHandle, string, CancellationToken, Task<ConceptsLease>> composeConcepts = concepts ?? ConceptsComposition.LeaseAsync;
 
     public const int Ok = 0, Failed = 1, Usage = 2, Canceled = 130;
     private const int HistoryPage = 1000, ListedDamage = 20;
@@ -35,10 +38,11 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
     public const string UsageText = """
         Usage: vm [--data <dir>] [--json] [--yes] <command>
 
-          browse                  full-screen browser: :store, :history, :builds, :files, :tables, :settings; ? lists the keys
+          browse                  full-screen browser: :store, :history, :builds, :files, :tables, :items, :creatures,
+                                  :settings; ? lists the keys
                                   (read-only, except: r and a in :builds and m, g and G in :files take the writer lock, and
-                                  the first :tables load holds it until browse exits, or reads only what is stored when the
-                                  app holds it)
+                                  the first :tables, :items or :creatures load takes it and holds it until browse exits, or
+                                  reads only what is stored when the app holds it)
           store info              packs, objects and bytes in the object store, and the last scrub (read-only)
           store scrub             full index check and verify of every object; records the outcome in scrub-v1.json
                                   (writes: takes the writer lock)
@@ -55,13 +59,20 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
                                   open the product's current build in enUS and check every table, with timings (writes: takes
                                   the writer lock and downloads table bytes and the metadata they need; --fetch-definitions
                                   also fetches newer WoWDBDefs definitions, D081)
+          concepts states <product> [--sample N] [--details M]
+                                  open the product's current build in enUS, list the first N items and N creatures
+                                  (default 2000) and read the first M details (default 20) through layer 6; counts by
+                                  state (writes: takes the writer lock and downloads the tables, icons and models read)
 
           --data <dir>   data folder; otherwise VIBEMINER_DATA_DIR, the folder chosen in Settings, then the default
           --json         one JSON document on stdout instead of text
           --yes          confirm reset
+          --sample N     concepts states: items and creatures to list (1-100000)
+          --details M    concepts states: details to read of each (0-1000, at most N)
         """;
 
     private bool json, yes, fetchDefinitions;
+    private int? sample, details;
     /// <summary>Entries written so far while a <c>history list --json</c> document is open, so a failure can close it.</summary>
     private long? openHistory;
     private DataFolder folder = new("", DataFolderSource.Default);
@@ -78,6 +89,13 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
             if (arg == "--json") json = true;
             else if (arg == "--yes") yes = true;
             else if (arg == "--fetch-definitions") fetchDefinitions = true;
+            else if (arg is "--sample" or "--details")
+            {
+                if (i + 1 >= args.Count || !int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var count))
+                    return UsageError($"{arg} needs a whole number.");
+                i++;
+                if (arg == "--sample") sample = count; else details = count;
+            }
             else if (arg == "--data")
             {
                 if (i + 1 >= args.Count || args[i + 1].Length == 0) return UsageError("--data needs a folder.");
@@ -102,12 +120,16 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
             ["builds", "refresh"] => (folder, token) => BuildsRefresh(folder, null, token),
             ["builds", "refresh", var product] => (folder, token) => BuildsRefresh(folder, product, token),
             ["tables", "states", var product] => (folder, token) => TablesStates(folder, product, token),
+            ["concepts", "states", var product] => (folder, token) => ConceptsStates(folder, product, token),
             _ => null,
         };
         if (command is null) return UsageError(words.Count == 0 ? "No command given." : $"Unknown command: {string.Join(' ', words)}.");
         if (yes && words is not ["reset"]) return UsageError("--yes only applies to reset.");
         if (fetchDefinitions && words is not ["tables", "states", _]) return UsageError("--fetch-definitions applies only to tables states.");
-        if (words is ["builds" or "tables", _, var named] && !Products.IsKnown(named))
+        if ((sample is not null || details is not null) && words is not ["concepts", "states", _]) return UsageError("--sample and --details apply only to concepts states.");
+        if (sample is < 1 or > MaxSample) return UsageError($"--sample is 1 to {MaxSample}.");
+        if (details is < 0 or > MaxDetails || details > (sample ?? DefaultSample)) return UsageError($"--details is 0 to {MaxDetails} and at most --sample.");
+        if (words is ["builds" or "tables" or "concepts", _, var named] && !Products.IsKnown(named))
             return UsageError($"{named} isn't a reviewed product. Reviewed: {string.Join(", ", Products.Ids)}.");
 
         try
@@ -134,6 +156,8 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
         await using var session = new BrowseSession(stores, folder, storeFolder, environment);
         // The real composition shares the session's generated store with the names index (#186).
         session.UseTables(tables ?? session.ComposeTablesAsync);
+        // Layer 6 over the session's tables composition, file system and images (#204).
+        session.UseConcepts();
         return await browse(session, ct).ConfigureAwait(false);
     }
 

@@ -41,7 +41,15 @@ internal sealed class BrowseSession : IAsyncDisposable
         FileSystem = DefaultFileSystemAsync;
         files = new FilesCache(OpenReadAsync, (objects, ct) => FileSystem(objects, Builds(objects), NameSwitch, ct));
         Preloads = new SessionPreloads(this);
+        Concepts = new ConceptsCache(ct => OpenConcepts is { } open ? open(this, ct)
+            : throw new InvalidOperationException("Layer 6 isn't wired into this session (UseConcepts)."));
     }
+
+    /// <summary>
+    /// The session's layer 6 handles (#204): the lease <see cref="OpenConcepts"/> gives, made once, and the build handles of the
+    /// last <see cref="ConceptsCache.MaxBuilds"/> builds, kept so their relation indexes survive key presses.
+    /// </summary>
+    internal ConceptsCache Concepts { get; }
 
     /// <summary>The session's table preloads (#159), over the tables composition; stopped and awaited before it closes.</summary>
     public SessionPreloads Preloads { get; }
@@ -91,6 +99,49 @@ internal sealed class BrowseSession : IAsyncDisposable
     {
         tables = new SessionTables(this, compose);
         OpenTables = tables.LeaseAsync;
+    }
+
+    /// <summary>
+    /// Opens layer 6 for one <c>:items</c> or <c>:creatures</c> load (#204); the view disposes the lease before the load returns.
+    /// Null until <see cref="UseConcepts"/> wires it (the views then say so). A test seam too.
+    /// </summary>
+    internal Func<BrowseSession, CancellationToken, Task<ConceptsLease>>? OpenConcepts { get; set; }
+
+    /// <summary>Wires <see cref="OpenConcepts"/> to the real layer 6 over the session's own layers (<see cref="ComposeConceptsAsync"/>).</summary>
+    internal void UseConcepts() => OpenConcepts = ComposeConceptsAsync;
+
+    /// <summary>
+    /// Layer 6 over what the session already keeps, opening nothing twice (D472): the one tables composition
+    /// (<see cref="OpenTables"/>), the session's read-only file system and its BLP images. Icons and models therefore read only
+    /// stored bytes, with no TACT keys, as the Files views do; the lease releases its holds and closes nothing else.
+    /// </summary>
+    internal async Task<ConceptsLease> ComposeConceptsAsync(BrowseSession _, CancellationToken ct)
+    {
+        if (OpenTables is not { } open) throw new InvalidOperationException("Layer 6 needs the session's tables composition (UseTables).");
+        var tables = await open(this, ct).ConfigureAwait(false);
+        try
+        {
+            var hold = await files.HoldAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var images = await ImagesAsync(ct).ConfigureAwait(false);
+                return ConceptsLease.Over(tables.Tables, hold.FileSystem, images, async () =>
+                {
+                    try { await hold.DisposeAsync().ConfigureAwait(false); }
+                    finally { await tables.DisposeAsync().ConfigureAwait(false); }
+                });
+            }
+            catch
+            {
+                await hold.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+        catch
+        {
+            await tables.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <summary>The region a build opens in when it lists it and its route is usable (D280). There is no setting for it yet.</summary>
@@ -171,8 +222,16 @@ internal sealed class BrowseSession : IAsyncDisposable
     /// <summary>The files target a Files view last opened (Open) in this session, which <c>:files</c> shows again; null before one.</summary>
     public OpenedFiles? LastFiles { get => Volatile.Read(ref lastFiles); set => Volatile.Write(ref lastFiles, value); }
 
-    /// <summary>Drops the session's store, file system and open build: the next <see cref="OpenFilesAsync"/> opens them again.</summary>
-    public ValueTask InvalidateFilesAsync() => files.InvalidateAsync();
+    /// <summary>
+    /// Drops the session's store, file system and open build: the next <see cref="OpenFilesAsync"/> opens them again. The layer 6
+    /// handles over them go too (<see cref="ConceptsCache.InvalidateAsync"/>).
+    /// </summary>
+    public async ValueTask InvalidateFilesAsync()
+    {
+        // Files first: a layer 6 compose that starts after this then holds the new file system.
+        try { await files.InvalidateAsync().ConfigureAwait(false); }
+        finally { await Concepts.InvalidateAsync().ConfigureAwait(false); }
+    }
 
     /// <summary>Stops and awaits the table preloads, then closes the tables composition and the session's files (each once no lease
     /// holds it), then the generated store. Call after every load has ended.</summary>
@@ -182,7 +241,12 @@ internal sealed class BrowseSession : IAsyncDisposable
         {
             try
             {
-                try { await Preloads.DisposeAsync().ConfigureAwait(false); }
+                try
+                {
+                    try { await Preloads.DisposeAsync().ConfigureAwait(false); }
+                    // Layer 6 holds the tables lease and a file system hold, so it closes first.
+                    finally { await Concepts.DisposeAsync().ConfigureAwait(false); }
+                }
                 finally { if (tables is not null) await tables.DisposeAsync().ConfigureAwait(false); }
             }
             finally { await files.DisposeAsync().ConfigureAwait(false); }

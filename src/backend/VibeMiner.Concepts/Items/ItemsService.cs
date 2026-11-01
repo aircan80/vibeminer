@@ -274,7 +274,7 @@ public sealed class ItemsService : IItems
                 }
                 itemRow = found.Row!;
                 (summary, sparseRow) = await SummaryAsync(layout, itemRow.Row, priority, cancellationToken).ConfigureAwait(false);
-                facts = ItemFacts.Project(layout.ItemColumns, layout.SparseColumns, itemRow.Row, sparseRow?.Row, SparseState(summary.Name.State));
+                facts = ItemFacts.Project(layout.ItemColumns, layout.SparseColumns, itemRow.Row, sparseRow?.Row, ItemFacts.SparseState(summary.Name.State));
             }
             catch (ItemsSourceException problem) { return new(ResultState(problem.Code), null, item, sparse, null, problem.Code, problem.Message); }
             var icon = await IconAsync(summary.IconFileDataId, cancellationToken).ConfigureAwait(false);
@@ -288,15 +288,6 @@ public sealed class ItemsService : IItems
                     await IconAsync(byDefault.DefaultIconFileDataId, cancellationToken).ConfigureAwait(false)));
             return new(ItemResultState.Found, new ItemDetail(summary, itemRow, sparseRow, icon, facts, labels) { Icons = icons, Appearances = appearances }, item, sparse);
         }
-
-        // The name state already says how the ItemSparse lookup went.
-        private static ItemSparseState SparseState(ItemNameState name) => name switch
-        {
-            ItemNameState.MissingSparse => ItemSparseState.Missing,
-            ItemNameState.SparseProtected => ItemSparseState.Protected,
-            ItemNameState.SparseUnknown => ItemSparseState.Unknown,
-            _ => ItemSparseState.Present,
-        };
 
         // The old icon rules (ItemIconsStore) on layer 5: no field, 0, else the BLP header through the build's files.
         private async Task<ItemIcon> IconAsync(uint? fileDataId, CancellationToken cancellationToken)

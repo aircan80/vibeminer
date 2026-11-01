@@ -31,8 +31,9 @@ test('production project dependencies preserve pure engine boundaries and the or
     Concepts: ['Formats'],
     // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
     // Generated: the browse session opens the profile's generated store once, for layer 4's listfile names index (#186) and tables.
-    // Composition is the layer 7 composition shared with the desktop Host (#205).
-    Cli: ['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Composition'],
+    // Composition is the layer 7 composition shared with the desktop Host (#205). Concepts: items, item effects and creatures
+    // for :items, :creatures and concepts states (#204).
+    Cli: ['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Composition', 'Concepts'],
     // Layer 7 composition shared by vm and the desktop Host (#205): data-folder paths, the writer's layer 2 over layers 1-3.
     Composition: ['Objects', 'Cdn', 'ObjectAccess', 'Builds'],
   };

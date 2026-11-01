@@ -36,6 +36,14 @@ internal sealed class FilesLease : IAsyncDisposable
         Interlocked.Exchange(ref disposed, 1) != 0 ? ValueTask.CompletedTask : owner.ReleaseAsync(shared, entry);
 }
 
+/// <summary>A hold on the session's <see cref="IFileSystem"/> (<see cref="FilesCache.HoldAsync"/>); disposing it twice is harmless.</summary>
+internal sealed class FileSystemHold(IFileSystem files, Func<ValueTask> release) : IAsyncDisposable
+{
+    private int disposed;
+    public IFileSystem FileSystem { get; } = files;
+    public ValueTask DisposeAsync() => Interlocked.Exchange(ref disposed, 1) != 0 ? ValueTask.CompletedTask : release();
+}
+
 /// <summary>
 /// The session's layer 4: one read-only store handle and one <see cref="IFileSystem"/> over it (so the community names load once),
 /// and the most recent opened target's <see cref="IBuildFiles"/>. Opening another target replaces it; the old handle is disposed
@@ -112,6 +120,30 @@ internal sealed class FilesCache(Func<CancellationToken, Task<IStoreHandle>> ope
             try { if (retired is not null) await ReleaseEntryAsync(retired).ConfigureAwait(false); }
             catch (Exception e) when (e is not OperationCanceledException) { }
             return lease;
+        }
+        finally { opening.Release(); }
+    }
+
+    /// <summary>
+    /// A hold on the session's file system alone, opening the store and file system when none is cached and opening no build
+    /// (layer 6 opens its own build files through it, #204). Dispose the hold when the load ends. Throws what the store open throws.
+    /// </summary>
+    public async Task<FileSystemHold> HoldAsync(CancellationToken ct)
+    {
+        lock (gate) ObjectDisposedException.ThrowIf(disposed, this);
+        await opening.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            Shared? have;
+            lock (gate)
+            {
+                ObjectDisposedException.ThrowIf(disposed, this);
+                have = shared;
+                if (have is not null) have.Holds++;
+            }
+            // A fresh shared part comes back already holding one for this caller.
+            have ??= await OpenSharedAsync(ct).ConfigureAwait(false);
+            return new FileSystemHold(have.Files, () => ReleaseAsync(have, null));
         }
         finally { opening.Release(); }
     }

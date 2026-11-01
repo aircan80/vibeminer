@@ -356,6 +356,18 @@
           "VibeMiner.Objects": "[1.0.0, )"
         }
       },
+      "vibeminer.concepts": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Formats": "[1.0.0, )"
+        }
+      },
+      "vibeminer.concepts.testing": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Concepts": "[1.0.0, )"
+        }
+      },
       "vibeminer.files": {
         "type": "Project",
         "dependencies": {
@@ -424,6 +436,7 @@
           "VibeMiner.Builds": "[1.0.0, )",
           "VibeMiner.Cdn": "[1.0.0, )",
           "VibeMiner.Composition": "[1.0.0, )",
+          "VibeMiner.Concepts": "[1.0.0, )",
           "VibeMiner.Files": "[1.0.0, )",
           "VibeMiner.Formats": "[1.0.0, )",
           "VibeMiner.Generated": "[1.0.0, )",
