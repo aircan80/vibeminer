@@ -56,16 +56,23 @@ internal sealed class ViewRegistry
 
     public ViewEntry? Find(string name)
     {
-        name = name.Trim().TrimStart(':').ToLowerInvariant();
-        if (name.Length == 0) return null;
-        if (entries.FirstOrDefault(e => e.Name == name) is { } exact) return exact;
-        var matches = entries.Where(e => e.Name.StartsWith(name, StringComparison.Ordinal)).ToList();
+        var matches = Matching(name);
         return matches.Count == 1 ? matches[0] : null;
+    }
+
+    /// <summary>The exact match alone, else every view the prefix starts; more than one means the prefix is ambiguous.</summary>
+    public IReadOnlyList<ViewEntry> Matching(string name)
+    {
+        name = name.Trim().TrimStart(':').ToLowerInvariant();
+        if (name.Length == 0) return [];
+        if (entries.FirstOrDefault(e => e.Name == name) is { } exact) return [exact];
+        return entries.Where(e => e.Name.StartsWith(name, StringComparison.Ordinal)).ToList();
     }
 
     /// <summary>The views <c>vm browse</c> has today; files and tables come with their layers.</summary>
     public static ViewRegistry Default() => new ViewRegistry()
         .Add(new("store", "the object store: packs, objects, bytes", () => new StoreView()))
         .Add(new("history", "version-service replies per product; Enter shows the raw reply", () => new HistoryView()))
-        .Add(new("builds", "builds per product from the history log; r refreshes", () => new BuildsView()));
+        .Add(new("builds", "builds per product from the history log; r refreshes", () => new BuildsView()))
+        .Add(new("settings", "the data folder, its sizes, the last scrub and measured builds (read-only)", () => new SettingsView()));
 }

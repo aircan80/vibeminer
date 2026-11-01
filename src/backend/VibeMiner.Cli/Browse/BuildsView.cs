@@ -168,7 +168,9 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
         if (opened is not { State: BuildOpenState.Open, Opened: { } open }) return NotOpened(opened);
         progress.Report($"counting stored objects of {build.VersionsName}; x cancels");
         await using var figures = new DownloadedFigures(store.Objects);
-        return Measured(await figures.GetAsync(open, ct).ConfigureAwait(false), region.Region);
+        var figure = await figures.GetAsync(open, ct).ConfigureAwait(false);
+        session.Remember(open.Build, build.VersionsName, figure);
+        return Measured(figure, region.Region);
     }
 
     /// <summary>The region <c>d</c> and <c>a</c> open the build in: a current one, else the first listed.</summary>
@@ -207,9 +209,19 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
             {
                 result = await jobs.StopAsync(open.Build).ConfigureAwait(false) ?? await job.Completion.ConfigureAwait(false);
             }
+            if (FigureOf(result) is { } figure) session.Remember(open.Build, build.VersionsName, figure);
             return DownloadAllLine(result, region.Region);
         }
     }
+
+    /// <summary>
+    /// What the end of a Download all says is stored, as a Downloaded figure: only once its scan has finished (a finished pass, or a
+    /// job past scanning), since during the scan only scanned rows count.
+    /// </summary>
+    internal static DownloadedFigure? FigureOf(DownloadAllResult r) =>
+        r.Outcome is DownloadAllOutcome.Completed or DownloadAllOutcome.Incomplete || r.Final.Stage == DownloadAllStage.Fetching
+            ? new DownloadedFigure(r.Final.StoredObjects, r.Final.TotalObjects, r.Final.StoredBytes, r.Final.TotalBytes)
+            : null;
 
     /// <summary>
     /// A running job's progress, after the task's <c>download all: </c> prefix, e.g.

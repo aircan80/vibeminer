@@ -4,14 +4,18 @@ using VibeMiner.Builds;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 using Spectre.Console;
+using VibeMiner.Cli.Profile;
 using Xunit;
 
 namespace VibeMiner.Cli.Tests;
 
-public sealed class CommandTests
+public sealed class CommandTests : IDisposable
 {
-    private const string Data = "/data/vm";
-    private static readonly string StoreFolder = Path.Combine(Data, ObjectStore.DefaultFolderName);
+    // A temp data folder: store scrub writes its record there. Created on first write, removed after each test.
+    private readonly string Data = Path.Combine(Path.GetTempPath(), "vibeminer-cli-commands-" + Guid.NewGuid().ToString("N"));
+    private string StoreFolder => Path.Combine(Data, ObjectStore.DefaultFolderName);
+
+    public void Dispose() { if (Directory.Exists(Data)) Directory.Delete(Data, true); }
 
     private readonly FakeStores stores = new();
     private readonly StringWriter output = new(), error = new(), json = new();
@@ -24,7 +28,16 @@ public sealed class CommandTests
 
     private Task<int> Run(params string[] args) => Run(CancellationToken.None, args);
     private Task<int> Run(CancellationToken ct, params string[] args) =>
-        new VmCommands(Env(("VIBEMINER_DATA_DIR", Data)), stores, Plain(output), Plain(error), json).RunAsync(args, ct);
+        new VmCommands(Env(("VIBEMINER_DATA_DIR", Data)), stores, Plain(output), Plain(error), json, time: clock).RunAsync(args, ct);
+
+    private readonly ManualTime clock = new(new DateTimeOffset(2026, 11, 1, 9, 30, 0, TimeSpan.Zero));
+
+    private void ClearOutput()
+    {
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        json.GetStringBuilder().Clear();
+    }
 
     private JsonElement JsonOut() => JsonDocument.Parse(json.ToString()).RootElement;
 
@@ -67,7 +80,8 @@ public sealed class CommandTests
         Assert.Contains(["Packs", "2"], rows);
         Assert.Contains(["Objects", "1,234 (56 history records)"], rows);
         Assert.Contains(["Bytes", "3.0 MiB in packs, 2.0 MiB live"], rows);
-        Assert.Contains(["Last scrub", "not recorded"], rows);
+        Assert.Contains(["Last scrub", "none yet (vm store scrub runs one)"], rows);
+        Assert.DoesNotContain(rows, r => r[0] == "Scrub problem");
         Assert.False(output.ToString().Contains('\u001b'), "no ANSI codes on a plain console");
         Assert.Equal("", json.ToString());
     }
@@ -83,7 +97,7 @@ public sealed class CommandTests
         Assert.False(info.GetProperty("store").GetProperty("writer").GetBoolean());
         Assert.Equal(1234, info.GetProperty("objects").GetInt64());
         Assert.Equal(3L << 20, info.GetProperty("packBytes").GetInt64());
-        Assert.Equal(JsonValueKind.Null, info.GetProperty("lastScrub").ValueKind);
+        Assert.Equal("absent", info.GetProperty("lastScrub").GetProperty("state").GetString());
     }
 
     [Fact]
@@ -388,5 +402,81 @@ public sealed class CommandTests
         Assert.Contains("new products are unknown", output.ToString());
         Assert.Contains("SUMMARY_UNREADABLE", output.ToString());
         Assert.DoesNotContain("No new WoW products", output.ToString());
+    }
+
+    [Fact]
+    public async Task AFinishedScrubIsRecordedAndInfoShowsIt()
+    {
+        Assert.Equal(VmCommands.Ok, await Run("store", "scrub"));
+        Assert.Contains(["Recorded", ScrubRecords.PathIn(Data)], Rows(output));
+        var read = await ScrubRecords.ReadAsync(Data);
+        Assert.Equal(ScrubRecordState.Present, read.State);
+        Assert.Equal((ScrubOutcome.Clean, clock.GetUtcNow(), 1234L), (read.Record!.Outcome, read.Record.FinishedAt, read.Record.Checked));
+
+        ClearOutput();
+        Assert.Equal(VmCommands.Ok, await Run("store", "info"));
+        Assert.Contains(["Last scrub", "2026-11-01 09:30 UTC: clean, 1,234 objects checked"], Rows(output));
+        Assert.DoesNotContain(Rows(output), r => r[0] == "Scrub problem");
+
+        // A later damaged scrub replaces it, and info names the problem.
+        var bad = ObjectKey.Parse(ObjectKeyType.Config, new string('a', 32));
+        stores.Scrub = new("pack 3 is shorter than its rows", true, new VerifyReport(10, 100, 1, 0, [bad], []));
+        clock.Advance(TimeSpan.FromHours(1));
+        ClearOutput();
+        Assert.Equal(VmCommands.Failed, await Run("--json", "store", "scrub"));
+        Assert.True(JsonOut().GetProperty("recorded").GetBoolean());
+        ClearOutput();
+        Assert.Equal(VmCommands.Ok, await Run("store", "info"));
+        Assert.Contains(["Last scrub", "2026-11-01 10:30 UTC: problem, 10 objects checked"], Rows(output));
+        Assert.Contains(["Scrub problem", $"index: pack 3 is shorter than its rows (rebuilt from the packs); 1 corrupt, 0 lost; first: corrupt {bad}"], Rows(output));
+
+        ClearOutput();
+        Assert.Equal(VmCommands.Ok, await Run("--json", "store", "info"));
+        var last = JsonOut().GetProperty("lastScrub");
+        Assert.Equal("present", last.GetProperty("state").GetString());
+        Assert.Equal("problem", last.GetProperty("outcome").GetString());
+        Assert.Equal(1, last.GetProperty("corruptCount").GetInt64());
+        Assert.Equal($"corrupt {bad}", last.GetProperty("problems")[0].GetString());
+        Assert.Equal(clock.GetUtcNow(), last.GetProperty("finishedAt").GetDateTimeOffset());
+    }
+
+    [Fact]
+    public async Task ACanceledScrubRecordsNothing()
+    {
+        using var cancel = new CancellationTokenSource();
+        stores.BeforeScrub = async ct => { await cancel.CancelAsync(); ct.ThrowIfCancellationRequested(); };
+        Assert.Equal(VmCommands.Canceled, await Run(cancel.Token, "store", "scrub"));
+        Assert.Equal(ScrubRecordState.Absent, (await ScrubRecords.ReadAsync(Data)).State);
+    }
+
+    [Fact]
+    public async Task AScrubThatThrowsIsRecordedAsFailedAndABusyStoreIsNot()
+    {
+        stores.WriterFailure = ObjectStoreCodes.Busy;
+        Assert.Equal(VmCommands.Failed, await Run("store", "scrub"));
+        Assert.Equal(ScrubRecordState.Absent, (await ScrubRecords.ReadAsync(Data)).State);
+
+        stores.WriterFailure = null;
+        stores.BeforeScrub = _ => throw new ObjectStoreException("OBJECT_STORE_CORRUPT", "the index is unreadable");
+        Assert.Equal(VmCommands.Failed, await Run("store", "scrub"));
+        var read = await ScrubRecords.ReadAsync(Data);
+        Assert.Equal(("OBJECT_STORE_CORRUPT", "the index is unreadable"), (read.Record!.FailureCode, read.Record.FailureMessage));
+        ClearOutput();
+        Assert.Equal(VmCommands.Ok, await Run("store", "info"));
+        Assert.Contains(["Last scrub", "2026-11-01 09:30 UTC: failed, 0 objects checked"], Rows(output));
+        Assert.Contains(["Scrub problem", "OBJECT_STORE_CORRUPT: the index is unreadable"], Rows(output));
+    }
+
+    [Fact]
+    public async Task InfoSaysWhenTheScrubRecordCantBeUsed()
+    {
+        Directory.CreateDirectory(Data);
+        await File.WriteAllTextAsync(ScrubRecords.PathIn(Data), """{"version":9}""");
+        Assert.Equal(VmCommands.Ok, await Run("store", "info"));
+        Assert.Contains(["Last scrub", "scrub-v1.json can't be used (newer): The scrub record is version 9, from a newer VibeMiner."], Rows(output));
+        ClearOutput();
+        Assert.Equal(VmCommands.Ok, await Run("--json", "store", "info"));
+        Assert.Equal("newer", JsonOut().GetProperty("lastScrub").GetProperty("state").GetString());
+        Assert.Contains("newer VibeMiner", JsonOut().GetProperty("lastScrub").GetProperty("reason").GetString());
     }
 }

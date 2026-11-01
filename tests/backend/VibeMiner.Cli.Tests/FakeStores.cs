@@ -31,6 +31,30 @@ internal sealed class FakeStores : IStoreOpener
     public Func<bool, CancellationToken, Task>? BeforeOpen { get; set; }
     /// <summary>Called as a handle is disposed, before it counts as closed; the flag is true for the writer.</summary>
     public Action<bool>? Disposing { get; set; }
+    /// <summary>When set, every handle's objects are this (a wrapper over <see cref="Source"/>, say) instead of the scripted ones.</summary>
+    public IObjectSource? Objects { get; set; }
+    /// <summary>
+    /// When set, the catalog stands in for the one in <c>catalog-v1/</c> of this data folder: one <see cref="InMemoryCatalog"/>
+    /// shared by every handle, kept only while <see cref="CatalogMarker"/> exists. When a reset has removed the folder, the next
+    /// handle gets a fresh catalog and writes the marker again. Unset, each handle gets its own fresh catalog.
+    /// </summary>
+    public string? CatalogDataFolder { get; set; }
+    /// <summary>How many fresh catalogs handles have created.</summary>
+    public int CatalogsCreated { get; private set; }
+    public const string CatalogMarkerName = "fake-catalog";
+    public string? CatalogMarker => CatalogDataFolder is { } data ? Path.Combine(data, RealStores.CatalogFolder, CatalogMarkerName) : null;
+    private InMemoryCatalog? shared;
+
+    private InMemoryCatalog CreateCatalog(IObjectSource objects)
+    {
+        if (CatalogMarker is not { } marker) { CatalogsCreated++; return new InMemoryCatalog(objects); }
+        if (shared is not null && File.Exists(marker)) return shared;
+        CatalogsCreated++;
+        shared = new InMemoryCatalog(objects);
+        Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+        File.WriteAllBytes(marker, []);
+        return shared;
+    }
 
     public Task<IStoreHandle> OpenReadOnlyAsync(string folder, CancellationToken ct) => OpenAsync(folder, false, ReadOnlyFailure, ct);
     /// <summary>A writer open asked to create a store gets past a missing one, as the real store does.</summary>
@@ -54,10 +78,10 @@ internal sealed class FakeStores : IStoreOpener
     {
         public bool Writer => writer;
         private InMemoryCatalog? catalog;
-        public IObjectSource Objects => owner.LaterHistoryPageThrows is { } failure ? new FailingHistory(owner.Source, failure)
+        public IObjectSource Objects => owner.Objects is { } objects ? objects : owner.LaterHistoryPageThrows is { } failure ? new FailingHistory(owner.Source, failure)
             : owner.ObservationFails is { } offline ? new FailingObservations(owner.Source, offline)
             : owner.ObservationScript is { } script ? new ScriptedObservations(owner.Source, script) : owner.Source;
-        public Task<ICatalog> CatalogAsync(CancellationToken ct) => Task.FromResult<ICatalog>(catalog ??= new InMemoryCatalog(Objects));
+        public Task<ICatalog> CatalogAsync(CancellationToken ct) => Task.FromResult<ICatalog>(catalog ??= owner.CreateCatalog(Objects));
         public ValueTask<StoreStats> StatsAsync(CancellationToken ct) => ValueTask.FromResult(owner.Stats);
         public async Task<ScrubReport> ScrubAsync(IProgress<ScanProgress>? progress, CancellationToken ct)
         {
@@ -117,4 +141,62 @@ internal sealed class ManualTime(DateTimeOffset start) : TimeProvider
     private DateTimeOffset now = start;
     public override DateTimeOffset GetUtcNow() => now;
     public void Advance(TimeSpan by) => now += by;
+}
+
+/// <summary>
+/// Passes everything to an inner source and counts what goes outside the store: observations by kind, and every GetKey, GetKeys
+/// and GetRange call with the <see cref="ServedFrom"/> of each result (null when it wasn't present).
+/// </summary>
+internal sealed class CountingObjectSource(IObjectSource inner) : IObjectSource
+{
+    private readonly Lock gate = new();
+    private readonly Dictionary<ObservationKind, int> observations = [];
+    private readonly List<ServedFrom?> served = [];
+
+    public int GetKeyCalls { get; private set; }
+    public int GetKeysCalls { get; private set; }
+    public int GetRangeCalls { get; private set; }
+    public IReadOnlyDictionary<ObservationKind, int> Observations { get { lock (gate) return new Dictionary<ObservationKind, int>(observations); } }
+    public IReadOnlyList<ServedFrom?> Served { get { lock (gate) return [.. served]; } }
+
+    public void Clear()
+    {
+        lock (gate) { observations.Clear(); served.Clear(); GetKeyCalls = GetKeysCalls = GetRangeCalls = 0; }
+    }
+
+    private void Record(params ObjectResult[] results) { lock (gate) served.AddRange(results.Select(r => r.ServedFrom)); }
+
+    public async Task<ObjectResult> GetKeyAsync(ObjectRequest request, CdnContext? cdn, FetchPriority priority, CancellationToken ct)
+    {
+        lock (gate) GetKeyCalls++;
+        var r = await inner.GetKeyAsync(request, cdn, priority, ct);
+        Record(r);
+        return r;
+    }
+
+    public async Task<IReadOnlyList<ObjectResult>> GetKeysAsync(IReadOnlyList<ObjectRequest> requests, CdnContext? cdn, FetchPriority priority, IProgress<ObjectProgress>? progress, CancellationToken ct)
+    {
+        lock (gate) GetKeysCalls++;
+        var r = await inner.GetKeysAsync(requests, cdn, priority, progress, ct);
+        Record([.. r]);
+        return r;
+    }
+
+    public async Task<ObjectResult> GetRangeAsync(ObjectRequest request, long offset, Memory<byte> destination, CdnContext? cdn, FetchPriority priority, CancellationToken ct)
+    {
+        lock (gate) GetRangeCalls++;
+        var r = await inner.GetRangeAsync(request, offset, destination, cdn, priority, ct);
+        Record(r);
+        return r;
+    }
+
+    public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken ct)
+    {
+        lock (gate) observations[request.Kind] = observations.GetValueOrDefault(request.Kind) + 1;
+        return inner.ObserveAsync(request, ct);
+    }
+
+    public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.CountPresentAsync(keys, ct);
+    public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.HasKeysAsync(keys, ct);
+    public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken ct) => inner.ReadHistoryAsync(query, ct);
 }

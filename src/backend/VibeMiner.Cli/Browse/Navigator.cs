@@ -61,7 +61,13 @@ internal sealed class Navigator : IAsyncDisposable
     /// <summary><c>:name</c>: replaces the stack with that top view. False, with a message, for a name the registry doesn't know.</summary>
     public bool Go(string name)
     {
-        if (registry.Find(name) is not { } entry)
+        var matches = registry.Matching(name);
+        if (matches.Count > 1)
+        {
+            Say($"{name.Trim()} is ambiguous: {string.Join(", ", matches.Select(e => e.Name))}. Type more of the name.");
+            return false;
+        }
+        if (matches is not [var entry])
         {
             Say($"No view {name.Trim()}. Views: {string.Join(", ", registry.Entries.Select(e => e.Name))}.");
             return false;

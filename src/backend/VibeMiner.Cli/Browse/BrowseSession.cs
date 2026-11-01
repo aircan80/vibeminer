@@ -9,10 +9,35 @@ namespace VibeMiner.Cli.Browse;
 /// What every view works against: the resolved data folder and the store in it. Read-only by default: views open the store
 /// read-only for one load and close it; only an action (<c>r</c>) asks for the writer lock.
 /// </summary>
-internal sealed class BrowseSession(IStoreOpener stores, DataFolder folder, string storeFolder)
+internal sealed class BrowseSession(IStoreOpener stores, DataFolder folder, string storeFolder, CliEnvironment? environment = null)
 {
+    private readonly Lock gate = new();
+    private readonly Dictionary<BuildRef, MeasuredBuild> measured = [];
+
     public DataFolder Folder { get; } = folder;
     public string StoreFolder { get; } = storeFolder;
+    /// <summary>What the data folder was resolved from: the OS, environment and home, for <c>:settings</c>.</summary>
+    public CliEnvironment Environment { get; } = environment ?? CliEnvironment.Current();
+    public IStoreOpener Stores => stores;
+
+    /// <summary>The clock a remembered figure is dated by. A test seam.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
+    /// <summary>
+    /// Keeps the latest Downloaded figure of a build (from <c>d</c>, or the end of <c>a</c>), dated now. Measuring every build
+    /// would mean opening each one, so <c>:settings</c> lists only these. Safe from any thread.
+    /// </summary>
+    public void Remember(BuildRef build, string versionsName, DownloadedFigure figure)
+    {
+        var at = Clock.GetUtcNow();
+        lock (gate) measured[build] = new(build, versionsName, figure, at);
+    }
+
+    /// <summary>The remembered figures, newest first.</summary>
+    public IReadOnlyList<MeasuredBuild> Measured
+    {
+        get { lock (gate) return [.. measured.Values.OrderByDescending(m => m.At).ThenBy(m => m.Build.Product, StringComparer.Ordinal)]; }
+    }
 
     public Task<IStoreHandle> OpenReadAsync(CancellationToken ct) => stores.OpenReadOnlyAsync(StoreFolder, ct);
 
@@ -36,3 +61,6 @@ internal sealed class BrowseSession(IStoreOpener stores, DataFolder folder, stri
         _ => $"{e.GetType().Name}: {e.Message}",
     };
 }
+
+/// <summary>A build's Downloaded figure as it was when measured.</summary>
+internal sealed record MeasuredBuild(BuildRef Build, string VersionsName, DownloadedFigure Figure, DateTimeOffset At);

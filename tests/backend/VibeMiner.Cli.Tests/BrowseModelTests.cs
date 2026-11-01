@@ -5,6 +5,7 @@ using VibeMiner.Cdn;
 using VibeMiner.Cli.Browse;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
+using VibeMiner.Cli.Profile;
 using Xunit;
 
 namespace VibeMiner.Cli.Tests;
@@ -23,7 +24,7 @@ public sealed class BrowseModelTests : IAsyncDisposable
     public BrowseModelTests()
     {
         stores.Source.Time = time;
-        session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), StoreFolder);
+        session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), StoreFolder) { Clock = time };
         navigator = new Navigator(ViewRegistry.Default(), session, a => a());
     }
 
@@ -86,7 +87,10 @@ public sealed class BrowseModelTests : IAsyncDisposable
     public void TheRegistryFindsExactNamesAndUniquePrefixes()
     {
         var registry = ViewRegistry.Default();
-        Assert.Equal(["store", "history", "builds"], registry.Entries.Select(e => e.Name));
+        Assert.Equal(["store", "history", "builds", "settings"], registry.Entries.Select(e => e.Name));
+        // :s is store or settings, so it names neither; :st and :se do.
+        Assert.Null(registry.Find(":s"));
+        Assert.Equal("settings", registry.Find(":se")?.Name);
         Assert.Equal("history", registry.Find("history")?.Name);
         Assert.Equal("store", registry.Find(":st")?.Name);
         Assert.Equal("builds", registry.Find(":b")?.Name);
@@ -106,9 +110,15 @@ public sealed class BrowseModelTests : IAsyncDisposable
         await GoAsync(":st");
         Assert.IsType<StoreView>(navigator.Current.View);
         Assert.False(navigator.Go(":nope"));
-        Assert.Equal("No view :nope. Views: store, history, builds.", navigator.Message);
+        Assert.Equal("No view :nope. Views: store, history, builds, settings.", navigator.Message);
         Assert.IsType<StoreView>(navigator.Current.View);
         Assert.Single(navigator.Frames);
+
+        // A prefix two views share names both and goes nowhere.
+        Assert.False(navigator.Go(":s"));
+        Assert.Equal(":s is ambiguous: store, settings. Type more of the name.", navigator.Message);
+        Assert.IsType<StoreView>(navigator.Current.View);
+        Assert.Equal(["store", "settings"], navigator.Registry.Matching(":s").Select(e => e.Name));
     }
 
     [Fact]
@@ -126,7 +136,7 @@ public sealed class BrowseModelTests : IAsyncDisposable
         Assert.Contains(["Pack bytes", "3.0 MiB"], rows);
         Assert.Contains(["Live bytes", "2.0 MiB"], rows);
         Assert.Contains(["Created", "2026-10-31 12:00 UTC"], rows);
-        Assert.Contains(["Last scrub", "not recorded"], rows);
+        Assert.Contains(["Last scrub", "none yet (vm store scrub runs one)"], rows);
         Assert.Equal([(StoreFolder, false)], stores.Opened);
         Assert.Equal(0, stores.Open);
         Assert.False(navigator.TryAction('r'));
@@ -729,5 +739,102 @@ public sealed class BrowseModelTests : IAsyncDisposable
         var (json, _, none) = await RunVm(true, "--json", "browse");
         Assert.Equal(VmCommands.Usage, json);
         Assert.Null(none);
+    }
+
+    [Fact]
+    public async Task DAndTheEndOfAAreRememberedAndSettingsListsTheLatest()
+    {
+        await OpenableRetailBuildAsync();
+        Assert.Empty(session.Measured);
+        Assert.True(navigator.TryAction('d'));
+        await SettleTaskAsync();
+        Assert.Equal("downloaded: 0.0% of 10 B, 0 of 2 objects (eu)", navigator.Tasks.Status);
+        var first = Assert.Single(session.Measured);
+        Assert.Equal((new BuildRef("wow", A, B, "eu"), "12.0.1.60000", new DownloadedFigure(0, 2, 0, 10), time.GetUtcNow()),
+            (first.Build, first.VersionsName, first.Figure, first.At));
+
+        time.Advance(TimeSpan.FromMinutes(5));
+        Assert.True(navigator.TryAction('a'));
+        await SettleTaskAsync();
+        Assert.Equal("download all: done, 2 objects, 10 B stored (eu)", navigator.Tasks.Status);
+        // Same build: the end of a replaces the d figure.
+        var latest = Assert.Single(session.Measured);
+        Assert.Equal(new DownloadedFigure(2, 2, 10, 10), latest.Figure);
+
+        var settings = await GoAsync(":settings");
+        Assert.Null(settings.Error);
+        Assert.Contains(["Downloaded wow 12.0.1.60000 (eu)", "100.0% of 10 B, 2 of 2 objects, measured 2026-01-01 00:06 UTC"], Cells(settings));
+        Assert.DoesNotContain(Cells(settings), r => r[1] == SettingsView.NoneMeasured);
+    }
+
+    [Fact]
+    public void ADownloadAllStoppedWhileScanningIsNotRemembered()
+    {
+        var build = new BuildRef("wow", A, B, "us");
+        var scanning = new DownloadAllProgress(build, DownloadAllStage.Scanning, 5, 100, 50, 1000, 0, 0);
+        DownloadAllResult Result(DownloadAllOutcome o, DownloadAllProgress p) => new(build, o, p, 0, 0, 0, null, null);
+        Assert.Null(BuildView.FigureOf(Result(DownloadAllOutcome.Canceled, scanning)));
+        Assert.Null(BuildView.FigureOf(Result(DownloadAllOutcome.DiskFull, scanning)));
+        Assert.Equal(new DownloadedFigure(5, 100, 50, 1000), BuildView.FigureOf(Result(DownloadAllOutcome.Canceled, scanning with { Stage = DownloadAllStage.Fetching })));
+        Assert.Equal(new DownloadedFigure(5, 100, 50, 1000), BuildView.FigureOf(Result(DownloadAllOutcome.Completed, scanning)));
+    }
+
+    [Fact]
+    public async Task SettingsShowsTheFolderItsSizesAndTheLastScrubReadOnly()
+    {
+        var data = Path.Combine(Path.GetTempPath(), "vibeminer-settings-view-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(data, "generated-v1", "tables"));
+            await File.WriteAllBytesAsync(Path.Combine(data, "generated-v1", "tables", "rows.bin"), new byte[5]);
+            var bad = ObjectKey.Parse(ObjectKeyType.Config, new string('a', 32));
+            await ScrubRecords.WriteAsync(data, ScrubRecord.FromReport(
+                new ScrubReport(null, false, new VerifyReport(10, 100, 1, 0, [bad], [])), new DateTimeOffset(2026, 10, 30, 8, 15, 0, TimeSpan.Zero)));
+            var env = new CliEnvironment("linux", _ => null, "/home/nobody-settings");
+            var settings = new BrowseSession(stores, new DataFolder(data, DataFolderSource.Flag), Path.Combine(data, ObjectStore.DefaultFolderName), env);
+
+            var content = await new SettingsView().LoadAsync(settings, CancellationToken.None);
+            var rows = content.Rows.Select(r => r.Cells.ToArray()).ToList();
+            Assert.Equal(["Field", "Value"], content.Columns);
+            Assert.Contains(["Data folder", $"{data} (--data)"], rows);
+            Assert.Contains(["Default folder", "/home/nobody-settings/.local/share/VibeMiner"], rows);
+            Assert.Contains(["Choice file", "/home/nobody-settings/.config/@vibeminer/desktop/data-folder-v1.json (none)"], rows);
+            Assert.Contains(["Object store", "3.0 MiB in packs, 2.0 MiB live, 1,234 objects"], rows);
+            Assert.Contains(["Generated data", "5 B in 1 files"], rows);
+            Assert.Contains(["Last scrub", "2026-10-30 08:15 UTC: problem, 10 objects checked"], rows);
+            Assert.Contains(["Scrub problem", $"1 corrupt, 0 lost; first: corrupt {bad}"], rows);
+            Assert.Contains(["Downloaded", SettingsView.NoneMeasured], rows);
+            // Read-only, and nothing stays open.
+            Assert.All(stores.Opened, o => Assert.False(o.Writer));
+            Assert.Empty(stores.WriterCreate);
+            Assert.Equal(0, stores.Open);
+
+            // No store, no generated folder, an unreadable record: each says so, none hides the others.
+            stores.ReadOnlyFailure = ObjectStoreCodes.Missing;
+            Directory.Delete(Path.Combine(data, "generated-v1"), true);
+            await File.WriteAllTextAsync(Path.Combine(data, ScrubRecords.FileName), "{not json");
+            rows = (await new SettingsView().LoadAsync(settings, CancellationToken.None)).Rows.Select(r => r.Cells.ToArray()).ToList();
+            Assert.Contains(["Object store", "missing (OBJECT_STORE_MISSING)"], rows);
+            Assert.Contains(["Generated data", "absent"], rows);
+            Assert.Contains(rows, r => r[0] == "Last scrub" && r[1].StartsWith("scrub-v1.json can't be used (badJson): ", StringComparison.Ordinal));
+            Assert.DoesNotContain(rows, r => r[0] == "Scrub problem");
+        }
+        finally { if (Directory.Exists(data)) Directory.Delete(data, true); }
+    }
+
+    [Fact]
+    public async Task TheStoreViewShowsTheLastScrubRecord()
+    {
+        var data = Path.Combine(Path.GetTempPath(), "vibeminer-store-view-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await ScrubRecords.WriteAsync(data, ScrubRecord.FromFailure(
+                new ObjectStoreException(ObjectStoreCodes.Busy, "held"), new DateTimeOffset(2026, 10, 30, 8, 15, 0, TimeSpan.Zero)));
+            var store = new BrowseSession(stores, new DataFolder(data, DataFolderSource.Flag), Path.Combine(data, ObjectStore.DefaultFolderName));
+            var rows = (await new StoreView().LoadAsync(store, CancellationToken.None)).Rows.Select(r => r.Cells.ToArray()).ToList();
+            Assert.Contains(["Last scrub", "2026-10-30 08:15 UTC: failed, 0 objects checked"], rows);
+            Assert.Contains(["Scrub problem", $"{ObjectStoreCodes.Busy}: held"], rows);
+        }
+        finally { if (Directory.Exists(data)) Directory.Delete(data, true); }
     }
 }

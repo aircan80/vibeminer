@@ -45,13 +45,13 @@ flowchart TB
 
 ### Stores
 
-**Planned.** Today there is one SQLite catalog, the `objects-v1` object store and `settings-v1.json` ([STORAGE](STORAGE.md)). The three stores below arrive with #153, #155 and #156 (generated store). They are named by what they hold. Reset wipes the catalog store and the generated store, Settings included, and keeps the object store.
+**Partly built.** The object store (`cdn-store-v1/`, #153) exists, and `vm` uses it with layer 3's build catalog in `catalog-v1/`. The generated store (`generated-v1/`, D210) exists too; the rest of the catalog store arrives with #155. Until the Host composes them (#160), the app still runs on the legacy SQLite catalog (`discovery-v1.sqlite3`), `objects-v1/` and `settings-v1.json` ([STORAGE](STORAGE.md)). They are named by what they hold. Reset wipes `catalog-v1/`, `generated-v1/` and `settings-v1.json`, and keeps every object and history record in `cdn-store-v1/`, and its `scrub-v1.json`; the only writes to the store are the writer open's lock and recovery ([D240](DECISIONS.md)). It lives in `VibeMiner.Cli/Profile` (`vm reset`) until the Host composes the new stores (#160).
 
 | Store | Holds | Written by | Reset |
 | --- | --- | --- | --- |
-| Object store | Configs, archive and loose-file indexes and EKey objects exactly as served, plus the dated history log of version-service replies | Layer 1, through layer 2 | Kept |
-| Catalog store | Builds, opened builds, admissions, jobs, problems, Settings | Layer 3 | Wiped |
-| Generated store | Everything layers 4–6 prepare: the Files list, table rows, textures, models, Items, Creatures. All of it is rebuilt from the object store | Layers 4–6 | Wiped |
+| Object store (`cdn-store-v1/`) | Configs, archive and loose-file indexes and EKey objects exactly as served, plus the dated history log of version-service replies | Layer 1, through layer 2 | Kept |
+| Catalog store (`catalog-v1/`, plus `settings-v1.json`) | Builds, opened builds, admissions, jobs, problems, Settings | Layer 3 | Wiped |
+| Generated store (`generated-v1/`) | Everything layers 4–6 prepare: the Files list, table rows, textures, models, Items, Creatures. All of it is rebuilt from the object store | Layers 4–6 | Wiped |
 
 ### Testing by layer
 

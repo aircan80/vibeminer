@@ -18,6 +18,7 @@ The storage rewrite (#153-#160) splits local data into three layers. Layer 1, th
 - **Recovery and rebuild** ([D125](DECISIONS.md), [D126](DECISIONS.md)):
   - an open replays the synced tail past the last commit, keeping the first copy of a key;
   - every open runs a cheap index check (schema, CRC-checked store and pack rows); the full check (`integrity_check`, totals over every row) runs after an unclean shutdown or as a scrub, and a failing index is rebuilt from the packs;
+  - a scrub is due weekly and yields to interactive work; its outcome goes in `scrub-v1.json` beside the store ([D241](DECISIONS.md)). Nothing runs the schedule yet (#160); `vm store scrub` runs one by hand;
   - Scan rebuilds it in place.
 - **History log** ([D127](DECISIONS.md)): raw versions, cdns, bgdl and summary replies, WoWDBDefs table definitions and wow-listfile releases and parts, stored once, with dated records. A summary record has an empty product ([D152](DECISIONS.md)); a definition record is kind 5 ([D181](DECISIONS.md)); a listfile release is kind 6 and one 8 MiB part of its CSV kind 7 ([D220](DECISIONS.md)).
 - **Stats** ([D150](DECISIONS.md)): `StatsAsync` on the store and the read-only store gives packs, object and history counts and pack bytes from one index read, no pack touched.
@@ -36,7 +37,9 @@ Electron resolves the data folder once at start ([D128](DECISIONS.md)): `VIBEMIN
 | macOS | `~/Library/Application Support/VibeMiner` | `tmutil addexclusion` at each start; Spotlight still indexes it |
 | Linux | `$XDG_DATA_HOME/VibeMiner`, else `~/.local/share/VibeMiner` | |
 
-A choice file that can't be used (unreadable, not JSON, a newer version, an unknown field, not an absolute path) stops the start with a message naming the file. So does a folder that can't be created, a chosen folder whose parent is missing, or one that refuses writes: a small probe file is written and removed at each start. The test override is never excluded from backups. The engine's own default without `--data-dir` is the same folder. Choosing a folder in Settings arrives with #155.
+A choice file that can't be used (unreadable, not JSON, a newer version, an unknown field, not an absolute path) stops the start with a message naming the file. So does a folder that can't be created, a chosen folder whose parent is missing, or one that refuses writes: a small probe file is written and removed at each start. The test override is never excluded from backups. The engine's own default without `--data-dir` is the same folder. Choosing a folder stays Electron's; the engine only reads the choice, and moving data between folders is out of scope ([D242](DECISIONS.md)). `:settings` in `vm browse` shows the folder, its source and its sizes.
+
+A reset ([D240](DECISIONS.md), `vm reset`) wipes `catalog-v1/`, `generated-v1/` and `settings-v1.json` and keeps every object and history record in `cdn-store-v1/`, and `scrub-v1.json`. It holds the store's writer lock while it runs. The only writes to `cdn-store-v1/` are the writer open's own: its lock, its clean-close flag and, after an unclean shutdown, layer 1's recovery. It leaves the legacy `discovery-v1.sqlite3` and `objects-v1/` (#158) and Electron's `data-folder-v1.json` alone.
 
 ### Measured
 
@@ -233,7 +236,7 @@ A legacy metadata receipt with a null `Location` means a loose object at offset 
 
 ## Settings
 
-App-wide settings live in `settings-v1.json` in the engine data directory, next to the catalog, not in it. The engine writes a temporary file, flushes it and then replaces the file, so a failed write leaves the old one. A missing file means defaults; a malformed, oversized or newer-version file, or a single value it doesn't understand, is reported and that value reads as Off, whatever its default (D081, D105, D106). A newer file, or one whose bytes could not be read (too large, changed while read, locked or not permitted), is never overwritten. See [settings-v1](../contracts/settings-v1.md).
+App-wide settings live in `settings-v1.json` in the engine data directory, next to the catalog, not in it. The engine writes a temporary file, flushes it and then replaces the file, so a failed write leaves the old one. A missing file means defaults; a malformed, oversized or newer-version file, or a single value it doesn't understand, is reported and that value reads as Off, whatever its default (D081, D105, D106). A newer file, or one whose bytes could not be read (too large, changed while read, locked or not permitted), is never overwritten. A reset deletes it ([D240](DECISIONS.md)). See [settings-v1](../contracts/settings-v1.md).
 
 ## Fetched table definitions
 
