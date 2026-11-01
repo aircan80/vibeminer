@@ -88,7 +88,7 @@ public sealed class RealStoreIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ALargeObjectIsStagedAndAResumeFetchesOnlyTheRest()
+    public async Task ALargeObjectIsStagedAndABrokenStreamResumesOnlyTheRestFromTheNextHost()
     {
         var store = await OpenAsync("own");
         var options = new ObjectSourceOptions { InMemoryObjectBytes = 1 << 20 };
@@ -98,16 +98,13 @@ public sealed class RealStoreIntegrationTests : IAsyncLifetime
         var source = Source(store, options: options);
         var context = new CdnContext(Scenario.Route);
 
-        var broken = await source.GetKeyAsync(new(big.Key, big.DeclaredLength), context, FetchPriority.Background, None);
-        Assert.Equal((ObjectState.Unavailable, "CDN_NETWORK"), (broken.State, broken.Code));
-        Assert.Single(cdn.Requests);      // a stream that already delivered bytes never moves to the next host
-        Assert.False(await store.HasAsync(big.Key));
-
         var resumed = await source.GetKeyAsync(new(big.Key, big.DeclaredLength), context, FetchPriority.Background, None);
         Assert.Equal((ObjectState.Present, ServedFrom.Cdn), (resumed.State, resumed.ServedFrom!.Value));
         Assert.Null(resumed.Bytes);
+        Assert.Equal(2, cdn.Requests.Count);
         var second = cdn.Requests[1];
         var headerLength = 12 + 24 * 12;
+        Assert.NotEqual(cdn.Requests[0].Host, second.Host);
         Assert.Equal(headerLength + 3L * 256 * 1024, second.Offset);   // the first three whole chunks were proven and kept
         Assert.Equal(big.DeclaredLength - second.Offset, second.Length);
 

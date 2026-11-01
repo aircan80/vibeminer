@@ -183,6 +183,43 @@ public sealed class ObjectSourceTests
     }
 
     [Fact]
+    public async Task ALargeObjectWhoseStreamBreaksResumesFromTheNextHostAtItsCheckedBytesAndThatHostGoesLast()
+    {
+        var s = new Scenario { Options = new ObjectSourceOptions { InMemoryObjectBytes = 1 << 20 } };
+        var big = s.Serve(Synthetic.Chunked(35, Enumerable.Repeat(256 * 1024, 12).ToArray()));   // 3 MiB in 12 chunks
+        s.Cdn.BreakOnceAfter(CdnObjectKind.Data, Scenario.KeyOf(big.Key), 1_000_000);              // L3 cuts the stream in chunk 4
+        var r = await s.Source.GetKeyAsync(new(big.Key, big.DeclaredLength), s.Context, FetchPriority.Background, None);
+        Assert.Equal((ObjectState.Present, ServedFrom.Cdn), (r.State, r.ServedFrom!.Value));
+        Assert.Equal(big.Bytes.ToArray(), (await s.Store.ReadAsync(big.Key)).Bytes);
+        var proven = 12 + 24 * 12 + 3L * 256 * 1024;   // the header and the first three whole chunks passed their checks
+        Assert.Equal([(Scenario.L3, (long?)null, (long?)null), (Scenario.Us, proven, big.DeclaredLength - proven)],
+            s.Cdn.Requests.Select(q => (q.Host, q.Offset, q.Length)));
+
+        var next = s.Serve(Synthetic.Config(36));
+        s.Cdn.ClearRequests();
+        Assert.True((await s.Source.GetKeyAsync(new(next.Key), s.Context, FetchPriority.Background, None)).IsPresent);
+        Assert.Equal(Scenario.Us, Assert.Single(s.Cdn.Requests).Host);
+    }
+
+    [Fact]
+    public async Task ALargeObjectWhoseStreamBreaksOnEveryHostEndsOnceAsANetworkFailureAndKeepsItsCheckedBytes()
+    {
+        var s = new Scenario { Options = new ObjectSourceOptions { InMemoryObjectBytes = 1 << 20 } };
+        var big = s.Serve(Synthetic.Chunked(37, Enumerable.Repeat(256 * 1024, 12).ToArray()));
+        var key = Scenario.KeyOf(big.Key);
+        s.Cdn.BreaksOn(Scenario.L3, CdnObjectKind.Data, key, 1_000_000).BreaksOn(Scenario.Us, CdnObjectKind.Data, key, 600_000);
+        var r = await s.Source.GetKeyAsync(new(big.Key, big.DeclaredLength), s.Context, FetchPriority.Background, None);
+        Assert.Equal((ObjectState.Unavailable, "CDN_NETWORK"), (r.State, r.Code));
+        Assert.Equal([Scenario.L3, Scenario.Us], s.Cdn.Requests.Select(q => q.Host));   // one stream per host, then one outcome
+        Assert.False(await s.Store.HasAsync(big.Key));
+
+        // Both hosts' checked bytes stay staged for a later call.
+        var proven = 12 + 24 * 12 + 5L * 256 * 1024;   // L3's three chunks, then two more of Us's 600 000 bytes
+        await using (var staging = await s.Store.StageAsync(big.Key, big.DeclaredLength))
+            Assert.Equal(proven, staging.Length);
+    }
+
+    [Fact]
     public async Task ARangeMemberWithBadBytesOnEveryHostIsRefused()
     {
         var s = new Scenario();

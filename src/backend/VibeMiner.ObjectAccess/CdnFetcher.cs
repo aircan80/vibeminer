@@ -16,13 +16,21 @@ internal interface IFetchSink
     /// <summary>
     /// An object too large for memory. <paramref name="fetch"/> streams the object from a byte offset (0, or where a resumed
     /// staging stopped) into the given sink and throws <see cref="CdnException"/> on failure. Called again after the sink refused
-    /// the bytes, it streams from the next host, never the ones whose bytes were refused; null means no host is left.
+    /// the bytes, it streams from the next host, never the ones whose bytes were refused; null means no host is left. It throws
+    /// <see cref="StreamBrokeException"/> when a stream broke after bytes reached the sink and another host is left: start a new
+    /// staging (it keeps the checked bytes) and call it again.
     /// </summary>
     Task<ObjectResult> StreamLargeAsync(ObjectRequest request, long declaredLength,
         Func<long, Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask>, CancellationToken, Task<CdnReply?>> fetch, CancellationToken cancellationToken);
 
     /// <summary>The store's answer when it already has the key (checked again just before a transfer starts), else null.</summary>
     ValueTask<ObjectResult?> AlreadyHaveAsync(ObjectKey key, CancellationToken cancellationToken);
+}
+
+/// <summary>A streamed fetch broke after bytes reached the sink and another host is left: restage and fetch again.</summary>
+internal sealed class StreamBrokeException(CdnException failure) : Exception(failure.Message, failure)
+{
+    public CdnException Failure { get; } = failure;
 }
 
 /// <summary>
@@ -498,32 +506,51 @@ internal sealed partial class CdnFetcher
             {
                 var declared = request.DeclaredLength!.Value;
                 CdnFailure? failure = null;
-                // Hosts whose bytes the sink refused. Each host gets a request of its own so the one that sent bytes is known.
+                // Hosts whose bytes the sink refused, and hosts whose stream broke after bytes reached the sink. Neither is asked
+                // again for this object, so a call makes at most one stream per host. Each host gets a request of its own so the
+                // one that sent bytes is known.
                 var refused = new HashSet<string>(StringComparer.Ordinal);
+                var broke = new HashSet<string>(StringComparer.Ordinal);
+                var attempts = new List<CdnAttempt>();
                 string? streaming = null;
+                CdnException? lastBreak = null;
                 var result = await sink.StreamLargeAsync(request, declared, async (offset, into, token) =>
                 {
-                    // Called again: the sink refused what the last host sent.
-                    if (streaming is not null) { refused.Add(streaming); Hosts.SentBadBytes(streaming); streaming = null; }
-                    var hosts = Hosts.Order(context.Route, ticket.CurrentPriority).Hosts.Where(h => !refused.Contains(h)).ToArray();
-                    if (hosts.Length == 0) return null;
+                    // Called again after a break: the sink restaged from its checked bytes. Otherwise it refused the last host's bytes.
+                    if (streaming is not null && !broke.Contains(streaming)) { refused.Add(streaming); Hosts.SentBadBytes(streaming); }
+                    streaming = null;
+                    var hosts = Hosts.Order(context.Route, ticket.CurrentPriority).Hosts.Where(h => !refused.Contains(h) && !broke.Contains(h)).ToArray();
+                    if (hosts.Length == 0)
+                    {
+                        if (lastBreak is null) return null;
+                        failure = lastBreak.Failure;
+                        throw new CdnException(attempts);
+                    }
                     var cdnRequest = offset == 0 ? CdnRequest.Whole(kind, key, declared) : CdnRequest.Range(kind, key, offset, declared - offset, declared);
-                    var attempts = new List<CdnAttempt>();
                     foreach (var host in hosts)
                     {
                         string? started = null;
+                        long sent = 0;
                         try
                         {
                             var reply = await Client(ticket).FetchToAsync(context.Route.WithHosts([host]), cdnRequest, (bytes, t) =>
-                            { started = streaming = host; return into(bytes, t); }, token).ConfigureAwait(false);
+                            { started = streaming = host; sent += bytes.Length; return into(bytes, t); }, token).ConfigureAwait(false);
                             Hosts.Observe(reply); transferred(reply.Length);
                             return reply with { Failed = [.. attempts, .. reply.Failed] };
                         }
                         catch (CdnException ex)
                         {
+                            // A failed host goes last in the ranking (Observe), a host that broke a stream included.
                             Hosts.Observe(ex); attempts.AddRange(ex.Attempts);
-                            // Bytes already reached the sink: never move on, so it never sees two hosts' bytes without a restart.
-                            if (started is not null) break;
+                            if (started is null) continue;
+                            transferred(sent);
+                            // Bytes already reached the sink: never append another host's bytes to them. A broken connection or
+                            // an idle timeout restarts from the sink's checked bytes on the next host; anything else ends here.
+                            if (ex.Failure is not (CdnFailure.Network or CdnFailure.Timeout)) break;
+                            broke.Add(host); lastBreak = ex;
+                            if (hosts.Any(h => !broke.Contains(h) && !refused.Contains(h))) throw new StreamBrokeException(ex);
+                            failure = ex.Failure;
+                            throw new CdnException(attempts);
                         }
                     }
                     var all = new CdnException(attempts);

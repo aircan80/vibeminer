@@ -270,8 +270,9 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
             (string? Code, string? Message) rejected = default;
             try
             {
-                // A refused chunk cuts the staging back to its proven bytes; a new staging resumes there from the next host.
-                // A refused commit (the whole-object check) leaves nothing staged, so the next host starts from 0.
+                // A refused chunk cuts the staging back to its proven bytes; a new staging resumes there from the next host, as it
+                // does after a stream broke mid-object. A refused commit (the whole-object check) leaves nothing staged, so the next
+                // host starts from 0. The fetch makes at most one stream per host, so the loop ends.
                 while (true)
                 {
                     await using var staging = await owner.writer.StageAsync(request.Key, declaredLength, ObjectOrigin.Cdn, cancellationToken).ConfigureAwait(false);
@@ -282,6 +283,7 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
                             return new(request.Key, ObjectState.Refused, Code: rejected.Code ?? ObjectStoreCodes.StagingRejected,
                                 Message: rejected.Message ?? "Every host's bytes were refused.");
                     }
+                    catch (StreamBrokeException) { continue; }
                     catch (CdnException failure) { return CdnFetcher.FromCdnFailure(request.Key, failure); }
                     catch (ObjectStoreException ex) when (ex.Code == ObjectStoreCodes.StagingRejected) { rejected = (ex.Code, ex.Message); continue; }
                     var put = await staging.CommitAsync(cancellationToken).ConfigureAwait(false);

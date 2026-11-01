@@ -36,6 +36,7 @@ public sealed class FakeCdn
     private readonly HashSet<(string, CdnObjectKind, CdnKey)> corrupt = [];
     private readonly HashSet<string> http2 = new(StringComparer.Ordinal);
     private readonly Dictionary<(CdnObjectKind, CdnKey), int> breaks = [];
+    private readonly Dictionary<(string, CdnObjectKind, CdnKey), int> breaksOn = [];
     private readonly List<FakeCdnRequest> requests = [];
 
     public TimeProvider Time { get; set; } = TimeProvider.System;
@@ -53,6 +54,8 @@ public sealed class FakeCdn
     public FakeCdn Http2(string host) { lock (gate) http2.Add(host); return this; }
     /// <summary>The next whole-object reply for the key breaks off after this many body bytes (once).</summary>
     public FakeCdn BreakOnceAfter(CdnObjectKind kind, CdnKey key, int bytes) { lock (gate) breaks[(kind, key)] = bytes; return this; }
+    /// <summary>Every reply this host gives for the key, whole or ranged, breaks off after this many body bytes.</summary>
+    public FakeCdn BreaksOn(string host, CdnObjectKind kind, CdnKey key, int bytes) { lock (gate) breaksOn[(host, kind, key)] = bytes; return this; }
 
     public IReadOnlyList<FakeCdnRequest> Requests { get { lock (gate) return requests.ToArray(); } }
     public void ClearRequests() { lock (gate) requests.Clear(); }
@@ -77,9 +80,11 @@ public sealed class FakeCdn
             if (corrupt.Contains((host, kind, key))) { bytes = (byte[])bytes.Clone(); bytes[bytes.Length / 2] ^= 0x40; }
             int? cut = null;
             if (offset is null && breaks.Remove((kind, key), out var after)) cut = after;
+            if (breaksOn.TryGetValue((host, kind, key), out var always)) cut = always;
             if (offset is null || mode == FakeHostMode.IgnoresRanges) return new(HttpStatusCode.OK, bytes, null, null, version, cut);
             if (offset.Value + length!.Value > bytes.Length) return new(HttpStatusCode.RequestedRangeNotSatisfiable, [], null, bytes.Length, version);
-            return new(HttpStatusCode.PartialContent, bytes.AsSpan((int)offset.Value, (int)length.Value).ToArray(), offset, bytes.Length, version);
+            return new(HttpStatusCode.PartialContent, bytes.AsSpan((int)offset.Value, (int)length.Value).ToArray(), offset, bytes.Length, version,
+                cut is { } c ? (int)Math.Min(c, length.Value) : null);
         }
     }
 
