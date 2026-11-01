@@ -78,4 +78,5 @@ internal enum StorePoint
     RebuildBuilt,         // rebuilt index complete, not yet swapped in
     RebuildSwapped,
     StagingAppended,      // staged bytes written to the staging file
+    IndexMeasuring,       // full index check: between the first stamp of the store row and the measure
 }

@@ -121,7 +121,7 @@ static async Task Lookups(string dir, int millions, bool rebuild, bool scan)
     var sw = Stopwatch.StartNew();
     await using (var s = await ObjectStore.OpenReadOnlyAsync(store))
     {
-        Console.WriteLine($"| open with the index check | {sw.Elapsed.TotalSeconds:F1} s | integrity_check and totals over every row |");
+        Console.WriteLine($"| open after a clean close | {sw.Elapsed.TotalSeconds * 1000:F0} ms | cheap check: schema, store and pack rows |");
         var rng = new Random(5);
         for (var i = 0; i < 200_000; i++) await s.HasAsync(VibeMiner.Objects.Testing.ScaleStore.Tiny((long)(rng.NextDouble() * total)).Key);  // warm the page cache
         foreach (var (label, absent) in new[] { ("Has, present key", false), ("Has, absent key", true) })
@@ -148,10 +148,17 @@ static async Task Lookups(string dir, int millions, bool rebuild, bool scan)
         Array.Sort(reads);
         Console.WriteLine($"| Read, 17-byte object | p50 {reads[reads.Length / 2]:F1} µs | p99 {reads[reads.Length * 99 / 100]:F1} µs |");
     }
+    // After an unclean shutdown the open runs the full check (integrity_check, totals over every row): a killed writer on a copy.
+    var crashCopy = await VibeMiner.Objects.Testing.ScaleStore.CopyAsync(store, Path.Combine(dir, "unclean"));
+    var killed = await ObjectStore.OpenAsync(crashCopy);
+    killed.Kill();
+    sw.Restart();
+    await using (var unclean = await ObjectStore.OpenAsync(crashCopy))
+        Console.WriteLine($"| open after an unclean shutdown | {sw.Elapsed.TotalSeconds:F1} s | full check ran: {unclean.OpenReport.FullIndexCheck} |");
     if (scan)
     {
         // Scan writes, so it runs on a reflink copy in the work folder, never on the cache.
-        var copy = await VibeMiner.Objects.Testing.ScaleStore.CopyAsync(store, dir);
+        var copy = await VibeMiner.Objects.Testing.ScaleStore.CopyAsync(store, Path.Combine(dir, "scan"));
         sw.Restart();
         await using var w = await ObjectStore.OpenAsync(copy);
         var r = await w.ScanAsync();

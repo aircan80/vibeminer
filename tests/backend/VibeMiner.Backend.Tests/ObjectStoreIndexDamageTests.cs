@@ -73,21 +73,106 @@ public sealed class ObjectStoreIndexDamageTests
             c.Open();
             using var cmd = c.CreateCommand(); cmd.CommandText = "UPDATE history SET url = NULL"; cmd.ExecuteNonQuery();
         }
-        // The open-time totals see the damaged row: a reader refuses, the writer rebuilds and the record reads whole again.
-        Assert.Equal(ObjectStoreCodes.IndexUnreadable, (await Assert.ThrowsAsync<ObjectStoreException>(() => ObjectStore.OpenReadOnlyAsync(dir))).Code);
+        // After a clean close the open runs only the cheap check, so the damage is met in use: a named state, never a raw exception.
+        await using (var shared = await ObjectStore.OpenReadOnlyAsync(dir))
+            Assert.Equal(ObjectStoreCodes.IndexUnreadable, (await Assert.ThrowsAsync<ObjectStoreException>(async () => await shared.ReadHistoryAsync(new HistoryQuery()))).Code);
         await using (var store = await ObjectStore.OpenAsync(dir, Quick))
         {
-            Assert.True(store.OpenReport.IndexRebuilt);
+            Assert.False(store.OpenReport.FullIndexCheck);
+            Assert.Equal(ObjectStoreCodes.IndexUnreadable, (await Assert.ThrowsAsync<ObjectStoreException>(async () => await store.ReadHistoryAsync(new HistoryQuery()))).Code);
+            var scrub = await store.ScrubAsync();  // the writer's repair: the full check finds it and rebuilds from the packs
+            Assert.True(scrub.IndexRebuilt, scrub.IndexProblem);
             Assert.Equal(Synthetic.Observation(1).Url, Assert.Single(await store.ReadHistoryAsync(new HistoryQuery())).Url);
         }
     }
 
-    /// <summary>An index that is structurally sound but no longer says what the packs say. Each must be found at open.</summary>
+    [Fact]
+    public async Task AFullCheckWhileTheWriterCommitsNeverCallsASoundIndexDamaged()
+    {
+        // Review of 9ba08cd: totals and rows read in different snapshots made a live store's sound index read as unreadable.
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var seed = 1000;
+        ObjectStore? writer = null;
+        // Commits land between the full check's first stamp and its measure: once, or on every try.
+        var commits = 0; var always = false;
+        void Commit(StorePoint p)
+        {
+            if (p != StorePoint.IndexMeasuring || writer is null || !Volatile.Read(ref always) && Volatile.Read(ref commits) >= 1) return;
+            var o = Synthetic.Headerless(Interlocked.Increment(ref seed), 3000);
+            Assert.Equal(PutOutcome.Stored, Assert.Single(writer.PutAsync([o], commitNow: true).GetAwaiter().GetResult()).Outcome);
+            Interlocked.Increment(ref commits);
+        }
+        writer = await ObjectStore.OpenAsync(dir, Quick with { Fault = Commit });
+        await using var w = writer;
+        await writer.PutAsync(Fill());
+        await writer.PutAsync(HistoryRecordFormat.Objects(Synthetic.Observation(1)));
+        // The writer runs, so its marker is unset: a reader's open runs the full check, and must not refuse a sound index.
+        await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir, Quick with { Fault = Commit }))
+        {
+            Assert.Equal(1, commits);
+            Volatile.Write(ref commits, 0);
+            var scrub = await reader.ScrubAsync();
+            Assert.Null(scrub.IndexProblem);
+            Assert.True(scrub.IndexChecked);
+            Volatile.Write(ref always, true);  // a writer that never stops: no stable view, so nothing is concluded
+            var restless = await reader.ScrubAsync();
+            Assert.Null(restless.IndexProblem);
+            Assert.False(restless.IndexChecked);
+            Volatile.Write(ref always, false);
+        }
+        // The writer's own scrub measures on readers, so a Put from inside the measure completes: writes aren't held up.
+        Volatile.Write(ref commits, 0);
+        var mine = await writer.ScrubAsync();
+        Assert.Equal((null, false), (mine.IndexProblem, mine.IndexRebuilt));
+        Assert.Equal(1, commits);
+        Volatile.Write(ref always, true);  // never settles on readers: one pass with the writer held concludes it
+        var held = await writer.ScrubAsync();
+        Assert.Equal((null, false, true), (held.IndexProblem, held.IndexRebuilt, held.IndexChecked));
+    }
+
+    [Fact]
+    public async Task AScrubHonoursItsCancellation()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        using var cancel = new CancellationTokenSource();
+        await using var store = await ObjectStore.OpenAsync(dir, Quick with { Fault = p => { if (p == StorePoint.IndexMeasuring) cancel.Cancel(); } });
+        await store.PutAsync(Fill());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => store.ScrubAsync(ct: cancel.Token));
+        Assert.Equal(PutOutcome.Stored, Assert.Single(await store.PutAsync([Synthetic.Headerless(777)])).Outcome);  // the store goes on
+    }
+
+    [Fact]
+    public async Task OnlyAnUncleanShutdownMakesTheNextOpenRunTheFullCheck()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.True(store.OpenReport.FullIndexCheck is false);  // a new store has nothing to check
+            await store.PutAsync([Synthetic.Headerless(1)]);
+        }
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick)) Assert.False(store.OpenReport.FullIndexCheck);
+        await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir)) Assert.True(await reader.HasAsync(Synthetic.Headerless(1).Key));
+        var killed = await ObjectStore.OpenAsync(dir, Quick);
+        await killed.PutAsync([Synthetic.Headerless(2)]);
+        killed.Kill();  // as a crash: the marker the open cleared stays cleared
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.True(store.OpenReport.FullIndexCheck);
+            Assert.False(store.OpenReport.IndexRebuilt);
+            Assert.True(await store.HasAsync(Synthetic.Headerless(2).Key));
+        }
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick)) Assert.False(store.OpenReport.FullIndexCheck);
+    }
+
+    /// <summary>An index that is structurally sound but no longer says what the packs say: found by the next scrub after a clean close, by the open after a crash.</summary>
     public static TheoryData<string> Damage() => new() { "out-of-order", "dropped-rows", "altered-key", "added-row", "dropped-history" };
 
     [Theory]
     [MemberData(nameof(Damage))]
-    public async Task AnIndexThatHidesOrInventsRowsIsFoundAtOpenAndRebuilt(string damage)
+    public async Task AnIndexThatHidesOrInventsRowsIsFoundByAScrubOrTheOpenAfterACrash(string damage)
     {
         // QA on #153: rows out of key order passed quick_check, lookups then missed objects in the packs and Verify looped.
         using var t = new TempDirectory();
@@ -141,10 +226,10 @@ public sealed class ObjectStoreIndexDamageTests
             case "added-row": Sql("INSERT INTO objects SELECT $n, pack, offset, length, sha256, NULL FROM objects WHERE k = $o", ("$n", K(Synthetic.Headerless(998).Key)), ("$o", K(objects[5].Key))); break;
             case "dropped-history": Sql("DELETE FROM history WHERE record = (SELECT record FROM history LIMIT 1)"); break;
         }
-        Assert.Equal(ObjectStoreCodes.IndexUnreadable, (await Assert.ThrowsAsync<ObjectStoreException>(() => ObjectStore.OpenReadOnlyAsync(dir))).Code);
-        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        var unclean = Path.Combine(t.Path, "unclean");
+        CopyFolder(dir, unclean);
+        async Task Whole(ObjectStore store)
         {
-            Assert.True(store.OpenReport.IndexRebuilt, string.Join("; ", store.OpenReport.Problems));
             foreach (var o in objects) Assert.Equal(o.Bytes.ToArray(), (await store.ReadAsync(o.Key)).Bytes);
             Assert.False(await store.HasAsync(Synthetic.Headerless(999).Key));
             Assert.False(await store.HasAsync(Synthetic.Headerless(998).Key));
@@ -152,7 +237,37 @@ public sealed class ObjectStoreIndexDamageTests
             var verify = await store.VerifyAsync();
             Assert.Equal((objects.Count + 4, 0L), (verify.Checked, verify.CorruptCount));
         }
-        await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir)) Assert.True(await reader.HasAsync(objects[3].Key));
+        // Damage done after a clean close (D126): the open runs only the cheap check and doesn't see it; the next scrub does.
+        await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir)) Assert.NotNull((await reader.ScrubAsync()).IndexProblem);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.False(store.OpenReport.FullIndexCheck);
+            var scrub = await store.ScrubAsync();
+            Assert.NotNull(scrub.IndexProblem);
+            Assert.True(scrub.IndexRebuilt);
+            await Whole(store);
+        }
+        await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir)) Assert.Null((await reader.ScrubAsync()).IndexProblem);
+        // The same damage after an unclean shutdown: the open's full check finds it, a reader refuses, the writer rebuilds.
+        var crashed = await ObjectStore.OpenAsync(unclean, Quick);
+        crashed.Kill();
+        Assert.Equal(ObjectStoreCodes.IndexUnreadable, (await Assert.ThrowsAsync<ObjectStoreException>(() => ObjectStore.OpenReadOnlyAsync(unclean))).Code);
+        await using (var store = await ObjectStore.OpenAsync(unclean, Quick))
+        {
+            Assert.True(store.OpenReport.FullIndexCheck);
+            Assert.True(store.OpenReport.IndexRebuilt, string.Join("; ", store.OpenReport.Problems));
+            await Whole(store);
+        }
+    }
+
+    private static void CopyFolder(string from, string to)
+    {
+        foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(to, Path.GetRelativePath(from, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target);
+        }
     }
 
     private static List<string> ReadAll(Microsoft.Data.Sqlite.SqliteCommand cmd)

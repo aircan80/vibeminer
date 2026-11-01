@@ -129,6 +129,7 @@ internal static class ObjectStoreTestKit
         {
             // The totals in the store row must have stayed exact through whatever happened: a drift would rebuild at every open.
             Assert.False(store.OpenReport.IndexRebuilt, string.Join("; ", store.OpenReport.Problems));
+            Assert.True(store.OpenReport.FullIndexCheck, "a crash must leave the clean-close marker unset");
             foreach (var (hex, (kind, seed)) in committed)
             {
                 if (deleted.Contains(hex) || uncertain.Contains(hex)) continue;
@@ -164,6 +165,6 @@ internal static class ObjectStoreTestKit
         var before = Rows(dir);
         await using (var store = await ObjectStore.OpenAsync(dir, Quick)) await store.ScanAsync();
         Assert.Equal(before, Rows(dir));
-        await using (var store = await ObjectStore.OpenAsync(dir, Quick)) Assert.False(store.OpenReport.IndexRebuilt, string.Join("; ", store.OpenReport.Problems));
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick)) Assert.False(store.OpenReport.IndexRebuilt || store.OpenReport.FullIndexCheck, string.Join("; ", store.OpenReport.Problems));
     }
 }

@@ -210,7 +210,7 @@ SQLite 3, WAL journal, `PRAGMA user_version = 1`. The writer runs `synchronous=N
 CREATE TABLE store(id INTEGER PRIMARY KEY CHECK(id = 1), store_id BLOB NOT NULL CHECK(length(store_id) = 16),
     format INTEGER NOT NULL, created_at INTEGER NOT NULL, next_seq INTEGER NOT NULL,
     object_count INTEGER NOT NULL, object_digest INTEGER NOT NULL, history_count INTEGER NOT NULL, history_digest INTEGER NOT NULL,
-    row_check INTEGER NOT NULL);
+    clean_close INTEGER NOT NULL, row_check INTEGER NOT NULL);
 CREATE TABLE packs(seq INTEGER PRIMARY KEY, state INTEGER NOT NULL, committed_length INTEGER NOT NULL, live_bytes INTEGER NOT NULL,
     row_check INTEGER NOT NULL);
 CREATE TABLE objects(k BLOB PRIMARY KEY, pack INTEGER NOT NULL, offset INTEGER NOT NULL, length INTEGER NOT NULL,
@@ -232,6 +232,7 @@ CREATE INDEX history_time ON history(observed_at, record);
 | `store.next_seq` | The sequence number the next entry gets: at least one more than any committed entry's |
 | `store.object_count`, `object_digest` | The number of `objects` rows, and the XOR of their row values (5.3) |
 | `store.history_count`, `history_digest` | The same over `history` rows |
+| `store.clean_close` | 1 when the last writer closed cleanly (everything committed), 0 from the moment a writer opens. It decides how much an open checks (6.3) |
 | `store.row_check` | `CRC` of the store row (5.2) |
 | `packs.seq` | Pack number |
 | `packs.state` | 0 active (the one being appended to; at most one), 1 sealed, 2 compacting (a compaction target not yet switched in), 3 retired (replaced by compaction, its file about to be deleted) |
@@ -251,7 +252,7 @@ CREATE INDEX history_time ON history(observed_at, record);
 All integers are written as i64 LE, then `CRC` is taken over the concatenation. The result, 0 to 2^32−1, is stored as an INTEGER.
 
 - `packs.row_check = CRC(seq ‖ state ‖ committed_length)`, 24 bytes.
-- `store.row_check = CRC(store_id[16] ‖ format ‖ created_at ‖ next_seq ‖ object_count ‖ object_digest ‖ history_count ‖ history_digest)`, 72 bytes.
+- `store.row_check = CRC(store_id[16] ‖ format ‖ created_at ‖ next_seq ‖ object_count ‖ object_digest ‖ history_count ‖ history_digest ‖ clean_close)`, 80 bytes.
 
 Every write to these rows recomputes `row_check` in the same statement.
 
@@ -323,18 +324,22 @@ An entry larger than the limit goes alone into a fresh pack.
 3. Read every `pack-*.vmp` header (2.2):
    - any newer header: `OBJECT_STORE_NEWER_FORMAT`;
    - valid headers from two store ids: `OBJECT_STORE_FOREIGN_PACK`.
-4. If `user_version` = 1, **validate** the index on a read-only connection. The index is unusable when:
+4. If `user_version` = 1, **validate** the index on a read-only connection. Every open runs the **cheap check**. The index is unusable when:
+   - the four tables don't have exactly the columns of section 5, in order;
+   - there isn't exactly one store row, or that row has a wrong type, `id` ≠ 1, a `store_id` that isn't 16 bytes, `format` ≠ 1, `next_seq` < 1, `clean_close` outside 0-1, or a bad `row_check`;
+   - a pack row has `seq` < 1, a state outside 0-3, `committed_length` < 64, or a bad `row_check`, or more than one pack is active;
+   - its store id differs from the one the packs carry.
+
+   When the cheap check passes but `clean_close` is 0 (the last writer didn't close cleanly), the open also runs the **full check**. The index is then also unusable when:
    - `PRAGMA integrity_check` isn't `ok`. This also finds rows out of key order; `quick_check` does not.
-   - The four tables don't have exactly the columns of section 5, in order.
-   - There isn't exactly one store row, or that row has a wrong type, `id` ≠ 1, a `store_id` that isn't 16 bytes, `format` ≠ 1, `next_seq` < 1, or a bad `row_check`.
-   - A pack row has `seq` < 1, a state outside 0-3, `committed_length` < 64, or a bad `row_check`; or more than one pack is active.
-   - Recounting the `objects` rows and recomputing their digest (5.3) disagrees with the store row; the same for `history`.
-   - Its store id differs from the one the packs carry.
+   - recounting the `objects` rows and recomputing their digest (5.3) disagrees with the store row, or the same for `history`.
+
+   The full check costs about 0.8 s per million rows here, the cheap one milliseconds. A writer can also run the full check on request (Scrub, 6.13).
 5. **Unusable index, or none** (`user_version` 0 or missing):
    - With no readable pack, delete the index files and any pack file of at most 64 bytes, then create a fresh index: a random store id, `next_seq` 1, zero totals.
    - Otherwise rebuild it (6.6) into `objects.sqlite3.rebuild`. Checkpoint it, delete the old index's `-wal`/`-shm`, move the rebuilt file over `objects.sqlite3`, and `fsync` the folder.
 6. If nothing was rebuilt, walk the active pack's tail headers (from `committed_length`) without writing. A newer entry there means `OBJECT_STORE_NEWER_FORMAT`. Then delete leftover `.rebuild` files.
-7. Open the writer connection and load the store row.
+7. Open the writer connection, load the store row, and set `clean_close` to 0 in a `synchronous=FULL` transaction, before anything else is changed. From here on a crash leaves the marker unset, so the next open runs the full check.
 8. Clean up the packs:
    - For each pack in state compacting or retired, delete its file, `fsync` `packs/`, and delete its row.
    - A pack file with no row and at most 64 bytes is deleted; any other unlisted pack is reported and left alone.
@@ -342,7 +347,7 @@ An entry larger than the limit goes alone into a fresh pack.
    - A sealed pack shorter or longer than `committed_length` is reported and left alone.
    - An active pack shorter than `committed_length` is reported and sealed.
    - If the active pack is longer than `committed_length`, recover its tail (below).
-9. If step 7 or 8 fails with an index error and nothing was rebuilt yet, close everything, rebuild (step 5), and run steps 7 and 8 once more.
+9. If step 7 or 8 fails with an index error, nothing was rebuilt yet and at least one pack is readable, close everything, rebuild (step 5), and run steps 7 and 8 once more.
 10. Delete staged files not written for 7 days, and start the writer.
 
 **Tail recovery** walks the active pack from `committed_length`, entry by entry:
@@ -484,7 +489,7 @@ Cancellation or a failure before the switch deletes the target file and its row.
 **Open:**
 1. The index must exist, else `OBJECT_STORE_MISSING`. A `user_version` above 1 is `OBJECT_STORE_NEWER_FORMAT`; below 1 is `OBJECT_STORE_MISSING`.
 2. Read every pack header: a newer one is `OBJECT_STORE_NEWER_FORMAT`, two store ids are `OBJECT_STORE_FOREIGN_PACK`.
-3. Validate the index as in 6.3 step 4. Unusable is `OBJECT_STORE_INDEX_UNREADABLE`, since a read-only store can't rebuild.
+3. Validate the index as in 6.3 step 4: the cheap check, and the full one when `clean_close` is 0. A running writer keeps the marker at 0, and a reader can't tell that from a crash, so a reader opening a store whose writer runs pays the full check. Unusable is `OBJECT_STORE_INDEX_UNREADABLE`, since a read-only store can't rebuild.
 
 **Then:**
 - It offers Has, Read, ReadRange, the history read and Verify, and nothing that writes.
@@ -509,9 +514,39 @@ The same reply observed again is a new record sharing the document. The same obs
 - paging: a page continues strictly after the query's `after` entry, 1 to 10,000 entries per page;
 - a page that doesn't run forward is `OBJECT_STORE_INDEX_UNREADABLE`.
 
+### 6.12a Close
+
+A writer closes after its queue is empty and every pending batch has committed:
+1. Set `clean_close` to 1, in a `synchronous=FULL` transaction.
+2. Checkpoint the WAL (`wal_checkpoint(TRUNCATE)`).
+3. Release the lock.
+
+A writer that stopped on an error, or a process that is killed, never sets the marker, so the next open checks fully.
+
+### 6.13 Scrub
+
+The full check on request, for a scheduler above layer 1 to run in the background; this layer doesn't schedule it.
+1. Run the full check of 6.3 step 4 on reader connections, while writes go on. Read the store row's `next_seq`, totals and `row_check` before and after measuring the rows, and trust the comparison only when the two agree (`next_seq` only grows, so nothing was committed in between). Try up to three times.
+2. If commits kept landing through every try, run one pass as a writer request instead, where nothing can commit; writes wait for that pass.
+3. If the check fails, confirm it as a writer request, then rebuild the index in place as Scan does (6.6) and report the problem.
+4. Then run Verify (6.7) over every object.
+
+The scrub honours cancellation: it interrupts SQLite's running statements.
+
+A read-only store runs the same check and Verify and reports a failing index without rebuilding it. If its writer kept committing through every try, it reports that it couldn't check (no stable view), not damage. A read-only open that runs the full check treats that case the same way and keeps the cheap check's verdict.
+
+**Which damage is found when.** Pack bytes are checked by every read (block CRCs), so damage done while the app was closed never returns bad bytes. Index damage after a clean close is found by the cheap check when it hits the store or pack rows. Rows dropped, added, altered or out of order are found:
+- by the next scrub or explicit full check;
+- by the next open after an unclean shutdown;
+- for a damaged row that is read, at that read (Corrupt);
+- for rows out of order, by Verify's cursor check (`OBJECT_STORE_INDEX_UNREADABLE`).
+
+Until then a lookup can miss such a row and report the object Absent. Fetching and putting it again does not repair this: the Put also misses the hidden row, and its insert can then hit the primary key, so that batch fails with `OBJECT_STORE_WRITE_FAILED`. Only a scrub or a rebuild repairs it.
+
 ### 6.12 Which commits are `synchronous=FULL`
 
 `FULL` makes the commit, and every earlier one in the WAL, durable before it returns. These use it:
+- clearing and setting `clean_close` (6.3 step 7, 6.12a);
 - the pack roll (6.2);
 - the compaction listing and switch (6.8);
 - Scan's seal of the active pack (6.6).
@@ -538,6 +573,7 @@ Batches use `NORMAL`. Power loss can then only drop batch commits for the active
 | Compaction target listed or copied, before the switch | A compacting row and target file | Target deleted, source intact |
 | After the switch, before the source is deleted | A retired row and the source file | Source deleted |
 | Index rebuild at open, before the move | `objects.sqlite3.rebuild` | Deleted; old index, or rebuilt again |
+| Any point while a writer is open | `clean_close` = 0 | Full index check |
 | Staging append | Staged file with unproven bytes | Resume keeps only proven chunks |
 
 The reference tests cover these by process kill (an in-process fault hook and real SIGKILL at every step), and by an index restored to its state after the last durable commit. A real power cut is not tested.
@@ -620,6 +656,7 @@ The calls are split by role. Each lists its inputs, outputs and guarantees.
 - **Scan()** gives counts of packs, entries, live rows, duplicates, tombstones, corrupt and unverifiable entries, and problems.
 - **Verify(full)** gives counts of checked, corrupt and lost objects, with keys.
 - **Compact(fraction, max packs)** gives the packs compacted and skipped, the bytes before and after, and the rows moved.
+- **Scrub(full)** gives the index problem found by the full check (or none), whether the index was rebuilt, and Verify's report (6.13).
 
 **IObjectVerifier**: one instance, the same one Put and staging use.
 - **Check(key, bytes, declared length)** gives nothing, or the refusal (code and message) that Put would give for those bytes, in the order of section 4. The one exception is `OBJECT_HISTORY_DOCUMENT_MISSING`, which depends on the store.
@@ -646,7 +683,7 @@ The calls are split by role. Each lists its inputs, outputs and guarantees.
 | Staging | 16 at once, 2 GiB declared in all, files kept 7 days |
 | History page | 1 to 10,000 entries |
 | BLTE chunks | 1 to 65,536 |
-| Pack numbers | 1 to 999,999 |
+| Pack numbers | 1 to 999,999; a store that would need more refuses with `OBJECT_STORE_LIMIT` |
 
 ## 12. Worked example
 
@@ -685,6 +722,6 @@ The index after the commit:
 | --- | --- |
 | `objects` | `k` = `01 00 0e d9 41 75 af 80 22 f2 5c 21 04 ec a1 21 1b c6`, `pack` 1, `offset` 64, `length` 21, `sha256` as above, `last_read` NULL |
 | `packs` | `seq` 1, `state` 0 (active), `committed_length` 185, `live_bytes` 121, `row_check` 2294590932 (0x88C4ADD4 = `CRC(i64 1 ‖ i64 0 ‖ i64 185)`) |
-| `store` | `next_seq` 2, `object_count` 1, `object_digest` 8803469163995718811 (0x7A2C348FD711E49B, the one row's `Mix`), `history_count` 0, `history_digest` 0 |
+| `store` | `next_seq` 2, `object_count` 1, `object_digest` 8803469163995718811 (0x7A2C348FD711E49B, the one row's `Mix`), `history_count` 0, `history_digest` 0, `clean_close` 1 after the close |
 
 The CRC values and the digest above were recomputed from this specification alone, with an independent bitwise CRC-32C (reflected polynomial 0x82F63B78) and the `Mix` steps of 5.3.

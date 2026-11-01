@@ -14,7 +14,10 @@ public sealed partial class ObjectStore
     /// old index until the new one is complete. last_read is kept.
     /// </summary>
     public Task<ScanReport> ScanAsync(IProgress<ScanProgress>? progress = null, CancellationToken ct = default) =>
-        MaintainAsync(async () =>
+        MaintainAsync(() => ScanCoreAsync(progress, ct), ct);
+
+    private async Task<ScanReport> ScanCoreAsync(IProgress<ScanProgress>? progress, CancellationToken ct)
+    {
         {
             // Seal the active pack first, durably, so a Scan that fails leaves no pack marked active without a handle.
             if (active is not null) Durably(tx => SetPackState(tx, activeSeq, PackState.Sealed));
@@ -38,7 +41,8 @@ public sealed partial class ObjectStore
             verified.Clear();
             try { ObjectIndex.Exec(c, "PRAGMA wal_checkpoint(TRUNCATE)"); } catch (SqliteException) { /* readers hold the WAL; a later checkpoint gets it */ }
             return report;
-        }, ct);
+        }
+    }
 
     /// <summary>At open, with no usable index: build one beside it from the packs, then move it into place. Nothing else has it open.</summary>
     private async Task RebuildIndexAsync(CancellationToken ct)
@@ -52,7 +56,7 @@ public sealed partial class ObjectStore
             using (var tx = c.BeginTransaction())
             {
                 var (_, id) = await ReplayPacksAsync(c, tx, null, ct);
-                Exec(c, tx, "UPDATE store SET store_id = $id, row_check = vm_store_check($id, format, created_at, next_seq, object_count, object_digest, history_count, history_digest) WHERE id = 1", ("$id", id ?? System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)));
+                Exec(c, tx, "UPDATE store SET store_id = $id, row_check = vm_store_check($id, format, created_at, next_seq, object_count, object_digest, history_count, history_digest, clean_close) WHERE id = 1", ("$id", id ?? System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)));
                 tx.Commit();
             }
             CarryLastRead(c);
@@ -144,7 +148,7 @@ public sealed partial class ObjectStore
             foreach (var (pack, kept) in tombBytes) Exec(c, tx, "UPDATE packs SET live_bytes = live_bytes + $k WHERE seq = $s", ("$k", kept), ("$s", pack));
             var measured = ObjectIndex.Measure(c, tx);
             Exec(c, tx, "UPDATE store SET next_seq = $n, object_count = $oc, object_digest = $od, history_count = $hc, history_digest = $hd, " +
-                "row_check = vm_store_check(store_id, format, created_at, $n, $oc, $od, $hc, $hd) WHERE id = 1",
+                "row_check = vm_store_check(store_id, format, created_at, $n, $oc, $od, $hc, $hd, clean_close) WHERE id = 1",
                 ("$n", (long)maxSeq + 1), ("$oc", measured.Objects), ("$od", measured.ObjectDigest), ("$hc", measured.History), ("$hd", measured.HistoryDigest));
             var live = Count(c, tx, "SELECT count(*) FROM objects");
             // Dangling history (a record whose document no copy holds) is reported; the record stays as stored.
@@ -169,6 +173,43 @@ public sealed partial class ObjectStore
             ObjectIndex.Exec(c, "DETACH DATABASE old");
         }
         catch (SqliteException) { /* the old index is unreadable: last_read starts empty */ }
+    }
+
+    // ---------------------------------------------------------------- Scrub
+
+    /// <summary>
+    /// The full check on request (D126), for layer 3 to schedule: integrity_check and the totals over every row, then Verify of every
+    /// object. A failing index is rebuilt from the packs in place, as an open after a crash would; the report says what was found.
+    /// </summary>
+    public async Task<ScrubReport> ScrubAsync(bool full = false, IProgress<ScanProgress>? progress = null, CancellationToken ct = default)
+    {
+        EnsureWriter();
+        // Measure on reader connections, so writes go on meanwhile; the stamps keep commits from passing for damage.
+        var (_, problem, _, settled) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring)), ct);
+        // A store that kept committing: one pass with the writer held, where nothing can commit (writes wait for it).
+        if (!settled) (_, problem, _, _) = await MaintainAsync(() => Task.FromResult(ObjectIndex.Validate(indexPath, full: true, ct)), ct);
+        var rebuilt = false;
+        if (problem is not null)
+            (problem, rebuilt) = await MaintainAsync(async () =>
+            {
+                // Confirmed with the writer held before anything is rebuilt.
+                var (_, confirmed, _, _) = ObjectIndex.Validate(indexPath, full: true, ct);
+                if (confirmed is null) return (confirmed, false);
+                problems.Add($"{confirmed}; rebuilt from the packs");
+                await ScanCoreAsync(null, ct);
+                return (confirmed, true);
+            }, ct);
+        return new ScrubReport(problem, rebuilt, await VerifyAsync(full, progress, ct));
+    }
+
+    /// <summary>Read-only stores: the same full index check, reported without a rebuild (only the writer can rebuild).</summary>
+    internal async Task<ScrubReport> ScrubReadOnlyAsync(bool full, IProgress<ScanProgress>? progress, CancellationToken ct)
+    {
+        var (_, problem, _, settled) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring)), ct);
+        VerifyReport verify;
+        try { verify = await VerifyAsync(full, progress, ct); }
+        catch (ObjectStoreException e) when (problem is not null && e.Code == ObjectStoreCodes.IndexUnreadable) { verify = new(0, 0, 0, 0, [], []); }
+        return new ScrubReport(problem, false, verify, settled);
     }
 
     // ---------------------------------------------------------------- Verify
@@ -285,7 +326,7 @@ public sealed partial class ObjectStore
 
     private async Task<(long length, long moved, long skipped)?> CompactPackAsync(int seq, long committed, CancellationToken ct)
     {
-        var target = nextPackSeq++;
+        var target = TakePackNumber();
         var targetPath = PackPath(target);
         Durably(tx => InsertPack(tx, target, PackState.Compacting, PackFormat.PackHeaderBytes));
         At(StorePoint.CompactTargetListed);

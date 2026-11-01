@@ -13,7 +13,7 @@ namespace VibeMiner.Objects.Testing;
 public static class ScaleStore
 {
     /// <summary>Bumped when the store's on-disk format or the synthetic objects change, so an old cache is rebuilt.</summary>
-    public const int Format = 2;
+    public const int Format = 3;  // 3: the store row's clean-close marker
     private const string Manifest = "scale-store.json";
 
     private sealed record Record(int Format, long Objects, DateTimeOffset BuiltAt, double BuildSeconds);
@@ -94,7 +94,7 @@ public static class ScaleStore
         var copy = Path.Combine(target, ObjectStore.DefaultFolderName);
         if (!OperatingSystem.IsWindows())
         {
-            var start = new ProcessStartInfo("cp") { UseShellExecute = false, RedirectStandardError = true };
+            var start = new ProcessStartInfo("cp") { UseShellExecute = false };
             foreach (var a in new[] { "-R", "--reflink=auto", store, copy }) start.ArgumentList.Add(a);
             try
             {

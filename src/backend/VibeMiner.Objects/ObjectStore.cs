@@ -85,7 +85,10 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
             }
             var packStore = OnePackStore(valid);
             // A read-only store can't rebuild: a damaged index is a named state, for its writer to repair.
-            var (indexStore, problem) = ObjectIndex.Validate(store.indexPath);
+            var (indexStore, problem, clean, _) = ObjectIndex.Validate(store.indexPath, full: false, ct);
+            // Unset also while its writer runs (it clears the marker at open): a reader can't tell that from a crash, so it checks fully.
+            // A writer that kept committing leaves it unsettled, which is no evidence of damage: the cheap check stands.
+            if (problem is null && !clean) (indexStore, problem, _, _) = ObjectIndex.Validate(store.indexPath, full: true, ct, () => store.At(StorePoint.IndexMeasuring));
             if (problem is not null) throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, $"The object index can't be used: {problem}. Its writer rebuilds it.");
             if (packStore is not null && !packStore.AsSpan().SequenceEqual(indexStore))
                 throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index names another store than its packs. Its writer rebuilds it.");

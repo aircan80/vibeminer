@@ -49,11 +49,27 @@ public sealed class ObjectStoreScaleTests(ITestOutputHelper output)
         var sw = Stopwatch.StartNew();
         var dir = await CachedAsync();
         output.WriteLine($"store ready in {sw.Elapsed.TotalSeconds:F1} s");
-        // Reads only: the cached store is shared, so it is opened read-only (which runs the same open-time index check).
+        // Reads only: the cached store is shared, so it is opened read-only. It was closed cleanly, so only the cheap check runs.
         sw.Restart();
         await using var s = await ObjectStore.OpenReadOnlyAsync(dir);
-        output.WriteLine($"open with the index check (integrity_check, totals over every row) {sw.Elapsed.TotalSeconds:F1} s");
-        // Where that goes: SQLite's integrity_check on its own, then everything else (schema, rows, totals in parallel).
+        output.WriteLine($"open after a clean close (cheap check only) {sw.Elapsed.TotalSeconds * 1000:F0} ms");
+        // After an unclean shutdown the open runs the full check: measured on a copy whose writer was killed.
+        using (var t = new TempDirectory())
+        {
+            var copy = await ScaleStore.CopyAsync(dir, t.Path);
+            var killed = await ObjectStore.OpenAsync(copy);
+            killed.Kill();
+            sw.Restart();
+            await using (var unclean = await ObjectStore.OpenAsync(copy))
+            {
+                output.WriteLine($"open after an unclean shutdown (full check) {sw.Elapsed.TotalSeconds:F1} s");
+                Assert.True(unclean.OpenReport.FullIndexCheck);
+                Assert.False(unclean.OpenReport.IndexRebuilt);
+            }
+            sw.Restart();
+            await using (var clean = await ObjectStore.OpenAsync(copy)) output.WriteLine($"writer open after its clean close {sw.Elapsed.TotalSeconds * 1000:F0} ms");
+        }
+        // Where the full check goes: SQLite's integrity_check on its own; the rest is the totals over every row.
         sw.Restart();
         using (var c = new SqliteConnection($"Data Source={Path.Combine(dir, "objects.sqlite3")};Mode=ReadOnly;Pooling=False"))
         {
@@ -61,7 +77,7 @@ public sealed class ObjectStoreScaleTests(ITestOutputHelper output)
             using var cmd = c.CreateCommand(); cmd.CommandText = "PRAGMA integrity_check";
             Assert.Equal("ok", cmd.ExecuteScalar());
         }
-        output.WriteLine($"  of which integrity_check alone {sw.Elapsed.TotalSeconds:F1} s");
+        output.WriteLine($"  integrity_check alone {sw.Elapsed.TotalSeconds:F1} s");
         var rng = new Random(5);
         for (var i = 0; i < 100_000; i++) await s.HasAsync(ScaleStore.Tiny((long)(rng.NextDouble() * total)).Key);
         foreach (var (label, absent) in new[] { ("present", false), ("absent", true) })

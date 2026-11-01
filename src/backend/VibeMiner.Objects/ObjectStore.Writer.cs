@@ -81,10 +81,14 @@ public sealed partial class ObjectStore
         }
         nextPackSeq = disk.Count == 0 ? 1 : disk[^1].seq + 1;
         var packStore = OnePackStore(valid);
-        // A damaged index (D126) is rebuilt from the packs, never trusted: SQLite's check, the schema, every store and pack row.
+        // A damaged index (D126) is rebuilt from the packs, never trusted. Every open runs the cheap check (schema, store and pack
+        // rows with their CRCs); the full one (integrity_check, totals over every row) only when the last writer didn't close cleanly.
+        var fullCheck = false;
         if (!unreadable && version == ObjectIndex.SchemaVersion)
         {
-            var (indexStore, problem) = ObjectIndex.Validate(indexPath);
+            var (indexStore, problem, clean, _) = ObjectIndex.Validate(indexPath, full: false, ct);
+            // The lock is held, so nothing else commits: the full check always settles here.
+            if (problem is null && !clean) { fullCheck = true; (indexStore, problem, _, _) = ObjectIndex.Validate(indexPath, full: true, ct); }
             if (problem is not null) { unreadable = true; problems.Add($"{problem}; rebuilt from the packs"); }
             else if (packStore is not null && !packStore.AsSpan().SequenceEqual(indexStore)) { unreadable = true; problems.Add("the index names another store than its packs; rebuilt from the packs"); }
         }
@@ -119,6 +123,8 @@ public sealed partial class ObjectStore
         {
             OpenWriterConnection();
             storeId = ReadStoreId(wconn!);
+            // Unset the clean-close marker first, durably: from here on a crash leaves it unset, so the next open runs the full check.
+            SetCleanClose(false);
             await LoadAndRecoverAsync(disk, ct);
         }
         catch (Exception e) when (!rebuilt && valid.Count > 0 && e is SqliteException or InvalidCastException or InvalidOperationException or FormatException or OverflowException)
@@ -132,13 +138,14 @@ public sealed partial class ObjectStore
             rebuilt = true;
             OpenWriterConnection();
             storeId = ReadStoreId(wconn!);
+            SetCleanClose(false);
             await LoadAndRecoverAsync(disk, ct);
         }
         CleanStaging();
         readers = new IndexReaders(indexPath, options.ReadConnections);
         requests = Channel.CreateBounded<Request>(new BoundedChannelOptions(64) { SingleReader = true });
         loop = Task.Run(RunAsync, CancellationToken.None);
-        OpenReport = OpenReport with { IndexRebuilt = rebuilt, Problems = problems.ToArray() };
+        OpenReport = OpenReport with { IndexRebuilt = rebuilt, FullIndexCheck = fullCheck, Problems = problems.ToArray() };
     }
 
     private string RebuildPath => indexPath + ".rebuild";
@@ -576,7 +583,7 @@ public sealed partial class ObjectStore
     {
         if (active is not null && (activeLength + size <= options.MaxPackBytes || activeLength == PackFormat.PackHeaderBytes)) return;
         if (pending.Count > 0) await CommitAsync();
-        var seq = nextPackSeq++;
+        var seq = TakePackNumber();
         var path = PackPath(seq);
         var handle = PackFiles.OpenWrite(path, FileMode.CreateNew);
         try
@@ -727,6 +734,17 @@ public sealed partial class ObjectStore
         finally { ObjectIndex.Exec(wconn!, "PRAGMA synchronous=NORMAL"); }
     }
 
+    /// <summary>The next pack number; file names hold six digits, so the store refuses to go past pack 999,999 (about 2 PB at 2 GiB).</summary>
+    private int TakePackNumber()
+    {
+        if (nextPackSeq > 999_999) throw new ObjectStoreException(ObjectStoreCodes.Limit, "The store has used every pack number (999,999).");
+        return nextPackSeq++;
+    }
+
+    private void SetCleanClose(bool clean) => Durably(tx => ExecWriter(
+        "UPDATE store SET clean_close = $c, row_check = vm_store_check(store_id, format, created_at, next_seq, object_count, object_digest, history_count, history_digest, $c) WHERE id = 1",
+        tx, ("$c", clean ? 1L : 0L)));
+
     private void SealRow(int seq) => SetPackState(null, seq, PackState.Sealed);
 
     // Pack and store rows always carry their row check (ObjectIndex.Validate). SET sees the old values, so the new ones go in by name.
@@ -736,7 +754,7 @@ public sealed partial class ObjectStore
         ExecWriter("INSERT INTO packs VALUES($s, $st, $c, 0, vm_pack_check($s, $st, $c))", tx, ("$s", seq), ("$st", (int)state), ("$c", committed));
     private void WriteStoreRow(SqliteTransaction? tx, long next, StoreTotals t) =>
         ExecWriter("UPDATE store SET next_seq = $n, object_count = $oc, object_digest = $od, history_count = $hc, history_digest = $hd, " +
-            "row_check = vm_store_check(store_id, format, created_at, $n, $oc, $od, $hc, $hd) WHERE id = 1", tx,
+            "row_check = vm_store_check(store_id, format, created_at, $n, $oc, $od, $hc, $hd, clean_close) WHERE id = 1", tx,
             ("$n", next), ("$oc", t.Objects), ("$od", t.ObjectDigest), ("$hc", t.History), ("$hd", t.HistoryDigest));
     private string PackPath(int seq) => Path.Combine(packsDirectory, PackFiles.Name(seq));
 
@@ -788,8 +806,11 @@ public sealed partial class ObjectStore
         requests?.Writer.TryComplete();
         if (loop is not null) await loop;
         foreach (var s in stagings.Values.Where(v => v is not null).ToList()) await s.DisposeAsync();
-        if (wconn is not null && fault is null)
+        if (wconn is not null && fault is null && !killed)
         {
+            // Clean close (D126): everything is committed; the marker is set durably, so the next open needs only the cheap check.
+            try { SetCleanClose(true); }
+            catch (SqliteException) { /* left unset: the next open runs the full check, which is only slower */ }
             try { ObjectIndex.Exec(wconn, "PRAGMA wal_checkpoint(TRUNCATE)"); }
             catch (SqliteException) { /* a reader in another process holds the WAL; the next writer checkpoints */ }
         }

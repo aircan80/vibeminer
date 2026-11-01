@@ -58,6 +58,11 @@ public interface IObjectStoreMaintenance
     Task<VerifyReport> VerifyAsync(bool full = false, IProgress<ScanProgress>? progress = null, CancellationToken ct = default);
     /// <summary>Rewrites sealed packs with dead space.</summary>
     Task<CompactReport> CompactAsync(CompactOptions? compact = null, CancellationToken ct = default);
+    /// <summary>
+    /// The background scrub layer 3 can schedule: the full index check an open runs only after an unclean shutdown (rebuilding the
+    /// index from the packs when it fails), then Verify of every object.
+    /// </summary>
+    Task<ScrubReport> ScrubAsync(bool full = false, IProgress<ScanProgress>? progress = null, CancellationToken ct = default);
 }
 
 /// <summary>Why bytes can't be stored under a key: one of <see cref="ObjectRefusalCodes"/>, and what failed.</summary>
@@ -164,5 +169,7 @@ public sealed class ReadOnlyObjectStore : IObjectReader, IHistoryReader, IAsyncD
     public ValueTask<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken ct = default) => inner.ReadHistoryAsync(query, ct);
     /// <summary>Scrubs every indexed object, as the writer's Verify does; it reads only.</summary>
     public Task<VerifyReport> VerifyAsync(bool full = false, IProgress<ScanProgress>? progress = null, CancellationToken ct = default) => inner.VerifyAsync(full, progress, ct);
+    /// <summary>The full index check and Verify; a failing index is reported, since only its writer can rebuild it.</summary>
+    public Task<ScrubReport> ScrubAsync(bool full = false, IProgress<ScanProgress>? progress = null, CancellationToken ct = default) => inner.ScrubReadOnlyAsync(full, progress, ct);
     public ValueTask DisposeAsync() => inner.DisposeAsync();
 }

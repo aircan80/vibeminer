@@ -27,7 +27,7 @@ internal static class ObjectIndex
         CREATE TABLE store(id INTEGER PRIMARY KEY CHECK(id = 1), store_id BLOB NOT NULL CHECK(length(store_id) = 16),
             format INTEGER NOT NULL, created_at INTEGER NOT NULL, next_seq INTEGER NOT NULL,
             object_count INTEGER NOT NULL, object_digest INTEGER NOT NULL, history_count INTEGER NOT NULL, history_digest INTEGER NOT NULL,
-            row_check INTEGER NOT NULL);
+            clean_close INTEGER NOT NULL, row_check INTEGER NOT NULL);
         CREATE TABLE packs(seq INTEGER PRIMARY KEY, state INTEGER NOT NULL, committed_length INTEGER NOT NULL, live_bytes INTEGER NOT NULL,
             row_check INTEGER NOT NULL);
         CREATE TABLE objects(k BLOB PRIMARY KEY, pack INTEGER NOT NULL, offset INTEGER NOT NULL, length INTEGER NOT NULL,
@@ -48,8 +48,8 @@ internal static class ObjectIndex
         // The rows recovery trusts most (where a pack's committed bytes end, the next sequence number) carry a CRC of their own:
         // SQLite has no page checksums, so a flipped bit there would otherwise pass every check and steer recovery wrong.
         c.CreateFunction("vm_pack_check", (long seq, long state, long committed) => PackCheck(seq, state, committed), isDeterministic: true);
-        c.CreateFunction("vm_store_check", (byte[] id, long format, long created, long next, long oc, long od, long hc, long hd) =>
-            StoreCheck(id, format, created, next, new(oc, od, hc, hd)), isDeterministic: true);
+        c.CreateFunction("vm_store_check", (byte[] id, long format, long created, long next, long oc, long od, long hc, long hd, long clean) =>
+            StoreCheck(id, format, created, next, new(oc, od, hc, hd), clean), isDeterministic: true);
         // Order-independent digests of every row, so open can tell a dropped, added or altered row from the totals in the store row.
         c.CreateAggregate("vm_object_digest", 0L, (long acc, byte[] k, long pack, long offset, long length, byte[] sha) => acc ^ ObjectDigest(k, pack, offset, length, sha), isDeterministic: true);
         c.CreateAggregate("vm_history_digest", 0L, (long acc, byte[] record, long observed, string product, string region, long kind, byte[] document, string url) =>
@@ -76,7 +76,7 @@ internal static class ObjectIndex
         using (var cmd = c.CreateCommand())
         {
             cmd.Transaction = tx;
-            cmd.CommandText = "INSERT INTO store VALUES(1, $id, $f, $t, $n, 0, 0, 0, 0, vm_store_check($id, $f, $t, $n, 0, 0, 0, 0))";
+            cmd.CommandText = "INSERT INTO store VALUES(1, $id, $f, $t, $n, 0, 0, 0, 0, 0, vm_store_check($id, $f, $t, $n, 0, 0, 0, 0, 0))";
             cmd.Parameters.AddWithValue("$id", storeId); cmd.Parameters.AddWithValue("$f", (int)PackFormat.Version);
             cmd.Parameters.AddWithValue("$t", createdMs); cmd.Parameters.AddWithValue("$n", nextSeq);
             cmd.ExecuteNonQuery();
@@ -109,12 +109,12 @@ internal static class ObjectIndex
         return PackFormat.Crc32C(b);
     }
 
-    public static long StoreCheck(byte[] id, long format, long created, long next, StoreTotals totals)
+    public static long StoreCheck(byte[] id, long format, long created, long next, StoreTotals totals, long cleanClose)
     {
-        var b = new byte[(id?.Length ?? 0) + 56];
+        var b = new byte[(id?.Length ?? 0) + 64];
         id?.CopyTo(b, 0);
         var at = id?.Length ?? 0;
-        foreach (var v in new[] { format, created, next, totals.Objects, totals.ObjectDigest, totals.History, totals.HistoryDigest })
+        foreach (var v in new[] { format, created, next, totals.Objects, totals.ObjectDigest, totals.History, totals.HistoryDigest, cleanClose })
         { System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(b.AsSpan(at), v); at += 8; }
         return PackFormat.Crc32C(b);
     }
@@ -167,7 +167,26 @@ internal static class ObjectIndex
     /// As <see cref="Measure"/> for the objects table, split by key range over parallel read-only connections: at 30M rows one
     /// connection takes about 8.6 s here, so open-time checking spreads it over the CPUs.
     /// </summary>
-    private static (long count, long digest) MeasureObjectsParallel(string path)
+    private static (long count, long digest) MeasureHistory(SqliteConnection c)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT count(*), vm_history_digest(record, observed_at, product, region, kind, document, url) FROM history";
+        using var r = cmd.ExecuteReader(); r.Read();
+        return (r.GetInt64(0), r.IsDBNull(1) ? 0 : r.GetInt64(1));
+    }
+
+    private readonly record struct StoreStamp(long NextSeq, StoreTotals Totals, long RowCheck);
+
+    private static StoreStamp Stamp(SqliteConnection c)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT next_seq, object_count, object_digest, history_count, history_digest, row_check FROM store WHERE id = 1";
+        using var r = cmd.ExecuteReader();
+        if (!r.Read()) throw new InvalidOperationException("The store row is gone.");
+        return new(r.GetInt64(0), new(r.GetInt64(1), r.GetInt64(2), r.GetInt64(3), r.GetInt64(4)), r.GetInt64(5));
+    }
+
+    private static (long count, long digest) MeasureObjectsParallel(string path, CancellationToken ct)
     {
         byte[]? lo, hi;
         using (var c = Open(path, readOnly: true))
@@ -184,9 +203,10 @@ internal static class ObjectIndex
         var bounds = Enumerable.Range(0, slices + 1).Select(i => i == slices ? (byte[]?)null : BoundOf(a + (z - a) * (UInt128)i / (UInt128)slices)).ToArray();
         static byte[] BoundOf(UInt128 v) { var b = new byte[8]; System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(b, (ulong)v); return b; }
         var parts = new (long count, long digest)[slices];
-        Parallel.For(0, slices, new ParallelOptions { MaxDegreeOfParallelism = slices }, i =>
+        Parallel.For(0, slices, new ParallelOptions { MaxDegreeOfParallelism = slices, CancellationToken = ct }, i =>
         {
             using var c = Open(path, readOnly: true);
+            using var interrupt = ct.Register(() => SQLitePCL.raw.sqlite3_interrupt(c.Handle));
             using var cmd = c.CreateCommand();
             cmd.CommandText = "SELECT count(*), vm_object_digest(k, pack, offset, length, sha256) FROM objects WHERE k >= $a" + (bounds[i + 1] is null ? "" : " AND k < $b");
             cmd.Parameters.AddWithValue("$a", i == 0 ? Array.Empty<byte>() : bounds[i]!);
@@ -199,29 +219,40 @@ internal static class ObjectIndex
 
     private static readonly (string table, string[] columns)[] Expected =
     [
-        ("store", ["id", "store_id", "format", "created_at", "next_seq", "object_count", "object_digest", "history_count", "history_digest", "row_check"]),
+        ("store", ["id", "store_id", "format", "created_at", "next_seq", "object_count", "object_digest", "history_count", "history_digest", "clean_close", "row_check"]),
         ("packs", ["seq", "state", "committed_length", "live_bytes", "row_check"]),
         ("objects", ["k", "pack", "offset", "length", "sha256", "last_read"]),
         ("history", ["record", "observed_at", "product", "region", "kind", "document", "url"]),
     ];
 
     /// <summary>
-    /// Opens an existing index read-only and checks it before anything trusts it: SQLite's quick_check, the exact tables and columns,
-    /// one store row and every pack row with sane values and matching row checks, at most one active pack. Returns the store id and
-    /// null, or a problem; it never throws for a damaged file.
+    /// Opens an existing index read-only and checks it before anything trusts it (D126). The cheap check, run at every open: the exact
+    /// tables and columns, one store row and every pack row with sane values and matching row checks, at most one active pack. The
+    /// full check adds SQLite's integrity_check and the totals over every row (about 0.8 s per million rows here); an open runs it
+    /// only after an unclean shutdown, and a scrub on request. Returns the store id, whether the last writer closed cleanly, and
+    /// null or a problem; it never throws for a damaged file.
     /// </summary>
-    public static (byte[]? storeId, string? problem) Validate(string path)
+    /// <remarks>
+    /// On a live store the totals and the rows are read in different snapshots (the measure runs on several connections), so the
+    /// full check stamps the store row (next_seq, which only grows, the totals and its row check) before and after measuring, and
+    /// trusts the comparison only when the two stamps agree; nothing was committed in between. It tries three times; a store that
+    /// kept committing comes back <c>settled = false</c> with no problem, never as damaged. <paramref name="measuring"/> runs between
+    /// the first stamp and the measure (tests). Cancellation interrupts SQLite's statements.
+    /// </remarks>
+    public static (byte[]? storeId, string? problem, bool clean, bool settled) Validate(string path, bool full, CancellationToken ct = default, Action? measuring = null)
     {
         try
         {
             using var c = Open(path, readOnly: true);
-            using (var cmd = c.CreateCommand())
+            using var interrupt = ct.Register(() => SQLitePCL.raw.sqlite3_interrupt(c.Handle));
+            if (full)
             {
+                using var cmd = c.CreateCommand();
                 // integrity_check, not quick_check: it also finds rows out of key order, which hide objects from lookups (QA on #153).
                 // At 30M rows it takes about 3.6 s here, quick_check 3.0 s: the objects table has no secondary index to cross-check.
                 cmd.CommandText = "PRAGMA integrity_check";
                 var first = cmd.ExecuteScalar() as string;
-                if (first != "ok") return (null, $"the index fails SQLite's check ({first})");
+                if (first != "ok") return (null, $"the index fails SQLite's check ({first})", false, true);
             }
             foreach (var (table, columns) in Expected)
             {
@@ -229,13 +260,14 @@ internal static class ObjectIndex
                 cmd.CommandText = $"PRAGMA table_info({table})";
                 var names = new List<string>();
                 using (var r = cmd.ExecuteReader()) while (r.Read()) names.Add(r.GetValue(1) as string ?? "");
-                if (!names.SequenceEqual(columns)) return (null, $"the index's {table} table doesn't have the expected columns");
+                if (!names.SequenceEqual(columns)) return (null, $"the index's {table} table doesn't have the expected columns", false, true);
             }
             byte[]? id = null;
             StoreTotals recorded = default;
+            var clean = false;
             using (var cmd = c.CreateCommand())
             {
-                cmd.CommandText = "SELECT id, store_id, format, created_at, next_seq, object_count, object_digest, history_count, history_digest, row_check FROM store";
+                cmd.CommandText = "SELECT id, store_id, format, created_at, next_seq, object_count, object_digest, history_count, history_digest, clean_close, row_check FROM store";
                 using var r = cmd.ExecuteReader();
                 var rows = 0;
                 while (r.Read())
@@ -244,11 +276,12 @@ internal static class ObjectIndex
                     if (r.GetValue(0) is not long one || one != 1 || r.GetValue(1) is not byte[] { Length: 16 } sid || r.GetValue(2) is not long format ||
                         format != PackFormat.Version || r.GetValue(3) is not long created || r.GetValue(4) is not long next || next < 1 ||
                         r.GetValue(5) is not long oc || r.GetValue(6) is not long od || r.GetValue(7) is not long hc || r.GetValue(8) is not long hd ||
-                        r.GetValue(9) is not long check || check != StoreCheck(sid, format, created, next, new(oc, od, hc, hd)))
-                        return (null, "the index's store row is damaged");
-                    id = sid; recorded = new(oc, od, hc, hd);
+                        r.GetValue(9) is not long cc || cc is not (0 or 1) ||
+                        r.GetValue(10) is not long check || check != StoreCheck(sid, format, created, next, new(oc, od, hc, hd), cc))
+                        return (null, "the index's store row is damaged", false, true);
+                    id = sid; recorded = new(oc, od, hc, hd); clean = cc == 1;
                 }
-                if (rows != 1) return (null, "the index doesn't have exactly one store row");
+                if (rows != 1) return (null, "the index doesn't have exactly one store row", false, true);
             }
             using (var cmd = c.CreateCommand())
             {
@@ -260,21 +293,36 @@ internal static class ObjectIndex
                     if (r.GetValue(0) is not long seq || seq < 1 || r.GetValue(1) is not long state || state is < 0 or > 3 ||
                         r.GetValue(2) is not long committed || committed < PackFormat.PackHeaderBytes || r.GetValue(3) is not long ||
                         r.GetValue(4) is not long check || check != PackCheck(seq, state, committed))
-                        return (null, "a pack row in the index is damaged");
+                        return (null, "a pack row in the index is damaged", false, true);
                     if (state == (long)PackState.Active) active++;
                 }
-                if (active > 1) return (null, "the index lists more than one active pack");
+                if (active > 1) return (null, "the index lists more than one active pack", false, true);
             }
+            if (!full) return (id, null, clean, true);
             // Rows lost, added or altered in a structurally sound file: only the totals over the rows themselves can tell.
-            var (count, digest) = MeasureObjectsParallel(path);
-            if (count != recorded.Objects || digest != recorded.ObjectDigest) return (null, $"the index's object rows don't match its totals ({count} rows, {recorded.Objects} recorded)");
-            var measured = Measure(c);
-            if (measured.History != recorded.History || measured.HistoryDigest != recorded.HistoryDigest) return (null, "the index's history rows don't match its totals");
-            return (id, null);
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var before = Stamp(c);
+                measuring?.Invoke();
+                var (count, digest) = MeasureObjectsParallel(path, ct);
+                var history = MeasureHistory(c);
+                if (Stamp(c) != before) continue;  // a writer committed meanwhile: the comparison would mix two snapshots
+                if (count != before.Totals.Objects || digest != before.Totals.ObjectDigest)
+                    return (null, $"the index's object rows don't match its totals ({count} rows, {before.Totals.Objects} recorded)", false, true);
+                if (history.count != before.Totals.History || history.digest != before.Totals.HistoryDigest)
+                    return (null, "the index's history rows don't match its totals", false, true);
+                return (id, null, clean, true);
+            }
+            return (id, null, clean, false);
+        }
+        catch (Exception e) when (ct.IsCancellationRequested && e is SqliteException or AggregateException)
+        {
+            throw new OperationCanceledException("The index check was canceled.", e, ct);
         }
         catch (Exception e) when (e is SqliteException or InvalidCastException or InvalidOperationException or FormatException or OverflowException or ArgumentException or AggregateException)
         {
-            return (null, $"the index can't be read ({e.Message})");
+            return (null, $"the index can't be read ({e.Message})", false, true);
         }
     }
 

@@ -17,7 +17,7 @@ The storage rewrite (#153-#160) splits local data into three layers. Layer 1, th
 - **Reads check** ([D124](DECISIONS.md)) the header, every block's CRC, and the SHA-256 on the first read of a small object in a session. A range read touches only its blocks. Damage reads as Corrupt, never as bytes.
 - **Recovery and rebuild** ([D125](DECISIONS.md), [D126](DECISIONS.md)):
   - an open replays the synced tail past the last commit, keeping the first copy of a key;
-  - the index is checked at open (`integrity_check`, row checks, totals over every row) and rebuilt from the packs when it doesn't hold;
+  - every open runs a cheap index check (schema, CRC-checked store and pack rows); the full check (`integrity_check`, totals over every row) runs after an unclean shutdown or as a scrub, and a failing index is rebuilt from the packs;
   - Scan rebuilds it in place.
 - **History log** ([D127](DECISIONS.md)): raw versions, cdns and bgdl replies, stored once, with dated records.
 - **Formats** ([D129](DECISIONS.md)): anything newer is refused by name and never truncated.
@@ -48,10 +48,13 @@ Synthetic headerless objects, i9-13900K (32 threads), btrfs on LUKS on NVMe, pag
 | Has at 30M rows, present / absent key | p50 4.7 / 4.1 µs, p99 6.6 / 5.8 µs |
 | Load of 30M 17-byte objects (8 callers) | 1,238 s, 24,235 obj/s |
 | Scan of the 30M store | 806 s, identical rows (`ObjectStoreScaleTests`) |
+| The full index check (`integrity_check`, row checks, totals over every row), run by an open after an unclean shutdown or a scrub, 3M / 10M / 30M rows | 2.7 s / 7.6 s / 22.7 s, of which `integrity_check` 0.4 s / 1.2 s / about 3.6 s; the rest is the totals digest. An open after a clean close runs only the cheap check |
+| Has at 3M / 10M rows (present key), from the cached scale store | p50 4.4 / 4.6 µs, p99 5.7 / 5.9 µs |
+| A scale run on the cached store (`VIBEMINER_OBJECT_STORE_SCALE=3` / `10`), once built (58 s / 325 s) | 5 s / 11 s |
 | Reopen recovering 128 synced, uncommitted entries | 0.06 s |
 | Scan / Verify / open with the index deleted, 4 GiB in 48,896 objects | 4.2 s / 4.6 s / 4.2 s |
 
-Every object pays three hashes on Put (its key's MD5, SHA-256, CRC-32C), about 520 MiB/s on one core; one fsync is about 6.6 ms here. The 30M-row checks are an opt-in test, not part of `npm test` ([TESTING](TESTING.md#environment-variables)).
+Every object pays three hashes on Put (its key's MD5, SHA-256, CRC-32C), about 520 MiB/s on one core; one fsync is about 6.6 ms here. The scale checks are opt-in, not part of `npm test` ([TESTING](TESTING.md#object-store-scale-store)).
 
 ## Identity and provenance
 

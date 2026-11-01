@@ -41,7 +41,14 @@ public sealed record RangeRead(ReadState State, ObjectInfo? Info = null, string?
 public enum DeleteOutcome { Deleted, Absent, Refused }
 public sealed record DeleteResult(ObjectKey Key, DeleteOutcome Outcome, string? Code = null);
 
-public sealed record OpenReport(int RecoveredEntries, long TruncatedBytes, bool IndexRebuilt, IReadOnlyList<string> Problems);
+/// <summary><see cref="FullIndexCheck"/>: the open ran the full index check (the last writer didn't close cleanly), not just the cheap one.</summary>
+public sealed record OpenReport(int RecoveredEntries, long TruncatedBytes, bool IndexRebuilt, IReadOnlyList<string> Problems, bool FullIndexCheck = false);
+/// <summary>
+/// A scrub: the full index check (<see cref="IndexProblem"/> is null when it held; <see cref="IndexRebuilt"/> when the writer rebuilt
+/// it) and Verify. <see cref="IndexChecked"/> is false only for a read-only store whose writer kept committing through every attempt:
+/// no stable view, so nothing was concluded.
+/// </summary>
+public sealed record ScrubReport(string? IndexProblem, bool IndexRebuilt, VerifyReport Verify, bool IndexChecked = true);
 public sealed record ScanReport(int Packs, long Entries, long Live, long Duplicates, long Tombstones, long Corrupt, long Unverifiable, IReadOnlyList<string> Problems);
 public sealed record VerifyReport(long Checked, long Bytes, long CorruptCount, long LostCount, IReadOnlyList<ObjectKey> Corrupt, IReadOnlyList<ObjectKey> Lost);
 /// <summary><see cref="SkippedCorrupt"/>: packs left alone because they hold a corrupt live entry (Read and Verify still report it).</summary>
