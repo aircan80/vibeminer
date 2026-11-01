@@ -1,6 +1,6 @@
 namespace VibeMiner.Cli.Browse;
 
-/// <summary>One open view in the stack: its last content, its filter and where the cursor was.</summary>
+/// <summary>One open view in the stack: its last content, its filter and where the cursor was (a row, or a text line).</summary>
 internal sealed class BrowseFrame(BrowseView view)
 {
     public BrowseView View { get; } = view;
@@ -9,14 +9,21 @@ internal sealed class BrowseFrame(BrowseView view)
     public bool Loading { get; set; }
     public string Filter { get; set; } = "";
     public int Selected { get; set; }
+    /// <summary>Set when a key asked for a reload while opening a view on top; Esc back to this view reloads it.</summary>
+    public bool Stale { get; set; }
 
-    /// <summary>The rows the filter lets through (all of them with no filter).</summary>
+    private bool Filtering => Filter.Length > 0 && !View.FiltersOnLoad;
+
+    /// <summary>The rows the filter lets through (all of them with no filter, or when the view filtered them as it loaded).</summary>
     public IReadOnlyList<BrowseRow> Visible => Content is not { } content ? []
-        : Filter.Length == 0 ? content.Rows : content.Rows.Where(r => r.Matches(Filter)).ToList();
+        : !Filtering ? content.Rows : content.Rows.Where(r => r.Matches(Filter)).ToList();
 
     /// <summary>The text with the filter applied to its lines.</summary>
     public string? VisibleText => Content?.Text is not { } text ? null
-        : Filter.Length == 0 ? text : string.Join('\n', text.Split('\n').Where(l => l.Contains(Filter, StringComparison.OrdinalIgnoreCase)));
+        : !Filtering ? text : string.Join('\n', text.Split('\n').Where(l => l.Contains(Filter, StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>How many places the cursor can be: text lines in a text view, visible rows in a table.</summary>
+    public int Count => VisibleText is { } visible ? visible.Split('\n').Length : Visible.Count;
 }
 
 /// <summary>
@@ -55,6 +62,8 @@ internal sealed class Navigator : IAsyncDisposable
     public string Path => string.Join(" > ", frames.Select(f => f.View.Title));
     /// <summary>The running (or last) load, for tests. Never faults.</summary>
     public Task Loading { get; private set; } = Task.CompletedTask;
+    /// <summary>The question a key asked, open on the status line until <see cref="Answer"/> or <see cref="CancelAsk"/>.</summary>
+    public KeyAsk? Asking { get; private set; }
     /// <summary>A one-off line from the last key (an unknown view, a key with nothing to do); cleared by the next key that works.</summary>
     public string? Message { get; private set; }
 
@@ -75,6 +84,7 @@ internal sealed class Navigator : IAsyncDisposable
         CancelLoad();
         frames.Clear();
         Message = null;
+        Asking = null;
         Open(entry.Create());
         return true;
     }
@@ -87,6 +97,7 @@ internal sealed class Navigator : IAsyncDisposable
         Current.Selected = visibleIndex;
         CancelLoad();
         Message = null;
+        Asking = null;
         Open(drill());
         return true;
     }
@@ -94,35 +105,110 @@ internal sealed class Navigator : IAsyncDisposable
     /// <summary>Esc: clears the filter first, then goes back one view. False at the top with no filter.</summary>
     public bool Back()
     {
+        Asking = null;
         if (Current.Filter.Length > 0) { SetFilter(""); return true; }
         if (frames.Count < 2) return false;
         CancelLoad();
         frames.RemoveAt(frames.Count - 1);
         Message = null;
-        // The view below may have been left mid-load; it loads again.
-        if (Current.Content is null && Current.Error is null) Load(Current);
+        // The view below may have been left mid-load, or a key asked for its reload; it loads again.
+        if (Current.Stale || (Current.Content is null && Current.Error is null)) Load(Current);
         else Raise();
         return true;
     }
 
+    /// <summary>Sets the filter; a view that filters on load loads again with it.</summary>
     public void SetFilter(string filter)
     {
         Current.Filter = filter.Trim();
         Current.Selected = 0;
-        Raise();
+        if (Current.View.FiltersOnLoad) Load(Current);
+        else Raise();
     }
 
     public void Reload() => Load(Current);
 
-    /// <summary>A view's own key. False when the current view has none for it.</summary>
+    /// <summary>The keys the shell takes before a view's: <c>: / ? q x</c> (Esc and Enter aren't characters).</summary>
+    public const string GlobalKeys = ":/?qx";
+
+    /// <summary>The current view's quick keys that count: not a global key, not an action's key, the first of a repeated key.</summary>
+    public IReadOnlyList<ViewKey> Keys
+    {
+        get
+        {
+            var actions = Current.View.Actions;
+            return Current.View.Keys.Where(k => !GlobalKeys.Contains(k.Key) && actions.All(a => a.Key != k.Key))
+                .DistinctBy(k => k.Key).ToList();
+        }
+    }
+
+    /// <summary>The selected visible row of a table, or null (a text view, an empty table).</summary>
+    public BrowseRow? SelectedRow => Current.VisibleText is null && Current.Visible is { Count: > 0 } rows && Current.Selected < rows.Count
+        ? rows[Math.Max(0, Current.Selected)] : null;
+
+    /// <summary>A view's own key: an action, then a quick key. False when the current view has none for it.</summary>
     public bool TryAction(char key)
     {
-        if (Current.View.Actions.FirstOrDefault(a => a.Key == key) is not { } action) return false;
+        if (Current.View.Actions.FirstOrDefault(a => a.Key == key) is { } action)
+        {
+            Message = null;
+            StartTask(action.Task, action.Run);
+            return true;
+        }
+        if (Keys.FirstOrDefault(k => k.Key == key) is not { } viewKey) return false;
         Message = null;
-        // Whatever view is showing when it ends reloads, so it shows what the task wrote.
-        Tasks.Start(action.Task, (progress, ct) => action.Run(session, progress, ct), () => { if (frames.Count > 0) Load(Current); });
+        Apply(viewKey.Press(SelectedRow));
         return true;
     }
+
+    /// <summary>Enter on the open question: closes it and does what the answer says.</summary>
+    public void Answer(string typed)
+    {
+        if (Asking is not { } ask) return;
+        Asking = null;
+        Message = null;
+        Apply(ask.Answer(typed));
+    }
+
+    /// <summary>Esc on the open question: closes it, doing nothing.</summary>
+    public void CancelAsk()
+    {
+        Asking = null;
+        Raise();
+    }
+
+    /// <summary>
+    /// Down or PgDn on the last line of a text view: asks the view to read further and loads it again, the cursor staying where it
+    /// is. False when the view has no more or is loading.
+    /// </summary>
+    public bool More()
+    {
+        var frame = Current;
+        if (frame.Loading || frame.Content?.Text is null || !frame.View.HasMore) return false;
+        frame.View.More();
+        Message = null;
+        Load(frame);
+        return true;
+    }
+
+    private void Apply(KeyOutcome outcome)
+    {
+        if (outcome.Say is { } say) Message = say;
+        if (outcome.Start is { } task) StartTask(task.Name, task.Run);
+        if (outcome.Ask is { } ask) Asking = ask;
+        if (outcome.Open is { } view)
+        {
+            Current.Stale |= outcome.Reload;
+            CancelLoad();
+            Open(view);
+        }
+        else if (outcome.Reload) Load(Current);
+        else Raise();
+    }
+
+    private void StartTask(string name, Func<BrowseSession, IProgress<string>, CancellationToken, Task<string>> run) =>
+        // Whatever view is showing when it ends reloads, so it shows what the task wrote.
+        Tasks.Start(name, (progress, ct) => run(session, progress, ct), () => { if (frames.Count > 0) Load(Current); });
 
     /// <summary>The <c>?</c> text: the keys, then the views, then the current view's own keys.</summary>
     public string Help()
@@ -142,11 +228,13 @@ internal sealed class Navigator : IAsyncDisposable
             "Views",
         };
         lines.AddRange(registry.Entries.Select(e => $"  :{e.Name,-9}{e.Help}"));
-        if (Current.View.Actions.Count > 0)
+        var keys = Keys;
+        if (Current.View.Actions.Count > 0 || keys.Count > 0)
         {
             lines.Add("");
             lines.Add("This view");
             lines.AddRange(Current.View.Actions.Select(a => $"  {a.Key,-9}{a.Help}"));
+            lines.AddRange(keys.Select(k => $"  {k.Key,-9}{k.Help}"));
         }
         lines.Add("");
         lines.Add("Read-only, except where a key says it writes.");
@@ -173,6 +261,8 @@ internal sealed class Navigator : IAsyncDisposable
         var token = loadCancel.Token;
         var run = ++generation;
         frame.Loading = true;
+        frame.Stale = false;
+        frame.View.Filter = frame.Filter;
         Raise();
         Loading = Task.Run(async () =>
         {
@@ -187,7 +277,7 @@ internal sealed class Navigator : IAsyncDisposable
                 frame.Content = content;
                 frame.Error = error;
                 frame.Loading = false;
-                if (frame.Selected >= frame.Visible.Count) frame.Selected = Math.Max(0, frame.Visible.Count - 1);
+                if (frame.Selected >= frame.Count) frame.Selected = Math.Max(0, frame.Count - 1);
                 Raise();
             });
         }, CancellationToken.None);

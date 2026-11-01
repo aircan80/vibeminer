@@ -342,6 +342,19 @@
       "vibeminer.cdn": {
         "type": "Project"
       },
+      "vibeminer.files": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Builds": "[1.0.0, )",
+          "VibeMiner.ObjectAccess": "[1.0.0, )"
+        }
+      },
+      "vibeminer.files.testing": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Files": "[1.0.0, )"
+        }
+      },
       "vibeminer.objectaccess": {
         "type": "Project",
         "dependencies": {
@@ -368,6 +381,7 @@
           "Terminal.Gui": "[2.5.0, )",
           "VibeMiner.Builds": "[1.0.0, )",
           "VibeMiner.Cdn": "[1.0.0, )",
+          "VibeMiner.Files": "[1.0.0, )",
           "VibeMiner.ObjectAccess": "[1.0.0, )",
           "VibeMiner.Objects": "[1.0.0, )"
         }

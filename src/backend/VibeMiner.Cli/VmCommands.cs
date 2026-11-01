@@ -111,7 +111,9 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
     {
         if (json) return UsageError("browse is interactive; --json doesn't apply to it.");
         if (browse is null) return await Fail("BROWSE_NEEDS_TERMINAL", "vm browse needs a terminal on stdin and stdout. For scripts, use the other commands.");
-        return await browse(new BrowseSession(stores, folder, storeFolder, environment), ct).ConfigureAwait(false);
+        // Disposed after the browser returns, so after its navigator has stopped every load: closes the session's files.
+        await using var session = new BrowseSession(stores, folder, storeFolder, environment);
+        return await browse(session, ct).ConfigureAwait(false);
     }
 
     private async Task<int> Info(string storeFolder, CancellationToken ct)

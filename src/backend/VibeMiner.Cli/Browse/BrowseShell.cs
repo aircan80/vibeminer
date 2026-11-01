@@ -9,7 +9,7 @@ namespace VibeMiner.Cli.Browse;
 
 /// <summary>
 /// The Terminal.Gui window for <c>vm browse</c> (D165): a header with the breadcrumb, a note line, the current view as a table
-/// (or its text as a list of lines) and a status line that doubles as the <c>:</c> and <c>/</c> prompt. It only draws
+/// (or its text as a list of lines) and a status line that doubles as the <c>:</c> and <c>/</c> prompt and a view key's question. It only draws
 /// <see cref="Navigator"/> and passes keys to it. Global keys are read from the application's keyboard before the focused view,
 /// so the table's type-to-search never takes them; while the prompt has focus only Enter and Esc are taken.
 /// </summary>
@@ -46,6 +46,10 @@ internal sealed class BrowseShell : Window
         {
             if (built?.Frame == navigator.Current && table.Value is { } selection) navigator.Current.Selected = selection.SelectedCell.Y;
         };
+        text.ValueChanged += (_, _) =>
+        {
+            if (built?.Frame == navigator.Current && text.Value is { } line) navigator.Current.Selected = line;
+        };
         // Product ids and paths have underscores, which a label would otherwise take as a hotkey marker and hide.
         foreach (var label in new[] { header, note, status }) label.HotKeySpecifier = (System.Text.Rune)0xFFFF;
         Add(header, note, table, text, status, prompt);
@@ -57,6 +61,12 @@ internal sealed class BrowseShell : Window
 
     /// <summary>The status line as shown, for the smoke test.</summary>
     public string StatusText => status.Text;
+
+    /// <summary>The header, note and status lines and a text view's lines as built, for the smoke test's width check.</summary>
+    internal IEnumerable<string> ShownLines => [header.Text, note.Text, status.Text, .. textLines];
+    private string[] textLines = [];
+    /// <summary>The longest question shown; the prompt gets the rest of the line, at least 30 columns at 80.</summary>
+    internal const int MaxQuestion = 49;
 
     private void OnKey(object? sender, Key key)
     {
@@ -78,6 +88,13 @@ internal sealed class BrowseShell : Window
             text.Viewport = text.Viewport with { X = x };
             return;
         }
+        // Down or PgDn on the last line reads further, when the view has more.
+        if (text.Visible && (key == Key.CursorDown || key == Key.PageDown) && text.Value is { } at
+            && at >= (text.Source?.Count ?? 0) - 1 && navigator.More())
+        {
+            key.Handled = true;
+            return;
+        }
         if (key.IsCtrl || key.IsAlt) return;
         var c = key.AsRune.Value;
         switch (c)
@@ -96,9 +113,18 @@ internal sealed class BrowseShell : Window
     private void OpenPrompt(char mode)
     {
         promptMode = mode;
-        status.Text = mode.ToString();
-        status.Width = 1;
-        prompt.Text = mode == '/' ? navigator.Current.Filter : "";
+        var label = mode.ToString();
+        var initial = mode == '/' ? navigator.Current.Filter : "";
+        if (mode == '?' && navigator.Asking is { } ask)
+        {
+            var question = ask.Question.Length > MaxQuestion ? ask.Question[..(MaxQuestion - 3)] + "..." : ask.Question;
+            label = question + " ";
+            initial = ask.Initial;
+        }
+        status.Text = label;
+        status.Width = label.Length;
+        prompt.X = label.Length;
+        prompt.Text = initial;
         prompt.Visible = true;
         prompt.SetFocus();
     }
@@ -109,7 +135,12 @@ internal sealed class BrowseShell : Window
         prompt.Visible = false;
         status.Width = Dim.Fill();
         (text.Visible ? (View)text : table).SetFocus();
-        if (submit && promptMode == '/') navigator.SetFilter(typed);
+        if (promptMode == '?')
+        {
+            if (submit) navigator.Answer(typed);
+            else navigator.CancelAsk();
+        }
+        else if (submit && promptMode == '/') navigator.SetFilter(typed);
         else if (submit && typed.Trim() is "q" or "quit") app.RequestStop();
         else if (submit && typed.Trim().Length > 0) navigator.Go(typed);
         Render();
@@ -138,11 +169,14 @@ internal sealed class BrowseShell : Window
             table.Visible = !isText;
             if (isText)
             {
-                text.SetSource(new ObservableCollection<string>((frame.VisibleText ?? "").Split('\n')));
+                var lines = textLines = (frame.VisibleText ?? "").Split('\n');
+                text.SetSource(new ObservableCollection<string>(lines));
+                text.Value = Math.Clamp(frame.Selected, 0, lines.Length - 1);
                 if (!prompt.Visible) text.SetFocus();
             }
             else
             {
+                textLines = [];
                 var content = frame.Content;
                 var rows = frame.Visible;
                 table.Table = new RowsSource(content?.Columns.Count > 0 ? [.. content.Columns] : [""], rows);
@@ -152,9 +186,12 @@ internal sealed class BrowseShell : Window
             }
             built = (frame, frame.Content, frame.Filter);
         }
+        // A key's question opens the prompt ('?' marks it; the help key never opens one).
+        if (navigator.Asking is not null && !prompt.Visible) OpenPrompt('?');
         if (prompt.Visible) return;
         var parts = new List<string>();
-        if (frame.Filter.Length > 0) parts.Add($"/{frame.Filter} ({frame.Visible.Count} of {frame.Content?.Rows.Count ?? 0})");
+        if (frame.Filter.Length > 0 && frame.View.FiltersOnLoad) parts.Add($"/{frame.Filter} ({frame.Count} rows)");
+        else if (frame.Filter.Length > 0) parts.Add($"/{frame.Filter} ({frame.Visible.Count} of {frame.Content?.Rows.Count ?? 0})");
         if (frame.Loading) parts.Add("loading...");
         if (navigator.Message is { } message) parts.Add(message);
         if (navigator.Tasks.Status.Length > 0) parts.Add(navigator.Tasks.Status);

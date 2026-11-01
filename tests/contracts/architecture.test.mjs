@@ -24,8 +24,8 @@ test('production project dependencies preserve pure engine boundaries and the or
     // Layer 5 formats: reads files through layer 4 (#177). ObjectAccess is for the table definitions only: fetched
     // definitions are layer 2 observations and history (D180). Generated is the layer 1 generated store for decoded tables (D210, #179).
     Formats: ['Files', 'ObjectAccess', 'Generated'],
-    // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
-    Cli: ['Objects', 'Cdn', 'ObjectAccess', 'Builds'],
+    // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects (layers 1-4 so far), never the legacy ones.
+    Cli: ['Objects', 'Cdn', 'ObjectAccess', 'Builds', 'Files'],
   };
   for (const [project, dependencies] of Object.entries(allowed)) {
     const source = await readFile(path.join(root, `src/backend/VibeMiner.${project}/VibeMiner.${project}.csproj`), 'utf8');

@@ -125,6 +125,7 @@ internal sealed class ProductBuildsView(ReviewedProduct product) : BrowseView
 {
     public override string Title => product.Id;
     public override IReadOnlyList<ViewAction> Actions => [BuildsView.Refresh];
+    public override IReadOnlyList<ViewKey> Keys => [new('f', "files: list the selected build's files (enUS)", row => FilesView.Open(row?.Tag as CatalogBuild))];
 
     public override async Task<ViewContent> LoadAsync(BrowseSession session, CancellationToken ct)
     {
@@ -134,7 +135,7 @@ internal sealed class ProductBuildsView(ReviewedProduct product) : BrowseView
         var rows = list.Builds.Select(b => new BrowseRow(
             [b.VersionsName, b.Current ? "yes" : "", string.Join(' ', b.Regions.Where(g => !b.Current || g.Current).Select(g => g.Region).Distinct()),
              BrowseSession.Time(b.FirstSeen), BrowseSession.Time(b.LastSeen), b.BuildConfig],
-            () => new BuildView(b))).ToList();
+            () => new BuildView(b), b)).ToList();
         var note = list.LastObservedAt is null ? $"{product.Label}: no versions history. r fetches it (writes)."
             : $"{product.Label}: {list.Builds.Count:N0} builds, last versions reply {BrowseSession.Time(list.LastObservedAt.Value)} UTC.";
         if (list.Problems.Count > 0)
@@ -151,6 +152,7 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
 {
     public override string Title => build.VersionsName;
     public override IReadOnlyList<ViewAction> Actions => [Downloaded, DownloadAll];
+    public override IReadOnlyList<ViewKey> Keys => [new('f', "files: list this build's files (enUS)", _ => FilesView.Open(build))];
 
     /// <summary>
     /// <c>d</c>: opens the build read-only from the store (its ENCODING, ROOT and every archive index, so not on every load) and
@@ -174,7 +176,10 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
     }
 
     /// <summary>The region <c>d</c> and <c>a</c> open the build in: a current one, else the first listed.</summary>
-    private BuildRegion? Region => build.Regions.FirstOrDefault(g => g.Current) ?? build.Regions.FirstOrDefault();
+    private BuildRegion? Region => RegionOf(build);
+
+    /// <summary>The region a build opens in from browse: a current one, else the first listed; null when none is.</summary>
+    internal static BuildRegion? RegionOf(CatalogBuild build) => build.Regions.FirstOrDefault(g => g.Current) ?? build.Regions.FirstOrDefault();
 
     /// <summary>
     /// <c>a</c>: Download all, as the store's writer. Opens the build over the writer's source (fetching metadata it lacks), then
@@ -286,6 +291,7 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
             new(["First seen", $"{BrowseSession.Time(build.FirstSeen)} UTC"]), new(["Last seen", $"{BrowseSession.Time(build.LastSeen)} UTC"]),
             new(["Downloaded", "d measures (opens the build read-only)"]),
             new(["Download all", "a fetches every object (takes the writer lock)"]),
+            new(["Files", "f lists the files (enUS)"]),
         };
         rows.AddRange(build.Fields.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => new BrowseRow([$"field {f.Key}", f.Value])));
         rows.AddRange(build.Regions.Select(g => new BrowseRow([$"region {g.Region}",

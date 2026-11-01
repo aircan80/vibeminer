@@ -19,6 +19,10 @@ public sealed class InMemoryFileNames : IFileNames
     /// <summary>The state <see cref="StatusAsync"/> reports. Off by default.</summary>
     public FileNamesState State { get { lock (gate) return state; } set { lock (gate) state = value; } }
 
+    /// <summary>The code <see cref="StatusAsync"/> reports with a state that isn't Ready (the last failed attempt's).</summary>
+    public string? Code { get { lock (gate) return code; } set { lock (gate) code = value; } }
+    private string? code;
+
     /// <summary>How many times <see cref="UpdateAsync"/> was called.</summary>
     public int Updates { get; private set; }
 
@@ -57,5 +61,5 @@ public sealed class InMemoryFileNames : IFileNames
         lock (gate) { Updates++; return Task.FromResult(Status()); }
     }
 
-    private FileNamesStatus Status() => state == FileNamesState.Ready ? new(state, "fake", Count: count) : new(state);
+    private FileNamesStatus Status() => state == FileNamesState.Ready ? new(state, "fake", Count: count) : new(state, Code: code);
 }

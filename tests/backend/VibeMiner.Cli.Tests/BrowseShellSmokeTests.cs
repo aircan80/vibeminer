@@ -4,7 +4,10 @@ using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.Testing;
 using Terminal.Gui.Time;
+using VibeMiner.Builds;
 using VibeMiner.Cli.Browse;
+using VibeMiner.Files;
+using VibeMiner.Files.Testing;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 using Xunit;
@@ -39,6 +42,45 @@ public sealed class BrowseShellSmokeTests(ITestOutputHelper output)
         await Observe(stores, time, ObservationKind.Summary, "", "summary reply");
         var session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), StoreFolder);
 
+        Step[] steps =
+        [
+            new("store", (s, _) => s.Contains("Packs") && s.Contains("1,234"), a => { Type(a, ":history"); a.InjectKey(Key.Enter); }),
+            new("history", (s, _) => s.Contains("Retail") && s.Contains("(summary)"), a => { a.InjectKey(Key.CursorDown); a.InjectKey(Key.Enter); }),
+            new("drilled", (s, _) => Line(s, 0).Contains("history > wow") && s.Contains("newest first"), a => a.InjectKey(Key.Esc)),
+            new("back", (s, _) => !Line(s, 0).Contains("history > ") && s.Contains("Retail"), a => { Type(a, "/wow"); a.InjectKey(Key.Enter); }),
+            new("filtered", (_, sh) => sh.StatusText.Contains("/wow (1 of 2)"), a => a.InjectKey(new Key('?'))),
+            new("help", (s, _) => s.Contains("Keys (Esc closes)") && s.Contains("go to a view"), a => a.InjectKey(Key.Esc)),
+            new("closed", (s, _) => !s.Contains("Keys (Esc closes)"), a => a.InjectKey(new Key('q'))),
+        ];
+        var (shots, failure, stopped, navigator) = Drive(session, ViewRegistry.Default(), "store", steps);
+
+        await navigator.DisposeAsync().AsTask().WaitAsync(Guard);
+        foreach (var (name, screen) in shots) output.WriteLine($"--- {name}\n{screen}");
+        Assert.Null(failure);
+        Assert.True(stopped);
+
+        Assert.Contains("vm browse  store  [read-only]", Line(shots["store"], 0));
+        Assert.Contains("Product", shots["history"]);
+        Assert.Contains("wow", shots["history"]);
+        Assert.Contains("versions", shots["drilled"]);
+        var filtered = shots["filtered"];
+        Assert.Contains("Retail", filtered);
+        Assert.DoesNotContain("(summary)", filtered);
+        Assert.Contains("/wow (1 of 2)", filtered);
+        Assert.Contains("Esc      clear the filter, then go back", shots["help"]);
+        Assert.Contains("/wow (1 of 2)", shots["closed"]);
+        Assert.All(stores.Opened, o => Assert.False(o.Writer));
+        Assert.Empty(stores.WriterCreate);
+        Assert.Equal(0, stores.Open);
+    }
+
+    /// <summary>
+    /// Runs the shell at 80x24 over <paramref name="registry"/> from <paramref name="start"/>, taking each step once its screen is
+    /// ready, until the last step quits it or one never becomes ready.
+    /// </summary>
+    private static (Dictionary<string, string> Shots, string? Failure, bool Stopped, Navigator Navigator) Drive(
+        BrowseSession session, ViewRegistry registry, string start, Step[] steps)
+    {
         var shots = new Dictionary<string, string>();
         string? failure = null;
         var stopped = false;
@@ -48,19 +90,8 @@ public sealed class BrowseShellSmokeTests(ITestOutputHelper output)
         {
             using var app = Application.Create(new VirtualTimeProvider()).Init(DriverRegistry.Names.ANSI);
             app.Driver!.SetScreenSize(80, 24);
-            navigator = new Navigator(ViewRegistry.Default(), session, a => app.Invoke(a));
-            using var shell = new BrowseShell(app, navigator);
-
-            Step[] steps =
-            [
-                new("store", (s, _) => s.Contains("Packs") && s.Contains("1,234"), a => { Type(a, ":history"); a.InjectKey(Key.Enter); }),
-                new("history", (s, _) => s.Contains("Retail") && s.Contains("(summary)"), a => { a.InjectKey(Key.CursorDown); a.InjectKey(Key.Enter); }),
-                new("drilled", (s, _) => Line(s, 0).Contains("history > wow") && s.Contains("newest first"), a => a.InjectKey(Key.Esc)),
-                new("back", (s, _) => !Line(s, 0).Contains("history > ") && s.Contains("Retail"), a => { Type(a, "/wow"); a.InjectKey(Key.Enter); }),
-                new("filtered", (_, sh) => sh.StatusText.Contains("/wow (1 of 2)"), a => a.InjectKey(new Key('?'))),
-                new("help", (s, _) => s.Contains("Keys (Esc closes)") && s.Contains("go to a view"), a => a.InjectKey(Key.Esc)),
-                new("closed", (s, _) => !s.Contains("Keys (Esc closes)"), a => a.InjectKey(new Key('q'))),
-            ];
+            navigator = new Navigator(registry, session, a => app.Invoke(a));
+            using var shell = new BrowseShell(app, navigator, start);
 
             var step = 0;
             var iterations = 0;
@@ -84,25 +115,121 @@ public sealed class BrowseShellSmokeTests(ITestOutputHelper output)
             app.Run(shell); // returns only after q, or RequestStop above
             stopped = true;
         }, Guard);
+        return (shots, failure, stopped, navigator!);
+    }
 
-        await navigator!.DisposeAsync().AsTask().WaitAsync(Guard);
+    [Fact]
+    public async Task AKeysQuestionIsAnsweredOrCanceledAndATextViewReadsFurther()
+    {
+        var stores = new FakeStores();
+        var session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), StoreFolder);
+        var keys = new KeysView();
+        var answers = new List<string>();
+        keys.KeyList.Add(new('e', "export", row => new(Ask: new("Export to:", $"/tmp/{row!.Cells[0]}", typed =>
+        {
+            answers.Add(typed);
+            return new(Say: $"would write {typed}");
+        }))));
+        var more = new MoreView(pageLines: 30, pages: 2);
+        var registry = new ViewRegistry().Add(new("keys", "", () => keys)).Add(new("more", "", () => more));
+
+        Step[] steps =
+        [
+            new("keys", (s, _) => s.Contains("alpha") && s.Contains("gamma"), a => a.InjectKey(new Key('e'))),
+            new("asked", (s, _) => Line(s, 23).StartsWith("Export to: /tmp/alpha"), a => { a.InjectKey(Key.End); Type(a, "-x"); a.InjectKey(Key.Enter); }),
+            new("answered", (_, sh) => sh.StatusText.Contains("would write /tmp/alpha-x"), a => a.InjectKey(new Key('e'))),
+            new("asked again", (s, _) => Line(s, 23).StartsWith("Export to: /tmp/alpha "), a => { Type(a, "zz"); a.InjectKey(Key.Esc); }),
+            new("canceled", (_, sh) => sh.StatusText.Contains("? keys"), a => { Type(a, ":more"); a.InjectKey(Key.Enter); }),
+            new("text", (s, _) => s.Contains("line 0000") && s.Contains("1 of 2 pages"), a => { a.InjectKey(Key.End); a.InjectKey(Key.CursorDown); }),
+            new("more", (s, _) => s.Contains("2 of 2 pages") && s.Contains("line 0029"), a => a.InjectKey(new Key('q'))),
+        ];
+        var (shots, failure, stopped, navigator) = Drive(session, registry, "keys", steps);
+
+        await navigator.DisposeAsync().AsTask().WaitAsync(Guard);
         foreach (var (name, screen) in shots) output.WriteLine($"--- {name}\n{screen}");
         Assert.Null(failure);
         Assert.True(stopped);
+        Assert.Equal(["/tmp/alpha-x"], answers);
+        Assert.Equal(80, Line(shots["asked"], 23).Length);
+        Assert.Contains("would write /tmp/alpha-x", shots["answered"]);
+        Assert.DoesNotContain("zz", shots["canceled"]);
+        Assert.Equal(2, more.Read);
+        Assert.Equal(29, navigator.Frames[^1].Selected);
+        Assert.Contains("line 0029", shots["more"]);
+    }
 
-        Assert.Contains("vm browse  store  [read-only]", Line(shots["store"], 0));
-        Assert.Contains("Product", shots["history"]);
-        Assert.Contains("wow", shots["history"]);
-        Assert.Contains("versions", shots["drilled"]);
-        var filtered = shots["filtered"];
-        Assert.Contains("Retail", filtered);
-        Assert.DoesNotContain("(summary)", filtered);
-        Assert.Contains("/wow (1 of 2)", filtered);
-        Assert.Contains("Esc      clear the filter, then go back", shots["help"]);
-        Assert.Contains("/wow (1 of 2)", shots["closed"]);
+    private const string VersionsHeader = "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|KeyRing!HEX:16|BuildId!DEC:4|VersionsName!String:0|ProductConfig!HEX:16";
+
+    [Fact]
+    public async Task TheFilesViewsListFilterShowAFileAndItsHoleAndGAsksWithItsChoiceShown()
+    {
+        string a = new('a', 32), b = new('b', 32), c = new('c', 32);
+        var stores = new FakeStores();
+        var versions = Encoding.UTF8.GetBytes($"{VersionsHeader}\n## seqn = 1\nus|{a}|{b}|{c}|60000|12.0.1.60000|{c}\n");
+        stores.Source.AddReply("wow", "us", ObservationKind.Versions, versions);
+        await stores.Source.ObserveAsync(new(ObservationKind.Versions, "wow", "us"), default);
+        var memory = new InMemoryFileSystem();
+        byte[] blp = [.. "BLP2"u8, .. new byte[12]];
+        memory.Add(new BuildRef("wow", a, b, "us"), ["enUS"],
+        [
+            new FakeFile(10, Storage: FileStorage.Stored, Content: blp),
+            new FakeFile(11, Storage: FileStorage.Stored, Content: new byte[64], Holes: [new FileHole(16, 16, "0123456789ABCDEF")]),
+            new FakeFile(12, Size: 9),
+        ]);
+        memory.Names.Use(new Dictionary<uint, string> { [10] = "interface/icons/a.blp", [11] = "interface/x.bin", [12] = "sound/y.ogg" });
+        await using var session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), StoreFolder)
+        {
+            FileSystem = (_, _, _) => memory,
+        };
+
+        static bool Idle(BrowseShell sh) => !sh.StatusText.Contains("loading...");
+        Step[] steps =
+        [
+            new("store", (s, _) => s.Contains("Packs"), a => { Type(a, ":builds"); a.InjectKey(Key.Enter); }),
+            new("builds", (s, sh) => Idle(sh) && Line(s, 0).Contains("builds") && s.Contains("wow"), a => a.InjectKey(Key.Enter)),
+            new("product", (s, sh) => Idle(sh) && Line(s, 0).Contains("builds > wow") && s.Contains("12.0.1.60000"), a => a.InjectKey(new Key('f'))),
+            new("files", (s, sh) => Idle(sh) && Line(s, 0).Contains("files enUS") && s.Contains("sound/y.ogg"), a => { Type(a, "/interface"); a.InjectKey(Key.Enter); }),
+            new("filtered", (s, sh) => Idle(sh) && sh.StatusText.Contains("/interface (2 rows)") && !s.Contains("sound/y.ogg"), a => a.InjectKey(Key.Enter)),
+            new("file", (s, sh) => Idle(sh) && Line(s, 0).Contains("> a.blp") && s.Contains("|BLP2"), a => a.InjectKey(Key.Esc)),
+            new("back", (s, sh) => Idle(sh) && !Line(s, 0).Contains("> a.blp") && s.Contains("interface/x.bin"), a => { a.InjectKey(Key.CursorDown); a.InjectKey(Key.Enter); }),
+            new("hole", (s, sh) => Idle(sh) && Line(s, 0).Contains("> x.bin") && s.Contains("encrypted, needs TACT key"), a => a.InjectKey(Key.Esc)),
+            new("back again", (s, sh) => Idle(sh) && !Line(s, 0).Contains("> x.bin") && s.Contains("interface/x.bin"), a => a.InjectKey(new Key('G'))),
+            new("asked", (s, _) => Line(s, 23).StartsWith("ensure all ", StringComparison.Ordinal), a => a.InjectKey(Key.Esc)),
+            new("not asked", (s, sh) => sh.StatusText.Contains("? keys") && !Line(s, 23).Contains("y/N"), a => a.InjectKey(new Key('q'))),
+        ];
+        // Every line the shell built (header, note, status, a text view's lines) fits 80 columns at every step.
+        var wide = new List<string>();
+        steps = [.. steps.Select(st => st with
+        {
+            Ready = (s, sh) =>
+            {
+                if (!st.Ready(s, sh)) return false;
+                wide.AddRange(sh.ShownLines.Where(l => l.Length > 80).Select(l => $"{st.Name}: {l}"));
+                return true;
+            },
+        })];
+        var (shots, failure, stopped, navigator) = Drive(session, ViewRegistry.Default(), "store", steps);
+
+        await navigator.DisposeAsync().AsTask().WaitAsync(Guard);
+        foreach (var (name, screen) in shots) output.WriteLine($"--- {name}\n{screen}");
+        Assert.Null(failure);
+        Assert.True(stopped);
+        Assert.Empty(wide);
+
+        var files = shots["files"];
+        foreach (var column in new[] { "Id", "Path", "Format", "Size", "Stored", "Enc" }) Assert.Contains(column, Line(files, 3));
+        Assert.Contains("interface/icons/a.blp", files);
+        Assert.Contains("interface/x.bin", shots["filtered"]);
+        var file = shots["file"];
+        Assert.Contains("FileDataID   10", file);
+        Assert.Contains("Stored       yes", file);
+        Assert.Contains("00000000  42 4c 50 32 00 00 00 00  00 00 00 00 00 00 00 00  |BLP2............|", file);
+        Assert.Contains("00000010-0000001f  encrypted, needs TACT key 0123456789ABCDEF (16 bytes)", shots["hole"]);
+        // The question shows its y/N choice at 80 columns; Esc starts nothing.
+        Assert.StartsWith("ensure all enUS, path inter... (writer lock)? y/N", Line(shots["asked"], 23), StringComparison.Ordinal);
+        Assert.Null(navigator.Tasks.Running);
         Assert.All(stores.Opened, o => Assert.False(o.Writer));
-        Assert.Empty(stores.WriterCreate);
-        Assert.Equal(0, stores.Open);
+        Assert.Empty(memory.EnsureRequests);
     }
 
     private static async Task Observe(FakeStores stores, ManualTime time, ObservationKind kind, string product, string reply)

@@ -40,7 +40,7 @@ node tools/dotnet.mjs run --project src/backend/VibeMiner.Cli -- store info
 
 Commands: `store info`, `store scrub` (takes the writer lock and records the outcome in `scrub-v1.json`), `reset --yes` (wipes the catalog, generated and settings stores; keeps every object and history record, and writes to the object store only through the writer open's lock and recovery; [D240](docs/DECISIONS.md)), `history list [product]`, `builds refresh [product]` (fetches from the official version service; takes the writer lock) and `builds list [product]` (read-only, except that the first use for a product fetches it under the writer lock).
 
-`vm browse` ([D165](docs/DECISIONS.md)) is the full-screen browser over the same store, in the style of k9s: `:store`, `:history`, `:builds` and `:settings` (data folder, sizes, last scrub; [D242](docs/DECISIONS.md)) switch views, `/` filters, Enter opens a row, Esc goes back, `?` lists the keys and `q` quits. It reads only; `r` in `:builds` refreshes in the background under the writer lock, and `x` cancels it. It needs a terminal (80x24 is enough; no mouse):
+`vm browse` ([D165](docs/DECISIONS.md)) is the full-screen browser over the same store, in the style of k9s: `:store`, `:history`, `:builds`, `:files` (`f` on a build opens it; `g`/`G` ensure files under the writer lock; `e` exports one) and `:settings` (data folder, sizes, last scrub; [D242](docs/DECISIONS.md)) switch views, `/` filters, Enter opens a row, Esc goes back, `?` lists the keys and `q` quits. Otherwise it reads only; `r` in `:builds` refreshes in the background under the writer lock, and `x` cancels it. It needs a terminal (80x24 is enough; no mouse):
 
 ```bash
 node tools/dotnet.mjs run --project src/backend/VibeMiner.Cli -- browse

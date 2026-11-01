@@ -20,6 +20,8 @@ public sealed class BrowseModelTests : IAsyncDisposable
     private readonly ManualTime time = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     private readonly BrowseSession session;
     private readonly Navigator navigator;
+    // Navigators over test views, disposed with the default one.
+    private readonly List<Navigator> disposables = [];
 
     public BrowseModelTests()
     {
@@ -28,7 +30,11 @@ public sealed class BrowseModelTests : IAsyncDisposable
         navigator = new Navigator(ViewRegistry.Default(), session, a => a());
     }
 
-    public async ValueTask DisposeAsync() => await navigator.DisposeAsync().AsTask().WaitAsync(Guard);
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var nav in disposables) await nav.DisposeAsync().AsTask().WaitAsync(Guard);
+        await navigator.DisposeAsync().AsTask().WaitAsync(Guard);
+    }
 
     /// <summary>Goes to a top view and waits for its load.</summary>
     private async Task<BrowseFrame> GoAsync(string name)
@@ -87,7 +93,7 @@ public sealed class BrowseModelTests : IAsyncDisposable
     public void TheRegistryFindsExactNamesAndUniquePrefixes()
     {
         var registry = ViewRegistry.Default();
-        Assert.Equal(["store", "history", "builds", "settings"], registry.Entries.Select(e => e.Name));
+        Assert.Equal(["store", "history", "builds", "settings", "files"], registry.Entries.Select(e => e.Name));
         // :s is store or settings, so it names neither; :st and :se do.
         Assert.Null(registry.Find(":s"));
         Assert.Equal("settings", registry.Find(":se")?.Name);
@@ -110,7 +116,7 @@ public sealed class BrowseModelTests : IAsyncDisposable
         await GoAsync(":st");
         Assert.IsType<StoreView>(navigator.Current.View);
         Assert.False(navigator.Go(":nope"));
-        Assert.Equal("No view :nope. Views: store, history, builds, settings.", navigator.Message);
+        Assert.Equal("No view :nope. Views: store, history, builds, settings, files.", navigator.Message);
         Assert.IsType<StoreView>(navigator.Current.View);
         Assert.Single(navigator.Frames);
 
@@ -700,6 +706,194 @@ public sealed class BrowseModelTests : IAsyncDisposable
         await GoAsync(":history");
         Assert.False(navigator.TryAction('r'));
         Assert.Empty(stores.WriterCreate);
+    }
+
+    /// <summary>A navigator over test views only, already on the first one and loaded.</summary>
+    private async Task<Navigator> TestNavigatorAsync(params BrowseView[] views)
+    {
+        var registry = new ViewRegistry();
+        foreach (var view in views) registry.Add(new(view.Title, $"test view {view.Title}", () => view));
+        var nav = new Navigator(registry, session, a => a());
+        disposables.Add(nav);
+        Assert.True(nav.Go(views[0].Title));
+        await nav.Loading.WaitAsync(Guard);
+        return nav;
+    }
+
+    [Fact]
+    public async Task AViewKeyGetsTheSelectedRowAndCanSayReloadAndOpen()
+    {
+        var view = new KeysView();
+        var opened = new KeysView("opened");
+        BrowseRow? pressed = null;
+        view.KeyList.Add(new('s', "say", row => { pressed = row; return new(Say: $"row {row?.Tag}"); }));
+        view.KeyList.Add(new('l', "reload", _ => new(Reload: true)));
+        view.KeyList.Add(new('o', "open", _ => new(Open: opened, Reload: true)));
+        var nav = await TestNavigatorAsync(view);
+
+        nav.Current.Selected = 1;
+        Assert.True(nav.TryAction('s'));
+        Assert.Equal("beta", pressed!.Cells[0]);
+        Assert.Equal("row 1", nav.Message);
+        Assert.Single(view.Loads);
+
+        Assert.True(nav.TryAction('l'));
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal(2, view.Loads.Count);
+        Assert.Null(nav.Message);
+
+        Assert.True(nav.TryAction('o'));
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal("keys > opened", nav.Path);
+        Assert.Single(opened.Loads);
+        Assert.Equal(2, view.Loads.Count);
+        // Reload with Open: the view below loads again on the way back.
+        Assert.True(nav.Back());
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal(3, view.Loads.Count);
+        Assert.Equal(1, nav.Current.Selected);
+        Assert.False(nav.Current.Stale);
+    }
+
+    [Fact]
+    public async Task AViewKeyInATextViewOrAnEmptyTableGetsNoRow()
+    {
+        var view = new KeysView();
+        BrowseRow? pressed = new([]);
+        view.KeyList.Add(new('s', "say", row => { pressed = row; return KeyOutcome.None; }));
+        var nav = await TestNavigatorAsync(view, new MoreView());
+        nav.SetFilter("nothing matches");
+        Assert.True(nav.TryAction('s'));
+        Assert.Null(pressed);
+
+        Assert.True(nav.Go("more"));
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Null(nav.SelectedRow);
+    }
+
+    [Fact]
+    public async Task AnAskOpensAQuestionThatAnAnswerOrEscCloses()
+    {
+        var view = new KeysView();
+        string? answered = null;
+        view.KeyList.Add(new('e', "export", row => new(Ask: new("Export to:", $"/tmp/{row!.Cells[0]}", typed =>
+        {
+            answered = typed;
+            return new(Say: $"would write {typed}");
+        }))));
+        var nav = await TestNavigatorAsync(view);
+
+        Assert.True(nav.TryAction('e'));
+        Assert.Equal("Export to:", nav.Asking!.Question);
+        Assert.Equal("/tmp/alpha", nav.Asking.Initial);
+        nav.Answer("/tmp/out");
+        Assert.Null(nav.Asking);
+        Assert.Equal("/tmp/out", answered);
+        Assert.Equal("would write /tmp/out", nav.Message);
+
+        answered = null;
+        Assert.True(nav.TryAction('e'));
+        nav.CancelAsk();
+        Assert.Null(nav.Asking);
+        nav.Answer("late");
+        Assert.Null(answered);
+        Assert.Single(view.Loads);
+    }
+
+    [Fact]
+    public async Task AKeyStartsABackgroundTaskThatReloadsTheViewWhenItEnds()
+    {
+        var view = new KeysView();
+        view.KeyList.Add(new('w', "work", row => new(Say: "starting", Start: new("work", async (s, progress, ct) =>
+        {
+            Assert.Same(session, s);
+            progress.Report("halfway");
+            await Task.Yield();
+            return $"worked on {row!.Tag}";
+        }))));
+        var nav = await TestNavigatorAsync(view);
+        nav.Current.Selected = 2;
+
+        Assert.True(nav.TryAction('w'));
+        Assert.Equal("starting", nav.Message);
+        await nav.Tasks.Current.WaitAsync(Guard);
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Null(nav.Tasks.Running);
+        Assert.Equal("worked on 2", nav.Tasks.Status);
+        Assert.Equal(2, view.Loads.Count);
+    }
+
+    [Fact]
+    public async Task ViewKeysCannotShadowGlobalOrActionKeysAndHelpListsTheRest()
+    {
+        var view = new KeysView();
+        var actionRan = false;
+        view.ActionList.Add(new('r', "refresh action", "refresh", (_, _, _) => { actionRan = true; return Task.FromResult("done"); }));
+        foreach (var c in Navigator.GlobalKeys) view.KeyList.Add(new(c, $"shadow {c}", _ => throw new InvalidOperationException()));
+        view.KeyList.Add(new('r', "shadow r", _ => throw new InvalidOperationException()));
+        view.KeyList.Add(new('f', "format filter", _ => new(Say: "first f")));
+        view.KeyList.Add(new('f', "second f", _ => new(Say: "second f")));
+        var nav = await TestNavigatorAsync(view);
+
+        Assert.Equal(['f'], nav.Keys.Select(k => k.Key));
+        foreach (var c in Navigator.GlobalKeys) Assert.False(nav.TryAction(c));
+        Assert.True(nav.TryAction('r'));
+        await nav.Tasks.Current.WaitAsync(Guard);
+        Assert.True(actionRan);
+        Assert.True(nav.TryAction('f'));
+        Assert.Equal("first f", nav.Message);
+
+        var help = nav.Help();
+        Assert.Contains("This view\n  r        refresh action\n  f        format filter\n", help);
+        Assert.DoesNotContain("shadow", help);
+        Assert.DoesNotContain("second f", help);
+    }
+
+    [Fact]
+    public async Task AViewThatFiltersOnLoadReloadsWithTheFilterAndEscClearsIt()
+    {
+        var view = new KeysView(filtersOnLoad: true);
+        var nav = await TestNavigatorAsync(view);
+        Assert.Equal([""], view.Loads);
+
+        nav.SetFilter(" ALP ");
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal(["", "ALP"], view.Loads);
+        Assert.Equal("ALP", nav.Current.Filter);
+        Assert.Equal(["alpha"], nav.Current.Visible.Select(r => r.Cells[0]));
+
+        // The rows are the view's: Visible doesn't narrow them again.
+        nav.Current.Content = new(["Name"], [new(["beta"])]);
+        Assert.Equal(["beta"], nav.Current.Visible.Select(r => r.Cells[0]));
+
+        Assert.True(nav.Back());
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal(["", "ALP", ""], view.Loads);
+        Assert.Equal("", nav.Current.Filter);
+        Assert.Equal(3, nav.Current.Visible.Count);
+        Assert.False(nav.Back());
+    }
+
+    [Fact]
+    public async Task MoreReadsFurtherAndKeepsTheSelectedLine()
+    {
+        var view = new MoreView(pageLines: 5, pages: 2);
+        var table = new KeysView();
+        var nav = await TestNavigatorAsync(view, table);
+        Assert.Equal(5, nav.Current.Count);
+        nav.Current.Selected = 4;
+
+        Assert.True(nav.More());
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal(10, nav.Current.Count);
+        Assert.Equal(4, nav.Current.Selected);
+        Assert.Equal("2 of 2 pages", nav.Current.Content!.Note);
+        Assert.False(nav.More());
+
+        // A table has no more to read.
+        Assert.True(nav.Go("keys"));
+        await nav.Loading.WaitAsync(Guard);
+        Assert.False(nav.More());
     }
 
     /// <summary>vm with the browse runner given or not, over a plain console pinned here (no ANSI whatever the environment says).</summary>
