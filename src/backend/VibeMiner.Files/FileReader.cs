@@ -264,7 +264,7 @@ internal sealed class FileReader
         return result.IsPresent ? result : throw new FileReadFailure(StateOf(result.State), result.Code, result.Message, result.ObservedAt);
     }
 
-    /// <summary>Layer 2's states as read states. Refused means the bytes or declarations failed a check: Corrupt.</summary>
+    /// <summary>Layer 2's states as read states. Refused means the bytes or declarations failed a check: Corrupt. Unsupported stays Unsupported.</summary>
     private static FileReadState StateOf(ObjectState state) => state switch
     {
         ObjectState.NotFound => FileReadState.Missing,
@@ -272,6 +272,7 @@ internal sealed class FileReader
         ObjectState.Unavailable => FileReadState.Unavailable,
         ObjectState.StoreFailed => FileReadState.StoreFailed,
         ObjectState.Refused => FileReadState.Corrupt,
+        ObjectState.Unsupported => FileReadState.Unsupported,
         _ => throw new InvalidOperationException($"Layer 2 answered {state} without bytes."),
     };
 

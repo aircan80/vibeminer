@@ -129,6 +129,17 @@ public sealed class EnsureTests
     }
 
     [Fact]
+    public async Task An_unsupported_object_is_unsupported_not_refused()
+    {
+        var real = FilesFixture.Real(FilesFixture.Build, EnUs, Distinct(2));
+        real.Objects.Unsupported(real.KeyOf(1));
+        await using var files = await OpenAsync(real.Files);
+        var result = await files.EnsureAsync(EnsureSelection.Many([1, 2]), EnsurePriority.Background, null, Ct);
+        Assert.Equal(EnsureOutcome.Incomplete, result.Outcome);
+        Assert.Equal([(FileEnsureState.Unsupported, "OBJECT_LOCATION_TOO_LARGE"), (FileEnsureState.Stored, (string?)null)], result.Files.Select(f => (f.State, f.Code)));
+    }
+
+    [Fact]
     public async Task A_refused_object_is_refused_with_its_code()
     {
         var real = FilesFixture.Real(FilesFixture.Build, EnUs, Distinct(2));

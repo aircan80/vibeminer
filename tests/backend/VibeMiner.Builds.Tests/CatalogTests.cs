@@ -274,6 +274,7 @@ public sealed class CatalogTests : IDisposable
 
     [Theory]
     [InlineData(ObjectState.Refused, "CATALOG_DOCUMENT_REFUSED")]
+    [InlineData(ObjectState.Unsupported, "CATALOG_DOCUMENT_UNSUPPORTED")]
     [InlineData(ObjectState.StoreFailed, "CATALOG_DOCUMENT_STORE_FAILED")]
     [InlineData(ObjectState.NotFound, "CATALOG_DOCUMENT_UNAVAILABLE")]
     [InlineData(ObjectState.Unavailable, "CATALOG_DOCUMENT_UNAVAILABLE")]

@@ -224,6 +224,7 @@ public sealed class FileReadTests
         { "Unavailable", FileReadState.Unavailable },
         { "StoreFailed", FileReadState.StoreFailed },
         { "Refused", FileReadState.Corrupt },
+        { "Unsupported", FileReadState.Unsupported },
     };
 
     [Theory]
@@ -242,13 +243,14 @@ public sealed class FileReadTests
                 "NeedsNetwork" => objects.NeedsNetwork(key),
                 "Unavailable" => objects.Unavailable(key, "CDN_TIMEOUT"),
                 "StoreFailed" => objects.StoreFailed(key),
+                "Unsupported" => objects.Unsupported(key),
                 _ => objects.Refuse(key, "OBJECT_SIZE_MISMATCH"),
             };
         });
         var expectedCode = script switch
         {
             "NotFound" => "CDN_NOT_FOUND", "NeedsNetwork" => "OBJECT_ACCESS_NEEDS_NETWORK", "Unavailable" => "CDN_TIMEOUT",
-            "StoreFailed" => "OBJECT_STORE_DISK_FULL", _ => "OBJECT_SIZE_MISMATCH",
+            "StoreFailed" => "OBJECT_STORE_DISK_FULL", "Unsupported" => "OBJECT_LOCATION_TOO_LARGE", _ => "OBJECT_SIZE_MISMATCH",
         };
 
         foreach (var read in new[] { await s.Files.GetAsync(1u, Ct), await s.Files.ReadRangeAsync(1u, 500, 10, Ct) })

@@ -5,7 +5,7 @@ namespace VibeMiner.ObjectAccess;
 
 /// <summary>
 /// CDN only: every call fetches and verifies, nothing is stored and nothing is recorded (RecordAsync answers Present, not recorded). Whole objects over 64 MiB are
-/// refused (there is nowhere to stage them); a range of a chunked loose one is fetched chunk by chunk (D340). Anything reading the store's index directly, like the Downloaded figure, sees 0%.
+/// Unsupported (there is nowhere to stage them); a range of a chunked loose one is fetched chunk by chunk (D340). Anything reading the store's index directly, like the Downloaded figure, sees 0%.
 /// </summary>
 public sealed class CdnObjectSource : IObjectSource
 {
@@ -105,7 +105,7 @@ public sealed class CdnObjectSource : IObjectSource
 
         public Task<ObjectResult> StreamLargeAsync(ObjectRequest request, long declaredLength,
             Func<long, Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask>, CancellationToken, Task<CdnReply?>> fetch, CancellationToken cancellationToken) =>
-            Task.FromResult(new ObjectResult(request.Key, ObjectState.Refused, Code: "OBJECT_ACCESS_TOO_LARGE",
+            Task.FromResult(new ObjectResult(request.Key, ObjectState.Unsupported, Code: "OBJECT_ACCESS_TOO_LARGE",
                 Message: "A CDN-only source holds objects in memory, at most 64 MiB."));
 
         public ValueTask<ObjectResult?> AlreadyHaveAsync(ObjectKey key, CancellationToken cancellationToken) => ValueTask.FromResult<ObjectResult?>(null);

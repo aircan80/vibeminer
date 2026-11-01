@@ -178,6 +178,7 @@ public sealed partial class Catalog : ICatalog, IAsyncDisposable
         {
             ObjectState.Present => ("CATALOG_DOCUMENT_TOO_LARGE", $"The versions reply is too large to read ({detail})."),
             ObjectState.Refused => ("CATALOG_DOCUMENT_REFUSED", $"The versions reply was refused ({detail})."),
+            ObjectState.Unsupported => ("CATALOG_DOCUMENT_UNSUPPORTED", $"The versions reply can't be read this way ({detail})."),
             ObjectState.StoreFailed => ("CATALOG_DOCUMENT_STORE_FAILED", $"The versions reply couldn't be stored ({detail})."),
             _ => ("CATALOG_DOCUMENT_UNAVAILABLE", $"The versions reply can't be read now ({detail})."),
         };

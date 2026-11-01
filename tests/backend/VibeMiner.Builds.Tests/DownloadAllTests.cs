@@ -217,10 +217,24 @@ public sealed class DownloadAllTests
         await using var jobs = new DownloadAllJobs(source, Plenty, new() { FetchBatch = 3 });
         var result = await Done(jobs.Start(build));
         Assert.Equal(DownloadAllOutcome.Incomplete, result.Outcome);
-        Assert.Equal((1L, 1L, 1L, "CDN_NOT_FOUND"), (result.NotFound, result.Unavailable, result.Refused, result.Code));
+        Assert.Equal((1L, 1L, 1L, 0L, "CDN_NOT_FOUND"), (result.NotFound, result.Unavailable, result.Refused, result.Unsupported, result.Code));
+        Assert.DoesNotContain("unsupported", result.Message);
         Assert.Equal(8, source.Requests.Count);
         Assert.Equal((5L, 3L), (result.Final.StoredObjects, result.Final.FailedObjects));
         foreach (var i in new[] { 0, 2, 3, 6, 7 }) Assert.True(await StoredAsync(Key(i)));
+    }
+
+    [Fact]
+    public async Task AnArchiveEntryOver64MiBIsCountedAsUnsupportedNotRefused()
+    {
+        const long big = (64L << 20) + 1;
+        var build = Ledger(3, size: i => i == 1 ? big : 10 + i, archived: new() { [1] = (new(Key(1000), 0, big), 0) });
+        await using var jobs = new DownloadAllJobs(source, Plenty);
+        var result = await Done(jobs.Start(build));
+        Assert.Equal(DownloadAllOutcome.Incomplete, result.Outcome);
+        Assert.Equal((0L, 0L, 0L, 1L, "OBJECT_LOCATION_TOO_LARGE"), (result.NotFound, result.Unavailable, result.Refused, result.Unsupported, result.Code));
+        Assert.Equal((2L, 1L), (result.Final.StoredObjects, result.Final.FailedObjects));
+        Assert.Contains("1 of them unsupported", result.Message);
     }
 
     [Fact]

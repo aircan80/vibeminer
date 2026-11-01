@@ -33,7 +33,7 @@ public enum DownloadAllStage { Scanning, Fetching }
 /// <summary>
 /// A job's figures over the build's object ledger (ENCODING's encoded rows and their encoded sizes, as the Downloaded figure
 /// counts). Stored is what the scan found stored plus what the job fetched since; during Scanning only scanned rows count.
-/// <see cref="FailedObjects"/> came back NotFound, Unavailable or Refused. <see cref="CdnBytes"/> is layer 2's transfer
+/// <see cref="FailedObjects"/> came back NotFound, Unavailable, Refused or Unsupported. <see cref="CdnBytes"/> is layer 2's transfer
 /// bytes (gap bytes included) summed over the job's batches. A job that stops before scanning reports zeros.
 /// Within a fetch batch, <see cref="StoredObjects"/> also counts the objects layer 2 has finished so far (its per-call
 /// <see cref="ObjectProgress.Done"/>), since layer 2 doesn't say which of them failed until the batch ends; it never goes
@@ -49,7 +49,7 @@ public enum DownloadAllOutcome
 {
     /// <summary>Every ledger object is stored.</summary>
     Completed,
-    /// <summary>The pass finished, but some objects came back NotFound, Unavailable or Refused (see the counts).</summary>
+    /// <summary>The pass finished, but some objects came back NotFound, Unavailable, Refused or Unsupported (see the counts).</summary>
     Incomplete,
     /// <summary>Turned off, or its owner was disposed.</summary>
     Canceled,
@@ -65,7 +65,7 @@ public enum DownloadAllOutcome
 
 /// <summary>A job's one terminal result. <see cref="Final"/> is its last progress snapshot.</summary>
 public sealed record DownloadAllResult(BuildRef Build, DownloadAllOutcome Outcome, DownloadAllProgress Final, long NotFound, long Unavailable,
-    long Refused, string? Code, string? Message);
+    long Refused, long Unsupported, string? Code, string? Message);
 
 /// <summary>
 /// Per-build Download all: each job fetches every object of an opened build's ledger through layer 2 at background priority,
@@ -199,7 +199,7 @@ public sealed class DownloadAllJob
     private readonly Lock gate = new();
     private DownloadAllProgress latest;
     private DownloadAllStage stage;
-    private long storedObjects, totalObjects, storedBytes, totalBytes, notFound, unavailable, refused, cdnDone, cdnBatch;
+    private long storedObjects, totalObjects, storedBytes, totalBytes, notFound, unavailable, refused, unsupported, cdnDone, cdnBatch;
     // Objects layer 2 finished in the current batch, and the most StoredObjects ever shown.
     private long batchDone, batchSize, shownStored;
     private int batch;
@@ -368,6 +368,7 @@ public sealed class DownloadAllJob
                         case ObjectState.Unavailable when r.Code is "CDN_OFFLINE" or NoContext: stop ??= (DownloadAllOutcome.NeedsNetwork, r.Code, r.Message); break;
                         case ObjectState.Unavailable: unavailable++; firstCode ??= r.Code; break;
                         case ObjectState.Refused: refused++; firstCode ??= r.Code; break;
+                        case ObjectState.Unsupported: unsupported++; firstCode ??= r.Code; break;
                         case ObjectState.NeedsNetwork: stop ??= (DownloadAllOutcome.NeedsNetwork, r.Code, r.Message); break;
                         case ObjectState.StoreFailed when r.Code == ObjectStoreCodes.DiskFull:
                             if (stop?.Outcome != DownloadAllOutcome.DiskFull) stop = (DownloadAllOutcome.DiskFull, r.Code, r.Message);
@@ -382,10 +383,12 @@ public sealed class DownloadAllJob
             if (stop is { } s) return Finish(s.Outcome, s.Code, s.Message);
             Publish(force: false);
         }
-        long failed;
-        lock (gate) failed = notFound + unavailable + refused;
+        long failed, notSupported;
+        lock (gate) { failed = notFound + unavailable + refused + unsupported; notSupported = unsupported; }
         return failed == 0 ? Finish(DownloadAllOutcome.Completed, null, null)
-            : Finish(DownloadAllOutcome.Incomplete, firstCode, $"{failed} objects couldn't be fetched; running Download all again retries them.");
+            : Finish(DownloadAllOutcome.Incomplete, firstCode, notSupported == 0
+                ? $"{failed} objects couldn't be fetched; running Download all again retries them."
+                : $"{failed} objects couldn't be fetched, {notSupported} of them unsupported by layer 2 (a rerun won't fetch those); running Download all again retries the rest.");
     }
 
     // Layer 2 may call it from its own threads. Ignores a batch that has already been counted, and never waits for the subscriber.
@@ -424,14 +427,14 @@ public sealed class DownloadAllJob
             latest = Snapshot(final: true);
             finished = true;
             Queue(latest, kept: true);
-            return new(Build, outcome, latest, notFound, unavailable, refused, code, message);
+            return new(Build, outcome, latest, notFound, unavailable, refused, unsupported, code, message);
         }
     }
 
     // Under gate. Between batch ends, finished-but-unsorted objects count as stored, and stored never goes down until the final.
     private DownloadAllProgress Snapshot(bool final)
     {
-        var failed = notFound + unavailable + refused;
+        var failed = notFound + unavailable + refused + unsupported;
         var finishedObjects = storedObjects + failed + batchDone;
         var stored = storedObjects + batchDone;
         if (!final && stored < shownStored) stored = shownStored;

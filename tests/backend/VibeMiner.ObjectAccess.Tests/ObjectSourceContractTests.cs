@@ -63,6 +63,19 @@ public abstract class ObjectSourceContract
     }
 
     [Fact]
+    public async Task AnArchiveEntryOver64MiBIsUnsupportedNotRefused()
+    {
+        var o = Synthetic.Headerless(7, 300);
+        var source = Arrange([o]);
+        var size = (64L << 20) + 1;
+        var results = await source.GetKeysAsync([new(o.Key, size, [new(new CdnKey(new byte[16]), 0, size)])], Context, FetchPriority.Background, null, None);
+        var r = Assert.Single(results);
+        Assert.Equal((ObjectState.Unsupported, "OBJECT_LOCATION_TOO_LARGE"), (r.State, r.Code));
+        Assert.False(r.Retryable);
+        Assert.False(r.IsPresent);
+    }
+
+    [Fact]
     public async Task GetRangeFillsTheDestination()
     {
         var o = Synthetic.Chunked(5, 1000, 1000);

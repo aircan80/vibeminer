@@ -295,6 +295,11 @@ public sealed class EnsureActionTests : IAsyncDisposable
     }
 
     [Fact]
+    public void AnUnsupportedFileIsSaidAsUnsupportedNotRefused() =>
+        Assert.Equal("ensure: incomplete, 1 of 3 stored; 1 refused, 1 unsupported.",
+            EnsureTask.Line(Result(EnsureOutcome.Incomplete, 0, FileEnsureState.Stored, FileEnsureState.Unsupported, FileEnsureState.Refused)));
+
+    [Fact]
     public void NotOpenedLinesNameEachState()
     {
         Assert.Equal("ensure: no deDE files in this build; nothing fetched.",

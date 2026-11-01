@@ -6,12 +6,13 @@ namespace VibeMiner.ObjectAccess.Testing;
 
 /// <summary>
 /// The standard <see cref="IObjectSource"/> test double for layer 3 and up: serves synthetic objects from memory, with
-/// scripted 404s, outages and refusals, version, definition and listfile replies with their real URLs, scripted observation failures,
+/// scripted 404s, outages, refusals and unsupported answers, version, definition and listfile replies with their real URLs, scripted observation failures,
 /// unrecorded fetches and recording of held listfile parts and deltas, and counts what was asked. The shared contract tests run it beside the real source.
 /// Like the real source it publishes its store commits: a key the first time an answer stores it, and keys dropped with <see cref="Remove"/>.
 /// </summary>
 public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
 {
+    private const long InMemoryObjectBytes = 64L << 20;
     private readonly Lock gate = new();
     private readonly Dictionary<ObjectKey, byte[]> objects = [];
     private readonly Dictionary<ObjectKey, ObjectResult> scripted = [];
@@ -40,6 +41,8 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
         Script(new(key, ObjectState.NeedsNetwork, Code: "OBJECT_ACCESS_NEEDS_NETWORK", Message: "Not stored, and this source is local only."));
     public InMemoryObjectSource StoreFailed(ObjectKey key, string code = "OBJECT_STORE_DISK_FULL") => Script(new(key, ObjectState.StoreFailed, Code: code));
     public InMemoryObjectSource Refuse(ObjectKey key, string code) => Script(new(key, ObjectState.Refused, Code: code));
+    /// <summary>The object answers Unsupported: fine, but the source can't fetch it that way.</summary>
+    public InMemoryObjectSource Unsupported(ObjectKey key, string code = "OBJECT_LOCATION_TOO_LARGE") => Script(new(key, ObjectState.Unsupported, Code: code));
     public InMemoryObjectSource AddReply(string product, string region, ObservationKind kind, byte[] bytes)
     {
         lock (gate) { replies[(product, region, kind)] = bytes; failures.Remove((product, region, kind)); }
@@ -126,6 +129,9 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
         lock (gate)
         {
             if (scripted.TryGetValue(request.Key, out var s)) return s;
+            // As the real source: an unstored archive entry over 64 MiB isn't fetched as a range.
+            if (!stored.Contains(request.Key) && request.Locations is { } locations && locations.Any(l => l.Size > InMemoryObjectBytes))
+                return new(request.Key, ObjectState.Unsupported, Code: "OBJECT_LOCATION_TOO_LARGE", Message: "An archive entry over 64 MiB isn't fetched as a range.");
             if (objects.TryGetValue(request.Key, out var bytes))
             {
                 if (request.DeclaredLength is { } declared && declared != bytes.Length)

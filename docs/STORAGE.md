@@ -97,12 +97,12 @@ Code: [`src/backend/VibeMiner.ObjectAccess/`](../src/backend/VibeMiner.ObjectAcc
 
 A request names the key, its declared length (from EN, an index entry or a config size pair; never a CDN config `*-index-size` hint) and the archive index entries that list it, if any. A loose request with no declared length (a config, say) is charged 4 MiB of the in-flight byte budget and may be at most that; a longer reply is refused as `TooLarge`. `Order` groups requests: lower groups go first, which is how Download all puts DOWNLOAD priority 0 first. Within a group, ranges come in CDN-config archive order, then loose objects. The `CdnContext` is the route from the current `cdns` reply and the CDN config's archive list.
 
-Results are `Present` (with where this call got it, `Store`, `SharedStore` or `Cdn`, and the origin the store recorded), `NotFound` (dated, retryable), `Unavailable` (offline, timeout, 5xx, broken connection; retryable, with a `CDN_*` code), `Refused` (wrong bytes or declarations, or a key the CDN doesn't serve), `NeedsNetwork` (local-only) or `StoreFailed` (for example `OBJECT_STORE_DISK_FULL`).
+Results are `Present` (with where this call got it, `Store`, `SharedStore` or `Cdn`, and the origin the store recorded), `NotFound` (dated, retryable), `Unavailable` (offline, timeout, 5xx, broken connection; retryable, with a `CDN_*` code), `Refused` (wrong bytes or declarations, or a key the CDN doesn't serve), `NeedsNetwork` (local-only), `StoreFailed` (for example `OBJECT_STORE_DISK_FULL`) or `Unsupported` (sound, but this source can't fetch it that way: an archive entry over 64 MiB, `OBJECT_LOCATION_TOO_LARGE`, or a whole object over 64 MiB from the CDN-only source, `OBJECT_ACCESS_TOO_LARGE`; [D341](DECISIONS.md)).
 
 | Implementation | Behaviour |
 | --- | --- |
 | `ObjectSource` | Own store, then the shared dev store (read-only; copied in through Put, which checks it again, and recorded with origin `SharedStore`; never pointed into), then the CDN. A copy that fails its read checks is deleted and fetched again |
-| `CdnObjectSource` | CDN only: fetches and checks every time, stores nothing, refuses whole objects over 64 MiB (ranges of big loose ones are read by range, [D340](DECISIONS.md)), counts 0 present, has no history |
+| `CdnObjectSource` | CDN only: fetches and checks every time, stores nothing, answers whole objects over 64 MiB `Unsupported` (ranges of big loose ones are read by range, [D340](DECISIONS.md)), counts 0 present, has no history |
 | `LocalObjectSource` | Local only, a true offline mode: own store, then the shared store; anything missing is `NeedsNetwork`, and nothing touches the network |
 | `InMemoryObjectSource` (tests) | Synthetic objects with scripted 404s, outages and refusals; the double for layer 3 and up |
 
@@ -144,7 +144,7 @@ A build is one build identity v2 ([D061](DECISIONS.md)); each (Region, CDN confi
 Problems:
 - `VERSIONS_ROW_INVALID` drops one row; `VERSIONS_REGION_AMBIGUOUS` drops a region listed twice.
 - `VERSIONS_UNREADABLE`, `VERSIONS_WRONG_KIND`, `VERSIONS_UNKNOWN_PRODUCT` and `VERSIONS_COLUMNS_MISSING` skip the whole reply. Stored; a list returns at most 1000, newest entry first.
-- `CATALOG_DOCUMENT_UNAVAILABLE`, `_REFUSED`, `_STORE_FAILED` and `_TOO_LARGE`: layer 2 couldn't serve the reply. Not stored, retried on the next list. At most 50 per list, then `CATALOG_PROBLEMS_TRUNCATED`.
+- `CATALOG_DOCUMENT_UNAVAILABLE`, `_REFUSED`, `_UNSUPPORTED`, `_STORE_FAILED` and `_TOO_LARGE`: layer 2 couldn't serve the reply. Not stored, retried on the next list. At most 50 per list, then `CATALOG_PROBLEMS_TRUNCATED`.
 
 No locales yet: opening a build reads them from its manifests.
 

@@ -31,6 +31,11 @@ public enum ObjectState
     NeedsNetwork,
     /// <summary>The object store couldn't take the bytes (for example <c>OBJECT_STORE_DISK_FULL</c>). See the code.</summary>
     StoreFailed,
+    /// <summary>
+    /// Nothing is wrong with the object or the request, but this source can't fetch it that way (an archive entry over 64 MiB,
+    /// <c>OBJECT_LOCATION_TOO_LARGE</c>; a whole object over 64 MiB from the CDN-only source, <c>OBJECT_ACCESS_TOO_LARGE</c>). Not retryable.
+    /// </summary>
+    Unsupported,
 }
 
 /// <summary>Where this call got the bytes from.</summary>
@@ -45,7 +50,7 @@ public sealed record ObjectResult(ObjectKey Key, ObjectState State, ServedFrom? 
     long? Length = null, byte[]? Bytes = null, string? Code = null, string? Message = null, DateTimeOffset? ObservedAt = null)
 {
     public bool IsPresent => State == ObjectState.Present;
-    /// <summary>NotFound, Unavailable and NeedsNetwork may succeed later; Refused and StoreFailed need something to change first.</summary>
+    /// <summary>NotFound, Unavailable and NeedsNetwork may succeed later; Refused, StoreFailed and Unsupported need something to change first.</summary>
     public bool Retryable => State is ObjectState.NotFound or ObjectState.Unavailable or ObjectState.NeedsNetwork;
 }
 

@@ -162,6 +162,7 @@ public sealed class BuildOpenerTests
         { ObjectState.Unavailable, "CDN_TIMEOUT", BuildOpenState.Unavailable },
         { ObjectState.NotFound, "CDN_NOT_FOUND", BuildOpenState.Missing },
         { ObjectState.Refused, "OBJECT_SIZE_MISMATCH", BuildOpenState.Corrupt },
+        { ObjectState.Unsupported, "OBJECT_LOCATION_TOO_LARGE", BuildOpenState.Unsupported },
         { ObjectState.StoreFailed, "OBJECT_STORE_DISK_FULL", BuildOpenState.StoreFailed },
     };
 

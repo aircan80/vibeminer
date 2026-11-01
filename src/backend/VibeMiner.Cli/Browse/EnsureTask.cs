@@ -73,6 +73,7 @@ internal static class EnsureTask
         (NoRoute, "no CDN route"),
         (FileEnsureState.Unavailable, "unavailable"),
         (FileEnsureState.Refused, "refused"),
+        (FileEnsureState.Unsupported, "unsupported"),
         (FileEnsureState.StoreFailed, "store failed"),
         (FileEnsureState.NotInEncoding, "not in encoding"),
         (FileEnsureState.NotInLocale, "not in locale"),

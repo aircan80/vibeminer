@@ -325,6 +325,7 @@ public sealed class RangeFetchTests
         Assert.Equal(o.Bytes.Slice((int)offset, 30).ToArray(), bytes);
         Assert.All(s.Cdn.Requests, q => Assert.NotNull(q.Offset));
         // A whole read of the same object is still over this source's in-memory bound.
-        Assert.Equal("OBJECT_ACCESS_TOO_LARGE", (await cdnOnly.GetKeyAsync(new(o.Key, o.DeclaredLength), s.Context, FetchPriority.Interactive, None)).Code);
+        var whole = await cdnOnly.GetKeyAsync(new(o.Key, o.DeclaredLength), s.Context, FetchPriority.Interactive, None);
+        Assert.Equal((ObjectState.Unsupported, "OBJECT_ACCESS_TOO_LARGE"), (whole.State, whole.Code));
     }
 }

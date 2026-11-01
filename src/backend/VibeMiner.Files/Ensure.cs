@@ -61,6 +61,8 @@ public enum FileEnsureState : byte
     NeedsNetwork,
     Unavailable,
     Refused,
+    /// <summary>Layer 2 can't fetch it that way (an archive entry over 64 MiB); nothing is wrong with it.</summary>
+    Unsupported,
     StoreFailed,
     Canceled,
 }
@@ -392,6 +394,7 @@ internal sealed partial class BuildFiles
         ObjectState.NeedsNetwork => (FileEnsureState.NeedsNetwork, result.Code),
         ObjectState.Unavailable => (FileEnsureState.Unavailable, result.Code),
         ObjectState.Refused => (FileEnsureState.Refused, result.Code),
+        ObjectState.Unsupported => (FileEnsureState.Unsupported, result.Code),
         ObjectState.StoreFailed => (FileEnsureState.StoreFailed, result.Code),
         _ => throw new InvalidOperationException($"Layer 2 answered {result.State}."),
     };

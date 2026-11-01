@@ -187,6 +187,7 @@ public sealed class BuildOpener : IBuilds
             ObjectState.Unavailable => BuildOpenState.Unavailable,
             ObjectState.NotFound => BuildOpenState.Missing,
             ObjectState.Refused => BuildOpenState.Corrupt,
+            ObjectState.Unsupported => BuildOpenState.Unsupported,
             _ => BuildOpenState.StoreFailed,
         };
         var code = result.Code ?? "OBJECT_ACCESS_" + result.State.ToString().ToUpperInvariant();

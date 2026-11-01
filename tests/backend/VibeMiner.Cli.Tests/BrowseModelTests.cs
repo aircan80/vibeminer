@@ -508,8 +508,8 @@ public sealed class BrowseModelTests : IAsyncDisposable
         var fetching = new DownloadAllProgress(build, DownloadAllStage.Fetching, 1_204_331, 2_900_112, 77_500_000_000, Total, 0, 0);
         var scanning = fetching with { Stage = DownloadAllStage.Scanning };
         var done = fetching with { StoredObjects = 2_900_112, StoredBytes = Total };
-        DownloadAllResult Result(DownloadAllOutcome outcome, DownloadAllProgress final, string? code = null, long notFound = 0, long unavailable = 0, long refused = 0) =>
-            new(build, outcome, final, notFound, unavailable, refused, code, "x");
+        DownloadAllResult Result(DownloadAllOutcome outcome, DownloadAllProgress final, string? code = null, long notFound = 0, long unavailable = 0, long refused = 0, long unsupported = 0) =>
+            new(build, outcome, final, notFound, unavailable, refused, unsupported, code, "x");
 
         // The task prefixes progress with its name.
         Assert.Equal("download all: 41.2% of 175.1 GiB, 1,204,331 of 2,900,112 objects; x cancels", "download all: " + BuildView.DownloadAllProgressLine(fetching));
@@ -521,6 +521,8 @@ public sealed class BrowseModelTests : IAsyncDisposable
         [
             BuildView.DownloadAllLine(Result(DownloadAllOutcome.Completed, done), "us"),
             BuildView.DownloadAllLine(Result(DownloadAllOutcome.Incomplete, fetching, "CDN_NOT_FOUND", 12_345, 678, 9), "us"),
+            BuildView.DownloadAllLine(Result(DownloadAllOutcome.Incomplete, fetching, "OBJECT_LOCATION_TOO_LARGE", unsupported: 2), "us"),
+            BuildView.DownloadAllLine(Result(DownloadAllOutcome.Incomplete, fetching, "CDN_NOT_FOUND", 1, 2, 3, 4), "us"),
             BuildView.DownloadAllLine(Result(DownloadAllOutcome.Canceled, fetching), "us"),
             BuildView.DownloadAllLine(Result(DownloadAllOutcome.DiskFull, fetching, "DOWNLOAD_ALL_NOT_ENOUGH_SPACE"), "us"),
             BuildView.DownloadAllLine(Result(DownloadAllOutcome.StoreFailed, fetching, "DOWNLOAD_ALL_FREE_SPACE_UNKNOWN"), "us"),
@@ -531,6 +533,8 @@ public sealed class BrowseModelTests : IAsyncDisposable
         [
             "download all: done, 2,900,112 objects, 175.1 GiB stored (us)",
             "download all: incomplete, 12,345 not found, 678 unavailable, 9 refused.",
+            "download all: incomplete, 2 unsupported.",
+            "download all: incomplete, 1 not found, 2 unavailable, 3 refused, 4 unsupported.",
             "download all: canceled at 41.2% of 175.1 GiB; stored objects are kept.",
             "download all: free space short or disk full (DOWNLOAD_ALL_NOT_ENOUGH_SPACE).",
             "download all: the store failed (DOWNLOAD_ALL_FREE_SPACE_UNKNOWN).",
@@ -1004,7 +1008,7 @@ public sealed class BrowseModelTests : IAsyncDisposable
     {
         var build = new BuildRef("wow", A, B, "us");
         var scanning = new DownloadAllProgress(build, DownloadAllStage.Scanning, 5, 100, 50, 1000, 0, 0);
-        DownloadAllResult Result(DownloadAllOutcome o, DownloadAllProgress p) => new(build, o, p, 0, 0, 0, null, null);
+        DownloadAllResult Result(DownloadAllOutcome o, DownloadAllProgress p) => new(build, o, p, 0, 0, 0, 0, null, null);
         Assert.Null(BuildView.FigureOf(Result(DownloadAllOutcome.Canceled, scanning)));
         Assert.Null(BuildView.FigureOf(Result(DownloadAllOutcome.DiskFull, scanning)));
         Assert.Equal(new DownloadedFigure(5, 100, 50, 1000), BuildView.FigureOf(Result(DownloadAllOutcome.Canceled, scanning with { Stage = DownloadAllStage.Fetching })));

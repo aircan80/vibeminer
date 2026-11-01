@@ -407,12 +407,13 @@ public sealed class ObjectSourceTests
     }
 
     [Fact]
-    public async Task AnArchiveEntryTooLargeForARangeIsRefused()
+    public async Task AnArchiveEntryTooLargeForARangeIsUnsupported()
     {
         var s = new Scenario();
         var o = Synthetic.Headerless(1, 300);
         var r = await s.Source.GetKeysAsync([new(o.Key, 100L << 20, [new(new CdnKey(new byte[16]), 0, 100L << 20)])], s.Context, FetchPriority.Background, null, None);
-        Assert.Equal("OBJECT_LOCATION_TOO_LARGE", r[0].Code);
+        Assert.Equal((ObjectState.Unsupported, "OBJECT_LOCATION_TOO_LARGE"), (r[0].State, r[0].Code));
+        Assert.False(r[0].Retryable);
         Assert.Empty(s.Cdn.Requests);
     }
 
@@ -616,7 +617,7 @@ public sealed class ObjectSourceTests
         await cdnOnly.GetKeyAsync(archive.Request(members[1]), s.Context, FetchPriority.Interactive, None);
         Assert.Equal(2, s.Cdn.Requests.Count);
         var big = await cdnOnly.GetKeyAsync(new(members[0].Key, 100L << 20), s.Context, FetchPriority.Interactive, None);
-        Assert.Equal("OBJECT_ACCESS_TOO_LARGE", big.Code);
+        Assert.Equal((ObjectState.Unsupported, "OBJECT_ACCESS_TOO_LARGE"), (big.State, big.Code));
         var observed = await cdnOnly.ObserveAsync(new(ObservationKind.Versions, "wow", "us"), None);
         Assert.Equal(0, await cdnOnly.CountPresentAsync([members[1].Key], None));
         Assert.Equal([false, false], await cdnOnly.HasKeysAsync([members[1].Key, members[0].Key], None));

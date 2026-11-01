@@ -234,7 +234,7 @@ internal sealed partial class CdnFetcher
                     if (r.Key.Type != ObjectKeyType.Encoded)
                     { finish(r.Key, new(r.Key, ObjectState.Refused, Code: "OBJECT_LOCATION_UNSUPPORTED", Message: "Only encoded objects live in archives.")); continue; }
                     if (locations.Any(l => l.Size > options.InMemoryObjectBytes))
-                    { finish(r.Key, new(r.Key, ObjectState.Refused, Code: "OBJECT_LOCATION_TOO_LARGE", Message: "An archive entry over 64 MiB isn't fetched as a range.")); continue; }
+                    { finish(r.Key, new(r.Key, ObjectState.Unsupported, Code: "OBJECT_LOCATION_TOO_LARGE", Message: "An archive entry over 64 MiB isn't fetched as a range.")); continue; }
                     var key = CdnKeyOf(r.Key);
                     planned.Add(new(key, r.DeclaredLength, locations)); byKey[key] = r;
                 }

@@ -240,6 +240,14 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
         : string.Create(CultureInfo.InvariantCulture,
             $"{Share(p.StoredBytes, p.TotalBytes) * 100:0.0}% of {VmCommands.Size(p.TotalBytes)}, {p.StoredObjects:N0} of {p.TotalObjects:N0} objects; x cancels");
 
+    /// <summary>An incomplete run's failure counts, nonzero ones only (all four if none is), in a fixed order.</summary>
+    private static string FailedCounts(DownloadAllResult r)
+    {
+        (long Count, string Words)[] all = [(r.NotFound, "not found"), (r.Unavailable, "unavailable"), (r.Refused, "refused"), (r.Unsupported, "unsupported")];
+        var shown = all.Where(c => c.Count != 0).ToArray();
+        return string.Join(", ", (shown.Length == 0 ? all : shown).Select(c => string.Create(CultureInfo.InvariantCulture, $"{c.Count:N0} {c.Words}")));
+    }
+
     /// <summary>The one status line a Download all run ends with, per outcome.</summary>
     internal static string DownloadAllLine(DownloadAllResult r, string region)
     {
@@ -249,8 +257,7 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
         {
             DownloadAllOutcome.Completed => string.Create(CultureInfo.InvariantCulture,
                 $"download all: done, {f.StoredObjects:N0} objects, {VmCommands.Size(f.StoredBytes)} stored ({region})"),
-            DownloadAllOutcome.Incomplete => string.Create(CultureInfo.InvariantCulture,
-                $"download all: incomplete, {r.NotFound:N0} not found, {r.Unavailable:N0} unavailable, {r.Refused:N0} refused."),
+            DownloadAllOutcome.Incomplete => "download all: incomplete, " + FailedCounts(r) + ".",
             DownloadAllOutcome.Canceled => string.Create(CultureInfo.InvariantCulture,
                 $"download all: canceled at {Share(f.StoredBytes, f.TotalBytes) * 100:0.0}% of {VmCommands.Size(f.TotalBytes)}; stored objects are kept."),
             DownloadAllOutcome.DiskFull => $"download all: free space short or disk full ({code}).",
