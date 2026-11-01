@@ -260,13 +260,20 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
         lock (gate) return Task.FromResult<IReadOnlyList<bool>>(keys.Select(stored.Contains).ToArray());
     }
 
+    /// <summary>
+    /// As the real store: ordered by (unix ms, record key), and a cursor keeps only the entries strictly after it in that order,
+    /// whether or not one equals it. Record keys share a type and namespace, so <see cref="ObjectKey.CompareTo"/> orders them by
+    /// their bytes, as the store's blob compare does.
+    /// </summary>
     public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken cancellationToken)
     {
+        static long Ms(HistoryEntry h) => h.ObservedAt.ToUnixTimeMilliseconds();
+        var after = query.After;
         lock (gate)
             return Task.FromResult<IReadOnlyList<HistoryEntry>>(history
                 .Where(h => (query.Product is null || h.Product == query.Product) && (query.Region is null || h.Region == query.Region) && (query.Kind is null || h.Kind == query.Kind))
-                .OrderBy(h => h.ObservedAt).ThenBy(h => h.Record)
-                .SkipWhile(h => query.After is not null && (h.ObservedAt, h.Record) != (query.After.ObservedAt, query.After.Record)).Skip(query.After is null ? 0 : 1)
+                .Where(h => after is null || Ms(h) > Ms(after) || Ms(h) == Ms(after) && h.Record.CompareTo(after.Record) > 0)
+                .OrderBy(Ms).ThenBy(h => h.Record)
                 .Take(query.Limit).ToArray());
     }
 }

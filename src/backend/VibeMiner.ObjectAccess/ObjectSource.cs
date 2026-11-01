@@ -32,6 +32,7 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
 
     /// <summary>The shared streams, so callers and tests can see the background limit and what is in use.</summary>
     public StreamScheduler Streams => fetcher.Streams;
+    internal CdnFetcher Fetcher => fetcher;
 
     public StoreCommitSubscription Subscribe(int capacity = StoreCommitFeed.DefaultCapacity) => commits.Subscribe(capacity);
 

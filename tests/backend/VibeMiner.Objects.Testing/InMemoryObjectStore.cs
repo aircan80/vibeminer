@@ -140,7 +140,9 @@ public sealed class InMemoryObjectStore : IObjectReader, IObjectWriter, IHistory
         ArgumentNullException.ThrowIfNull(query);
         if (query.Limit is < 1 or > 10_000) throw new ArgumentOutOfRangeException(nameof(query), "A history page is 1 to 10,000 entries.");
         ct.ThrowIfCancellationRequested();
-        static int Order(HistoryEntry a, HistoryEntry b) => a.ObservedAt != b.ObservedAt ? a.ObservedAt.CompareTo(b.ObservedAt)
+        // Unix milliseconds, as the store keeps them: a cursor's sub-millisecond part counts for nothing.
+        static int Order(HistoryEntry a, HistoryEntry b) => a.ObservedAt.ToUnixTimeMilliseconds() != b.ObservedAt.ToUnixTimeMilliseconds()
+            ? a.ObservedAt.ToUnixTimeMilliseconds().CompareTo(b.ObservedAt.ToUnixTimeMilliseconds())
             : a.Record.KeyBytes().AsSpan().SequenceCompareTo(b.Record.KeyBytes());
         var page = history.Values
             .Where(e => (query.Product is null || e.Product == query.Product) && (query.Region is null || e.Region == query.Region)

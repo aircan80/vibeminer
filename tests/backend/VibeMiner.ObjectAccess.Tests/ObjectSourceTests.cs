@@ -379,8 +379,7 @@ public sealed class ObjectSourceTests
         var hold = new TaskCompletionSource();
         s.Cdn.BeforeAnswer = (r, token) => r.Key == Scenario.KeyOf(blocker.Key) ? hold.Task.WaitAsync(token) : Task.CompletedTask;
         var bulk = s.Source.GetKeysAsync([new(blocker.Key, 300), new(queued.Key, 300)], s.Context, FetchPriority.Background, null, None);
-        while (s.Cdn.Requests.Count == 0) await Task.Delay(5);
-        await Task.Delay(100);
+        await Until(() => s.Source.Streams.BackgroundQueued == 1);   // blocker holds the one stream; queued waits behind it
         var screen = await s.Source.GetKeyAsync(new(queued.Key, 300), s.Context, FetchPriority.Interactive, None).WaitAsync(TimeSpan.FromSeconds(30));
         Assert.True(screen.IsPresent);
         Assert.Equal(queued.Bytes.ToArray(), screen.Bytes);
@@ -407,7 +406,7 @@ public sealed class ObjectSourceTests
         var bulk = s.Source.GetKeysAsync([new(blocker.Key, blocker.DeclaredLength)], s.Context, FetchPriority.Background, null, None);
         await holding.Task.WaitAsync(TimeSpan.FromSeconds(30));
         var waiting = s.Source.GetKeysAsync([new(queued.Key, 300)], s.Context, FetchPriority.Background, null, None);
-        await Task.Delay(100);
+        await Until(() => s.Source.Fetcher.BackgroundBytesWaiting == 1);   // waiting behind the blocker's bytes
         Assert.False(waiting.IsCompleted);
         var screen = await s.Source.GetKeyAsync(new(queued.Key, 300), s.Context, FetchPriority.Interactive, None).WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(screen.IsPresent);
@@ -427,8 +426,7 @@ public sealed class ObjectSourceTests
         s.Cdn.BeforeAnswer = (_, token) => hold.Task.WaitAsync(token);
         var calls = Enumerable.Range(0, 8).Select(i => s.Source.GetKeyAsync(new(o.Key, o.DeclaredLength), s.Context,
             i % 2 == 0 ? FetchPriority.Interactive : FetchPriority.Background, None)).ToArray();
-        while (s.Cdn.Requests.Count == 0) await Task.Delay(5);
-        await Task.Delay(50);
+        await Until(() => s.Source.Fetcher.Joins == calls.Length - 1);   // every other caller is waiting on the one transfer
         hold.SetResult();
         var results = await Task.WhenAll(calls);
         Assert.All(results, r => Assert.Equal(o.Bytes.ToArray(), r.Bytes));
@@ -446,7 +444,7 @@ public sealed class ObjectSourceTests
         var owner = s.Source.GetKeyAsync(new(o.Key), s.Context, FetchPriority.Background, cancel.Token);
         while (s.Cdn.Requests.Count == 0) await Task.Delay(5);
         var waiter = s.Source.GetKeyAsync(new(o.Key), s.Context, FetchPriority.Interactive, None);
-        await Task.Delay(20);
+        await Until(() => s.Source.Fetcher.Joins == 1);
         s.Cdn.BeforeAnswer = null;
         await cancel.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => owner);
@@ -578,6 +576,13 @@ public sealed class ObjectSourceTests
         Assert.Equal([false, false], await cdnOnly.HasKeysAsync([members[1].Key, members[0].Key], None));
         Assert.Empty(await cdnOnly.ReadHistoryAsync(new(), None));
         Assert.Equal((ObjectState.Present, false), (observed.State, observed.Recorded));
+    }
+
+    /// <summary>Waits for a state the source reaches on its own; the deadline is a deadlock guard.</summary>
+    private static async Task Until(Func<bool> condition)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (!condition()) await Task.Delay(5, deadline.Token);
     }
 
     private sealed class SyncProgress(List<ObjectProgress> into) : IProgress<ObjectProgress>

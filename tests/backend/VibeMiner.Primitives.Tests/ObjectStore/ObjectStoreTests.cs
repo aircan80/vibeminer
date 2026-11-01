@@ -630,6 +630,29 @@ public sealed class ObjectStoreTests
     }
 
     [Fact]
+    public async Task AHistoryCursorKeepsWhatIsStrictlyAfterItEvenWhenNoEntryEqualsIt()
+    {
+        using var t = new TempDirectory();
+        await using var store = await ObjectStore.OpenAsync(StoreDir(t), Quick);
+        var at = DateTimeOffset.FromUnixTimeMilliseconds(1_790_000_000_000);
+        // Two entries share a millisecond, so the record key breaks the tie.
+        foreach (var o in new[] { Synthetic.Observation(1, at: at), Synthetic.Observation(2, "wowt", at: at), Synthetic.Observation(3, at: at.AddSeconds(1)) })
+            await store.AppendHistoryAsync(o);
+        var all = await store.ReadHistoryAsync(new HistoryQuery());
+        Assert.Equal(3, all.Count);
+        Assert.True(all[0].Record.CompareTo(all[1].Record) < 0);
+        HistoryEntry Cursor(DateTimeOffset time, byte fill) => all[0] with { ObservedAt = time, Record = new ObjectKey(ObjectKeyType.HistoryRecord, Enumerable.Repeat(fill, 16).ToArray()) };
+        async Task<ObjectKey[]> After(HistoryEntry cursor) => (await store.ReadHistoryAsync(new HistoryQuery(After: cursor))).Select(e => e.Record).ToArray();
+
+        Assert.Equal(all.Skip(1).Select(e => e.Record), await After(all[0]));
+        Assert.Equal(all.Select(e => e.Record), await After(Cursor(at.AddMilliseconds(-1), 0xff)));
+        Assert.Equal(all.Select(e => e.Record), await After(Cursor(at, 0x00)));
+        Assert.Equal([all[2].Record], await After(Cursor(at, 0xff)));
+        Assert.Equal([all[2].Record], await After(Cursor(at.AddMilliseconds(500), 0x00)));
+        Assert.Empty(await After(Cursor(at.AddSeconds(1), 0xff)));
+    }
+
+    [Fact]
     public async Task ASummaryHasNoProductAndSurvivesARebuildFromThePacks()
     {
         using var t = new TempDirectory();

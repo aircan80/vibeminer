@@ -40,6 +40,10 @@ internal sealed class ByteBudget(long bytes)
     private readonly int total = (int)Math.Clamp(bytes / Unit, 1, int.MaxValue);
     private readonly SemaphoreSlim units = new((int)Math.Clamp(bytes / Unit, 1, int.MaxValue));
     private readonly SemaphoreSlim taker = new(1, 1);
+    private int waiting;
+
+    /// <summary>Takers not yet granted, for tests to wait on.</summary>
+    internal int Waiting => Volatile.Read(ref waiting);
 
     public sealed class Grant(ByteBudget owner, int units)
     {
@@ -50,15 +54,20 @@ internal sealed class ByteBudget(long bytes)
     public async Task<Grant> TakeAsync(long bytes, CancellationToken cancellationToken)
     {
         var need = (int)Math.Clamp((bytes + Unit - 1) / Unit, 1, total);
-        await taker.WaitAsync(cancellationToken).ConfigureAwait(false);
-        var taken = 0;
+        Interlocked.Increment(ref waiting);
         try
         {
-            for (; taken < need; taken++) await units.WaitAsync(cancellationToken).ConfigureAwait(false);
-            return new Grant(this, need);
+            await taker.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var taken = 0;
+            try
+            {
+                for (; taken < need; taken++) await units.WaitAsync(cancellationToken).ConfigureAwait(false);
+                return new Grant(this, need);
+            }
+            catch { if (taken > 0) units.Release(taken); throw; }
+            finally { taker.Release(); }
         }
-        catch { if (taken > 0) units.Release(taken); throw; }
-        finally { taker.Release(); }
+        finally { Interlocked.Decrement(ref waiting); }
     }
 }
 
@@ -86,6 +95,12 @@ internal sealed partial class CdnFetcher
 
     public StreamScheduler Streams { get; }
     public HostRanking Hosts { get; }
+    private int joins;
+
+    /// <summary>Background requests waiting for response bytes, for tests to wait on.</summary>
+    internal int BackgroundBytesWaiting => background.Waiting;
+    /// <summary>How many times a caller joined a transfer already running, for tests to wait on.</summary>
+    internal int Joins => Volatile.Read(ref joins);
 
     private sealed class InFlight(StreamScheduler.Ticket ticket)
     {
@@ -124,6 +139,7 @@ internal sealed partial class CdnFetcher
     public Task<ObjectResult>? Join(ObjectKey key, FetchPriority priority)
     {
         if (!inFlight.TryGetValue(key, out var running)) return null;
+        Interlocked.Increment(ref joins);
         if (priority == FetchPriority.Interactive) Streams.Promote(running.Ticket);
         return running.Done.Task;
     }

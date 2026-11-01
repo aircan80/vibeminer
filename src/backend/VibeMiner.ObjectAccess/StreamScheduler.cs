@@ -49,6 +49,8 @@ public sealed class StreamScheduler
     public int BackgroundLimit { get; private set; }
     public int BackgroundActive { get { lock (gate) return backgroundActive; } }
     public int InteractiveActive { get { lock (gate) return interactiveActive; } }
+    /// <summary>Background tickets waiting for a stream, for tests to wait on.</summary>
+    internal int BackgroundQueued { get { lock (gate) return backgroundQueue.Count; } }
 
     /// <summary>A place in the queue. Keep it to promote the request while it waits.</summary>
     public sealed class Ticket(FetchPriority priority)

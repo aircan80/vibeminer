@@ -166,6 +166,28 @@ public abstract class ObjectSourceContract
     }
 
     [Fact]
+    public async Task AHistoryCursorThatMatchesNoEntryStillPagesFromItsPlace()
+    {
+        var source = Arrange([]);
+        await source.ObserveAsync(new(ObservationKind.Versions, "wow", "us"), None);
+        await source.ObserveAsync(new(ObservationKind.Summary, "", "us"), None);
+        await source.ObserveAsync(new(ObservationKind.Definition, TableId, "wowdbdefs", TableName), None);
+        var all = await source.ReadHistoryAsync(new(), None);
+        Assert.Equal(3, all.Count);
+        HistoryEntry At(DateTimeOffset time, byte fill) => all[0] with { ObservedAt = time, Record = new ObjectKey(ObjectKeyType.HistoryRecord, Enumerable.Repeat(fill, 16).ToArray()) };
+        async Task<IReadOnlyList<ObjectKey>> After(HistoryEntry cursor) => (await source.ReadHistoryAsync(new(After: cursor), None)).Select(h => h.Record).ToArray();
+
+        Assert.Equal(all.Skip(1).Select(h => h.Record), await After(all[0]));
+        Assert.Equal(all.Select(h => h.Record), await After(At(all[0].ObservedAt.AddMilliseconds(-1), 0xff)));
+        Assert.Equal(all.Select(h => h.Record), await After(At(all[0].ObservedAt, 0x00)));
+        // The store keeps unix milliseconds, so the first entry's millisecond is what a 0xff cursor skips.
+        var first = all[0].ObservedAt.ToUnixTimeMilliseconds();
+        Assert.Equal(all.Where(h => h.ObservedAt.ToUnixTimeMilliseconds() > first).Select(h => h.Record), await After(At(all[0].ObservedAt, 0xff)));
+        Assert.Empty(await After(At(all[^1].ObservedAt, 0xff)));
+        Assert.Equal(all.Select(h => h.Record).Take(2), (await source.ReadHistoryAsync(new(After: At(all[0].ObservedAt, 0x00), Limit: 2), None)).Select(h => h.Record));
+    }
+
+    [Fact]
     public async Task OnlyStoredKeysCountAsPresent()
     {
         var a = Synthetic.Config(1); var b = Synthetic.Config(2); var c = Synthetic.Config(3);
