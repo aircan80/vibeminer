@@ -42,6 +42,155 @@ public interface IBuildFiles : IAsyncDisposable
     /// <see cref="FileLookupState.NotInEncoding"/>). Says nothing about stored state.
     /// </summary>
     Task<bool> ExistsAsync(FileRef file, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The whole file's decoded bytes, for the variant <see cref="StatAsync"/> reports. Fetches the encoded copy through layer 2
+    /// when it isn't stored. A file over <see cref="FileSystemOptions.MaxReadBytes"/> is <see cref="FileReadState.TooLarge"/>;
+    /// use <see cref="OpenReadAsync"/>. A Complete whole-file read has also matched the file's content key.
+    /// </summary>
+    Task<FileRead> GetAsync(FileRef file, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// <paramref name="length"/> decoded bytes from <paramref name="offset"/>, clamped to the end of the file (an offset at or
+    /// past the end reads 0 bytes, Complete, at the file's end, and fetches nothing). The end and the TooLarge check use the size
+    /// ENCODING declares, before any fetch; bytes whose BLTE layout disagrees with it are Corrupt. Decodes only the BLTE chunks the range overlaps, so a small range of a big file is
+    /// cheap once the encoded copy is stored. <paramref name="length"/> over <see cref="FileSystemOptions.MaxReadBytes"/> throws
+    /// <see cref="ArgumentOutOfRangeException"/>. A range that isn't the whole file can't be checked against the content key;
+    /// its chunks are checked against their own checksums.
+    /// </summary>
+    Task<FileRead> ReadRangeAsync(FileRef file, long offset, int length, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// A read-only seekable stream over the decoded file, with its holes listed up front. On a failure the stream is null and the
+    /// state says why. Reads are async only (<see cref="Stream.ReadAsync(Memory{byte}, CancellationToken)"/>); the stream decodes
+    /// one chunk at a time and holds at most one decoded chunk. A read stops short at the start of a hole, and a read that starts
+    /// inside one throws <see cref="FileHoleException"/>. Bytes that fail their checks mid-stream throw <see cref="FileReadException"/>.
+    /// The stream outlives the handle, isn't safe for concurrent use, and must be disposed.
+    /// </summary>
+    Task<FileOpen> OpenReadAsync(FileRef file, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// How a read ended. Complete, Partial and Protected carry bytes or named holes; every other state carries none. The lookup
+/// states are <see cref="FileLookupState"/>'s. Missing, NeedsNetwork, Unavailable and StoreFailed are layer 2's (Missing is its
+/// dated 404, never proof of absence). Corrupt means bytes or declarations failed a check; Unsupported means a well-formed
+/// layout or mode this code doesn't read. Bytes decrypted with a known key are proven only by that key (and, on a whole-file
+/// read, by the content key).
+/// </summary>
+public enum FileReadState
+{
+    /// <summary>Every byte of the range.</summary>
+    Complete,
+    /// <summary>Some bytes, with the rest in named holes.</summary>
+    Partial,
+    /// <summary>Every byte of the range lies in holes: no bytes.</summary>
+    Protected,
+    UnknownFile,
+    NotInLocale,
+    NotInEncoding,
+    Missing,
+    /// <summary>Not stored, and the network is off (layer 2 is local only).</summary>
+    NeedsNetwork,
+    Unavailable,
+    Corrupt,
+    Unsupported,
+    /// <summary>
+    /// A known TACT key didn't decrypt its chunk (Salsa20 has no MAC, so this shows as a bad inner mode, zlib or length after the
+    /// chunk checksum already proved the encrypted bytes): the key is wrong, not the data.
+    /// </summary>
+    WrongKey,
+    StoreFailed,
+    /// <summary>The whole file is over <see cref="FileSystemOptions.MaxReadBytes"/>; read it by range or as a stream.</summary>
+    TooLarge,
+}
+
+/// <summary>
+/// A decoded range this build can't read: an encrypted BLTE chunk whose TACT key isn't known. <see cref="KeyName"/> is the
+/// key's name as 16 uppercase hex digits (the 8 name bytes read as a little-endian integer), the same spelling as DB2 section keys.
+/// </summary>
+public sealed record FileHole(long Offset, long Length, string KeyName);
+
+/// <summary>Decoded bytes starting at <see cref="Offset"/> of the file.</summary>
+public sealed record FileSegment(long Offset, ReadOnlyMemory<byte> Bytes);
+
+/// <summary>
+/// The outcome of a read. <see cref="Offset"/> and <see cref="Length"/> are the range read, both clamped to the file; on a state
+/// that carries nothing, <see cref="Offset"/> is the offset asked for and <see cref="Length"/> is 0. Every hole the range
+/// overlaps is listed, clipped to the range. <see cref="Segments"/> and <see cref="Holes"/> are ascending, don't overlap, and
+/// together cover the range exactly: Complete has segments only, Protected holes only, Partial both. Segments are maximal (no two
+/// are adjacent; a Complete read of more than 0 bytes has one), and so are holes of one key. Bytes are never
+/// zero-filled. <see cref="Code"/>, <see cref="Message"/> and <see cref="ObservedAt"/> explain a failure (layer 2's code and
+/// time where it came from there).
+/// </summary>
+public sealed record FileRead(FileReadState State, long Offset, long Length, IReadOnlyList<FileSegment> Segments, IReadOnlyList<FileHole> Holes,
+    string? Code = null, string? Message = null, DateTimeOffset? ObservedAt = null)
+{
+    /// <summary>The bytes of a Complete read, else null.</summary>
+    public ReadOnlyMemory<byte>? Bytes => State != FileReadState.Complete ? null
+        : Segments.Count == 0 ? ReadOnlyMemory<byte>.Empty : (ReadOnlyMemory<byte>?)Segments[0].Bytes;
+
+    public static FileRead Failed(FileReadState state, long offset, string? code, string? message, DateTimeOffset? observedAt = null) =>
+        state is FileReadState.Complete or FileReadState.Partial or FileReadState.Protected
+            ? throw new ArgumentException("A failed read can't carry bytes or holes.", nameof(state))
+            : new(state, offset, 0, [], [], code, message, observedAt);
+}
+
+/// <summary>
+/// The outcome of <see cref="IBuildFiles.OpenReadAsync"/>. <see cref="Stream"/> is set for Complete (no holes), Partial (some)
+/// and Protected (the whole file is holes); every other state has none.
+/// </summary>
+public sealed record FileOpen(FileReadState State, FileReadStream? Stream, string? Code = null, string? Message = null, DateTimeOffset? ObservedAt = null);
+
+/// <summary>A read-only, seekable, async-only stream over one decoded file. <see cref="Stream.Length"/> is the decoded size.</summary>
+public abstract class FileReadStream : Stream
+{
+    /// <summary>Every hole of the file, ascending, known when the stream opened. Still readable after dispose.</summary>
+    public abstract IReadOnlyList<FileHole> Holes { get; }
+}
+
+/// <summary>A stream read started inside a hole.</summary>
+public sealed class FileHoleException(FileHole hole) : IOException($"The range at {hole.Offset} needs TACT key {hole.KeyName}.")
+{
+    public FileHole Hole { get; } = hole;
+}
+
+/// <summary>
+/// A stream read failed with a read state other than a hole (Corrupt, Unsupported, a layer 2 failure). <see cref="ObservedAt"/>
+/// is layer 2's time where the failure came from there.
+/// </summary>
+public sealed class FileReadException(FileReadState state, string? code, string? message, DateTimeOffset? observedAt = null)
+    : IOException(message ?? code ?? state.ToString())
+{
+    public FileReadState State { get; } = state;
+    public string? Code { get; } = code;
+    public DateTimeOffset? ObservedAt { get; } = observedAt;
+}
+
+/// <summary>
+/// The TACT keys a file system decrypts with: 16-byte keys by key name (the little-endian 8 name bytes). There is no default
+/// key list; a key not given leaves its chunks as holes.
+/// </summary>
+public interface ITactKeys
+{
+    /// <summary>The 16-byte key named <paramref name="keyName"/>, or null when it isn't known.</summary>
+    ReadOnlyMemory<byte>? Find(ulong keyName);
+}
+
+/// <summary>A fixed set of TACT keys.</summary>
+public sealed class TactKeys : ITactKeys
+{
+    private readonly Dictionary<ulong, byte[]> keys = [];
+
+    public static ITactKeys None { get; } = new TactKeys();
+
+    public TactKeys Add(ulong keyName, ReadOnlySpan<byte> key)
+    {
+        if (key.Length != 16) throw new ArgumentException("A TACT key is 16 bytes.", nameof(key));
+        keys[keyName] = key.ToArray();
+        return this;
+    }
+
+    public ReadOnlyMemory<byte>? Find(ulong keyName) => keys.TryGetValue(keyName, out var key) ? key : (ReadOnlyMemory<byte>?)null;
 }
 
 /// <summary>A file asked for by FileDataID or by path (case and slash direction don't matter).</summary>

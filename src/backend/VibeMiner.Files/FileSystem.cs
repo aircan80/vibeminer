@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using VibeMiner.Builds;
+using VibeMiner.Files.Formats;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 
@@ -9,6 +10,10 @@ public sealed record FileSystemOptions
 {
     /// <summary>Files whose stored state one layer 2 call checks while listing.</summary>
     public int PresenceBatch { get; init; } = 4096;
+    /// <summary>The most decoded bytes one <see cref="IBuildFiles.GetAsync"/> or <see cref="IBuildFiles.ReadRangeAsync"/> returns.</summary>
+    public long MaxReadBytes { get; init; } = 256L << 20;
+    /// <summary>The TACT keys encrypted chunks are decrypted with.</summary>
+    public ITactKeys Keys { get; init; } = TactKeys.None;
 }
 
 /// <summary>
@@ -26,6 +31,9 @@ public sealed class FileSystem : IFileSystem
         ArgumentNullException.ThrowIfNull(builds); ArgumentNullException.ThrowIfNull(objects);
         options ??= new();
         ArgumentOutOfRangeException.ThrowIfLessThan(options.PresenceBatch, 1, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxReadBytes, 0, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(options.MaxReadBytes, Array.MaxLength, nameof(options));
+        ArgumentNullException.ThrowIfNull(options.Keys, nameof(options));
         this.builds = builds; this.objects = objects; this.options = options;
     }
 
@@ -38,7 +46,7 @@ public sealed class FileSystem : IFileSystem
             return new(build, locale, Map(opened.State), null, opened.Code, opened.Message, opened.ObservedAt);
         if (!built.Metadata.Locales.Contains(locale))
             return new(build, locale, FilesOpenState.LocaleNotInBuild, null, "FILES_LOCALE_NOT_IN_BUILD", $"The build has no {locale} files.", null);
-        return new(build, locale, FilesOpenState.Open, new BuildFiles(built, locale, bit, objects, options.PresenceBatch), null, null, null);
+        return new(build, locale, FilesOpenState.Open, new BuildFiles(built, locale, bit, objects, options), null, null, null);
     }
 
     private static FilesOpenState Map(BuildOpenState state) => state switch
@@ -86,12 +94,29 @@ internal static class Variants
     public static ObjectKey KeyOf(FileVariant variant) => new(ObjectKeyType.Encoded, variant.EKey!.Value.ToBytes());
 }
 
-internal sealed class BuildFiles(IBuild opened, string locale, uint localeBit, IObjectSource objects, int batch) : IBuildFiles
+internal sealed class BuildFiles : IBuildFiles
 {
-    private IBuild? build = opened;
+    private readonly uint localeBit;
+    private readonly IObjectSource objects;
+    private readonly int batch;
+    private readonly FileSystemOptions options;
+    private readonly LayoutCache layouts = new();
+    private readonly Action counted;
+    private IBuild? build;
+    private long decodedChunks;
 
-    public BuildRef Build { get; } = opened.Build;
-    public string Locale { get; } = locale;
+    public BuildFiles(IBuild opened, string locale, uint localeBit, IObjectSource objects, FileSystemOptions options)
+    {
+        build = opened; Build = opened.Build; Locale = locale;
+        this.localeBit = localeBit; this.objects = objects; this.options = options; batch = options.PresenceBatch;
+        counted = () => Interlocked.Increment(ref decodedChunks);
+    }
+
+    public BuildRef Build { get; }
+    public string Locale { get; }
+
+    /// <summary>BLTE chunks decoded by this handle's reads so far.</summary>
+    internal long DecodedChunks => Interlocked.Read(ref decodedChunks);
 
     public ValueTask DisposeAsync() { Volatile.Write(ref build, null); return ValueTask.CompletedTask; }
 
@@ -154,8 +179,89 @@ internal sealed class BuildFiles(IBuild opened, string locale, uint localeBit, I
         return Task.FromResult(resolved.State != FileResolutionState.UnknownFile && Variants.Pick(resolved.Variants, localeBit) is not null);
     }
 
-    private FileResolution Resolve(FileRef file) => file.FileDataId is { } id ? Opened.Resolve(id)
-        : file.Path is { } path ? Opened.Resolve(path) : throw new ArgumentException("An empty file reference.", nameof(file));
+    public async Task<FileRead> GetAsync(FileRef file, CancellationToken cancellationToken)
+    {
+        var build = Opened;
+        ThrowIfEmpty(file);
+        cancellationToken.ThrowIfCancellationRequested();
+        var (reader, failed) = ReaderFor(build, file, 0);
+        if (reader is null) return failed!;
+        if (reader.Size > options.MaxReadBytes)
+            return FileRead.Failed(FileReadState.TooLarge, 0, "FILES_READ_TOO_LARGE", $"The file is {reader.Size} bytes, over the {options.MaxReadBytes} a whole read returns.");
+        // An empty file needs no fetch, but still has to be the content ENCODING names.
+        var read = reader.Size == 0 ? new FileRead(FileReadState.Complete, 0, 0, [], [])
+            : await ReadAsync(reader, 0, (int)reader.Size, 0, cancellationToken).ConfigureAwait(false);
+        if (read.State == FileReadState.Complete && !reader.MatchesContentKey(read.Bytes!.Value.Span))
+            return FileRead.Failed(FileReadState.Corrupt, 0, "BLTE_INTEGRITY", "The decoded file doesn't match its content key.");
+        return read;
+    }
+
+    public async Task<FileRead> ReadRangeAsync(FileRef file, long offset, int length, CancellationToken cancellationToken)
+    {
+        var build = Opened;
+        ThrowIfEmpty(file);
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(length, options.MaxReadBytes);
+        cancellationToken.ThrowIfCancellationRequested();
+        var (reader, failed) = ReaderFor(build, file, offset);
+        if (reader is null) return failed!;
+        // Clamped to the declared size before any fetch; an empty range fetches nothing.
+        var start = Math.Min(offset, reader.Size);
+        var clamped = (int)Math.Min(length, reader.Size - start);
+        if (clamped == 0) return new(FileReadState.Complete, start, 0, [], []);
+        return await ReadAsync(reader, start, clamped, offset, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<FileOpen> OpenReadAsync(FileRef file, CancellationToken cancellationToken)
+    {
+        var build = Opened;
+        ThrowIfEmpty(file);
+        cancellationToken.ThrowIfCancellationRequested();
+        var (reader, failed) = ReaderFor(build, file, 0);
+        if (reader is null) return new(failed!.State, null, failed.Code, failed.Message, failed.ObservedAt);
+        // An empty file needs no fetch, but still has to be the content ENCODING names.
+        if (reader.Size == 0 && !reader.MatchesContentKey([]))
+            return new(FileReadState.Corrupt, null, "BLTE_INTEGRITY", "The decoded file doesn't match its content key.");
+        try { return await BuildFileStream.OpenAsync(reader, cancellationToken).ConfigureAwait(false); }
+        catch (FileReadFailure f) { return new(f.State, null, f.Code, f.Message, f.ObservedAt); }
+        catch (BlteFormatException b) { return new(b.State, null, b.Code, b.Message); }
+    }
+
+    private FileResolution Resolve(FileRef file) => Resolve(Opened, file);
+
+    private static FileResolution Resolve(IBuild build, FileRef file) => file.FileDataId is { } id ? build.Resolve(id)
+        : file.Path is { } path ? build.Resolve(path) : throw new ArgumentException("An empty file reference.", nameof(file));
+
+    private static void ThrowIfEmpty(FileRef file)
+    {
+        if (file.FileDataId is null && file.Path is null) throw new ArgumentException("An empty file reference.", nameof(file));
+    }
+
+    /// <summary>
+    /// The reader for the variant <see cref="StatAsync"/> reports, over the build's CDN context as it is now; or the lookup state,
+    /// at <paramref name="offset"/>, that says why there is none.
+    /// </summary>
+    private (FileReader? Reader, FileRead? Failed) ReaderFor(IBuild build, FileRef file, long offset)
+    {
+        var resolved = Resolve(build, file);
+        if (resolved.State == FileResolutionState.UnknownFile || resolved.FileDataId is null)
+            return (null, FileRead.Failed(FileReadState.UnknownFile, offset, null, "The file is UnknownFile."));
+        if (Variants.Pick(resolved.Variants, localeBit) is not { } variant)
+            return (null, FileRead.Failed(FileReadState.NotInLocale, offset, null, "The file is NotInLocale."));
+        if (variant.EKey is null) return (null, FileRead.Failed(FileReadState.NotInEncoding, offset, null, "The file is NotInEncoding."));
+        if (variant.DecodedSize is null)
+            return (null, FileRead.Failed(FileReadState.Corrupt, offset, "FILES_NO_DECLARED_SIZE", "ENCODING lists the file without a decoded size."));
+        return (new FileReader(objects, variant, build.Cdn, options.Keys, layouts, options.MaxReadBytes, counted), null);
+    }
+
+    /// <summary>A clamped, non-empty range; a failure is reported at <paramref name="askedOffset"/>.</summary>
+    private static async Task<FileRead> ReadAsync(FileReader reader, long offset, int length, long askedOffset, CancellationToken cancellationToken)
+    {
+        try { return await reader.ReadAsync(offset, length, cancellationToken).ConfigureAwait(false); }
+        catch (FileReadFailure f) { return FileRead.Failed(f.State, askedOffset, f.Code, f.Message, f.ObservedAt); }
+        catch (BlteFormatException b) { return FileRead.Failed(b.State, askedOffset, b.Code, b.Message); }
+    }
 
     /// <summary>
     /// One layer 2 index check for every file that has an encoded copy; the rest have no encoded copy. Only the first EKey

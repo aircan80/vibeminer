@@ -13,37 +13,43 @@ public abstract class FilesContractTests
 {
     private static CancellationToken Ct => CancellationToken.None;
 
-    /// <summary>A file system holding <paramref name="build"/> with exactly these locales and files.</summary>
-    protected abstract IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files);
+    /// <summary>A file system holding <paramref name="build"/> with exactly these locales and files, and this whole-read limit.</summary>
+    protected abstract IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20);
     /// <summary>A file system for which opening <paramref name="build"/> fails with a layer 3 state and code.</summary>
     protected abstract IFileSystem CreateFailing(BuildRef build, FilesOpenState state, string code);
     /// <summary>Makes one file's encoded copy stored, as a download would, on the file system <see cref="Create"/> returned last.</summary>
     protected abstract void MarkStored(BuildRef build, uint fileDataId);
+    /// <summary>
+    /// Called once a stream of the file is open: a side that can't script a failure on stream reads up front (the real one,
+    /// whose open already reads layer 2) scripts it now.
+    /// </summary>
+    protected abstract void StreamOpened(uint fileDataId);
 
     private static readonly IReadOnlyList<string> Locales = ["enUS", "deDE"];
 
-    private static readonly string KeyOf300 = "0123456789ABCDEF0123456789ABCDEF";
+    private static readonly byte[] Content100 = BlteBuilder.Bytes(1000, 100), Content300 = BlteBuilder.Bytes(3000, 300), Content400 = BlteBuilder.Bytes(4000, 400);
+    private static readonly string KeyOf300 = FilesFixture.ContentKeyOf(Content300).ToUpperInvariant();
 
     /// <summary>
     /// 100 every locale, stored; 150 deDE only; 200 enUS only, encrypted; 250 every locale, not in ENCODING; 300 every locale,
-    /// stored and encrypted, with a given content key; 400 and 500 every locale, not stored.
+    /// stored and encrypted, with a given (uppercase) content key; 400 and 500 every locale, not stored. 100, 300 and 400 have content.
     /// </summary>
     private static IReadOnlyList<FakeFile> Files() =>
     [
-        new(100, "Interface/Icons/One.blp", 1000, FileStorage.Stored),
+        new(100, "Interface/Icons/One.blp", Storage: FileStorage.Stored, Content: Content100),
         new(150, "world/de/two.m2", 1500, Locales: ["deDE"]),
         new(200, "world/en/three.m2", 2000, Encrypted: true, Locales: ["enUS"]),
         new(250, "sound/missing.ogg", 2500, NotInEncoding: true),
-        new(300, "sound/four.ogg", 3000, FileStorage.Stored, Encrypted: true, ContentKey: KeyOf300),
-        new(400, "sound/five.ogg", 4000),
+        new(300, "sound/four.ogg", Storage: FileStorage.Stored, Encrypted: true, ContentKey: KeyOf300, Content: Content300),
+        new(400, "sound/five.ogg", Content: Content400),
         new(500, "sound/six.ogg", 5000),
     ];
 
     private static readonly uint[] EnUsIds = [100, 200, 250, 300, 400, 500];
 
-    private async Task<IBuildFiles> OpenAsync(string locale = "enUS", IReadOnlyList<FakeFile>? files = null)
+    private async Task<IBuildFiles> OpenAsync(string locale = "enUS", IReadOnlyList<FakeFile>? files = null, long maxReadBytes = 256L << 20)
     {
-        var result = await Create(FilesFixture.Build, Locales, files ?? Files()).ForAsync(FilesFixture.Build, locale, Ct);
+        var result = await Create(FilesFixture.Build, Locales, files ?? Files(), maxReadBytes).ForAsync(FilesFixture.Build, locale, Ct);
         Assert.Equal(FilesOpenState.Open, result.State);
         return result.Files!;
     }
@@ -212,10 +218,10 @@ public abstract class FilesContractTests
     {
         await using var files = await OpenAsync();
         var byId = (await ListAsync(files, FileFilter.All)).ToDictionary(f => f.FileDataId);
-        Assert.Equal(new BuildFile(100, null, 1000, FilesFixture.ContentKeyOf(100), FileFormat.Unknown, FileStorage.Stored, false), byId[100]);
+        Assert.Equal(new BuildFile(100, null, 1000, FilesFixture.ContentKeyOf(Content100), FileFormat.Unknown, FileStorage.Stored, false), byId[100]);
         Assert.Equal(new BuildFile(200, null, 2000, FilesFixture.ContentKeyOf(200), FileFormat.Unknown, FileStorage.NotStored, true), byId[200]);
         Assert.Equal(new BuildFile(300, null, 3000, KeyOf300.ToLowerInvariant(), FileFormat.Unknown, FileStorage.Stored, true), byId[300]);
-        Assert.Equal(new BuildFile(400, null, 4000, FilesFixture.ContentKeyOf(400), FileFormat.Unknown, FileStorage.NotStored, false), byId[400]);
+        Assert.Equal(new BuildFile(400, null, 4000, FilesFixture.ContentKeyOf(Content400), FileFormat.Unknown, FileStorage.NotStored, false), byId[400]);
         Assert.All(byId.Values, f => Assert.Matches("^[0-9a-f]{32}$", f.ContentKey));
     }
 
@@ -332,30 +338,562 @@ public abstract class FilesContractTests
             Assert.Equal(expected, stats[i]);
         }
     }
+
+    // GetAsync, ReadRangeAsync and OpenReadAsync
+
+    private const string KeyA = "1122334455667788", KeyB = "0102030405060708";
+    private static readonly byte[] Plain = BlteBuilder.Bytes(1000, 10), Stored = BlteBuilder.Bytes(1000, 11), Streamed = BlteBuilder.Bytes(700, 12),
+        WithHoles = BlteBuilder.Bytes(1000, 20), AllHoles = BlteBuilder.Bytes(400, 21), Big = BlteBuilder.Bytes(2000, 60);
+    private static readonly FileHole[] HolesOf20 = [new(200, 300, KeyA), new(500, 100, KeyB), new(800, 200, KeyA)];
+    private static readonly FileHole[] HolesOf21 = [new(0, 250, KeyA), new(250, 150, KeyB)];
+
+    /// <summary>The scripted failures, by FileDataID 40 to 46, and whether the code is the same on both sides.</summary>
+    public static TheoryData<uint, FileReadState, string, bool> Failures => new()
+    {
+        { 40, FileReadState.Missing, "CDN_NOT_FOUND", true },
+        { 41, FileReadState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK", true },
+        { 42, FileReadState.Unavailable, "CDN_TIMEOUT", true },
+        { 43, FileReadState.StoreFailed, "OBJECT_STORE_DISK_FULL", true },
+        { 44, FileReadState.Corrupt, "FAKE_CORRUPT", false },
+        { 45, FileReadState.Unsupported, "FAKE_UNSUPPORTED", false },
+        { 46, FileReadState.WrongKey, "FAKE_WRONG_KEY", false },
+    };
+
+    /// <summary>
+    /// Every file has its own content: equal bytes are one encoded copy on the real side, stored or failing together.
+    /// 10 not stored and 11 stored, 1000 bytes; 12 not stored, 700 bytes; 20 with holes of A, B and A (Partial); 21 all holes
+    /// (Protected); 30 no content (NeedsNetwork); 40 to 46 scripted failures; 50 empty; 150 deDE only; 250 not in ENCODING.
+    /// </summary>
+    private static IReadOnlyList<FakeFile> ReadFiles() =>
+    [
+        new(10, Content: Plain),
+        new(11, Storage: FileStorage.Stored, Content: Stored),
+        new(12, Content: Streamed),
+        new(20, Content: WithHoles, Holes: HolesOf20),
+        new(21, Content: AllHoles, Holes: HolesOf21),
+        new(30, Size: 500),
+        .. Failures.Select(f => new FakeFile((uint)f[0], Content: BlteBuilder.Bytes(600, (int)(uint)f[0]),
+            ReadFailure: new((FileReadState)f[1], (string)f[2]))),
+        new(50, Content: []),
+        new(150, Content: BlteBuilder.Bytes(100, 150), Locales: ["deDE"]),
+        new(250, Size: 2500, NotInEncoding: true),
+    ];
+
+    private Task<IBuildFiles> OpenReadsAsync(long maxReadBytes = 256L << 20) => OpenAsync(files: ReadFiles(), maxReadBytes: maxReadBytes);
+
+    private static byte[] Slice(byte[] bytes, long offset, long length) => bytes.AsSpan((int)offset, (int)length).ToArray();
+
+    /// <summary>
+    /// The read's shape rules: segments and holes ascending, never empty, covering the range exactly; segments maximal, holes of
+    /// one key never adjacent; the state follows from them; segment bytes are the content's.
+    /// </summary>
+    private static void AssertShape(FileRead read, byte[] content)
+    {
+        var pieces = read.Segments.Select(x => (x.Offset, (long)x.Bytes.Length, Key: (string?)null))
+            .Concat(read.Holes.Select(h => (h.Offset, h.Length, Key: (string?)h.KeyName))).OrderBy(p => p.Offset).ToArray();
+        var at = read.Offset;
+        for (var i = 0; i < pieces.Length; i++)
+        {
+            Assert.Equal(at, pieces[i].Offset);
+            Assert.True(pieces[i].Item2 > 0, "A segment or hole is never empty.");
+            if (i > 0) Assert.False(pieces[i - 1].Key == pieces[i].Key, "Segments are maximal and so are holes of one key.");
+            at += pieces[i].Item2;
+        }
+        Assert.Equal(read.Offset + read.Length, at);
+        Assert.Equal(read.Segments.OrderBy(x => x.Offset).Select(x => x.Offset), read.Segments.Select(x => x.Offset));
+        Assert.Equal(read.Holes.OrderBy(h => h.Offset).Select(h => h.Offset), read.Holes.Select(h => h.Offset));
+        foreach (var segment in read.Segments) Assert.Equal(Slice(content, segment.Offset, segment.Bytes.Length), segment.Bytes.ToArray());
+        var expected = read.Holes.Count == 0 ? FileReadState.Complete : read.Segments.Count == 0 ? FileReadState.Protected : FileReadState.Partial;
+        Assert.Equal(expected, read.State);
+        Assert.Null(read.Code);
+    }
+
+    private static void AssertComplete(FileRead read, byte[] content, long offset, long length)
+    {
+        Assert.Equal((FileReadState.Complete, offset, length), (read.State, read.Offset, read.Length));
+        AssertShape(read, content);
+        Assert.Equal(Slice(content, offset, length), read.Bytes!.Value.ToArray());
+        Assert.Equal(length == 0 ? 0 : 1, read.Segments.Count);
+        Assert.Empty(read.Holes);
+    }
+
+    private static void AssertFailed(FileRead read, FileReadState state, long offset)
+    {
+        Assert.Equal((state, offset, 0L), (read.State, read.Offset, read.Length));
+        Assert.Empty(read.Segments);
+        Assert.Empty(read.Holes);
+        Assert.Null(read.Bytes);
+    }
+
+    [Fact]
+    public async Task GetReturnsTheWholeFile()
+    {
+        await using var files = await OpenReadsAsync();
+        AssertComplete(await files.GetAsync(10, Ct), Plain, 0, 1000);
+        AssertComplete(await files.GetAsync(11, Ct), Stored, 0, 1000);
+        AssertComplete(await files.GetAsync(12, Ct), Streamed, 0, 700);
+        AssertComplete(await files.GetAsync(50, Ct), [], 0, 0);
+    }
+
+    [Fact]
+    public async Task GetByPathReadsTheSameFile()
+    {
+        await using var files = await OpenAsync();
+        AssertComplete(await files.GetAsync(FileRef.ForPath("SOUND\\FOUR.OGG"), Ct), Content300, 0, 3000);
+        AssertComplete(await files.GetAsync(100, Ct), Content100, 0, 1000);
+    }
+
+    [Fact]
+    public async Task RangesInsideAndAcrossChunks()
+    {
+        await using var files = await OpenReadsAsync();
+        const int C = FilesFixture.ChunkBytes;
+        foreach (var (offset, length) in new[] { (10L, 20), (C, C), (C - 1, 2), (100L, 300), (0L, 1000), (1L, 998), (999L, 1) })
+            AssertComplete(await files.ReadRangeAsync(10, offset, length, Ct), Plain, offset, length);
+    }
+
+    [Fact]
+    public async Task RangesClampAtTheEnd()
+    {
+        await using var files = await OpenReadsAsync();
+        AssertComplete(await files.ReadRangeAsync(10, 900, 500, Ct), Plain, 900, 100);
+        AssertComplete(await files.ReadRangeAsync(10, 0, 1 << 20, Ct), Plain, 0, 1000);
+        AssertComplete(await files.ReadRangeAsync(10, 1000, 10, Ct), Plain, 1000, 0);
+        AssertComplete(await files.ReadRangeAsync(10, 5000, 10, Ct), Plain, 1000, 0);
+        AssertComplete(await files.ReadRangeAsync(10, long.MaxValue, 10, Ct), Plain, 1000, 0);
+        AssertComplete(await files.ReadRangeAsync(10, 300, 0, Ct), Plain, 300, 0);
+    }
+
+    [Fact]
+    public async Task AnEmptyRangeFetchesNothing()
+    {
+        await using var files = await OpenReadsAsync();
+        // No fetch: not stored after, and a file with no copy or a scripted failure still reads Complete.
+        AssertComplete(await files.ReadRangeAsync(10, 1000, 10, Ct), Plain, 1000, 0);
+        AssertComplete(await files.ReadRangeAsync(10, 10, 0, Ct), Plain, 10, 0);
+        Assert.Equal(FileStorage.NotStored, (await files.StatAsync(10, Ct)).File!.Storage);
+        Assert.Equal((FileReadState.Complete, 500L, 0L), await StateAt(files.ReadRangeAsync(30, 600, 10, Ct)));
+        Assert.Equal((FileReadState.Complete, 600L, 0L), await StateAt(files.ReadRangeAsync(40, 600, 10, Ct)));
+        Assert.Equal((FileReadState.Complete, 20L, 0L), await StateAt(files.ReadRangeAsync(44, 20, 0, Ct)));
+    }
+
+    private static async Task<(FileReadState, long, long)> StateAt(Task<FileRead> read)
+    {
+        var r = await read;
+        return (r.State, r.Offset, r.Length);
+    }
+
+    [Fact]
+    public async Task HolesAreNamedClippedAndMerged()
+    {
+        await using var files = await OpenReadsAsync();
+        var whole = await files.GetAsync(20, Ct);
+        Assert.Equal((FileReadState.Partial, 0L, 1000L), (whole.State, whole.Offset, whole.Length));
+        AssertShape(whole, WithHoles);
+        Assert.Null(whole.Bytes);
+        Assert.Equal(HolesOf20, whole.Holes);
+        Assert.Equal([0L, 600L], whole.Segments.Select(x => x.Offset));
+
+        var across = await files.ReadRangeAsync(20, 250, 400, Ct);
+        AssertShape(across, WithHoles);
+        Assert.Equal([new FileHole(250, 250, KeyA), new FileHole(500, 100, KeyB)], across.Holes);
+        Assert.Equal(600L, Assert.Single(across.Segments).Offset);
+        Assert.Equal(FileReadState.Partial, across.State);
+
+        var start = await files.ReadRangeAsync(20, 150, 100, Ct);
+        AssertShape(start, WithHoles);
+        Assert.Equal([new FileHole(200, 50, KeyA)], start.Holes);
+        Assert.Equal((150L, 50), (start.Segments[0].Offset, start.Segments[0].Bytes.Length));
+
+        var inside = await files.ReadRangeAsync(20, 300, 250, Ct);
+        Assert.Equal(FileReadState.Protected, inside.State);
+        AssertShape(inside, WithHoles);
+        Assert.Equal([new FileHole(300, 200, KeyA), new FileHole(500, 50, KeyB)], inside.Holes);
+
+        var end = await files.ReadRangeAsync(20, 900, 500, Ct);
+        Assert.Equal((FileReadState.Protected, 900L, 100L), (end.State, end.Offset, end.Length));
+        Assert.Equal([new FileHole(900, 100, KeyA)], end.Holes);
+
+        AssertComplete(await files.ReadRangeAsync(20, 620, 100, Ct), WithHoles, 620, 100);
+    }
+
+    [Fact]
+    public async Task AFileOfHolesIsProtected()
+    {
+        await using var files = await OpenReadsAsync();
+        var read = await files.GetAsync(21, Ct);
+        Assert.Equal((FileReadState.Protected, 0L, 400L), (read.State, read.Offset, read.Length));
+        AssertShape(read, AllHoles);
+        Assert.Equal(HolesOf21, read.Holes);
+        Assert.Null(read.Bytes);
+        var range = await files.ReadRangeAsync(21, 200, 100, Ct);
+        Assert.Equal([new FileHole(200, 50, KeyA), new FileHole(250, 50, KeyB)], range.Holes);
+        Assert.Equal(FileReadState.Protected, range.State);
+    }
+
+    [Fact]
+    public async Task LookupStatesCarryTheAskedOffset()
+    {
+        await using var files = await OpenReadsAsync();
+        foreach (var (file, state) in new[] { (FileRef.Id(999), FileReadState.UnknownFile), (FileRef.ForPath("no/such/file"), FileReadState.UnknownFile),
+            (FileRef.Id(150), FileReadState.NotInLocale), (FileRef.Id(250), FileReadState.NotInEncoding) })
+        {
+            AssertFailed(await files.GetAsync(file, Ct), state, 0);
+            AssertFailed(await files.ReadRangeAsync(file, 77, 10, Ct), state, 77);
+            AssertFailed(await files.ReadRangeAsync(file, 5000, 0, Ct), state, 5000);
+            var open = await files.OpenReadAsync(file, Ct);
+            Assert.Equal((state, null), (open.State, open.Stream));
+        }
+    }
+
+    [Fact]
+    public async Task AFileWithNoCopyNeedsNetwork()
+    {
+        await using var files = await OpenReadsAsync();
+        var get = await files.GetAsync(30, Ct);
+        AssertFailed(get, FileReadState.NeedsNetwork, 0);
+        Assert.Equal("OBJECT_ACCESS_NEEDS_NETWORK", get.Code);
+        var range = await files.ReadRangeAsync(30, 40, 10, Ct);
+        AssertFailed(range, FileReadState.NeedsNetwork, 40);
+        Assert.Equal("OBJECT_ACCESS_NEEDS_NETWORK", range.Code);
+        var open = await files.OpenReadAsync(30, Ct);
+        Assert.Equal((FileReadState.NeedsNetwork, null, "OBJECT_ACCESS_NEEDS_NETWORK"), (open.State, open.Stream, open.Code));
+        Assert.Equal(FileStorage.NotStored, (await files.StatAsync(30, Ct)).File!.Storage);
+    }
+
+    [Theory]
+    [MemberData(nameof(Failures))]
+    public async Task ScriptedFailuresCarryNothing(uint id, FileReadState state, string code, bool sameCode)
+    {
+        await using var files = await OpenReadsAsync();
+        var get = await files.GetAsync(id, Ct);
+        AssertFailed(get, state, 0);
+        var range = await files.ReadRangeAsync(id, 300, 100, Ct);
+        AssertFailed(range, state, 300);
+        Assert.NotNull(get.Code);
+        Assert.NotNull(range.Code);
+        if (sameCode) Assert.Equal((code, code), (get.Code, range.Code));
+        // Missing is layer 2's dated 404.
+        if (state == FileReadState.Missing) Assert.Equal((true, true), (get.ObservedAt is not null, range.ObservedAt is not null));
+        var open = await files.OpenReadAsync(id, Ct);
+        if (state == FileReadState.WrongKey)
+        {
+            // WrongKey shows only when a chunk is decoded: the stream opens, and its reads fail.
+            Assert.Equal(FileReadState.Complete, open.State);
+            await using var stream = open.Stream!;
+            var thrown = await Assert.ThrowsAsync<FileReadException>(() => ReadOnceAsync(stream));
+            Assert.Equal(FileReadState.WrongKey, thrown.State);
+            Assert.Equal(0, stream.Position);
+            return;
+        }
+        Assert.Equal((state, null), (open.State, open.Stream));
+        Assert.NotNull(open.Code);
+        if (sameCode) Assert.Equal(code, open.Code);
+        if (state == FileReadState.Missing) Assert.NotNull(open.ObservedAt);
+    }
+
+    [Fact]
+    public async Task ALayer2FailureMidStreamThrowsFromTheRead()
+    {
+        var content = BlteBuilder.Bytes(600, 47);
+        await using var files = await OpenAsync(files: [new(47, Content: content,
+            ReadFailure: new(FileReadState.Unavailable, "CDN_TIMEOUT", OnStreamRead: true))]);
+        var open = await files.OpenReadAsync(47, Ct);
+        Assert.Equal(FileReadState.Complete, open.State);
+        await using var stream = open.Stream!;
+        Assert.Empty(stream.Holes);
+        StreamOpened(47);
+        stream.Position = 200;
+        var thrown = await Assert.ThrowsAsync<FileReadException>(() => ReadOnceAsync(stream));
+        Assert.Equal((FileReadState.Unavailable, "CDN_TIMEOUT"), (thrown.State, thrown.Code));
+        Assert.Equal(200, stream.Position);
+        // Still failing, and an empty read or one at the end needs no bytes.
+        Assert.Equal(FileReadState.Unavailable, (await Assert.ThrowsAsync<FileReadException>(() => ReadOnceAsync(stream))).State);
+        Assert.Equal(0, await stream.ReadAsync(Memory<byte>.Empty, Ct));
+        stream.Position = 600;
+        Assert.Equal(0, await ReadOnceAsync(stream));
+        AssertFailed(await files.ReadRangeAsync(47, 10, 10, Ct), FileReadState.Unavailable, 10);
+    }
+
+    [Fact]
+    public async Task AWholeReadOverTheLimitIsTooLarge()
+    {
+        var limited = new FakeFile[] { new(60, Content: Big), new(61, Size: 5000), new(62, Content: BlteBuilder.Bytes(2000, 62), ReadFailure: new(FileReadState.Unavailable, "CDN_TIMEOUT")) };
+        await using var files = await OpenAsync(files: limited, maxReadBytes: 1000);
+        foreach (var id in new uint[] { 60, 61, 62 })
+        {
+            var read = await files.GetAsync(id, Ct);
+            AssertFailed(read, FileReadState.TooLarge, 0);
+            Assert.Equal("FILES_READ_TOO_LARGE", read.Code);
+        }
+        AssertComplete(await files.ReadRangeAsync(60, 500, 1000, Ct), Big, 500, 1000);
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => files.ReadRangeAsync(60, 0, 1001, Ct));
+        var open = await files.OpenReadAsync(60, Ct);
+        Assert.Equal(FileReadState.Complete, open.State);
+        await using var stream = open.Stream!;
+        Assert.Equal(Big, await ReadToEndAsync(stream, 333));
+    }
+
+    [Fact]
+    public async Task ReadArgumentsAreChecked()
+    {
+        await using var files = await OpenReadsAsync(maxReadBytes: 1000);
+        await Assert.ThrowsAsync<ArgumentException>(() => files.GetAsync(default, Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => files.ReadRangeAsync(default, 0, 1, Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => files.OpenReadAsync(default, Ct));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => files.ReadRangeAsync(10, -1, 1, Ct));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => files.ReadRangeAsync(10, 0, -1, Ct));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => files.ReadRangeAsync(10, 0, 1001, Ct));
+        // Arguments are checked before the lookup.
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => files.ReadRangeAsync(999, -1, 1, Ct));
+        AssertComplete(await files.ReadRangeAsync(10, 0, 1000, Ct), Plain, 0, 1000);
+    }
+
+    [Fact]
+    public async Task ReadsOnADisposedHandleThrow()
+    {
+        var files = await OpenReadsAsync();
+        await files.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => files.GetAsync(10, Ct));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => files.ReadRangeAsync(10, 0, 10, Ct));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => files.ReadRangeAsync(10, 5000, 0, Ct));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => files.OpenReadAsync(10, Ct));
+    }
+
+    [Fact]
+    public async Task ASuccessfulReadStoresTheFile()
+    {
+        await using var files = await OpenReadsAsync();
+        Assert.Equal(FileStorage.NotStored, (await files.StatAsync(10, Ct)).File!.Storage);
+        AssertComplete(await files.ReadRangeAsync(10, 0, 10, Ct), Plain, 0, 10);
+        Assert.Equal(FileStorage.Stored, (await files.StatAsync(10, Ct)).File!.Storage);
+
+        Assert.Equal(FileStorage.NotStored, (await files.StatAsync(12, Ct)).File!.Storage);
+        var open = await files.OpenReadAsync(12, Ct);
+        await open.Stream!.DisposeAsync();
+        Assert.Equal(FileStorage.Stored, (await files.StatAsync(12, Ct)).File!.Storage);
+
+        Assert.Equal(FileStorage.NotStored, (await files.StatAsync(20, Ct)).File!.Storage);
+        Assert.Equal(FileReadState.Partial, (await files.GetAsync(20, Ct)).State);
+        Assert.Equal(FileStorage.Stored, (await files.StatAsync(20, Ct)).File!.Storage);
+    }
+
+    // Streams
+
+    /// <summary>Reads to the end in <paramref name="size"/>-byte reads, accepting short ones.</summary>
+    private static async Task<byte[]> ReadToEndAsync(Stream stream, int size)
+    {
+        var all = new List<byte>();
+        var buffer = new byte[size];
+        int got;
+        while ((got = await stream.ReadAsync(buffer, Ct)) > 0) all.AddRange(buffer.AsSpan(0, got));
+        return [.. all];
+    }
+
+    /// <summary>One 10-byte read, as a task.</summary>
+    private static Task<int> ReadOnceAsync(Stream stream) => stream.ReadAsync(new byte[10], Ct).AsTask();
+
+    /// <summary>Reads until a read throws <see cref="FileHoleException"/> (returned) or the end (null), collecting the bytes.</summary>
+    private static async Task<(byte[] Bytes, FileHole? Hole)> ReadToHoleAsync(Stream stream, int size)
+    {
+        var all = new List<byte>();
+        var buffer = new byte[size];
+        while (true)
+        {
+            int got;
+            try { got = await stream.ReadAsync(buffer, Ct); }
+            catch (FileHoleException e) { return ([.. all], e.Hole); }
+            if (got == 0) return ([.. all], null);
+            all.AddRange(buffer.AsSpan(0, got));
+        }
+    }
+
+    [Fact]
+    public async Task AStreamReadsTheWholeFileInOddReads()
+    {
+        await using var files = await OpenReadsAsync();
+        var open = await files.OpenReadAsync(10, Ct);
+        Assert.Equal((FileReadState.Complete, null), (open.State, open.Code));
+        await using var stream = open.Stream!;
+        Assert.Empty(stream.Holes);
+        Assert.Equal((true, true, false, 1000L, 0L), (stream.CanRead, stream.CanSeek, stream.CanWrite, stream.Length, stream.Position));
+        Assert.Equal(Plain, await ReadToEndAsync(stream, 7));
+        Assert.Equal(1000, stream.Position);
+        Assert.Equal(0, await stream.ReadAsync(new byte[10], Ct));
+        Assert.Equal(0, await stream.ReadAsync(Memory<byte>.Empty, Ct));
+    }
+
+    [Fact]
+    public async Task AnEmptyFileStreamsNothing()
+    {
+        await using var files = await OpenReadsAsync();
+        var open = await files.OpenReadAsync(50, Ct);
+        Assert.Equal(FileReadState.Complete, open.State);
+        await using var stream = open.Stream!;
+        Assert.Equal((0L, 0), (stream.Length, await stream.ReadAsync(new byte[4], Ct)));
+        Assert.Empty(stream.Holes);
+    }
+
+    [Fact]
+    public async Task AStreamSeeksFromEachOrigin()
+    {
+        await using var files = await OpenReadsAsync();
+        await using var stream = (await files.OpenReadAsync(10, Ct)).Stream!;
+        Assert.Equal(900, stream.Seek(-100, SeekOrigin.End));
+        Assert.Equal(950, stream.Seek(50, SeekOrigin.Current));
+        Assert.Equal(Slice(Plain, 950, 50), await ReadToEndAsync(stream, 13));
+        Assert.Equal(130, stream.Seek(130, SeekOrigin.Begin));
+        var buffer = new byte[5];
+        Assert.Equal(5, await stream.ReadAsync(buffer, Ct));
+        Assert.Equal(Slice(Plain, 130, 5), buffer);
+        Assert.Equal(125, stream.Seek(-10, SeekOrigin.Current));
+        Assert.Equal(Slice(Plain, 125, 875), await ReadToEndAsync(stream, 64));
+        stream.Position = 3;
+        Assert.Equal(3, stream.Position);
+        Assert.Equal(Slice(Plain, 3, 997), await ReadToEndAsync(stream, 100));
+        // Past the end reads nothing; before the start throws.
+        Assert.Equal(1005, stream.Seek(5, SeekOrigin.End));
+        Assert.Equal(0, await stream.ReadAsync(new byte[4], Ct));
+        Assert.Throws<IOException>(() => stream.Seek(-1, SeekOrigin.Begin));
+        Assert.Throws<IOException>(() => stream.Seek(-1001, SeekOrigin.End));
+        Assert.Throws<ArgumentOutOfRangeException>(() => stream.Position = -1);
+        Assert.Equal(1005, stream.Position);
+    }
+
+    [Fact]
+    public async Task AStreamStopsAtHolesAndThrowsInsideThem()
+    {
+        await using var files = await OpenReadsAsync();
+        var open = await files.OpenReadAsync(20, Ct);
+        Assert.Equal(FileReadState.Partial, open.State);
+        await using var stream = open.Stream!;
+        Assert.Equal(HolesOf20, stream.Holes);
+        Assert.Equal(1000, stream.Length);
+
+        stream.Position = 150;
+        var (bytes, hole) = await ReadToHoleAsync(stream, 100);
+        Assert.Equal(Slice(WithHoles, 150, 50), bytes);
+        Assert.Equal(HolesOf20[0], hole);
+        Assert.Equal(200, stream.Position);
+
+        // Inside a hole: the whole merged hole, and the position doesn't move.
+        stream.Position = 350;
+        var inside = await Assert.ThrowsAsync<FileHoleException>(() => ReadOnceAsync(stream));
+        Assert.Equal(HolesOf20[0], inside.Hole);
+        Assert.Equal(350, stream.Position);
+        stream.Position = 599;
+        Assert.Equal(HolesOf20[1], (await Assert.ThrowsAsync<FileHoleException>(() => ReadOnceAsync(stream))).Hole);
+
+        stream.Position = 600;
+        (bytes, hole) = await ReadToHoleAsync(stream, 33);
+        Assert.Equal(Slice(WithHoles, 600, 200), bytes);
+        Assert.Equal(HolesOf20[2], hole);
+
+        // The stream stays usable after a hole.
+        stream.Position = 0;
+        (bytes, hole) = await ReadToHoleAsync(stream, 1000);
+        Assert.Equal(Slice(WithHoles, 0, 200), bytes);
+        Assert.Equal(HolesOf20[0], hole);
+    }
+
+    [Fact]
+    public async Task AStreamOfHolesIsProtected()
+    {
+        await using var files = await OpenReadsAsync();
+        var open = await files.OpenReadAsync(21, Ct);
+        Assert.Equal(FileReadState.Protected, open.State);
+        await using var stream = open.Stream!;
+        Assert.Equal(HolesOf21, stream.Holes);
+        Assert.Equal(HolesOf21[0], (await Assert.ThrowsAsync<FileHoleException>(() => ReadOnceAsync(stream))).Hole);
+        stream.Position = 399;
+        Assert.Equal(HolesOf21[1], (await Assert.ThrowsAsync<FileHoleException>(() => ReadOnceAsync(stream))).Hole);
+        stream.Position = 400;
+        Assert.Equal(0, await stream.ReadAsync(new byte[10], Ct));
+    }
+
+    [Fact]
+    public async Task AStreamIsAsyncOnlyAndReadOnly()
+    {
+        await using var files = await OpenReadsAsync();
+        await using var stream = (await files.OpenReadAsync(10, Ct)).Stream!;
+        Assert.Throws<NotSupportedException>(() => stream.Read(new byte[4], 0, 4));
+        Assert.Throws<NotSupportedException>(() => stream.Read(new byte[4].AsSpan()));
+        Assert.Throws<NotSupportedException>(() => stream.Write([1], 0, 1));
+        Assert.Throws<NotSupportedException>(() => stream.SetLength(5));
+        Assert.Equal(0, stream.Position);
+        var buffer = new byte[10];
+        Assert.Equal(10, await stream.ReadAsync(buffer, 0, 10, Ct));
+        Assert.Equal(Slice(Plain, 0, 10), buffer);
+    }
+
+    [Fact]
+    public async Task ADisposedStreamThrowsButKeepsItsHoles()
+    {
+        await using var files = await OpenReadsAsync();
+        var stream = (await files.OpenReadAsync(20, Ct)).Stream!;
+        Assert.Equal(10, await stream.ReadAsync(new byte[10], Ct));
+        await stream.DisposeAsync();
+        Assert.Equal((false, false, false), (stream.CanRead, stream.CanSeek, stream.CanWrite));
+        Assert.Equal(HolesOf20, stream.Holes);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => ReadOnceAsync(stream));
+        Assert.Throws<ObjectDisposedException>(() => stream.Seek(0, SeekOrigin.Begin));
+        Assert.Throws<ObjectDisposedException>(() => stream.Length);
+        Assert.Throws<ObjectDisposedException>(() => stream.Position);
+        Assert.Throws<ObjectDisposedException>(() => stream.Position = 0);
+        // Disposing twice is fine.
+        stream.Dispose();
+    }
+
+    [Fact]
+    public async Task AStreamOutlivesItsHandle()
+    {
+        var files = await OpenReadsAsync();
+        await using var plain = (await files.OpenReadAsync(12, Ct)).Stream!;
+        await using var holed = (await files.OpenReadAsync(20, Ct)).Stream!;
+        await files.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => files.OpenReadAsync(12, Ct));
+        Assert.Equal(Streamed, await ReadToEndAsync(plain, 99));
+        holed.Position = 600;
+        var (bytes, hole) = await ReadToHoleAsync(holed, 50);
+        Assert.Equal(Slice(WithHoles, 600, 200), bytes);
+        Assert.Equal(HolesOf20[2], hole);
+    }
+
+    [Fact]
+    public async Task StreamsOfTheSameFileAreIndependent()
+    {
+        await using var files = await OpenReadsAsync();
+        await using var a = (await files.OpenReadAsync(11, Ct)).Stream!;
+        await using var b = (await files.OpenReadAsync(FileRef.Id(11), Ct)).Stream!;
+        a.Position = 500;
+        Assert.Equal(Stored, await ReadToEndAsync(b, 256));
+        Assert.Equal(Slice(Stored, 500, 500), await ReadToEndAsync(a, 77));
+    }
 }
 
 public sealed class InMemoryFilesContractTests : FilesContractTests
 {
     private InMemoryFileSystem? last;
 
-    protected override IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files) =>
-        last = new InMemoryFileSystem(listNames: false).Add(build, locales, files);
+    protected override IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20) =>
+        last = new InMemoryFileSystem(listNames: false, maxReadBytes).Add(build, locales, files);
 
     protected override IFileSystem CreateFailing(BuildRef build, FilesOpenState state, string code) =>
         new InMemoryFileSystem(listNames: false).Fail(build, state, code);
 
     protected override void MarkStored(BuildRef build, uint fileDataId) => last!.SetStorage(build, fileDataId, FileStorage.Stored);
+
+    protected override void StreamOpened(uint fileDataId) { }
 }
 
 public sealed class RealFilesContractTests : FilesContractTests
 {
-    private VibeMiner.ObjectAccess.Testing.InMemoryObjectSource? objects;
+    private RealFiles? last;
 
-    protected override IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files)
+    protected override IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20)
     {
-        var (fs, _, source) = FilesFixture.Real(build, locales, files);
-        objects = source;
-        return fs;
+        last = FilesFixture.Real(build, locales, files, new FileSystemOptions { MaxReadBytes = maxReadBytes });
+        return last.Files;
     }
 
     protected override IFileSystem CreateFailing(BuildRef build, FilesOpenState state, string code)
@@ -364,5 +902,7 @@ public sealed class RealFilesContractTests : FilesContractTests
         return new FileSystem(builds, new VibeMiner.ObjectAccess.Testing.InMemoryObjectSource());
     }
 
-    protected override void MarkStored(BuildRef build, uint fileDataId) => objects!.AddStored(FilesFixture.ObjectKeyOf(fileDataId), [1, 2, 3]);
+    protected override void MarkStored(BuildRef build, uint fileDataId) => last!.MarkStored(fileDataId);
+
+    protected override void StreamOpened(uint fileDataId) => last!.FailStreamReads(fileDataId);
 }

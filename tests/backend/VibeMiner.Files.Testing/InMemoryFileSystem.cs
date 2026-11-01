@@ -5,22 +5,54 @@ namespace VibeMiner.Files.Testing;
 
 /// <summary>
 /// One file of a fake build. <see cref="Locales"/> null means every locale. <see cref="Path"/> resolves stats by path (as
-/// ROOT's name hash does) and is the listed name when the file system lists names. A null <see cref="ContentKey"/> takes 32 hex digits made from the FileDataID. A file with
+/// ROOT's name hash does) and is the listed name when the file system lists names. A null <see cref="ContentKey"/> is the MD5 of
+/// <see cref="Content"/>, or without content 32 hex digits made from the FileDataID; a given one must be the content's MD5. A file with
 /// <see cref="NotInEncoding"/> lists with <see cref="FileStorage.NoEncodedCopy"/> and no size, whatever <see cref="Storage"/> says.
+/// <see cref="Content"/> is the decoded file (it sets the listed size); without it a read answers NeedsNetwork, and the file can't
+/// be <see cref="FileStorage.Stored"/> (a stored copy always reads). <see cref="Holes"/>
+/// are its ranges no key opens: their bytes are never returned. <see cref="ReadFailure"/> makes every read that fetches fail with
+/// that state; a whole read over the limit is TooLarge and an empty range is Complete first, as both come from the listed size.
+/// A failure that shows on stream reads (<see cref="FakeReadFailure.OnStreamRead"/>, and always WrongKey) lets the stream open and
+/// fails its reads of readable bytes instead. A failed read never marks the file stored. Files never share a stored copy (the real
+/// side shares one EKey between files of identical content).
 /// </summary>
 public sealed record FakeFile(uint FileDataId, string? Path = null, long? Size = 0, FileStorage Storage = FileStorage.NotStored,
     bool Encrypted = false, IReadOnlyList<string>? Locales = null, string? ContentKey = null, FileFormat Format = FileFormat.Unknown,
-    bool NotInEncoding = false);
+    bool NotInEncoding = false, byte[]? Content = null, IReadOnlyList<FileHole>? Holes = null, FakeReadFailure? ReadFailure = null);
+
+/// <summary>
+/// A scripted read failure: a state that carries nothing and isn't a lookup state or TooLarge. <see cref="ObservedAt"/> is passed
+/// through; for Missing (layer 2's dated 404) null means the time of the read. With <see cref="OnStreamRead"/> (always for
+/// WrongKey, which shows only when a chunk is decoded), <see cref="IBuildFiles.OpenReadAsync"/> succeeds in the state its holes
+/// give and every stream read that would return bytes throws <see cref="FileReadException"/>; whole and range reads still fail.
+/// </summary>
+public sealed record FakeReadFailure(FileReadState State, string Code, string? Message = null, DateTimeOffset? ObservedAt = null,
+    bool OnStreamRead = false)
+{
+    /// <summary>Whether the stream opens and its reads fail.</summary>
+    public bool FailsStreamReads => OnStreamRead || State == FileReadState.WrongKey;
+
+    /// <summary>A layer 2 state.</summary>
+    public bool IsLayer2 => State is FileReadState.Missing or FileReadState.NeedsNetwork or FileReadState.Unavailable or FileReadState.StoreFailed;
+
+    /// <summary>
+    /// A layer 2 state every fetch answers, so the file can't be stored. One on stream reads can: the open fetched the copy.
+    /// </summary>
+    public bool KeepsNotStored => IsLayer2 && !OnStreamRead;
+}
 
 /// <summary>
 /// The standard <see cref="IFileSystem"/> test double for layer 5 and up: files are listed from memory, nothing is fetched.
 /// Builds are added with their locales and files or scripted to fail; anything else answers NeedsNetwork, as the real file
 /// system does offline. Storage can be changed while a handle is open, and the handle sees it on its next call. With
 /// <paramref name="listNames"/> false, no file is named (Path null, a path prefix matches nothing), as before names come in
-/// #173; paths still resolve.
+/// #173; paths still resolve. Reads serve <see cref="FakeFile.Content"/> and mark the file stored, as a fetch would;
+/// <paramref name="maxReadBytes"/> is <see cref="FileSystemOptions.MaxReadBytes"/>.
 /// </summary>
-public sealed class InMemoryFileSystem(bool listNames = false) : IFileSystem
+public sealed class InMemoryFileSystem(bool listNames = false, long maxReadBytes = 256L << 20) : IFileSystem
 {
+    private readonly long maxRead = maxReadBytes >= 0 && maxReadBytes <= Array.MaxLength ? maxReadBytes
+        : throw new ArgumentOutOfRangeException(nameof(maxReadBytes));
     private readonly Lock gate = new();
     private readonly Dictionary<BuildRef, FakeBuildFiles> builds = [];
     private readonly Dictionary<BuildRef, (FilesOpenState State, string Code)> failures = [];
@@ -33,10 +65,43 @@ public sealed class InMemoryFileSystem(bool listNames = false) : IFileSystem
         foreach (var file in files)
         {
             foreach (var locale in file.Locales ?? []) FileLocales.BitOf(locale);
-            if (!byId.TryAdd(file.FileDataId, file)) throw new ArgumentException($"FileDataID {file.FileDataId} is added twice.", nameof(files));
+            Validate(file);
+            var copy = file with { Content = file.Content?.ToArray(), Holes = file.Holes is null ? null : [.. file.Holes] };
+            if (!byId.TryAdd(file.FileDataId, copy)) throw new ArgumentException($"FileDataID {file.FileDataId} is added twice.", nameof(files));
         }
         lock (gate) { builds[build] = new FakeBuildFiles(locales.ToArray(), byId); failures.Remove(build); }
         return this;
+    }
+
+    private static void Validate(FakeFile file)
+    {
+        if (file.ReadFailure is { } failure && failure.State is FileReadState.Complete or FileReadState.Partial or FileReadState.Protected
+                or FileReadState.TooLarge or FileReadState.UnknownFile or FileReadState.NotInLocale or FileReadState.NotInEncoding)
+            throw new ArgumentException($"File {file.FileDataId}: a scripted read failure can't be {failure.State}.", nameof(file));
+        if (file.Storage == FileStorage.Stored && file.Content is null)
+            throw new ArgumentException($"File {file.FileDataId}: a stored file needs content.", nameof(file));
+        if (file.Storage == FileStorage.Stored && file.ReadFailure is { KeepsNotStored: true } stored)
+            throw new ArgumentException($"File {file.FileDataId}: a stored file can't fail with layer 2's {stored.State}.", nameof(file));
+        if (file.ReadFailure is { FailsStreamReads: true } onRead && file.Content is null)
+            throw new ArgumentException($"File {file.FileDataId}: a {onRead.State} failure on stream reads needs content to open.", nameof(file));
+        if (file.ContentKey is { } key && file.Content is { } content
+                && !string.Equals(key, Convert.ToHexStringLower(System.Security.Cryptography.MD5.HashData(content)), StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException($"File {file.FileDataId}: a content key must be the content's MD5.", nameof(file));
+        if (file.Holes is not { Count: > 0 } holes) return;
+        if (file.Content is null) throw new ArgumentException($"File {file.FileDataId}: holes need content.", nameof(file));
+        FileHole? last = null;
+        foreach (var hole in holes)
+        {
+            if (hole is null || hole.Length <= 0 || hole.Offset < 0 || hole.Offset > file.Content.Length - hole.Length)
+                throw new ArgumentException($"File {file.FileDataId}: a hole must be non-empty and inside the content.", nameof(file));
+            if (hole.KeyName is not { Length: 16 } name || !name.All(char.IsAsciiHexDigitUpper))
+                throw new ArgumentException($"File {file.FileDataId}: a key name is 16 uppercase hex digits.", nameof(file));
+            if (last is not null && hole.Offset < last.Offset + last.Length)
+                throw new ArgumentException($"File {file.FileDataId}: holes must be ascending and not overlap.", nameof(file));
+            if (last is not null && hole.Offset == last.Offset + last.Length && hole.KeyName == last.KeyName)
+                throw new ArgumentException($"File {file.FileDataId}: adjacent holes of one key must be one hole.", nameof(file));
+            last = hole;
+        }
     }
 
     public InMemoryFileSystem Fail(BuildRef build, FilesOpenState state, string code)
@@ -47,7 +112,7 @@ public sealed class InMemoryFileSystem(bool listNames = false) : IFileSystem
         return this;
     }
 
-    /// <summary>Changes one file's stored state, as a download or a scrub would.</summary>
+    /// <summary>Changes one file's stored state, as a download or a scrub would. Only a file with content can be stored.</summary>
     public InMemoryFileSystem SetStorage(BuildRef build, uint fileDataId, FileStorage storage)
     {
         lock (gate) builds[build].SetStorage(fileDataId, storage);
@@ -65,7 +130,7 @@ public sealed class InMemoryFileSystem(bool listNames = false) : IFileSystem
                 return Task.FromResult(new FilesOpenResult(build, locale, failed.State, null, failed.Code, $"The build is {failed.State} ({failed.Code}).", null));
             if (builds.TryGetValue(build, out var fake))
                 return Task.FromResult(fake.HasLocale(locale)
-                    ? new FilesOpenResult(build, locale, FilesOpenState.Open, new Handle(build, locale, fake, listNames), null, null, null)
+                    ? new FilesOpenResult(build, locale, FilesOpenState.Open, new Handle(build, locale, fake, listNames, maxRead), null, null, null)
                     : new FilesOpenResult(build, locale, FilesOpenState.LocaleNotInBuild, null, "FILES_LOCALE_NOT_IN_BUILD",
                         $"The build has no {locale} files.", null));
         }
@@ -82,7 +147,21 @@ public sealed class InMemoryFileSystem(bool listNames = false) : IFileSystem
 
         public static bool InLocale(FakeFile file, string locale) => file.Locales is null || file.Locales.Contains(locale);
 
-        public void SetStorage(uint id, FileStorage storage) { lock (gate) files[id] = files[id] with { Storage = storage }; }
+        public void SetStorage(uint id, FileStorage storage)
+        {
+            lock (gate)
+            {
+                var file = files[id];
+                if (storage == FileStorage.Stored && file.Content is null)
+                    throw new ArgumentException($"File {id} has no content, so it can't be stored.", nameof(storage));
+                if (storage == FileStorage.Stored && file.ReadFailure is { KeepsNotStored: true } failure)
+                    throw new ArgumentException($"File {id} fails with layer 2's {failure.State}, so it can't be stored.", nameof(storage));
+                files[id] = file with { Storage = storage };
+            }
+        }
+
+        /// <summary>A read fetched the file, so it is stored now.</summary>
+        public void MarkFetched(uint id) => SetStorage(id, FileStorage.Stored);
 
         public FakeFile? Find(uint id) { lock (gate) return files.GetValueOrDefault(id); }
 
@@ -101,7 +180,7 @@ public sealed class InMemoryFileSystem(bool listNames = false) : IFileSystem
         public static string Normalize(string path) => path.Replace('/', '\\').ToUpperInvariant();
     }
 
-    private sealed class Handle(BuildRef build, string locale, FakeBuildFiles fake, bool listNames) : IBuildFiles
+    private sealed class Handle(BuildRef build, string locale, FakeBuildFiles fake, bool listNames, long maxReadBytes) : IBuildFiles
     {
         private int disposed;
 
@@ -136,17 +215,208 @@ public sealed class InMemoryFileSystem(bool listNames = false) : IFileSystem
         {
             ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Lookup(file).Stat);
+        }
+
+        private (FileStat Stat, FakeFile? File) Lookup(FileRef file)
+        {
             var found = file.FileDataId is { } id ? fake.Find(id) : file.Path is { } path ? fake.Find(path) : throw new ArgumentException("An empty file reference.", nameof(file));
-            if (found is null) return Task.FromResult(new FileStat(FileLookupState.UnknownFile, null));
-            if (!FakeBuildFiles.InLocale(found, Locale)) return Task.FromResult(new FileStat(FileLookupState.NotInLocale, null));
-            return Task.FromResult(new FileStat(found.NotInEncoding ? FileLookupState.NotInEncoding : FileLookupState.Found, ToFile(found)));
+            if (found is null) return (new FileStat(FileLookupState.UnknownFile, null), null);
+            if (!FakeBuildFiles.InLocale(found, Locale)) return (new FileStat(FileLookupState.NotInLocale, null), null);
+            return (new FileStat(found.NotInEncoding ? FileLookupState.NotInEncoding : FileLookupState.Found, ToFile(found)), found);
+        }
+
+        /// <summary>The listed file to read, or the lookup state that says why there is none.</summary>
+        private (FakeFile? File, FileRead? Failed) Listed(FileRef file, long offset)
+        {
+            var (stat, found) = Lookup(file);
+            if (stat.State == FileLookupState.Found && found is not null) return (found, null);
+            var state = stat.State switch
+            {
+                FileLookupState.NotInLocale => FileReadState.NotInLocale,
+                FileLookupState.NotInEncoding => FileReadState.NotInEncoding,
+                _ => FileReadState.UnknownFile,
+            };
+            return (null, FileRead.Failed(state, offset, null, $"The file is {stat.State}."));
+        }
+
+        /// <summary>What fetching the file would fail with: a scripted failure, or no content offline. Null when it has content.</summary>
+        private static Failure? FetchFailure(FakeFile file) =>
+            file.ReadFailure is { } failure ? Failure.Of(failure)
+            : file.Content is null ? new(FileReadState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK", "Not stored, and this source is local only.", null)
+            : null;
+
+        /// <summary>
+        /// A range already clamped to the listed size (null when no size is listed): an empty one is Complete at once, with no
+        /// fetch; anything else fetches (a scripted failure or NeedsNetwork wins) and marks the file stored.
+        /// </summary>
+        private FileRead Fetch(FakeFile file, long start, int? length, long failedOffset)
+        {
+            if (length == 0) return new(FileReadState.Complete, start, 0, [], []);
+            if (FetchFailure(file) is { } failure) return FileRead.Failed(failure.State, failedOffset, failure.Code, failure.Message, failure.ObservedAt);
+            fake.MarkFetched(file.FileDataId);
+            return Read(file, start, length!.Value);
         }
 
         public async Task<bool> ExistsAsync(FileRef file, CancellationToken cancellationToken) =>
             (await StatAsync(file, cancellationToken).ConfigureAwait(false)).State is FileLookupState.Found or FileLookupState.NotInEncoding;
 
-        private BuildFile ToFile(FakeFile f) => new(f.FileDataId, listNames ? f.Path : null, f.NotInEncoding ? null : f.Size,
-            f.ContentKey?.ToLowerInvariant() ?? f.FileDataId.ToString("x32", System.Globalization.CultureInfo.InvariantCulture), f.Format,
+        public Task<FileRead> GetAsync(FileRef file, CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            var (found, failed) = Listed(file, 0);
+            if (found is null) return Task.FromResult(failed!);
+            var size = SizeOf(found);
+            if (size > maxReadBytes)
+                return Task.FromResult(FileRead.Failed(FileReadState.TooLarge, 0, "FILES_READ_TOO_LARGE",
+                    $"The file is {size} bytes, over the {maxReadBytes} a whole read returns."));
+            return Task.FromResult(Fetch(found, 0, (int?)size, 0));
+        }
+
+        public Task<FileRead> ReadRangeAsync(FileRef file, long offset, int length, CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (file.FileDataId is null && file.Path is null) throw new ArgumentException("An empty file reference.", nameof(file));
+            ArgumentOutOfRangeException.ThrowIfNegative(offset);
+            ArgumentOutOfRangeException.ThrowIfNegative(length);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(length, maxReadBytes);
+            var (found, failed) = Listed(file, offset);
+            if (found is null) return Task.FromResult(failed!);
+            if (SizeOf(found) is not { } size) return Task.FromResult(Fetch(found, offset, null, offset));
+            var start = Math.Min(offset, size);
+            return Task.FromResult(Fetch(found, start, (int)Math.Min(length, size - start), offset));
+        }
+
+        public Task<FileOpen> OpenReadAsync(FileRef file, CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            var (found, failed) = Listed(file, 0);
+            if (found is null) return Task.FromResult(new FileOpen(failed!.State, null, failed.Code, failed.Message));
+            var onRead = found.ReadFailure is { FailsStreamReads: true } scripted ? scripted : null;
+            if (onRead is null && FetchFailure(found) is { } failure)
+                return Task.FromResult(new FileOpen(failure.State, null, failure.Code, failure.Message, failure.ObservedAt));
+            var content = found.Content!;
+            var holes = found.Holes ?? [];
+            // The open read the file's layout, so it is stored even when its reads will fail.
+            fake.MarkFetched(found.FileDataId);
+            return Task.FromResult(new FileOpen(StateOf(content.Length, holes.Sum(h => h.Length)), new FakeReadStream(content, holes, onRead)));
+        }
+
+        /// <summary>The listed size: the content's length, else the declared size.</summary>
+        private static long? SizeOf(FakeFile file) => file.Content?.Length ?? file.Size;
+
+        /// <summary>A range of the file as maximal segments between its holes, clipped to the range, with bytes copied out.</summary>
+        private FileRead Read(FakeFile file, long offset, int length)
+        {
+            var content = file.Content!;
+            long end = offset + length, at = offset;
+            var segments = new List<FileSegment>();
+            var holes = new List<FileHole>();
+            foreach (var hole in file.Holes ?? [])
+            {
+                long from = Math.Max(hole.Offset, offset), to = Math.Min(hole.Offset + hole.Length, end);
+                if (from >= to) continue;
+                if (from > at) segments.Add(new(at, content.AsSpan((int)at, (int)(from - at)).ToArray()));
+                holes.Add(new(from, to - from, hole.KeyName));
+                at = to;
+            }
+            if (end > at) segments.Add(new(at, content.AsSpan((int)at, (int)(end - at)).ToArray()));
+            return new(StateOf(length, holes.Sum(h => h.Length)), offset, length, segments, holes);
+        }
+
+        private static FileReadState StateOf(long length, long inHoles) =>
+            inHoles == 0 ? FileReadState.Complete : inHoles == length ? FileReadState.Protected : FileReadState.Partial;
+
+        private BuildFile ToFile(FakeFile f) => new(f.FileDataId, listNames ? f.Path : null, f.NotInEncoding ? null : f.Content?.Length ?? f.Size,
+            f.ContentKey?.ToLowerInvariant()
+                ?? (f.Content is { } content ? Convert.ToHexStringLower(System.Security.Cryptography.MD5.HashData(content))
+                    : f.FileDataId.ToString("x32", System.Globalization.CultureInfo.InvariantCulture)), f.Format,
             f.NotInEncoding ? FileStorage.NoEncodedCopy : f.Storage, f.Encrypted);
+    }
+
+    /// <summary>A failed read's state, code, message and time; Missing gets the time of the read when none is scripted.</summary>
+    private sealed record Failure(FileReadState State, string Code, string Message, DateTimeOffset? ObservedAt)
+    {
+        public static Failure Of(FakeReadFailure f) => new(f.State, f.Code, f.Message ?? $"The read is {f.State} ({f.Code}).",
+            f.ObservedAt ?? (f.State == FileReadState.Missing ? TimeProvider.System.GetUtcNow() : null));
+    }
+
+    /// <summary>
+    /// An async-only stream over the content, which the fake never changes after Add, so it outlives the handle. With
+    /// <paramref name="failure"/>, every read that would return bytes throws <see cref="FileReadException"/> and leaves the position.
+    /// </summary>
+    private sealed class FakeReadStream(byte[] content, IReadOnlyList<FileHole> holes, FakeReadFailure? failure) : FileReadStream
+    {
+        private long position;
+        private bool disposed;
+
+        public override IReadOnlyList<FileHole> Holes { get; } = holes;
+        public override bool CanRead => !disposed;
+        public override bool CanSeek => !disposed;
+        public override bool CanWrite => false;
+        public override long Length { get { ObjectDisposedException.ThrowIf(disposed, this); return content.Length; } }
+
+        public override long Position
+        {
+            get { ObjectDisposedException.ThrowIf(disposed, this); return position; }
+            set { ObjectDisposedException.ThrowIf(disposed, this); ArgumentOutOfRangeException.ThrowIfNegative(value); position = value; }
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            var target = origin switch
+            {
+                SeekOrigin.Begin => offset,
+                SeekOrigin.Current => position + offset,
+                SeekOrigin.End => content.Length + offset,
+                _ => throw new ArgumentException("An unknown seek origin.", nameof(origin)),
+            };
+            if (target < 0) throw new IOException("A seek before the start of the stream.");
+            return position = target;
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (cancellationToken.IsCancellationRequested) return ValueTask.FromCanceled<int>(cancellationToken);
+            if (buffer.Length == 0 || position >= content.Length) return ValueTask.FromResult(0);
+            var stop = (long)content.Length;
+            foreach (var hole in Holes)
+            {
+                if (hole.Offset + hole.Length <= position) continue;
+                if (hole.Offset <= position) return ValueTask.FromException<int>(new FileHoleException(hole));
+                stop = hole.Offset;
+                break;
+            }
+            if (failure is not null)
+            {
+                var f = Failure.Of(failure);
+                return ValueTask.FromException<int>(new FileReadException(f.State, f.Code, f.Message, f.ObservedAt));
+            }
+            var count = (int)Math.Min(buffer.Length, stop - position);
+            content.AsSpan((int)position, count).CopyTo(buffer.Span);
+            position += count;
+            return ValueTask.FromResult(count);
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            ValidateBufferArguments(buffer, offset, count);
+            return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("Reads are async only.");
+        public override int Read(Span<byte> buffer) => throw new NotSupportedException("Reads are async only.");
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException("The stream is read-only.");
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("The stream is read-only.");
+        public override void SetLength(long value) => throw new NotSupportedException("The stream is read-only.");
+        public override void Flush() { }
+
+        protected override void Dispose(bool disposing) { disposed = true; base.Dispose(disposing); }
     }
 }

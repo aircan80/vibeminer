@@ -153,6 +153,16 @@ Projection rules:
 
 No decryption is implemented. A public key list was checked for coverage only: it lacked some of the key names one Retail Item file needed, so decryption alone cannot promise full tables.
 
+### Layer 4 reads (#172)
+
+The rewrite's file reads ([`BlteChunks`](../../src/backend/VibeMiner.Files/Formats/BlteChunks.cs), D190) decode one chunk at a time, so a range read decodes only the chunks it overlaps. The rules above still hold, with these differences:
+
+- The header MD5 is checked before any chunk claim is believed; each chunk's MD5 (headerless: the whole-object MD5) before its mode byte.
+- `E` chunks decrypt when the caller's `ITactKeys` has the key: Salsa20/20 with the 16-byte key, nonce = the 4 IV bytes then 4 zero bytes, with IV byte `i` XORed with byte `i` of the chunk's 0-based table ordinal (0 when headerless). The plaintext is a chunk payload with its own `N` or `Z` mode.
+- An unknown key is a hole named by its key name. Salsa20 has no MAC, so a known key that yields an inner mode other than `N` or `Z` (`E` or `F` inside `E` never ships), bad zlib or a wrong length is `WrongKey` (`BLTE_KEY_MISMATCH`), not Corrupt. Cipher `A` (ARC4) and outer modes other than `N`, `Z` and `E` are `BLTE_UNSUPPORTED`.
+- Decrypted bytes are proven only by the key, and by the CKey on a complete whole-file read. A range is checked by its chunks' MD5s only.
+- Headerless encrypted objects decrypt with ordinal 0; without the key the whole file is one hole.
+
 ## EN (encoding) v1
 
 [`EncodingInventoryReader`](../../src/backend/VibeMiner.Protocols.Tact/EncodingInventoryReader.cs) enumerates everything. [`EncodingFileLookup`](../../src/backend/VibeMiner.Protocols.Tact/EncodingFileLookup.cs) validates the whole file once, then answers CKey and EKey lookups by reading single pages through the page index. Neither builds an in-memory map of the whole file.

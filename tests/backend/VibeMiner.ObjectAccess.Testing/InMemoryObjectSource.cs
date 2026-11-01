@@ -30,6 +30,10 @@ public sealed class InMemoryObjectSource : IObjectSource
     public InMemoryObjectSource NotFound(ObjectKey key) =>
         Script(new(key, ObjectState.NotFound, Code: "CDN_NOT_FOUND", ObservedAt: Time.GetUtcNow()));
     public InMemoryObjectSource Unavailable(ObjectKey key, string code = "CDN_OFFLINE") => Script(new(key, ObjectState.Unavailable, Code: code));
+    /// <summary>The object answers NeedsNetwork, as a local-only source does for an object it doesn't hold.</summary>
+    public InMemoryObjectSource NeedsNetwork(ObjectKey key) =>
+        Script(new(key, ObjectState.NeedsNetwork, Code: "OBJECT_ACCESS_NEEDS_NETWORK", Message: "Not stored, and this source is local only."));
+    public InMemoryObjectSource StoreFailed(ObjectKey key, string code = "OBJECT_STORE_DISK_FULL") => Script(new(key, ObjectState.StoreFailed, Code: code));
     public InMemoryObjectSource Refuse(ObjectKey key, string code) => Script(new(key, ObjectState.Refused, Code: code));
     public InMemoryObjectSource AddReply(string product, string region, ObservationKind kind, byte[] bytes)
     {
