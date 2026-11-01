@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
-  <!-- Layer 5 formats (#177, #178): the DB2 and DBD readers, and WoWDBDefs table definitions in Definitions/. Reads files through layer 4 only (Db2FileSource); the DB2 reader keeps its own range seam for tests. Only the definitions use layer 2, for fetched definitions in the history log (D180). Decoded tables go into the layer 1 generated store (D210, #179) in Generated/. -->
+  <!-- Layer 5 formats (#177, #178): the DB2 and DBD readers, and WoWDBDefs table definitions in Definitions/. Reads files through layer 4 only (Db2FileSource); the DB2 reader keeps its own range seam for tests. Only the definitions use layer 2, for fetched definitions in the history log (D180). Decoded tables go into the layer 1 generated store (D210, #179) in Generated/. The BLP2 decoder (#199) is in Images/. -->
   <ProjectReference Include="../VibeMiner.Files/VibeMiner.Files.csproj" />
   <ProjectReference Include="../VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
   <ProjectReference Include="../VibeMiner.Generated/VibeMiner.Generated.csproj" />

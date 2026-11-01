@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup>
-  <!-- Temporary (#177): cross-checks the layer 5 reader against the legacy Formats.Wow reader on the same bytes. Slice 9 deletes it with the legacy reader. -->
+  <!-- Temporary (#177, #199): cross-checks the layer 5 DB2 reader and BLP2 decoder against the legacy Formats.Wow ones on the same bytes. Slice 9 deletes it with the legacy code. -->
   <ProjectReference Include="../../../src/backend/VibeMiner.Formats.Wow/VibeMiner.Formats.Wow.csproj" />
   <ProjectReference Include="../../../src/backend/VibeMiner.Formats/VibeMiner.Formats.csproj" />
   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />

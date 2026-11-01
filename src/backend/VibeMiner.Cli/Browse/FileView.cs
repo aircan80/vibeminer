@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using VibeMiner.Files;
+using VibeMiner.Formats.Images;
 
 namespace VibeMiner.Cli.Browse;
 
@@ -9,7 +10,9 @@ namespace VibeMiner.Cli.Browse;
 /// session's read-only store (a file that isn't stored answers NeedsNetwork; nothing is fetched). Holes are named lines, never
 /// zero-filled. Down on the last line or <c>n</c> reads the next window, up to <see cref="MaxShown"/>; windows already read are
 /// kept, a failed one isn't (the next load retries it, so after <c>g</c> ensures the file the reload reads it). <c>e</c> exports
-/// the whole file as a background task; <c>g</c> fetches it as the store's writer (<see cref="EnsureTask"/>).
+/// the whole file as a background task; <c>g</c> fetches it as the store's writer (<see cref="EnsureTask"/>). A BLP file also gets an
+/// Image line from layer 5's header inspection (#199): its 148-byte header read through the same read-only handle, so a file that
+/// isn't stored says so and nothing is fetched. A Ready inspection is kept for the content key; any other is read again next load.
 /// </summary>
 internal sealed class FileView(FilesTarget target, BuildFile file) : BrowseView
 {
@@ -31,6 +34,7 @@ internal sealed class FileView(FilesTarget target, BuildFile file) : BrowseView
     private BuildFile current = file;
     private bool found;
     private bool lastFailed;
+    private (string ContentKey, BlpInspection Inspection)? inspected;
 
     /// <summary>How many hex bytes the view shows at most (<see cref="MaxShown"/>); a test seam, a multiple of <see cref="Window"/>.</summary>
     internal int ShownLimit { get; init; } = MaxShown;
@@ -116,6 +120,9 @@ internal sealed class FileView(FilesTarget target, BuildFile file) : BrowseView
         }
         var stated = stat.File!;
         lines.AddRange(StatLines(stat.State, stated));
+        if (stat.State == FileLookupState.Found && stated.Format == FileFormat.Blp)
+            lines.InsertRange(lines.FindIndex(l => l.StartsWith("Format ", StringComparison.Ordinal)) + 1,
+                ImageLines(await InspectAsync(session, files, stated, ct).ConfigureAwait(false)));
         lines.Add("");
         if (stat.State == FileLookupState.NotInEncoding)
         {
@@ -193,6 +200,79 @@ internal sealed class FileView(FilesTarget target, BuildFile file) : BrowseView
         yield return $"Encrypted    {(f.Encrypted ? "yes" : "no")} (ROOT's flag, a hint; reading tells)";
     }
 
+    private async Task<BlpInspection> InspectAsync(BrowseSession session, IBuildFiles files, BuildFile f, CancellationToken ct)
+    {
+        lock (gate)
+            if (inspected is { } kept && kept.ContentKey == f.ContentKey) return kept.Inspection;
+        var images = await session.ImagesAsync(ct).ConfigureAwait(false);
+        var inspection = await images.InspectAsync(files, FileRef.Id(f.FileDataId), ct).ConfigureAwait(false);
+        if (inspection.State == BlpImageState.Ready) lock (gate) inspected = (f.ContentKey, inspection);
+        return inspection;
+    }
+
+    private const string ImageLabel = "Image        ";
+    private static readonly string Indent = new(' ', ImageLabel.Length);
+
+    /// <summary>The Image line(s) of a BLP: size, encoding and mip count when Ready, else the one state it is in, in words.</summary>
+    internal static IEnumerable<string> ImageLines(BlpInspection i)
+    {
+        var code = Code(i.Code);
+        var h = i.Header;
+        switch (i.State)
+        {
+            case BlpImageState.Ready:
+                var mips = i.Mips!.Count;
+                var encoding = i.Encoding!.Value;
+                // BC1 and paletted decode differently by alpha depth; BC2, BC3 and BGRA8 don't.
+                var alpha = encoding is Blp2Encoding.Bc1 or Blp2Encoding.Paletted ? (h!.AlphaDepth == 0 ? ", no alpha" : $", {h.AlphaDepth}-bit alpha") : "";
+                yield return $"{ImageLabel}{h!.Width} x {h.Height}, {EncodingName(encoding)}{alpha}, {mips} mip{(mips == 1 ? "" : "s")}";
+                yield break;
+            case BlpImageState.Protected:
+                yield return Fit($"{ImageLabel}header encrypted, needs TACT key{(i.HoleKeys.Count == 1 ? "" : "s")} {string.Join(", ", i.HoleKeys)}");
+                yield break;
+            case BlpImageState.FileFailed:
+                var failure = i.FileState switch
+                {
+                    FileReadState.UnknownFile or FileReadState.NotInLocale or FileReadState.NotInEncoding => $"not read: {i.Message ?? i.FileState.ToString()}",
+                    { } state => ReadFailure(state, i.Code, i.Message, i.ObservedAt),
+                    null => $"not read{code}{Message(i.Message)}",
+                };
+                yield return Fit($"{ImageLabel}{failure}");
+                yield break;
+            case BlpImageState.Unsupported when h is not null && !KnownProfile(h):
+                yield return $"{ImageLabel}unsupported encoding profile{code}";
+                yield return $"{Indent}color encoding {h.ColorEncoding}, alpha depth {h.AlphaDepth}, alpha encoding {h.AlphaEncoding}";
+                break;
+            default:
+                var what = i.State switch
+                {
+                    BlpImageState.Unsupported => "unsupported",
+                    BlpImageState.Invalid => "invalid BLP",
+                    BlpImageState.LimitExceeded => "over the decoder's limits",
+                    BlpImageState.MipUnavailable => "mip unavailable",
+                    _ => i.State.ToString(),
+                };
+                yield return Fit($"{ImageLabel}{what}{code}{Message(i.Message)}");
+                break;
+        }
+        // A refused header that was read still says what it declares.
+        if (h is not null)
+            yield return Fit($"{Indent}header says {h.Width} x {h.Height}, {h.DeclaredMips} mip{(h.DeclaredMips == 1 ? "" : "s")}, mip flags 0x{h.MipFlags:x2}");
+    }
+
+    private static bool KnownProfile(BlpHeader h) => Enum.GetValues<Blp2Encoding>().Any(e =>
+        (e switch { Blp2Encoding.Paletted => 1, Blp2Encoding.Bgra8 => 3, _ => 2 }) == h.ColorEncoding && Blp2Decoder.IsSupported(e, h.AlphaDepth, h.AlphaEncoding));
+
+    internal static string EncodingName(Blp2Encoding encoding) => encoding switch
+    {
+        Blp2Encoding.Paletted => "paletted (256 colors)",
+        Blp2Encoding.Bc1 => "BC1 (DXT1)",
+        Blp2Encoding.Bc2 => "BC2 (DXT3)",
+        Blp2Encoding.Bc3 => "BC3 (DXT5)",
+        Blp2Encoding.Bgra8 => "BGRA8 (uncompressed)",
+        _ => encoding.ToString(),
+    };
+
     /// <summary>The windows as hex lines and hole lines: adjacent bytes run on across windows, adjacent holes of one key merge.</summary>
     internal static List<string> HexLines(IReadOnlyList<FileRead> reads)
     {
@@ -261,14 +341,16 @@ internal sealed class FileView(FilesTarget target, BuildFile file) : BrowseView
     }
 
     /// <summary>What a failed read means for a read-only browser, in one line.</summary>
-    internal static string ReadFailure(FileRead read) => read.State switch
+    internal static string ReadFailure(FileRead read) => ReadFailure(read.State, read.Code, read.Message, read.ObservedAt);
+
+    private static string ReadFailure(FileReadState state, string? code, string? message, DateTimeOffset? observedAt) => state switch
     {
-        FileReadState.NeedsNetwork => $"not stored{Code(read.Code)}; g fetches it",
-        FileReadState.Missing => $"Missing: the CDN answered 404{(read.ObservedAt is { } at ? " at " + BrowseSession.Time(at) + " UTC" : "")}{Code(read.Code)}",
-        FileReadState.Unavailable => $"Unavailable{Code(read.Code)}{Message(read.Message)}",
-        FileReadState.WrongKey => $"WrongKey: a known TACT key didn't decrypt it{Code(read.Code)}",
-        FileReadState.UnknownFile or FileReadState.NotInLocale or FileReadState.NotInEncoding => $"not found now: {read.State}",
-        _ => $"{read.State}{Code(read.Code)}{Message(read.Message)}",
+        FileReadState.NeedsNetwork => $"not stored{Code(code)}; g fetches it",
+        FileReadState.Missing => $"Missing: the CDN answered 404{(observedAt is { } at ? " at " + BrowseSession.Time(at) + " UTC" : "")}{Code(code)}",
+        FileReadState.Unavailable => $"Unavailable{Code(code)}{Message(message)}",
+        FileReadState.WrongKey => $"WrongKey: a known TACT key didn't decrypt it{Code(code)}",
+        FileReadState.UnknownFile or FileReadState.NotInLocale or FileReadState.NotInEncoding => $"not found now: {state}",
+        _ => $"{state}{Code(code)}{Message(message)}",
     };
 
     private static string Message(string? message) => string.IsNullOrEmpty(message) ? "" : ": " + message;

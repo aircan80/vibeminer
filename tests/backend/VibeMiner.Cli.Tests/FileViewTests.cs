@@ -4,6 +4,7 @@ using VibeMiner.Cli.Browse;
 using VibeMiner.Files;
 using VibeMiner.Files.Names;
 using VibeMiner.Files.Testing;
+using VibeMiner.Formats.Images;
 using VibeMiner.Objects;
 using Xunit;
 
@@ -265,6 +266,150 @@ public sealed class FileViewTests : IAsyncDisposable
 
         Assert.Equal("Unavailable (CDN_DOWN)", FileView.ReadFailure(FileRead.Failed(FileReadState.Unavailable, 0, "CDN_DOWN", null)));
         Assert.Equal("Unavailable", FileView.ReadFailure(FileRead.Failed(FileReadState.Unavailable, 0, null, null)));
+    }
+
+    // ---------------------------------------------------------------- BLP image line
+
+    /// <summary>
+    /// A synthetic BLP2 (no game content): a 148-byte header, then BC1 blocks of zeros for a 64 x 64 base and its six smaller levels.
+    /// <paramref name="color"/>, <paramref name="depth"/> and <paramref name="alpha"/> are the header's encoding bytes.
+    /// </summary>
+    private static byte[] Blp(byte color = 2, byte depth = 0, byte alpha = 0)
+    {
+        int[] lengths = [2048, 512, 128, 32, 8, 8, 8];
+        var bytes = new byte[148 + lengths.Sum()];
+        "BLP2"u8.CopyTo(bytes);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), 1);
+        bytes[8] = color; bytes[9] = depth; bytes[10] = alpha; bytes[11] = 0x01;
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(12), 64);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16), 64);
+        var offset = 148;
+        for (var level = 0; level < lengths.Length; level++)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(20 + level * 4), (uint)offset);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(84 + level * 4), (uint)lengths[level]);
+            offset += lengths[level];
+        }
+        return bytes;
+    }
+
+    private static string? ImageLine(Navigator nav) => Lines(nav).TakeWhile(l => l != "").FirstOrDefault(l => l.StartsWith("Image ", StringComparison.Ordinal));
+
+    [Fact]
+    public async Task ABlpShowsItsSizeEncodingAndMipsUnderTheFormat()
+    {
+        Add(new FakeFile(40, Content: Blp(), Storage: FileStorage.Stored));
+        var (nav, view) = await OpenAsync(40);
+        var lines = Lines(nav);
+        Assert.Equal("Format       Blp (from the bytes)", lines[5]);
+        Assert.Equal("Image        64 x 64, BC1 (DXT1), no alpha, 7 mips", lines[6]);
+        Assert.Equal("Stored       yes", lines[7]);
+        // The inspection read the header at offset 0 and the hex view its first window; nothing else was read or fetched.
+        Assert.Equal(2, files.Reads(0));
+        Assert.Empty(stores.Source.Observed);
+
+        // A Ready inspection is kept, as the hex windows are: reloading reads nothing again.
+        nav.Reload();
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal("Image        64 x 64, BC1 (DXT1), no alpha, 7 mips", ImageLine(nav));
+        Assert.Equal(2, files.Reads(0));
+    }
+
+    [Fact]
+    public async Task OneBitAlphaIsNamedAndBc2HasNoAlphaWords()
+    {
+        Add(new FakeFile(46, Content: Blp(depth: 1), Storage: FileStorage.Stored), new FakeFile(47, Content: Blp(depth: 8, alpha: 1), Storage: FileStorage.Stored));
+        var (bc1, _) = await OpenAsync(46);
+        Assert.Equal("Image        64 x 64, BC1 (DXT1), 1-bit alpha, 7 mips", ImageLine(bc1));
+        var (bc2, _) = await OpenAsync(47);
+        Assert.Equal("Image        64 x 64, BC2 (DXT3), 7 mips", ImageLine(bc2));
+    }
+
+    [Fact]
+    public async Task ABusyGeneratedStoreStillShowsTheImageLine()
+    {
+        var opens = 0;
+        session.OpenGeneratedStore = (_, _) =>
+        {
+            Interlocked.Increment(ref opens);
+            throw new VibeMiner.Generated.GeneratedStoreException(VibeMiner.Generated.GeneratedStoreCodes.Busy, "busy");
+        };
+        Add(new FakeFile(48, Content: Blp(), Storage: FileStorage.Stored));
+        var (nav, _) = await OpenAsync(48);
+        Assert.Equal("Image        64 x 64, BC1 (DXT1), no alpha, 7 mips", ImageLine(nav));
+        Assert.Equal(1, opens);
+    }
+
+    [Fact]
+    public async Task AFileThatIsNotABlpHasNoImageLine()
+    {
+        Add(new FakeFile(41, Content: [.. "OggS"u8, 0, 1, 2, 3], Storage: FileStorage.Stored));
+        var (nav, _) = await OpenAsync(41);
+        Assert.Null(ImageLine(nav));
+        Assert.Equal(1, files.Reads(0));
+    }
+
+    [Fact]
+    public async Task ANotStoredBlpSaysSoAndNothingIsFetched()
+    {
+        Add(new FakeFile(42, Size: 2892));
+        memory.Names.Use(new Dictionary<uint, string> { [42] = "interface/icons/x.blp" });
+        var (nav, _) = await OpenAsync(42);
+        Assert.Contains("Format       Blp (from the name's extension)", Lines(nav));
+        Assert.Equal("Image        not stored (OBJECT_ACCESS_NEEDS_NETWORK); g fetches it", ImageLine(nav));
+        Assert.Empty(stores.Source.Observed);
+    }
+
+    [Fact]
+    public async Task AnEncryptedHeaderNamesItsKeyAndShowsNoFacts()
+    {
+        Add(new FakeFile(43, Content: Blp(), Storage: FileStorage.Stored, Holes: [new FileHole(0, 148, Key)]));
+        memory.Names.Use(new Dictionary<uint, string> { [43] = "x.blp" });
+        var (nav, _) = await OpenAsync(43);
+        Assert.Equal($"Image        header encrypted, needs TACT key {Key}", ImageLine(nav));
+        Assert.DoesNotContain(Lines(nav), l => l.Contains("64 x 64", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnUnsupportedProfileNamesItsBytesAndWhatTheHeaderSays()
+    {
+        Add(new FakeFile(44, Content: Blp(color: 2, depth: 3, alpha: 9), Storage: FileStorage.Stored));
+        var (nav, _) = await OpenAsync(44);
+        var lines = Lines(nav);
+        var at = Array.IndexOf(lines, "Image        unsupported encoding profile (BLP_UNSUPPORTED)");
+        Assert.True(at > 0, string.Join('\n', lines));
+        Assert.Equal("             color encoding 2, alpha depth 3, alpha encoding 9", lines[at + 1]);
+        Assert.Equal("             header says 64 x 64, 7 mips, mip flags 0x01", lines[at + 2]);
+        Assert.Equal("Stored       yes", lines[at + 3]);
+    }
+
+    [Fact]
+    public async Task ATruncatedBlpIsInvalidWithTheDecodersReason()
+    {
+        Add(new FakeFile(45, Content: Blp()[..100], Storage: FileStorage.Stored));
+        memory.Names.Use(new Dictionary<uint, string> { [45] = "x.blp" });
+        var (nav, _) = await OpenAsync(45);
+        Assert.Equal("Image        invalid BLP (BLP_INVALID): BLP2 core header is truncated.", ImageLine(nav));
+    }
+
+    [Fact]
+    public void EachOtherImageStateIsItsOwnLine()
+    {
+        static BlpInspection Failed(FileReadState state, string? code, string? message = null, DateTimeOffset? at = null) =>
+            new(BlpImageState.FileFailed, null, null, null, [], state, code, message, at);
+        Assert.Equal(["Image        Missing: the CDN answered 404 at 2026-10-31 12:00 UTC (CDN_404)"],
+            FileView.ImageLines(Failed(FileReadState.Missing, "CDN_404", null, new DateTimeOffset(2026, 10, 31, 12, 0, 0, TimeSpan.Zero))));
+        Assert.Equal(["Image        Corrupt (BLTE_BAD): bad chunk"], FileView.ImageLines(Failed(FileReadState.Corrupt, "BLTE_BAD", "bad chunk")));
+        Assert.Equal(["Image        not read: The build doesn't list the file."],
+            FileView.ImageLines(Failed(FileReadState.UnknownFile, null, "The build doesn't list the file.")));
+        Assert.Equal(["Image        header encrypted, needs TACT keys A, B"],
+            FileView.ImageLines(new(BlpImageState.Protected, null, null, null, ["A", "B"], null, null, "m", null)));
+        Assert.Equal(["Image        over the decoder's limits (BLP_LIMIT): too big"],
+            FileView.ImageLines(new(BlpImageState.LimitExceeded, null, null, null, [], null, "BLP_LIMIT", "too big", null)));
+        Assert.Equal(["Image        unsupported (BLP_UNSUPPORTED): Only BLP2 containers are supported."],
+            FileView.ImageLines(new(BlpImageState.Unsupported, null, null, null, [], null, "BLP_UNSUPPORTED", "Only BLP2 containers are supported.", null)));
+        Assert.Equal("paletted (256 colors)", FileView.EncodingName(Blp2Encoding.Paletted));
+        Assert.Equal("BGRA8 (uncompressed)", FileView.EncodingName(Blp2Encoding.Bgra8));
     }
 
     // ---------------------------------------------------------------- reading further

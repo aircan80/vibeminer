@@ -2,6 +2,7 @@ using System.Globalization;
 using VibeMiner.Builds;
 using VibeMiner.Files;
 using VibeMiner.Files.Names;
+using VibeMiner.Formats.Images;
 using VibeMiner.Formats.Tables;
 using VibeMiner.Generated;
 using VibeMiner.ObjectAccess;
@@ -15,7 +16,7 @@ namespace VibeMiner.Cli.Browse;
 /// ask for the writer lock, and they share one handle (<see cref="SharedWriter"/>). The Files views share one session-owned
 /// read-only store and file system instead (<see cref="OpenFilesAsync"/>), since opening a build and loading the names are too
 /// slow to redo per load. The profile's generated store (<c>generated-v1/</c>) is opened once per session, as its one writer, and
-/// shared by the names index (#186) and the tables composition (<see cref="GeneratedStoreAsync"/>); when another writer (the app)
+/// shared by the names index (#186), the tables composition and the BLP images (#199) (<see cref="GeneratedStoreAsync"/>); when another writer (the app)
 /// holds it, names are off rather than failing the view. Dispose the session when browse exits: it closes the tables
 /// composition, the files and then the generated store.
 /// </summary>
@@ -144,6 +145,21 @@ internal sealed class BrowseSession : IAsyncDisposable
         finally { generatedOpening.Release(); }
     }
 
+    private BlpImages? images;
+
+    /// <summary>
+    /// The session's layer 5 BLP images (#199), over the session's generated store, made once. The Files views' layer 4 decrypts
+    /// with no TACT keys, so the images know none either (their cache identity must match what the handle decrypts with). When the
+    /// generated store didn't open, an uncached one over <see cref="NoGeneratedStore"/> still inspects headers, which never touch it.
+    /// </summary>
+    internal async Task<BlpImages> ImagesAsync(CancellationToken ct)
+    {
+        if (Volatile.Read(ref images) is { } made) return made;
+        if (await GeneratedStoreAsync(ct).ConfigureAwait(false) is not { } store) return new BlpImages(NoGeneratedStore.Instance);
+        var fresh = new BlpImages(store);
+        return Interlocked.CompareExchange(ref images, fresh, null) ?? fresh;
+    }
+
     /// <summary>
     /// Opens a build and locale through the session's file system, reusing the last one opened. Dispose the lease when the load
     /// ends. A missing store throws OBJECT_STORE_MISSING, as <see cref="OpenReadAsync"/> does; a failed open comes back in the lease's result.
@@ -209,6 +225,21 @@ internal sealed class BrowseSession : IAsyncDisposable
         TablesBusyException t => $"{t.Code}: {t.Message} Wait for it to finish and try again.",
         _ => $"{e.GetType().Name}: {e.Message}",
     };
+}
+
+/// <summary>A generated store that holds nothing and refuses writes, for when the profile's one didn't open.</summary>
+internal sealed class NoGeneratedStore : IGeneratedStore
+{
+    public static NoGeneratedStore Instance { get; } = new();
+    public ValueTask<bool> HasAsync(GeneratedKey key, CancellationToken cancellationToken = default) => ValueTask.FromResult(false);
+    public ValueTask<GeneratedRead> ReadAsync(GeneratedKey key, CancellationToken cancellationToken = default) => ValueTask.FromResult(new GeneratedRead(GeneratedReadState.Absent));
+    public ValueTask<GeneratedRangeRead> ReadRangeAsync(GeneratedKey key, long offset, Memory<byte> destination, CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(new GeneratedRangeRead(GeneratedReadState.Absent));
+    public Task<IReadOnlyList<GeneratedPutOutcome>> PutAsync(IReadOnlyList<GeneratedPut> batch, CancellationToken cancellationToken = default) =>
+        throw new GeneratedStoreException(GeneratedStoreCodes.Busy, "The generated store didn't open; nothing is stored.");
+    public Task DeleteAsync(IReadOnlyList<GeneratedKey> keys, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task<GeneratedCompactReport> CompactAsync(double minDeadFraction = 0.25, int maxPacks = 1, CancellationToken cancellationToken = default) =>
+        throw new GeneratedStoreException(GeneratedStoreCodes.Busy, "The generated store didn't open.");
 }
 
 /// <summary>A build's Downloaded figure as it was when measured.</summary>

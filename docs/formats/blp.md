@@ -1,6 +1,6 @@
 # BLP2 images
 
-Our original BLP2 decoder ([`src/backend/VibeMiner.Formats.Wow/Images/`](../../src/backend/VibeMiner.Formats.Wow/Images/), revision `blp2-rgba8-v2`) and the icon PNG pipeline built on it ([`src/backend/VibeMiner.Infrastructure/Assets/`](../../src/backend/VibeMiner.Infrastructure/Assets/)).
+Our original BLP2 decoder (revision `blp2-rgba8-v2`) and its layer 5 entry point ([`src/backend/VibeMiner.Formats/Images/`](../../src/backend/VibeMiner.Formats/Images/), #199, D390). The legacy copy in [`src/backend/VibeMiner.Formats.Wow/Images/`](../../src/backend/VibeMiner.Formats.Wow/Images/) and the icon PNG pipeline built on it ([`src/backend/VibeMiner.Infrastructure/Assets/`](../../src/backend/VibeMiner.Infrastructure/Assets/)) stay until slice 9; until then `tests/backend/VibeMiner.Formats.Comparison` checks both decoders give the same output.
 
 The decoder takes a readable, seekable, caller-owned stream, a mip level (default 0) or a largest side (`DecodeLargestWithinAsync`), and limits. It returns owned, tightly packed **RGBA8, top-left origin, straight alpha**, plus the encoding, alpha facts, raw mip byte and all mip descriptors. No color-space conversion, premultiplication, resizing or PNG work happens inside it. It does not authenticate the source; the caller does.
 
@@ -78,6 +78,31 @@ The D100 rows are the only other profiles seen in the #80 survey, each decoded e
 | PNG output | | 5 MiB | |
 
 Reads are sliced at 64 KiB and loops check cancellation per row or block.
+
+## Layer 5 entry point
+
+[`BlpImages`](../../src/backend/VibeMiner.Formats/Images/BlpImages.cs) reads textures through layer 4 (`IBuildFiles`) and caches decoded images in the generated store (D390). It is built with an `IGeneratedStore`, the decoder limits and a per-build TACT key status source, the same snapshot layer 4 decrypts with.
+
+- `InspectAsync(files, file)`: stat, then the first 148 bytes by range, nothing more. Returns the raw header bytes (colour encoding, alpha depth and encoding, mip byte, width, height, declared mips counted from the descriptor pairs), and when the decoder accepts the header, the encoding and the declared levels with their storage. A refusal keeps the decoder's code and message, which name the three profile bytes.
+- `DecodeAsync(files, file, level)` and `DecodeLargestWithinAsync(files, file, maxSide)`: one `BlpImageState`. Ready carries the `Blp2Image`. Unsupported, Invalid, MipUnavailable and LimitExceeded are the decoder's `BLP_*` codes. Protected names the hole keys. FileFailed passes layer 4's `FileReadState`, code, message and time through (UnknownFile, NotInLocale, NotInEncoding, Missing, NeedsNetwork, Unavailable, StoreFailed, Corrupt, WrongKey...).
+
+Holes, per level:
+
+- A file under 148 bytes is Invalid, even in a hole.
+- The header must be clear, then the palette (palette images) and the decoded level's declared range. Otherwise Protected, with the keys of the holes over those ranges.
+- Refusals the header decides (profile, descriptors, the level's length and position, limits) come first, as in the decoder.
+- A level whose bytes are clear decodes even when other levels lie in holes. Nothing is zero-filled.
+- Largest-within plans its level from the header alone. A planned level in a hole is Protected; it never steps down to a smaller clear level, so keys never change which image a build shows.
+
+Cache:
+
+- Identity text: `vibeminer-generated-image v1`, the content key, decoder revision, `mip=` the level decoded (for largest-within the planned level, not the side asked for), `limits=` a SHA-256 of the limits' JSON. No build, no locale: builds with the same content key share it.
+- A stream with any encrypted chunk (`FileReadStream.ChunkKeys`, decrypted or a hole), even when the level only read clear chunks, files the image under the scoped identity: that text plus `encoding-in=` product, build config and CDN config, then `key NAME=fingerprint` or `=?` per chunk key (D350). Never shared.
+- Lookup: `DecodeAsync` tries the shared entry right after the stat, before any file read; then, after the open, the scoped one.
+- Largest-within reads the 148-byte header first to plan its level, then looks up the same way. So offline with the file not stored it is FileFailed (NeedsNetwork), and with the header in a hole Protected, even when `DecodeAsync` at the planned level would hit the shared entry.
+- Only Ready images are stored. Payload `VMIM` version 1: every `Blp2Image` field and mip descriptor, then the RGBA. An entry that reads Corrupt or doesn't match that shape for the level is deleted and decoded again.
+- An image over `GeneratedLimits.MaxObjectBytes` with its header is returned and not stored; a failed store write still returns the image.
+- No single flight: two calls decoding one image at once both decode, and the second store keeps the first.
 
 ## Model textures
 
