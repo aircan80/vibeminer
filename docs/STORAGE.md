@@ -144,6 +144,23 @@ The catalog store is a SQLite cache (`user_version` 1, application_id `0x564D637
 
 `InMemoryCatalog` in `VibeMiner.Builds.Testing` is the fake for layers 4 and up: no SQLite, no files, the same list rules. `CatalogContractTests` runs one suite against it and the real `Catalog`.
 
+### Layer 3: opening a build
+
+`IBuilds.OpenAsync(BuildRef)` opens one build ([D140](DECISIONS.md)): product, build config, CDN config and the `cdns` region whose route fetches what isn't stored (default `us`). Everything comes through layer 2 at interactive priority, in this order:
+
+1. The route from the newest readable `cdns` reply in the history log that lists the region (of the 32 latest observed: highest numeric `## seqn` first, then latest observed, replies without a numeric seqn last). None means no route; stored objects still open.
+2. The build config and CDN config.
+3. ENCODING (whole-object BLTE, EKey and CKey checked), then ROOT through its ENCODING EKey.
+4. Every archive index and the `file-index`, parsed four at a time, into one EKey → location map (D133 pick).
+
+The first failure ends the open, with no retry: `NeedsNetwork`, `Unavailable`, `Missing` (a dated 404), `Encrypted`, `Corrupt`, `Unsupported` or `StoreFailed`, plus the `BuildPart` and the layer 2 or parser code. A never-fetched build offline stops at its first config request and returns `NeedsNetwork`.
+
+The opened `IBuild` gives metadata (build name, keys, counts, the ROOT locale union as names) and resolves a FileDataID or a path to every ROOT variant: locale and content flags, CKey, the first EKey ENCODING lists, sizes, and an archive location or none (loose). Parsed state stays in memory for up to 4 opened builds, and at most 2 opens of different builds run at once (each may hold up to 512 MiB encoded and 1 GiB decoded metadata while parsing). A second open returns the same instance without asking layer 2, concurrent opens share one, and only a fully parsed build is kept, so a cancelled or failed open leaves nothing behind. Nothing is written to the catalog store; opening offline reparses what layer 1 holds.
+
+The opened build also lists its FileDataIDs per locale: ascending, each once, from a starting ID, walking ROOT in place. A file is listed when any of its variants has that locale bit (all-locales variants included); content flags don't filter.
+
+Layer 3 has its own ports of the config, BLTE (whole objects, for ENCODING and ROOT only), EN, ROOT and index parsers in `VibeMiner.Builds/Formats`. Ranged and keyed BLTE stay in layer 4. `InMemoryBuilds` in `VibeMiner.Builds.Testing` is the fake; `BuildsContractTests` runs one suite against it and `BuildOpener`.
+
 ## Identity and provenance
 
 Physical payload identity is local SHA-256 plus exact length. Blizzard content keys, encoding keys, configuration identities and locator references stay distinct typed protocol values. A header EKey is not automatically a whole-file MD5; encoded integrity and decoded CKey verification establish different facts.

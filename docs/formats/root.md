@@ -17,7 +17,7 @@ Header:
 | 16 | 4 | Named memberships (blocks with name hashes) |
 | 20 | 4 | Only when header size is 24: extension, must be 0 |
 
-Admitted profiles: v1 with header 20 or 24, v2 with header 24. Anything else is `ROOT_UNSUPPORTED`. The header counts are **memberships**, not unique files.
+Admitted profiles: v1 with header 20 or 24, v2 with header 24. The TSFM header used from 8.2 to 10.1.5 (12 bytes: `TSFM`, total count, named count, with no header size or version) is refused as `ROOT_UNSUPPORTED_LAYOUT`; it is recognised only when the second u32 is not 20 or 24, the named count is at most the total, and the first block at offset 12 has a count from 1 to the total that fits the input. A ROOT without `TSFM` (older builds) and anything else is `ROOT_UNSUPPORTED`. The header counts are **memberships**, not unique files.
 
 Blocks follow until EOF. Block header:
 
@@ -57,7 +57,7 @@ The reader keeps one block in memory: a `uint[count]` of IDs plus a packed `byte
 | Memberships per block | 2 M |
 | Block working memory | 64 MiB |
 
-Errors: `ROOT_INVALID`, `ROOT_UNSUPPORTED`, `ROOT_LIMIT`, with decoded offset and block/raw-flag context.
+Errors: `ROOT_INVALID`, `ROOT_UNSUPPORTED`, `ROOT_UNSUPPORTED_LAYOUT`, `ROOT_LIMIT`, with decoded offset and block/raw-flag context.
 
 ## Lookups
 
