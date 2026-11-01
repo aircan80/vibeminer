@@ -13,7 +13,8 @@ internal sealed record OpenedFiles(FilesTarget Target, string Label);
 /// A build's files for one locale, one page at a time, ascending by FileDataID. Loads are read-only: they open the build from the
 /// store through the session's layer 4 and never fetch. <c>/text</c> is a path prefix (the community names); <c>t</c> formats,
 /// <c>s</c> stored state, <c>l</c> the locale, <c>n</c>/<c>p</c> pages. Enter shows a file. <c>g</c> and <c>G</c> ensure files
-/// as the store's writer (<see cref="EnsureTask"/>), the one way this view fetches. Built with no target (the <c>:files</c> entry)
+/// as the store's writer (<see cref="EnsureTask"/>) and <c>m</c> fetches the build's metadata (<see cref="MetadataTask"/>), the only
+/// ways this view fetches. Built with no target (the <c>:files</c> entry)
 /// it shows the last target this session opened, or says how to open one.
 /// </summary>
 internal sealed class FilesView : BrowseView
@@ -39,11 +40,23 @@ internal sealed class FilesView : BrowseView
     private PageEnd? end;
     // The target of the rows the last current load listed, which g ensures in (a locale change may be loading meanwhile).
     private FilesTarget? listed;
+    // A build opened with f, until the first load picks its region (D280) and makes it the target.
+    private CatalogBuild? pending;
+    // False when the picked region has no usable CDN route, so m can't fetch the metadata.
+    private bool routed = true;
 
     public FilesView(FilesTarget target, string label)
     {
         ArgumentNullException.ThrowIfNull(target);
         state = new(new(target, label), null, 0, ImmutableList<uint>.Empty, "", 0);
+    }
+
+    /// <summary><c>f</c> on a build: no target until the first load picks the region (layer 3's rule, D280) for enUS.</summary>
+    public FilesView(CatalogBuild build)
+    {
+        ArgumentNullException.ThrowIfNull(build);
+        pending = build;
+        state = new(null, null, 0, ImmutableList<uint>.Empty, "", 0);
     }
 
     /// <summary>The <c>:files</c> entry: no target until its first load takes the session's last one.</summary>
@@ -65,7 +78,19 @@ internal sealed class FilesView : BrowseView
         new('l', LocaleHelp, _ => AskLocale()),
         new('g', "ensure: fetch the selected file so it is stored (writer lock)", EnsureOne),
         new('G', "ensure all: fetch every file the filters match (asks first)", _ => AskEnsureAll()),
+        new('m', "metadata: fetch configs, ENCODING, ROOT, indexes (writer lock)", _ => FetchMetadata()),
     ];
+
+    /// <summary><c>m</c>: the build's metadata as the store's writer (<see cref="MetadataTask"/>); the view reloads when it ends.</summary>
+    private KeyOutcome FetchMetadata()
+    {
+        OpenedFiles? opened; bool waiting, hasRoute;
+        lock (gate) { opened = state.Opened; waiting = pending is not null; hasRoute = routed; }
+        if (opened is null) return new(Say: waiting ? "Still loading this build." : NoTarget);
+        // No region has a usable route: nothing could fetch it, so the writer lock isn't taken.
+        if (!hasRoute) return new(Say: BuildView.NoRoute("metadata"));
+        return new(Start: MetadataTask.Start(opened.Target.Build));
+    }
 
     /// <summary>The <c>l</c> help: every locale, wrapped under the help's key column onto lines that fit <see cref="HelpWidth"/>.</summary>
     internal static string LocaleHelp
@@ -192,13 +217,15 @@ internal sealed class FilesView : BrowseView
         }));
     }
 
-    /// <summary><c>f</c> on a build: its files for enUS in the region <see cref="BuildView.RegionOf"/> picks; a Say when there is none.</summary>
+    /// <summary><c>f</c> on a build: its files for enUS, in the region the first load picks; a Say when the build lists none.</summary>
     internal static KeyOutcome Open(CatalogBuild? build)
     {
         if (build is null) return new(Say: "No build selected.");
-        if (BuildView.RegionOf(build) is not { } region) return new(Say: "No region lists a cdn config for this build, so it can't be opened.");
-        return new(Open: new FilesView(new(new BuildRef(build.Product, build.BuildConfig, region.CdnConfig, region.Region), DefaultLocale), build.VersionsName));
+        if (build.Regions.Count == 0) return new(Say: NoRegion);
+        return new(Open: new FilesView(build));
     }
+
+    internal const string NoRegion = "No region lists a cdn config for this build, so it can't be opened.";
 
     internal const string NoTarget = "No build open yet. In :builds, Enter a product, then f on a build.";
 
@@ -233,13 +260,34 @@ internal sealed class FilesView : BrowseView
     public override async Task<ViewContent> LoadAsync(BrowseSession session, CancellationToken ct)
     {
         var filter = Filter;
+        CatalogBuild? picking;
+        lock (gate) picking = state.Opened is null ? pending : null;
+        if (picking is not null)
+        {
+            BuildRegionChoice choice;
+            await using (var store = await session.OpenReadAsync(ct).ConfigureAwait(false))
+                choice = await session.ChooseRegionAsync(store.Objects, picking, ct).ConfigureAwait(false);
+            if (choice.Region is not { } region) return new(Columns, [], NoRegion);
+            var picked = new FilesTarget(new BuildRef(picking.Product, picking.BuildConfig, region.CdnConfig, region.Region), DefaultLocale);
+            lock (gate)
+            {
+                if (state.Opened is null && pending is not null)
+                {
+                    state = state with { Opened = new(picked, picking.VersionsName), Version = state.Version + 1 };
+                    routed = choice.Routed;
+                    pending = null;
+                }
+            }
+        }
         State s;
+        bool hasRoute;
         lock (gate)
         {
             // A new path filter starts over at the first page; the :files entry takes the session's last target.
             if (state.PagesFor != filter) state = state with { Pages = ImmutableList<uint>.Empty, PagesFor = filter, Version = state.Version + 1 };
-            if (state.Opened is null && session.LastFiles is { } previous) state = state with { Opened = previous, Version = state.Version + 1 };
+            if (state.Opened is null && pending is null && session.LastFiles is { } previous) state = state with { Opened = previous, Version = state.Version + 1 };
             s = state;
+            hasRoute = routed;
         }
         if (s.Opened is not { } opened) return new(Columns, [], NoTarget);
         var target = opened.Target;
@@ -248,7 +296,7 @@ internal sealed class FilesView : BrowseView
         if (lease.Result.State != FilesOpenState.Open || lease.Files is not { } files)
         {
             Finish(s, null);
-            return new(Columns, [], NotOpen(lease.Result));
+            return new(Columns, [], NotOpen(lease.Result, hasRoute));
         }
 
         var from = s.Pages.IsEmpty ? 0u : s.Pages[^1];
@@ -305,10 +353,14 @@ internal sealed class FilesView : BrowseView
         _ => "no copy",
     };
 
-    /// <summary>What an open that isn't Open means for a browser that never fetches, state first, within <see cref="Width"/>.</summary>
-    internal static string NotOpen(FilesOpenResult r) => Fit(r.State switch
+    /// <summary>
+    /// What an open that isn't Open means, state first, within <see cref="Width"/>. NeedsNetwork offers <c>m</c>, unless the
+    /// build's region has no usable CDN route (<paramref name="routed"/> false), when nothing could fetch it.
+    /// </summary>
+    internal static string NotOpen(FilesOpenResult r, bool routed = true) => Fit(r.State switch
     {
-        FilesOpenState.NeedsNetwork => ["NeedsNetwork: not stored.", "a on a build: Download all, whole build, writer lock."],
+        FilesOpenState.NeedsNetwork when !routed => ["NeedsNetwork: metadata not stored", "and no region has a usable CDN route."],
+        FilesOpenState.NeedsNetwork => ["NeedsNetwork: metadata not stored.", "m fetches it (writer lock)."],
         FilesOpenState.LocaleNotInBuild => [$"LocaleNotInBuild: no {r.Locale} files in this build; l picks another."],
         FilesOpenState.Missing => [$"Missing ({r.Code ?? "no code"}):", "the CDN had no copy of a part when last asked."],
         FilesOpenState.Encrypted => [$"Encrypted ({r.Code ?? "no code"}):", "part of the build needs a TACT key this app lacks."],

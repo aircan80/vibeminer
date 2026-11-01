@@ -6,7 +6,8 @@ namespace VibeMiner.Builds;
 
 /// <summary>
 /// One build to open: a registered product, its build and CDN configs (32 hex digits, kept lowercase) and the <c>cdns</c>
-/// row whose route fetches what isn't stored. A null <see cref="Region"/> takes the <c>us</c> row, then any row.
+/// row whose route fetches what isn't stored. A null <see cref="Region"/> takes the <c>us</c> row, then any usable row;
+/// <see cref="BuildRegions.ChooseAsync"/> picks a listing whose region has a usable route.
 /// </summary>
 public sealed partial record BuildRef
 {

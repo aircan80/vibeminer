@@ -372,8 +372,8 @@ public sealed class BrowseModelTests : IAsyncDisposable
 
         Assert.True(navigator.TryAction('a'));
         await SettleTaskAsync();
-        // Only the versions reply is stored: no cdns, so the writer's open has no route to fetch the build config.
-        Assert.Equal("download all: no network or CDN route for the BuildConfig; nothing fetched.", navigator.Tasks.Status);
+        // Only the versions reply is stored: no cdns, so no region has a route and nothing is opened (D280).
+        Assert.Equal(BuildView.NoRoute("download all"), navigator.Tasks.Status);
         Assert.True(navigator.Tasks.Status.Length <= 80);
         Assert.Contains((StoreFolder, true), stores.Opened);
         Assert.Equal([true], stores.WriterCreate);
@@ -427,6 +427,8 @@ public sealed class BrowseModelTests : IAsyncDisposable
     private async Task<ObjectKey[]> OpenableRetailBuildAsync()
     {
         await RetailBuildAsync();
+        // The cdns reply routes eu only, so the build opens in eu although us is preferred (D280).
+        await Observe(ObservationKind.Cdns, "wow", "Name!STRING:0|Path!STRING:0|Hosts!STRING:0\neu|tpr/wow|eu.cdn.blizzard.com\n");
         var builds = new InMemoryBuilds();
         session.Builds = _ => builds;
         session.FreeSpace = _ => 1L << 40;
@@ -443,7 +445,6 @@ public sealed class BrowseModelTests : IAsyncDisposable
         }
         var metadata = new BuildMetadata("12.0.1.60000", default, default, default, 0, files.Count, ["enUS"]);
         var fake = new FakeBuild(metadata, files, new CdnContext(new CdnRoute(["us.cdn.blizzard.com"], "tpr/wow")));
-        // The view opens the build in the first current region its catalog lists.
         builds.Add(new BuildRef("wow", A, B, "eu"), fake);
         return keys.ToArray();
     }
@@ -957,7 +958,7 @@ public sealed class BrowseModelTests : IAsyncDisposable
 
         var settings = await GoAsync(":settings");
         Assert.Null(settings.Error);
-        Assert.Contains(["Downloaded wow 12.0.1.60000 (eu)", "100.0% of 10 B, 2 of 2 objects, measured 2026-01-01 00:06 UTC"], Cells(settings));
+        Assert.Contains(["Downloaded wow 12.0.1.60000 (eu)", "100.0% of 10 B, 2 of 2 objects, measured 2026-01-01 00:07 UTC"], Cells(settings));
         Assert.DoesNotContain(Cells(settings), r => r[1] == SettingsView.NoneMeasured);
     }
 

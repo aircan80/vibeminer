@@ -85,6 +85,7 @@ internal sealed class Navigator : IAsyncDisposable
         frames.Clear();
         Message = null;
         Asking = null;
+        Tasks.ClearEnded();
         Open(entry.Create());
         return true;
     }
@@ -98,6 +99,7 @@ internal sealed class Navigator : IAsyncDisposable
         CancelLoad();
         Message = null;
         Asking = null;
+        Tasks.ClearEnded();
         Open(drill());
         return true;
     }
@@ -111,6 +113,7 @@ internal sealed class Navigator : IAsyncDisposable
         CancelLoad();
         frames.RemoveAt(frames.Count - 1);
         Message = null;
+        Tasks.ClearEnded();
         // The view below may have been left mid-load, or a key asked for its reload; it loads again.
         if (Current.Stale || (Current.Content is null && Current.Error is null)) Load(Current);
         else Raise();
@@ -207,8 +210,14 @@ internal sealed class Navigator : IAsyncDisposable
     }
 
     private void StartTask(string name, Func<BrowseSession, IProgress<string>, CancellationToken, Task<string>> run) =>
-        // Whatever view is showing when it ends reloads, so it shows what the task wrote.
-        Tasks.Start(name, (progress, ct) => run(session, progress, ct), () => { if (frames.Count > 0) Load(Current); });
+        // Whatever view is showing when it ends reloads, so it shows what the task wrote; the views under it reload when Esc
+        // comes back to them (a file stored from its detail shows as stored in the list).
+        Tasks.Start(name, (progress, ct) => run(session, progress, ct), () =>
+        {
+            if (frames.Count == 0) return;
+            for (var i = 0; i < frames.Count - 1; i++) frames[i].Stale = true;
+            Load(Current);
+        });
 
     /// <summary>The <c>?</c> text: the keys, then the views, then the current view's own keys.</summary>
     public string Help()

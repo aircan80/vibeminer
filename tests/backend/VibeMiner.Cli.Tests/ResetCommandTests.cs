@@ -249,7 +249,8 @@ public sealed class ResetCommandTests : IDisposable
             stores.Source.AddStored(new ObjectKey(ObjectKeyType.Encoded, eKey), new byte[size]);
         }
         var builds = new InMemoryBuilds();
-        builds.Add(new BuildRef("wow", A, B, "eu"), new FakeBuild(new BuildMetadata("12.0.1.60000", default, default, default, 0, files.Count, ["enUS"]), files,
+        // No cdns row has a usable host, so the build opens in the preferred region, us (D280).
+        builds.Add(new BuildRef("wow", A, B, "us"), new FakeBuild(new BuildMetadata("12.0.1.60000", default, default, default, 0, files.Count, ["enUS"]), files,
             new CdnContext(new CdnRoute(["us.cdn.blizzard.com"], "tpr/wow"))));
 
         Write(At(ProfileReset.GeneratedFolder, "tables", "rows.bin"), 1000);
@@ -280,7 +281,7 @@ public sealed class ResetCommandTests : IDisposable
             Assert.True(navigator.TryAction('d'));
             await navigator.Tasks.Current.WaitAsync(guard);
             await navigator.Loading.WaitAsync(guard);
-            Assert.Equal("downloaded: 100.0% of 10 B, 2 of 2 objects (eu)", navigator.Tasks.Status);
+            Assert.Equal("downloaded: 100.0% of 10 B, 2 of 2 objects (us)", navigator.Tasks.Status);
         }
 
         // Exactly one fresh catalog, shared by every later handle, rebuilt from documents the store served.

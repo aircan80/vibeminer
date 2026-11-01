@@ -38,9 +38,8 @@ public sealed record BuildOpenerOptions
 public sealed class BuildOpener : IBuilds
 {
     private const string TooLarge = "BUILD_METADATA_TOO_LARGE";
-    private const int HistoryPage = 1000;
     /// <summary>Distinct <c>cdns</c> replies read per open, the most recently observed ones.</summary>
-    internal const int MaxCdnsReplies = 32;
+    internal const int MaxCdnsReplies = CdnsRoutes.MaxReplies;
     private readonly IObjectSource source;
     private readonly BuildOpenerOptions options;
     private readonly OpenCache cache;
@@ -113,60 +112,9 @@ public sealed class BuildOpener : IBuilds
         return new OpenedBuild(build, metadata, cdn, encoding, root, locations);
     }
 
-    /// <summary>
-    /// The route from the newest readable <c>cdns</c> reply with a row for the region (null: <c>us</c>, then any), newest by
-    /// D139: highest numeric <c>## seqn</c>, then latest observed; a reply without a numeric seqn comes after every one with.
-    /// Only the <see cref="MaxCdnsReplies"/> most recently observed distinct replies are read. Null when none can be used, so
-    /// stored metadata still opens.
-    /// </summary>
-    private async Task<CdnRoute?> RouteAsync(BuildRef build, CancellationToken ct)
-    {
-        var latest = new Dictionary<ObjectKey, HistoryEntry>();
-        try
-        {
-            HistoryEntry? after = null;
-            while (true)
-            {
-                var page = await source.ReadHistoryAsync(new(build.Product, null, HistoryKind.Cdns, after, HistoryPage), ct).ConfigureAwait(false);
-                foreach (var e in page)
-                    if (!latest.TryGetValue(e.Document, out var seen) || seen.ObservedAt < e.ObservedAt) latest[e.Document] = e;
-                if (latest.Count > 2 * MaxCdnsReplies) Trim(latest);
-                if (page.Count < HistoryPage) break;
-                after = page[^1];
-            }
-        }
-        catch (Exception e) when (e is not OperationCanceledException) { return null; }
-        Trim(latest);
-
-        var replies = new List<(long? Seqn, DateTimeOffset ObservedAt, VersionsTable Table)>();
-        foreach (var entry in latest.Values)
-        {
-            try
-            {
-                var reply = await source.GetKeyAsync(new(entry.Document), null, FetchPriority.Interactive, ct).ConfigureAwait(false);
-                if (reply is not { IsPresent: true, Bytes: { } bytes }) continue;
-                var table = VersionsTable.Parse(bytes);
-                replies.Add((long.TryParse(table.Sequence, out var seqn) ? seqn : null, entry.ObservedAt, table));
-            }
-            catch (Exception e) when (e is not OperationCanceledException) { }
-        }
-        var region = build.Region ?? "us";
-        foreach (var (_, _, table) in replies.OrderBy(r => r.Seqn is null).ThenByDescending(r => r.Seqn).ThenByDescending(r => r.ObservedAt))
-        {
-            var row = table.Rows.FirstOrDefault(r => r.Fields.TryGetValue("Name", out var name) && name == region)
-                ?? (build.Region is null ? table.Rows.FirstOrDefault() : null);
-            if (row is null || !row.Fields.TryGetValue("Path", out var path) || !row.Fields.TryGetValue("Hosts", out var hosts)) continue;
-            try { return new CdnRoute(hosts.Split(' ', StringSplitOptions.RemoveEmptyEntries), path); }
-            catch (ArgumentException) { }
-        }
-        return null;
-    }
-
-    private static void Trim(Dictionary<ObjectKey, HistoryEntry> latest)
-    {
-        foreach (var old in latest.Values.OrderByDescending(e => e.ObservedAt).Skip(MaxCdnsReplies).Select(e => e.Document).ToArray())
-            latest.Remove(old);
-    }
+    /// <summary>The route <see cref="CdnsRoutes"/> picks for the build's region (null: <c>us</c>, then any usable row).</summary>
+    private async Task<CdnRoute?> RouteAsync(BuildRef build, CancellationToken ct) =>
+        CdnsRoutes.Route(await CdnsRoutes.NewestFirstAsync(source, build.Product, ct).ConfigureAwait(false), build.Region);
 
     private async Task<ArchiveLocations> ReadIndexesAsync(CdnConfigFile config, CdnContext? cdn, CancellationToken ct)
     {

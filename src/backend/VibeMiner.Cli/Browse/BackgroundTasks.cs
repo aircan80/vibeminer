@@ -50,12 +50,19 @@ internal sealed class BackgroundTasks(Action<Action> post) : IAsyncDisposable
         return true;
     }
 
+    /// <summary>Clears the last task's outcome line, once it has been seen; a running task's line stays.</summary>
+    public void ClearEnded()
+    {
+        if (Running is null && Status.Length > 0) Set(null, "");
+    }
+
     /// <summary>Asks the running task to stop. False when none runs.</summary>
     public bool Cancel()
     {
         if (Running is null || cancel is null) return false;
-        cancel.Cancel();
+        // Said first: the task may end (and post its outcome) inside Cancel.
         Set(Running, $"{Running}: canceling");
+        cancel.Cancel();
         return true;
     }
 

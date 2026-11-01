@@ -70,6 +70,7 @@ internal static class EnsureTask
     [
         (FileEnsureState.Missing, "missing"),
         (FileEnsureState.NeedsNetwork, "need network"),
+        (NoRoute, "no CDN route"),
         (FileEnsureState.Unavailable, "unavailable"),
         (FileEnsureState.Refused, "refused"),
         (FileEnsureState.StoreFailed, "store failed"),
@@ -77,6 +78,10 @@ internal static class EnsureTask
         (FileEnsureState.NotInLocale, "not in locale"),
         (FileEnsureState.UnknownFile, "unknown"),
     ];
+
+    private const string NoCdnContext = "OBJECT_ACCESS_NO_CDN_CONTEXT";
+    /// <summary>A count key of its own for Unavailable with <see cref="NoCdnContext"/>; no real state has this value.</summary>
+    private const FileEnsureState NoRoute = (FileEnsureState)byte.MaxValue;
 
     /// <summary>The one status line an ensure ends with, per outcome.</summary>
     internal static string Line(EnsureResult r)
@@ -87,7 +92,9 @@ internal static class EnsureTask
         {
             if (f.State == FileEnsureState.Stored) stored++;
             else if (f.State == FileEnsureState.AlreadyStored) already++;
-            counts[f.State] = counts.GetValueOrDefault(f.State) + 1;
+            // Unavailable for want of a CDN route is said as that (QA on #175), not as the CDN failing.
+            var state = f is { State: FileEnsureState.Unavailable, Code: NoCdnContext } ? NoRoute : f.State;
+            counts[state] = counts.GetValueOrDefault(state) + 1;
         }
         var have = stored + already;
         var total = r.Files.Count;

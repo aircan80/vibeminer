@@ -298,6 +298,53 @@ public sealed class BuildOpenerTests
         Assert.Equal(BuildOpener.MaxCdnsReplies, source.Count("GetKeyAsync:HistoryDocument"));
     }
 
+    private static CatalogBuild Listed(params (string Region, bool Current)[] regions)
+    {
+        var at = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        var record = new ObjectKey(ObjectKeyType.HistoryDocument, new byte[16]);
+        return new("wow", "id", "1.0.0.1", new string('a', 32), null, new Dictionary<string, string>(), at, at, true,
+            [.. regions.Select(r => new BuildRegion(r.Region, new string('b', 32), at, at, r.Current, record))]);
+    }
+
+    [Fact]
+    public async Task ARegionWithOnlyAnUnusableHostIsSkipped()
+    {
+        // cn sorts first and lists only a host CdnRoute doesn't admit (the QA case on #175); us is usable.
+        await ObserveCdns("cn|tpr/wow|blzdist-wow.necdn.leihuo.netease.com|x|tpr/configs/data\nus|tpr/wow|us.cdn.blizzard.com|x|tpr/configs/data\n");
+        var choice = await BuildRegions.ChooseAsync(source, Listed(("cn", true), ("eu", true), ("us", true)), cancellationToken: Ct);
+        Assert.Equal(("us", true), (choice.Region!.Region, choice.Routed));
+        // Without us listed, the first usable region by name: eu has no cdns row at all, kr does.
+        await ObserveCdns("cn|tpr/wow|blzdist-wow.necdn.leihuo.netease.com|x|tpr/configs/data\nkr|tpr/wow|kr.cdn.blizzard.com|x|tpr/configs/data\n");
+        choice = await BuildRegions.ChooseAsync(source, Listed(("cn", true), ("eu", true), ("kr", true)), cancellationToken: Ct);
+        Assert.Equal(("kr", true), (choice.Region!.Region, choice.Routed));
+    }
+
+    [Fact]
+    public async Task ThePreferredRegionComesFirstAndCurrentListingsBeforeOldOnes()
+    {
+        await ObserveCdns("eu|tpr/wow|eu.cdn.blizzard.com|x|tpr/configs/data\nus|tpr/wow|us.cdn.blizzard.com|x|tpr/configs/data\n");
+        Assert.Equal("eu", (await BuildRegions.ChooseAsync(source, Listed(("eu", true), ("us", true)), "eu", Ct)).Region!.Region);
+        Assert.Equal("us", (await BuildRegions.ChooseAsync(source, Listed(("eu", true), ("us", true)), cancellationToken: Ct)).Region!.Region);
+        Assert.Equal("eu", (await BuildRegions.ChooseAsync(source, Listed(("eu", true), ("us", false)), cancellationToken: Ct)).Region!.Region);
+    }
+
+    [Fact]
+    public async Task NoUsableRegionSaysSoAndStillNamesOne()
+    {
+        await ObserveCdns("cn|tpr/wow|blzdist-wow.necdn.leihuo.netease.com|x|tpr/configs/data\n");
+        var choice = await BuildRegions.ChooseAsync(source, Listed(("cn", true), ("us", true)), cancellationToken: Ct);
+        Assert.Equal(("us", false), (choice.Region!.Region, choice.Routed));
+        Assert.Equal(new BuildRegionChoice(null, false), await BuildRegions.ChooseAsync(source, Listed(), cancellationToken: Ct));
+    }
+
+    [Fact]
+    public async Task ANullRegionTakesAUsableRowOverAnUnusableOneInTheSameReply()
+    {
+        var build = new SyntheticBuild().LoadInto(inner);
+        await ObserveCdns("cn|tpr/wow|blzdist-wow.necdn.leihuo.netease.com|x|tpr/configs/data\neu|tpr/wow|eu.cdn.blizzard.com|x|tpr/configs/data\n");
+        Assert.Equal(["eu.cdn.blizzard.com"], (await OpenedAsync(new BuildOpener(source), build.Ref)).Cdn!.Route.Hosts);
+    }
+
     [Fact]
     public async Task AThirdOpenWaitsForASlot()
     {

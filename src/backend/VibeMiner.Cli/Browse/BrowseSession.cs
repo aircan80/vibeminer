@@ -61,6 +61,13 @@ internal sealed class BrowseSession : IAsyncDisposable
     /// <summary>Takes the writer lock, creating a missing store (as <c>vm builds refresh</c> does). OBJECT_STORE_BUSY when the app holds it.</summary>
     public Task<IStoreHandle> OpenWriterAsync(CancellationToken ct) => stores.OpenWriterAsync(StoreFolder, create: true, ct);
 
+    /// <summary>The region a build opens in when it lists it and its route is usable (D280). There is no setting for it yet.</summary>
+    public string PreferredRegion { get; init; } = "us";
+
+    /// <summary>The region listing browse opens a build in, from layer 3's rule (D280), read over a store handle's objects.</summary>
+    public Task<BuildRegionChoice> ChooseRegionAsync(IObjectSource objects, CatalogBuild build, CancellationToken ct) =>
+        BuildRegions.ChooseAsync(objects, build, PreferredRegion, ct);
+
     /// <summary>Opens builds over a store handle's objects. A test seam: the real one is layer 3's <see cref="BuildOpener"/>.</summary>
     internal Func<IObjectSource, IBuilds> Builds { get; set; } = objects => new BuildOpener(objects);
 

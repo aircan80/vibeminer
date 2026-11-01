@@ -1,6 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using VibeMiner.Builds;
+using VibeMiner.Builds.Testing;
+using BuildsFakeBuild = VibeMiner.Builds.Testing.FakeBuild;
+using FakeFile = VibeMiner.Files.Testing.FakeFile;
 using VibeMiner.Cli.Browse;
 using VibeMiner.Files;
 using VibeMiner.Files.Names;
@@ -257,7 +260,7 @@ public sealed class FilesViewTests : IAsyncDisposable
     }
 
     [Theory]
-    [InlineData(FilesOpenState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK", "NeedsNetwork: not stored. a on a build: Download all, whole build, writer lock.")]
+    [InlineData(FilesOpenState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK", "NeedsNetwork: metadata not stored. m fetches it (writer lock).")]
     [InlineData(FilesOpenState.Missing, "OBJECT_ACCESS_MISSING", "Missing (OBJECT_ACCESS_MISSING): the CDN had no copy of a part when last asked.")]
     [InlineData(FilesOpenState.Encrypted, "BUILD_ENCRYPTED", "Encrypted (BUILD_ENCRYPTED): part of the build needs a TACT key this app lacks.")]
     [InlineData(FilesOpenState.Unavailable, "OBJECT_ACCESS_UNAVAILABLE", "Unavailable (OBJECT_ACCESS_UNAVAILABLE): can't open the build.")]
@@ -280,7 +283,7 @@ public sealed class FilesViewTests : IAsyncDisposable
     public async Task AnUnstoredBuildIsNeedsNetworkAndAMissingStoreIsTheStoreError()
     {
         var nav = await FilesAsync(new BuildRef("wow", B, B, "us"));
-        Assert.StartsWith("NeedsNetwork: not stored.", Note(nav));
+        Assert.StartsWith("NeedsNetwork: metadata not stored.", Note(nav));
 
         stores.ReadOnlyFailure = ObjectStoreCodes.Missing;
         await session.InvalidateFilesAsync();
@@ -310,13 +313,25 @@ public sealed class FilesViewTests : IAsyncDisposable
 
     private const string VersionsHeader = "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|KeyRing!HEX:16|BuildId!DEC:4|VersionsName!String:0|ProductConfig!HEX:16";
 
-    /// <summary>The wow versions reply lists one build (build config A, cdn config B) in us and eu; the files open in eu.</summary>
-    private async Task<Navigator> RetailProductAsync()
+    private const string CdnsHeader = "Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0|ConfigPath!STRING:0";
+    private const string Netease = "cn|tpr/wow|blzdist-wow.necdn.leihuo.netease.com|x|tpr/configs/data\n";
+
+    /// <summary>
+    /// The wow versions reply lists one build (build config A, cdn config B) in each of <paramref name="regions"/>, and the cdns
+    /// reply has <paramref name="cdns"/> (none when null); the files of the region <paramref name="opens"/> list file 7.
+    /// </summary>
+    private async Task<Navigator> RetailProductAsync(string[]? regions = null, string? cdns = "us|tpr/wow|us.cdn.blizzard.com|x|tpr/configs/data\n",
+        string opens = "us")
     {
-        var versions = Encoding.UTF8.GetBytes($"{VersionsHeader}\n## seqn = 1\nus|{A}|{B}|{C}|60000|12.0.1.60000|{C}\neu|{A}|{B}|{C}|60000|12.0.1.60000|{C}\n");
-        stores.Source.AddReply("wow", "us", ObservationKind.Versions, versions);
+        var rows = string.Concat((regions ?? ["us", "eu"]).Select(r => $"{r}|{A}|{B}|{C}|60000|12.0.1.60000|{C}\n"));
+        stores.Source.AddReply("wow", "us", ObservationKind.Versions, Encoding.UTF8.GetBytes($"{VersionsHeader}\n## seqn = 1\n{rows}"));
         await stores.Source.ObserveAsync(new(ObservationKind.Versions, "wow", "us"), default);
-        memory.Add(new BuildRef("wow", A, B, "eu"), ["enUS"], [new FakeFile(7, Size: 3)]);
+        if (cdns is not null)
+        {
+            stores.Source.AddReply("wow", "us", ObservationKind.Cdns, Encoding.UTF8.GetBytes($"{CdnsHeader}\n## seqn = 1\n{cdns}"));
+            await stores.Source.ObserveAsync(new(ObservationKind.Cdns, "wow", "us"), default);
+        }
+        memory.Add(new BuildRef("wow", A, B, opens), ["enUS"], [new FakeFile(7, Size: 3)]);
         var nav = Nav(ViewRegistry.Default());
         Assert.True(nav.Go(":builds"));
         await nav.Loading.WaitAsync(Guard);
@@ -333,7 +348,7 @@ public sealed class FilesViewTests : IAsyncDisposable
         Assert.IsType<CatalogBuild>(nav.SelectedRow!.Tag);
         await Key(nav, 'f');
         var files = Assert.IsType<FilesView>(nav.Current.View);
-        Assert.Equal(new FilesTarget(new BuildRef("wow", A, B, "eu"), "enUS"), files.Target);
+        Assert.Equal(new FilesTarget(new BuildRef("wow", A, B, "us"), "enUS"), files.Target);
         Assert.Equal("builds > wow > files enUS", nav.Path);
         Assert.Equal(["7"], Ids(nav));
         Assert.Equal("Page 1, 7-7 (last). 12.0.1.60000 enUS.", Note(nav));
@@ -347,15 +362,121 @@ public sealed class FilesViewTests : IAsyncDisposable
         await nav.Loading.WaitAsync(Guard);
         Assert.Contains(nav.Current.Visible, r => r.Cells.SequenceEqual(["Files", "f lists the files (enUS)"]));
         await Key(nav, 'f');
-        Assert.Equal(new FilesTarget(new BuildRef("wow", A, B, "eu"), "enUS"), ((FilesView)nav.Current.View).Target);
+        Assert.Equal(new FilesTarget(new BuildRef("wow", A, B, "us"), "enUS"), ((FilesView)nav.Current.View).Target);
         Assert.Equal("builds > wow > 12.0.1.60000 > files enUS", nav.Path);
+    }
+
+    [Fact]
+    public async Task FSkipsAFirstRegionWhoseOnlyHostIsUnusable()
+    {
+        // The QA case on #175: cn sorts first and its cdns row lists only a host CdnRoute doesn't admit.
+        var nav = await RetailProductAsync(["cn", "eu", "us"], Netease + "eu|tpr/wow|eu.cdn.blizzard.com|x|tpr/configs/data\nus|tpr/wow|us.cdn.blizzard.com|x|tpr/configs/data\n");
+        await Key(nav, 'f');
+        Assert.Equal(new FilesTarget(new BuildRef("wow", A, B, "us"), "enUS"), ((FilesView)nav.Current.View).Target);
+        Assert.Equal(["7"], Ids(nav));
+    }
+
+    [Fact]
+    public async Task WithoutUsAFTakesTheFirstRegionWithAUsableRoute()
+    {
+        var nav = await RetailProductAsync(["cn", "eu"], Netease + "eu|tpr/wow|eu.cdn.blizzard.com|x|tpr/configs/data\n", opens: "eu");
+        await Key(nav, 'f');
+        Assert.Equal(new FilesTarget(new BuildRef("wow", A, B, "eu"), "enUS"), ((FilesView)nav.Current.View).Target);
+        Assert.Equal(["7"], Ids(nav));
+    }
+
+    [Fact]
+    public async Task NoUsableRegionSaysSoWhenTheMetadataIsntStored()
+    {
+        var nav = await RetailProductAsync(["cn"], Netease, opens: "us");
+        await Key(nav, 'f');
+        Assert.Equal(new BuildRef("wow", A, B, "cn"), ((FilesView)nav.Current.View).Target!.Build);
+        Assert.Equal("NeedsNetwork: metadata not stored and no region has a usable CDN route.", Note(nav));
+        await Key(nav, 'm');
+        Assert.Equal(BuildView.NoRoute("metadata"), nav.Message);
+        Assert.Null(nav.Tasks.Running);
+        Assert.DoesNotContain(stores.Opened, o => o.Writer);
+    }
+
+    /// <summary>A build the store lacks; <see cref="InMemoryBuilds"/> stands in for layer 3, and its open stores the build for layer 4.</summary>
+    private (BuildRef Build, InMemoryBuilds Builds, List<bool> Writers) UnstoredBuild()
+    {
+        var build = new BuildRef("wow", B, B, "us");
+        var builds = new InMemoryBuilds();
+        var writers = new List<bool>();
+        builds.Add(build, new BuildsFakeBuild(new BuildMetadata("1.15.9.70576", default, default, default, 3, 2, ["enUS"]), []));
+        builds.BeforeOpen = (_, _) =>
+        {
+            lock (writers) writers.Add(stores.Opened[^1].Writer);
+            memory.Add(build, ["enUS"], [new FakeFile(5, Size: 1), new FakeFile(6, Size: 2)]);
+            return Task.CompletedTask;
+        };
+        session.Builds = _ => builds;
+        return (build, builds, writers);
+    }
+
+    [Fact]
+    public async Task MFetchesTheMetadataAsTheWriterThenTheListOpens()
+    {
+        var (build, _, writers) = UnstoredBuild();
+        var nav = await FilesAsync(build);
+        Assert.Equal("NeedsNetwork: metadata not stored. m fetches it (writer lock).", Note(nav));
+        Assert.Contains(nav.Help().Split('\n'), l => l.StartsWith("  m        metadata: fetch configs, ENCODING, ROOT, indexes (writer lock)", StringComparison.Ordinal));
+
+        Assert.True(nav.TryAction('m'));
+        Assert.Equal("metadata", nav.Tasks.Running);
+        await nav.Tasks.Current.WaitAsync(Guard);
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal("metadata: stored, 2 files, 3 archives (us).", nav.Tasks.Status);
+        Assert.Equal([true], writers);
+        Assert.Equal([true], stores.WriterCreate);
+        // Only the session's read-only handle is still open: the writer's went at the end.
+        Assert.Equal(1, stores.Open);
+        Assert.Equal(["5", "6"], Ids(nav));
+    }
+
+    [Fact]
+    public async Task XCancelsTheMetadataFetchAndBusySaysSo()
+    {
+        var (build, builds, _) = UnstoredBuild();
+        var nav = await FilesAsync(build);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        builds.BeforeOpen = async (_, ct) => { started.TrySetResult(); await Task.Delay(Timeout.Infinite, ct); };
+        Assert.True(nav.TryAction('m'));
+        await started.Task.WaitAsync(Guard);
+        Assert.StartsWith("metadata: configs, ENCODING, ROOT, indexes (us); x cancels", nav.Tasks.Status);
+        Assert.True(nav.Tasks.Cancel());
+        await nav.Tasks.Current.WaitAsync(Guard);
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal("metadata canceled.", nav.Tasks.Status);
+        // Only the session's read-only handle is still open: the writer's went at the end.
+        Assert.Equal(1, stores.Open);
+        Assert.StartsWith("NeedsNetwork: metadata not stored.", Note(nav));
+
+        stores.WriterFailure = ObjectStoreCodes.Busy;
+        Assert.True(nav.TryAction('m'));
+        await nav.Tasks.Current.WaitAsync(Guard);
+        Assert.Equal(MetadataTask.Busy, nav.Tasks.Status);
+        Fits(MetadataTask.Busy);
+    }
+
+    [Fact]
+    public void MetadataLinesNameTheStateAndFit()
+    {
+        var build = new BuildRef("wow", A, B, "us");
+        Assert.Equal("metadata: no network or CDN route at BuildConfig (OBJECT_ACCESS_NO_CDN_CONTEXT).",
+            MetadataTask.Line(new(build, BuildOpenState.NeedsNetwork, null, BuildPart.BuildConfig, "OBJECT_ACCESS_NO_CDN_CONTEXT", "x", null)));
+        foreach (var state in Enum.GetValues<BuildOpenState>().Where(s => s != BuildOpenState.Open))
+            Fits(MetadataTask.Line(new(build, state, null, BuildPart.ArchiveIndex, new string('C', 60), "x", null)));
+        Assert.Equal("metadata: can't open: Corrupt at Root (BLTE_CHECKSUM).",
+            MetadataTask.Line(new(build, BuildOpenState.Corrupt, null, BuildPart.Root, "BLTE_CHECKSUM", "x", null)));
     }
 
     [Fact]
     public void FOnABuildWithNoRegionOrNoRowSaysSo()
     {
         var build = new CatalogBuild("wow", "id", "12.0.1.60000", A, null, new Dictionary<string, string>(), default, default, false, []);
-        Assert.Equal("No region lists a cdn config for this build, so it can't be opened.", FilesView.Open(build).Say);
+        Assert.Equal(FilesView.NoRegion, FilesView.Open(build).Say);
         Assert.Null(FilesView.Open(build).Open);
         Assert.Equal("No build selected.", FilesView.Open(null).Say);
     }
@@ -376,7 +497,7 @@ public sealed class FilesViewTests : IAsyncDisposable
 
         var product = await RetailProductAsync();
         await Key(product, 'f');
-        Assert.Equal(new FilesTarget(new BuildRef("wow", A, B, "eu"), "enUS"), session.LastFiles!.Target);
+        Assert.Equal(new FilesTarget(new BuildRef("wow", A, B, "us"), "enUS"), session.LastFiles!.Target);
         Assert.True(nav.Go(":files"));
         await nav.Loading.WaitAsync(Guard);
         Assert.Equal("files enUS", nav.Path);
@@ -490,9 +611,12 @@ public sealed class FilesViewTests : IAsyncDisposable
         Assert.True(FilesView.NoTarget.Length <= 80);
         foreach (var state in Enum.GetValues<FilesOpenState>().Where(s => s != FilesOpenState.Open))
         {
-            var line = FilesView.NotOpen(new(Small, "enUS", state, null, new string('C', 60), "m", null));
-            Fits(line);
-            Assert.StartsWith(state.ToString(), line);
+            foreach (var routed in new[] { true, false })
+            {
+                var line = FilesView.NotOpen(new(Small, "enUS", state, null, new string('C', 60), "m", null), routed);
+                Fits(line);
+                Assert.StartsWith(state.ToString(), line);
+            }
         }
         Assert.True(FilesView.Open(new CatalogBuild("wow", "id", "v", A, null, new Dictionary<string, string>(), default, default, false, [])).Say!.Length <= 80);
     }

@@ -327,6 +327,50 @@ public sealed class EnsureActionTests : IAsyncDisposable
     }
 
     [Fact]
+    public void UnavailableForWantOfACdnRouteIsSaidAsThat()
+    {
+        // The QA case on #175: the build opened in a region with no usable route, so the fetch had no CDN context.
+        var r = Result(EnsureOutcome.Incomplete, 0, FileEnsureState.Unavailable, FileEnsureState.Unavailable);
+        r = r with { Files = [r.Files[0] with { Code = "OBJECT_ACCESS_NO_CDN_CONTEXT" }, r.Files[1] with { Code = "CDN_TIMEOUT" }] };
+        Assert.Equal("ensure: incomplete, 0 of 2 stored; 1 no CDN route, 1 unavailable.", EnsureTask.Line(r));
+    }
+
+    [Fact]
+    public async Task EscBackToTheListAfterGInTheDetailShowsTheFileStoredAndClearsTheEndedLine()
+    {
+        var nav = await ListAsync();
+        Select(nav, "11");
+        Assert.True(nav.Drill(nav.Current.Selected));
+        await nav.Loading.WaitAsync(Guard);
+        Assert.IsType<FileView>(nav.Current.View);
+        Assert.True(nav.TryAction('g'));
+        Assert.Equal("ensure: done, 1 file stored (0 already), 0 B fetched", await EndedAsync(nav));
+
+        Assert.True(nav.Back());
+        await nav.Loading.WaitAsync(Guard);
+        Assert.IsType<FilesView>(nav.Current.View);
+        Assert.Equal("yes", StoredCell(nav, "11"));
+        Assert.Equal("", nav.Tasks.Status);
+    }
+
+    [Fact]
+    public async Task ARunningTasksLineStaysWhenTheUserMovesOn()
+    {
+        var nav = await ListAsync();
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        stores.BeforeOpen = async (isWriter, ct) => { if (isWriter) { held.TrySetResult(); await Task.Delay(Timeout.Infinite, ct); } };
+        Select(nav, "11");
+        Assert.True(nav.TryAction('g'));
+        await held.Task.WaitAsync(Guard);
+        Assert.True(nav.Drill(nav.Current.Selected));
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal("ensure: taking the writer lock", nav.Tasks.Status);
+        Assert.True(nav.Tasks.Cancel());
+        Assert.Equal("ensure canceled.", await EndedAsync(nav));
+        stores.BeforeOpen = null;
+    }
+
+    [Fact]
     public void ACancelWhileStillListingSaysTheTotalIsOnlyWhatWasListed()
     {
         var listing = Result(EnsureOutcome.Canceled, 0, FileEnsureState.Stored, FileEnsureState.Canceled, FileEnsureState.Canceled);

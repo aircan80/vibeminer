@@ -162,8 +162,9 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
 
     private async Task<string> DownloadedAsync(BrowseSession session, IProgress<string> progress, CancellationToken ct)
     {
-        if (Region is not { } region) return "downloaded: no region lists a cdn config for this build, so it can't be opened.";
         await using var store = await session.OpenReadAsync(ct).ConfigureAwait(false);
+        // Read-only, the route doesn't matter: nothing is fetched.
+        if ((await session.ChooseRegionAsync(store.Objects, build, ct).ConfigureAwait(false)).Region is not { } region) return NoRegion("downloaded");
         progress.Report($"opening {build.VersionsName} ({region.Region}) from the store: ENCODING, ROOT, indexes; x cancels");
         var opened = await session.Builds(store.Objects).OpenAsync(new BuildRef(build.Product, build.BuildConfig, region.CdnConfig, region.Region), ct)
             .ConfigureAwait(false);
@@ -175,11 +176,11 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
         return Measured(figure, region.Region);
     }
 
-    /// <summary>The region <c>d</c> and <c>a</c> open the build in: a current one, else the first listed.</summary>
-    private BuildRegion? Region => RegionOf(build);
+    /// <summary>The line for a build that lists no region, after the task's name.</summary>
+    internal static string NoRegion(string task) => $"{task}: no region lists a cdn config for this build; can't open it.";
 
-    /// <summary>The region a build opens in from browse: a current one, else the first listed; null when none is.</summary>
-    internal static BuildRegion? RegionOf(CatalogBuild build) => build.Regions.FirstOrDefault(g => g.Current) ?? build.Regions.FirstOrDefault();
+    /// <summary>The line for a build none of whose regions has a usable CDN route (D280), after the task's name; fits 80 columns.</summary>
+    internal static string NoRoute(string task) => $"{task}: no region of this build has a usable CDN route; nothing fetched.";
 
     /// <summary>
     /// <c>a</c>: Download all, as the store's writer. Opens the build over the writer's source (fetching metadata it lacks), then
@@ -192,13 +193,15 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
 
     private async Task<string> DownloadAllAsync(BrowseSession session, IProgress<string> progress, CancellationToken ct)
     {
-        if (Region is not { } region) return "download all: no region lists a cdn config for this build, so it can't be opened.";
         IStoreHandle store;
         progress.Report("taking the writer lock");
         try { store = await session.OpenWriterAsync(ct).ConfigureAwait(false); }
         catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.Busy) { return DownloadAllBusy; }
         await using (store)
         {
+            var choice = await session.ChooseRegionAsync(store.Objects, build, ct).ConfigureAwait(false);
+            if (choice.Region is not { } region) return NoRegion("download all");
+            if (!choice.Routed) return NoRoute("download all");
             progress.Report($"opening {build.VersionsName} ({region.Region}): ENCODING, ROOT, indexes; x cancels");
             var opened = await session.Builds(store.Objects).OpenAsync(new BuildRef(build.Product, build.BuildConfig, region.CdnConfig, region.Region), ct)
                 .ConfigureAwait(false);
