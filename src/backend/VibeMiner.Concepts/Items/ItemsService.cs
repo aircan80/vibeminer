@@ -6,11 +6,26 @@ using VibeMiner.Formats.Tables;
 
 namespace VibeMiner.Concepts.Items;
 
-/// <summary>Bounds of <see cref="ItemsService"/>. <see cref="MaxScanRows"/> is the most table rows one list call looks at (at least 1).</summary>
+/// <summary>
+/// Bounds of <see cref="ItemsService"/>. <see cref="MaxScanRows"/> is the most table rows one list call looks at (at least 1).
+/// <see cref="MaxLabelScanRows"/> is the most rows one class or subclass label's key scan looks at, checked between pages (at least 1).
+/// </summary>
 public sealed record ItemsOptions
 {
     public const int DefaultMaxScanRows = 20_000;
+    public const int DefaultMaxLabelScanRows = 200_000;
     private readonly int maxScanRows = DefaultMaxScanRows;
+    private readonly int maxLabelScanRows = DefaultMaxLabelScanRows;
+
+    public int MaxLabelScanRows
+    {
+        get => maxLabelScanRows;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+            maxLabelScanRows = value;
+        }
+    }
 
     public int MaxScanRows
     {
@@ -222,6 +237,7 @@ public sealed class ItemsService : IItems
             ItemSummary summary;
             TableRow itemRow;
             TableRow? sparseRow;
+            ItemFactSet facts;
             try
             {
                 var layout = ItemLayout.Resolve(itemColumns, sparseColumns);
@@ -235,11 +251,22 @@ public sealed class ItemsService : IItems
                 }
                 itemRow = found.Row!;
                 (summary, sparseRow) = await SummaryAsync(layout, itemRow.Row, priority, cancellationToken).ConfigureAwait(false);
+                facts = ItemFacts.Project(layout.ItemColumns, layout.SparseColumns, itemRow.Row, sparseRow?.Row, SparseState(summary.Name.State));
             }
             catch (ItemsSourceException problem) { return new(ResultState(problem.Code), null, item, sparse, null, problem.Code, problem.Message); }
             var icon = await IconAsync(summary.IconFileDataId, cancellationToken).ConfigureAwait(false);
-            return new(ItemResultState.Found, new ItemDetail(summary, itemRow, sparseRow, icon), item, sparse);
+            var labels = await ItemClassifications.ResolveAsync(tables, summary, owner.options.MaxLabelScanRows, priority, cancellationToken).ConfigureAwait(false);
+            return new(ItemResultState.Found, new ItemDetail(summary, itemRow, sparseRow, icon, facts, labels), item, sparse);
         }
+
+        // The name state already says how the ItemSparse lookup went.
+        private static ItemSparseState SparseState(ItemNameState name) => name switch
+        {
+            ItemNameState.MissingSparse => ItemSparseState.Missing,
+            ItemNameState.SparseProtected => ItemSparseState.Protected,
+            ItemNameState.SparseUnknown => ItemSparseState.Unknown,
+            _ => ItemSparseState.Present,
+        };
 
         // The old icon rules (ItemIconsStore) on layer 5: no field, 0, else the BLP header through the build's files.
         private async Task<ItemIcon> IconAsync(uint? fileDataId, CancellationToken cancellationToken)

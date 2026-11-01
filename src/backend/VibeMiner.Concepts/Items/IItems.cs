@@ -135,10 +135,11 @@ public sealed record ItemResult(ItemResultState State, ItemDetail? Detail, Table
     string? Code = null, string? Message = null);
 
 /// <summary>
-/// One item's detail: the summary, its source rows exactly as layer 5 read them, and its icon. Later slices add facts, labels,
-/// classifications and effects as further members.
+/// One item's detail: the summary, its source rows exactly as layer 5 read them, its icon, its facts (D454) and its class and
+/// subclass labels (D455). Facts and labels are states of their own and never block the detail. Later slices add effects as
+/// further members.
 /// </summary>
-public sealed record ItemDetail(ItemSummary Summary, TableRow ItemRow, TableRow? SparseRow, ItemIcon Icon);
+public sealed record ItemDetail(ItemSummary Summary, TableRow ItemRow, TableRow? SparseRow, ItemIcon Icon, ItemFactSet Facts, ItemClassLabels Labels);
 
 public enum ItemIconState
 {

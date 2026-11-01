@@ -5,6 +5,7 @@ using VibeMiner.Files;
 using VibeMiner.Formats;
 using VibeMiner.Formats.Images;
 using VibeMiner.Formats.Tables;
+using VibeMiner.Formats.Testing;
 using Xunit;
 using static VibeMiner.Concepts.Tests.Items.ItemsWorld;
 
@@ -27,6 +28,16 @@ public abstract class ItemsContract
     public static readonly BuildRef Other = new("wow", new string('c', 32), new string('d', 32), "us");
 
     protected abstract Task<IItems> CreateAsync(ItemsScenario scenario);
+
+    /// <summary>Every scenario item is ClassID 2, SubclassID 7: these are the class and subclass rows that label it.</summary>
+    public static readonly Db2Row ClassRow = new(99, false, null, ["99", "2", "Weapon"]);
+    public static readonly Db2Row SubclassRow = new(5, false, null, ["5", "2", "7", "Polearm"]);
+
+    public static FakeTable ClassTable => new(1140189, "ItemClass", TableState.Ready,
+        [new("ID", "integer", true), new("ClassID", "integer", false), new("ClassName_lang", "string", false)], [ClassRow]);
+
+    public static FakeTable SubclassTable => new(1261604, "ItemSubClass", TableState.Ready,
+        [new("ID", "integer", true), new("ClassID", "integer", false), new("SubClassID", "integer", false), new("DisplayName_lang", "string", false)], [SubclassRow]);
 
     public static ItemsScenario Scenario() => new(
     [
@@ -154,6 +165,24 @@ public abstract class ItemsContract
     }
 
     [Fact]
+    public async Task A_detail_has_its_facts_and_class_labels()
+    {
+        await using var items = await OpenAsync();
+        var found = (await items.GetAsync(10, Now, default)).Detail!;
+        Assert.Equal((ItemFactsState.Ready, ItemSparseState.Present), (found.Facts.State, found.Facts.Sparse));
+        Assert.Equal(ItemFacts.Keys.Select(key => key.Key), found.Facts.Facts.Select(fact => fact.Key));
+        var inventory = Assert.Single(found.Facts.Facts, fact => fact.Key == "inventoryType");
+        Assert.Equal((ItemFactState.Value, ItemFactAgreement.Agree), (inventory.State, inventory.Agreement));
+        Assert.All(inventory.Values, value => Assert.Equal("One-hand", value.Label));
+        Assert.Equal(ItemFactState.Unsupported, Assert.Single(found.Facts.Facts, fact => fact.Key == "display1").State);
+        Assert.Equal((ItemClassLabelState.Ready, "Weapon"), (found.Labels.Class.State, found.Labels.Class.Text));
+        Assert.Equal((ItemClassLabelState.Ready, "Polearm"), (found.Labels.Subclass.State, found.Labels.Subclass.Text));
+        var missing = (await items.GetAsync(30, Now, default)).Detail!;
+        Assert.Equal(ItemSparseState.Missing, missing.Facts.Sparse);
+        Assert.Equal(ItemFactState.Missing, Assert.Single(missing.Facts.Facts, fact => fact.Key == "quality").State);
+    }
+
+    [Fact]
     public async Task An_id_no_item_row_has_is_absent_even_with_a_sparse_row()
     {
         await using var items = await OpenAsync();
@@ -183,7 +212,8 @@ public sealed class ItemsServiceContractTests : ItemsContract
         var world = new ItemsWorld();
         var sparse = scenario.Items.Where(item => item.Name is not null).Select(item => Sparse(item.Id, item.Name!))
             .Concat(scenario.SparseOnly.Select(row => Sparse(row.Id, row.Name))).OrderBy(row => row.Id);
-        world.With(ItemTable([.. scenario.Items.Select(item => Item(item.Id, icon: item.Icon is { } icon ? N(icon) : "-1"))]), SparseTable([.. sparse]));
+        world.With(ItemTable([.. scenario.Items.Select(item => Item(item.Id, icon: item.Icon is { } icon ? N(icon) : "-1"))]), SparseTable([.. sparse]),
+            ClassTable, SubclassTable);
         world.WithFiles([.. scenario.Items.Where(item => item.IconSide is not null).DistinctBy(item => item.Icon)
             .Select(item => Icon(item.Icon!.Value, item.IconSide!.Value, item.IconSide.Value))]);
         return Task.FromResult<IItems>(world.Service);
@@ -195,11 +225,17 @@ public sealed class InMemoryItemsContractTests : ItemsContract
 {
     protected override Task<IItems> CreateAsync(ItemsScenario scenario)
     {
-        var items = scenario.Items.Select(item => new FakeItem(item.Id,
+        IReadOnlyList<ItemSourceValue> keys = [new("Item", "ClassID", 1, "2"), new("Item", "SubclassID", 2, "7")];
+        var labels = new ItemClassLabels(new(ItemClassLabelState.Ready, [keys[0]], "Weapon", new(0, ClassRow), 2, 1, 1),
+            new(ItemClassLabelState.Ready, keys, "Polearm", new(0, SubclassRow), 3, 1, 1));
+        var items = scenario.Items.Select((item, index) => new FakeItem(item.Id,
             item.Name is null ? new(ItemNameState.MissingSparse, null) : item.Name.Length == 0 ? new(ItemNameState.Empty, "") : new(ItemNameState.Valid, item.Name),
             Values(item.Name is not null), item.Icon,
             item.IconSide is { } side ? new ItemIcon(ItemIconState.Ready, item.Icon, BlpImageState.Ready, new BlpHeader(3, 8, 0, 0, (uint)side, (uint)side, 1),
-                Blp2Encoding.Bgra8, 1, HoleKeys: []) : null));
+                Blp2Encoding.Bgra8, 1, HoleKeys: []) : null,
+            ItemRow: new(index, Item(item.Id, icon: item.Icon is { } icon ? N(icon) : "-1")),
+            SparseRow: item.Name is null ? null : new(index, Sparse(item.Id, item.Name)),
+            ItemColumns: ItemsWorld.ItemColumns, SparseColumns: SparseColumns(), Labels: labels));
         return Task.FromResult<IItems>(new InMemoryItems().Add(Build, Locale, items));
     }
 }

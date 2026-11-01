@@ -12,11 +12,15 @@ namespace VibeMiner.Concepts.Testing;
 /// finds; when null it follows the real rule for no field (null) and 0, and a nonzero FileDataID reads as a file the build
 /// doesn't list (FileFailed, UnknownFile). <see cref="ItemRow"/> and <see cref="SparseRow"/> default to a row of the ID alone
 /// and, for a name from a found ItemSparse row (Valid, Empty, Invalid), the same. <see cref="Item"/> other than Found is an entry a
-/// Partial Item can't read: it lists, and its detail is Unknown or Protected (with <see cref="ItemKey"/>).
+/// Partial Item can't read: it lists, and its detail is Unknown or Protected (with <see cref="ItemKey"/>). Facts follow
+/// <see cref="ItemFacts.Project"/> on those rows and <see cref="ItemColumns"/> / <see cref="SparseColumns"/> (by default an ID
+/// column, then <c>Cell1</c>... that no fact reads). <see cref="Labels"/> is what a detail finds; when null the item-side key rules
+/// apply and a lookable key reads as a build without the target tables (TableNotReadable, NoDefinition).
 /// </summary>
 public sealed record FakeItem(uint Id, ItemName Name, IReadOnlyList<ItemSourceValue>? Values = null, uint? IconFileDataId = null,
     ItemIcon? Icon = null, bool IsCopy = false, uint? CopySourceId = null, string? SparseKey = null, TableRow? ItemRow = null,
-    TableRow? SparseRow = null, ItemRowState Item = ItemRowState.Found, string? ItemKey = null);
+    TableRow? SparseRow = null, ItemRowState Item = ItemRowState.Found, string? ItemKey = null,
+    IReadOnlyList<Db2Column>? ItemColumns = null, IReadOnlyList<Db2Column>? SparseColumns = null, ItemClassLabels? Labels = null);
 
 /// <summary>
 /// The standard <see cref="IItems"/> test double for layer 7 and up: items are seeded per build and locale, nothing is read. A
@@ -150,6 +154,17 @@ public sealed class InMemoryItems : IItems
             return Task.FromResult(new ItemsPage(ItemsPageState.Ok, entries, next, looked, null, null));
         }
 
+        private static Db2Column[] DefaultColumns(int count) =>
+            [new("ID", "integer", true), .. Enumerable.Range(1, Math.Max(count - 1, 0)).Select(i => new Db2Column($"Cell{i}", "integer", false))];
+
+        private static ItemClassLabel DefaultLabel(FakeItem item, bool subclass)
+        {
+            var key = ItemClassifications.SourceKey(item.Values ?? [], subclass);
+            if (key.State is { } state) return new(state, key.Keys);
+            var table = subclass ? ItemClassifications.SubclassTable : ItemClassifications.ClassTable;
+            return new(ItemClassLabelState.TableNotReadable, key.Keys, Table: new TableEntry(0, table, TableState.NoDefinition, true, null, null, null));
+        }
+
         private static ItemsPage Invalid() =>
             new(ItemsPageState.InvalidCursor, [], null, 0, null, null, "INVALID_CURSOR", "The Items cursor differs from this exact query, page size or build.");
 
@@ -171,7 +186,17 @@ public sealed class InMemoryItems : IItems
                     0 => new ItemIcon(ItemIconState.NoIcon, 0),
                     { } fdid => new ItemIcon(ItemIconState.FileFailed, fdid, BlpImageState.FileFailed, FileState: FileReadState.UnknownFile, HoleKeys: []),
                 };
-                return Task.FromResult(new ItemResult(ItemResultState.Found, new ItemDetail(Summary(item), itemRow, sparseRow, icon), null, null));
+                var sparseState = sparseRow is not null ? ItemSparseState.Present : item.Name.State switch
+                {
+                    ItemNameState.MissingSparse => ItemSparseState.Missing,
+                    ItemNameState.SparseProtected => ItemSparseState.Protected,
+                    ItemNameState.SparseUnknown => ItemSparseState.Unknown,
+                    _ => ItemSparseState.Unknown,
+                };
+                var sparseColumns = sparseState == ItemSparseState.Unknown ? null : item.SparseColumns ?? DefaultColumns(sparseRow?.Row.Values.Count ?? 1);
+                var facts = ItemFacts.Project(item.ItemColumns ?? DefaultColumns(itemRow.Row.Values.Count), sparseColumns, itemRow.Row, sparseRow?.Row, sparseState);
+                var labels = item.Labels ?? new(DefaultLabel(item, false), DefaultLabel(item, true));
+                return Task.FromResult(new ItemResult(ItemResultState.Found, new ItemDetail(Summary(item), itemRow, sparseRow, icon, facts, labels), null, null));
             }
             return Task.FromResult(new ItemResult(ItemResultState.Absent, null, null, null));
         }
