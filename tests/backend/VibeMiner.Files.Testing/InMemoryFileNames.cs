@@ -6,8 +6,8 @@ namespace VibeMiner.Files.Testing;
 /// <summary>
 /// The <see cref="IFileNames"/> of <see cref="InMemoryFileSystem"/>: a settable FileDataID-to-name map, matched by the real
 /// rules (ASCII case and slash direction ignored), and a settable state. Handles see a change on their next call. Names
-/// serve only while <see cref="State"/> is <see cref="FileNamesState.Ready"/>; <see cref="UpdateAsync"/> fetches nothing and
-/// only reports.
+/// serve only while <see cref="State"/> is <see cref="FileNamesState.Ready"/>; <see cref="UpdateAsync"/> fetches nothing: it runs
+/// <see cref="OnUpdate"/>, if set, and reports.
 /// </summary>
 public sealed class InMemoryFileNames : IFileNames
 {
@@ -50,10 +50,15 @@ public sealed class InMemoryFileNames : IFileNames
         lock (gate) return Task.FromResult(Status());
     }
 
-    public Task<FileNamesStatus> UpdateAsync(bool force, CancellationToken cancellationToken)
+    /// <summary>Runs inside <see cref="UpdateAsync"/> before it reports: a test makes the update block, fail or load names here.</summary>
+    public Func<bool, CancellationToken, Task>? OnUpdate { get; set; }
+
+    public async Task<FileNamesStatus> UpdateAsync(bool force, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        lock (gate) { Updates++; return Task.FromResult(Status()); }
+        lock (gate) Updates++;
+        if (OnUpdate is { } update) await update(force, cancellationToken).ConfigureAwait(false);
+        lock (gate) return Status();
     }
 
     private FileNamesStatus Status() => state == FileNamesState.Ready ? new(state, "fake", Count: count) : new(state, Code: code);

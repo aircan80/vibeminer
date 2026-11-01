@@ -111,8 +111,8 @@ internal sealed class BrowseSession : IAsyncDisposable
 
     /// <summary>
     /// Makes layer 4 over a store's objects and builds, with the names switch. A test seam: the real one is
-    /// <see cref="VibeMiner.Files.FileSystem"/> with the session's generated store for names (<see cref="GeneratedStoreAsync"/>). Browse never fetches names: handles only read the stored copy, and nothing calls
-    /// <see cref="IFileNames.UpdateAsync"/>.
+    /// <see cref="VibeMiner.Files.FileSystem"/> with the session's generated store for names (<see cref="GeneratedStoreAsync"/>). Handles only read the stored copy; only <c>N</c>
+    /// (<see cref="NamesTask"/>) calls <see cref="IFileNames.UpdateAsync"/>, on a file system over the writer's objects.
     /// </summary>
     internal Func<IObjectSource, IBuilds, IFileNameSwitch, CancellationToken, Task<IFileSystem>> FileSystem { get; set; }
 

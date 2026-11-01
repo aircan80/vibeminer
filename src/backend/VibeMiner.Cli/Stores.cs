@@ -91,20 +91,26 @@ internal sealed class RealStores : IStoreOpener
     }
 
     /// <summary>
-    /// The writer's layer 2 is the real <see cref="ObjectSource"/>: the store, then the official CDN and version service. The
-    /// CLI only observes and reads stored replies so far, so the CDN client is there for completeness and never asked.
+    /// The writer's layer 2 is the real <see cref="ObjectSource"/>: the store, then the official CDN and version service, and the
+    /// wow-listfile's GitHub releases (D105) for <c>N</c> in <c>vm browse</c>. Layer 4 asks for the listfile only while the
+    /// names switch is on; the listfile client has its own handler and connection budget.
     /// </summary>
     private sealed class WriterHandle : Handle
     {
         private readonly ObjectStore store;
         // Layer 1's handler: no redirects or decompression, bounded connections. The clients set their own timeouts.
         private readonly HttpClient http = new(CdnClient.CreateHandler(4)) { Timeout = Timeout.InfiniteTimeSpan };
+        private readonly WowListfileConnections listfileConnections = new();
+        private readonly HttpClient listfileHttp;
 
         public WriterHandle(ObjectStore store, string catalogPath) : base(catalogPath)
         {
             this.store = store;
+            // The listfile client sets its own budgets; HttpClient's timeout would cut a part short.
+            listfileHttp = new(WowListfileClient.CreateHandler(listfileConnections)) { Timeout = Timeout.InfiniteTimeSpan };
             Objects = new ObjectSource(store, store, store, null, new CdnClient(http),
-                [new VersionServiceObservations(new VersionClient(http))], ObjectVerification.Default);
+                [new VersionServiceObservations(new VersionClient(http)),
+                 new WowListfileObservations(new WowListfileClient(listfileHttp, connections: listfileConnections))], ObjectVerification.Default);
         }
 
         public override bool Writer => true;
@@ -114,6 +120,7 @@ internal sealed class RealStores : IStoreOpener
         protected override async ValueTask CloseStoreAsync()
         {
             http.Dispose();
+            listfileHttp.Dispose();
             await store.DisposeAsync().ConfigureAwait(false);
         }
     }

@@ -293,8 +293,8 @@ public sealed class FilesViewTests : IAsyncDisposable
 
     [Theory]
     [InlineData(FileNamesState.Off, "Names off in Settings: no paths, / finds none.")]
-    [InlineData(FileNamesState.NotReady, "Names not loaded: no paths, / finds none.")]
-    [InlineData(FileNamesState.Failed, "Names failed (LISTFILE_FETCH): no paths, / finds none.")]
+    [InlineData(FileNamesState.NotReady, "Names not loaded: N fetches them.")]
+    [InlineData(FileNamesState.Failed, "Names failed (LISTFILE_FETCH): N tries again.")]
     public async Task NamesThatDontServeAreNamedInTheNote(FileNamesState state, string said)
     {
         memory.Names.State = state;
@@ -601,7 +601,7 @@ public sealed class FilesViewTests : IAsyncDisposable
         var note = Note(nav);
         // A long code is cut so the names note still fits after the page.
         Assert.StartsWith("Page 1, no files match. Names failed (CCC", note);
-        Assert.EndsWith("...): no paths, / finds none.", note);
+        Assert.EndsWith("...): N tries again.", note);
         Assert.Equal(80, note.Length);
 
         await AnswerAsync(nav, 't', new string('y', 200));

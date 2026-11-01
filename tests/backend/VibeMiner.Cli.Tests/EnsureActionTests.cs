@@ -30,6 +30,7 @@ public sealed class EnsureActionTests : IAsyncDisposable
     /// <summary>The writer side's closes, in order: its handle, its file system, its store.</summary>
     private readonly List<string> closed = [];
     private int writerFileSystems;
+    private int readerFileSystems;
 
     public EnsureActionTests()
     {
@@ -56,7 +57,7 @@ public sealed class EnsureActionTests : IAsyncDisposable
             // The handle being opened is the last one asked for: the writer's for an ensure, the session cache's otherwise.
             FileSystem = (_, _, _, _) =>
             {
-                if (!stores.Opened[^1].Writer) return Task.FromResult<IFileSystem>(readOnly);
+                if (!stores.Opened[^1].Writer) { Interlocked.Increment(ref readerFileSystems); return Task.FromResult<IFileSystem>(readOnly); }
                 Interlocked.Increment(ref writerFileSystems);
                 return Task.FromResult<IFileSystem>(writer);
             },
@@ -404,6 +405,103 @@ public sealed class EnsureActionTests : IAsyncDisposable
             FileEnsureState.StoreFailed, FileEnsureState.NotInEncoding, FileEnsureState.NotInLocale, FileEnsureState.UnknownFile]).ToArray();
         foreach (var outcome in Enum.GetValues<EnsureOutcome>()) Fits(EnsureTask.Line(Result(outcome, 1023L << 40, many)));
         Fits(EnsureTask.NotOpened(new(Build, "enUS", FilesOpenState.StoreFailed, null, new string('C', 90), null, null)));
+    }
+
+    // ---------------------------------------------------------------- N: the community file names (#182)
+
+    private static readonly Dictionary<uint, string> Listfile = new()
+    {
+        [10] = "interface/icons/a.blp", [11] = "Interface/Icons/b.blp", [12] = "sound/c.ogg", [14] = "sound/d.ogg",
+    };
+
+    private static string Note(Navigator nav) => nav.Current.Content!.Note!;
+
+    [Fact]
+    public async Task NFetchesTheNamesAsTheWriterThenPathsShowAndSlashFiltersByPrefix()
+    {
+        memory.Names.State = FileNamesState.NotReady;
+        var asked = new List<(bool Force, bool Writer)>();
+        memory.Names.OnUpdate = (force, _) =>
+        {
+            lock (asked) asked.Add((force, stores.Opened[^1].Writer));
+            memory.Names.Use(Listfile);
+            return Task.CompletedTask;
+        };
+        var nav = await ListAsync();
+        Assert.Contains("Names not loaded: N fetches them.", Note(nav));
+        Assert.All(nav.Current.Visible, r => Assert.Equal("", r.Cells[1]));
+        Assert.Contains(nav.Help().Split('\n'), l => l == "  N        names: fetch file names from wow-listfile (writer lock)");
+
+        Assert.True(nav.TryAction('N'));
+        Assert.Equal(NamesTask.Name, nav.Tasks.Running);
+        Assert.Equal("names: ready, 4 names (fake).", await EndedAsync(nav));
+        // One unforced update, through the writer's own file system, which closed before its store.
+        Assert.Equal([(false, true)], asked);
+        Assert.Equal(1, writerFileSystems);
+        lock (closed) Assert.Equal(["files", "store"], closed);
+        Assert.Equal(1, stores.Open);
+        // The session's read-only file system was dropped, so the reload made a new one that loads the new copy.
+        Assert.Equal(2, readerFileSystems);
+        Assert.DoesNotContain("Names", Note(nav));
+        Assert.Equal("interface/icons/a.blp", nav.Current.Visible.Single(r => r.Cells[0] == "10").Cells[1]);
+
+        nav.SetFilter("interface/icons/");
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal(["10", "11"], nav.Current.Visible.Select(r => r.Cells[0]));
+    }
+
+    [Fact]
+    public async Task XCancelsTheNamesFetchAndTheWriterLockGoes()
+    {
+        memory.Names.State = FileNamesState.NotReady;
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        memory.Names.OnUpdate = async (_, ct) => { started.TrySetResult(); await Task.Delay(Timeout.Infinite, ct); };
+        var nav = await ListAsync();
+        Assert.True(nav.TryAction('N'));
+        await started.Task.WaitAsync(Guard);
+        await StatusAsync(nav, "names: checking and fetching wow-listfile from GitHub; x cancels");
+        Assert.True(nav.Tasks.Cancel());
+        Assert.Equal("names canceled.", await EndedAsync(nav));
+        Assert.Equal(0, session.WriterLeases);
+        Assert.Equal(1, stores.Open);
+        Assert.Contains("Names not loaded: N fetches them.", Note(nav));
+    }
+
+    [Fact]
+    public async Task NWhenTheStoreIsBusyOrTheSwitchIsOffFetchesNothing()
+    {
+        memory.Names.State = FileNamesState.NotReady;
+        var nav = await ListAsync();
+        stores.WriterFailure = ObjectStoreCodes.Busy;
+        Assert.True(nav.TryAction('N'));
+        Assert.Equal(NamesTask.Busy, await EndedAsync(nav));
+        Assert.Equal(0, memory.Names.Updates);
+
+        stores.WriterFailure = null;
+        session.NameSwitch = new Switch(false);
+        var writers = stores.Opened.Count(o => o.Writer);
+        Assert.True(nav.TryAction('N'));
+        Assert.Equal(NamesTask.Off, await EndedAsync(nav));
+        Assert.Equal(writers, stores.Opened.Count(o => o.Writer));
+        Assert.Equal(0, memory.Names.Updates);
+    }
+
+    [Fact]
+    public void NamesLinesSayEachOutcomeAndFit()
+    {
+        Assert.Equal("names: ready, 1 name (v1).", NamesTask.Line(new(FileNamesState.Ready, "v1", Count: 1)));
+        Assert.Equal("names: kept v1 (2,000); the update failed (LISTFILE_FETCH_FAILED).",
+            NamesTask.Line(new(FileNamesState.Ready, "v1", Count: 2_000, Code: "LISTFILE_FETCH_FAILED")));
+        Assert.Equal("names: failed (CDN_OFFLINE); N tries again.", NamesTask.Line(new(FileNamesState.Failed, Code: "CDN_OFFLINE")));
+        Assert.Equal(NamesTask.NoStore, NamesTask.Line(new(FileNamesState.Off)));
+        var huge = new string('C', 90);
+        foreach (var state in Enum.GetValues<FileNamesState>()) Fits(NamesTask.Line(new(state, huge, Count: int.MaxValue, Code: huge)));
+        foreach (var line in new[] { NamesTask.Busy, NamesTask.Off, NamesTask.NoStore }) Fits(line);
+    }
+
+    private sealed class Switch(bool on) : IFileNameSwitch
+    {
+        public Task<bool> NamesEnabledAsync(CancellationToken cancellationToken) => Task.FromResult(on);
     }
 
     [Fact]

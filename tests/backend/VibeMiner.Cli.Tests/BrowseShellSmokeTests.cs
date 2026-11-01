@@ -261,6 +261,64 @@ public sealed class BrowseShellSmokeTests(ITestOutputHelper output)
         Assert.Empty(memory.EnsureRequests);
     }
 
+    [Fact]
+    public async Task NFetchesTheNamesInTheFilesViewThenSlashFindsIconsByPath()
+    {
+        // #182: :files never loaded names, so paths were empty and / found nothing.
+        string a = new('a', 32), b = new('b', 32), c = new('c', 32);
+        var stores = new FakeStores();
+        var versions = Encoding.UTF8.GetBytes($"{VersionsHeader}\n## seqn = 1\nus|{a}|{b}|{c}|60000|12.0.1.60000|{c}\n");
+        stores.Source.AddReply("wow", "us", ObservationKind.Versions, versions);
+        await stores.Source.ObserveAsync(new(ObservationKind.Versions, "wow", "us"), default);
+        var memory = new InMemoryFileSystem();
+        memory.Add(new BuildRef("wow", a, b, "us"), ["enUS"], [new FakeFile(10, Size: 1), new FakeFile(11, Size: 2), new FakeFile(12, Size: 3)]);
+        memory.Names.State = VibeMiner.Files.Names.FileNamesState.NotReady;
+        memory.Names.OnUpdate = (_, _) =>
+        {
+            memory.Names.Use(new Dictionary<uint, string> { [10] = "interface/icons/a.blp", [11] = "interface/icons/b.blp", [12] = "sound/y.ogg" });
+            return Task.CompletedTask;
+        };
+        await using var session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), StoreFolder)
+        {
+            FileSystem = (_, _, _, _) => Task.FromResult<IFileSystem>(memory),
+        };
+
+        static bool Idle(BrowseShell sh) => !sh.StatusText.Contains("loading...");
+        Step[] steps =
+        [
+            new("store", (s, _) => s.Contains("Packs"), a => { Type(a, ":builds"); a.InjectKey(Key.Enter); }),
+            new("builds", (s, sh) => Idle(sh) && Line(s, 0).Contains("builds") && s.Contains("wow"), a => a.InjectKey(Key.Enter)),
+            new("product", (s, sh) => Idle(sh) && Line(s, 0).Contains("builds > wow") && s.Contains("12.0.1.60000"), a => a.InjectKey(new Key('f'))),
+            new("unnamed", (s, sh) => Idle(sh) && Line(s, 0).Contains("files enUS") && s.Contains("Names not loaded: N fetches them."), a => a.InjectKey(new Key('N'))),
+            new("named", (s, sh) => Idle(sh) && sh.StatusText.Contains("names: ready, 3 names") && s.Contains("sound/y.ogg"),
+                a => { Type(a, "/interface/icons/"); a.InjectKey(Key.Enter); }),
+            new("filtered", (s, sh) => Idle(sh) && sh.StatusText.Contains("/interface/icons/ (2 rows)") && !s.Contains("sound/y.ogg"), a => a.InjectKey(new Key('q'))),
+        ];
+        var wide = new List<string>();
+        steps = [.. steps.Select(st => st with
+        {
+            Ready = (s, sh) =>
+            {
+                if (!st.Ready(s, sh)) return false;
+                wide.AddRange(sh.ShownLines.Where(l => l.Length > 80).Select(l => $"{st.Name}: {l}"));
+                return true;
+            },
+        })];
+        var (shots, failure, stopped, navigator) = Drive(session, ViewRegistry.Default(), "store", steps);
+
+        await navigator.DisposeAsync().AsTask().WaitAsync(Guard);
+        foreach (var (name, screen) in shots) output.WriteLine($"--- {name}\n{screen}");
+        Assert.Null(failure);
+        Assert.True(stopped);
+        Assert.Empty(wide);
+        Assert.Equal(1, memory.Names.Updates);
+        Assert.Contains("interface/icons/a.blp", shots["filtered"]);
+        Assert.Contains("interface/icons/b.blp", shots["filtered"]);
+        // Only N took the writer lock, and it went at the end.
+        Assert.Single(stores.Opened, o => o.Writer);
+        Assert.Equal(0, session.WriterLeases);
+    }
+
     private static async Task Observe(FakeStores stores, ManualTime time, ObservationKind kind, string product, string reply)
     {
         stores.Source.AddReply(product, "us", kind, Encoding.UTF8.GetBytes(reply));

@@ -13,8 +13,8 @@ internal sealed record OpenedFiles(FilesTarget Target, string Label);
 /// A build's files for one locale, one page at a time, ascending by FileDataID. Loads are read-only: they open the build from the
 /// store through the session's layer 4 and never fetch. <c>/text</c> is a path prefix (the community names); <c>t</c> formats,
 /// <c>s</c> stored state, <c>l</c> the locale, <c>n</c>/<c>p</c> pages. Enter shows a file. <c>g</c> and <c>G</c> ensure files
-/// as the store's writer (<see cref="EnsureTask"/>) and <c>m</c> fetches the build's metadata (<see cref="MetadataTask"/>), the only
-/// ways this view fetches. Built with no target (the <c>:files</c> entry)
+/// as the store's writer (<see cref="EnsureTask"/>), <c>m</c> fetches the build's metadata (<see cref="MetadataTask"/>) and <c>N</c>
+/// the community file names (<see cref="NamesTask"/>), the only ways this view fetches. Built with no target (the <c>:files</c> entry)
 /// it shows the last target this session opened, or says how to open one.
 /// </summary>
 internal sealed class FilesView : BrowseView
@@ -80,6 +80,7 @@ internal sealed class FilesView : BrowseView
         new('G', "ensure all: fetch every file the filters match (asks first)", _ => AskEnsureAll()),
         new('m', "metadata: fetch configs, ENCODING, ROOT, indexes (writer lock)", _ => FetchMetadata()),
         new('P', "preload: stop or resume the tables preload (m starts it)", _ => TogglePreload()),
+        new('N', "names: fetch file names from wow-listfile (writer lock)", _ => new(Start: NamesTask.Start())),
     ];
 
     /// <summary><c>m</c>: the build's metadata as the store's writer (<see cref="MetadataTask"/>); the view reloads when it ends.</summary>
@@ -387,7 +388,7 @@ internal sealed class FilesView : BrowseView
     /// <summary>The failed names note with its code, the code cut with "..." so the note fits <paramref name="room"/>.</summary>
     internal static string NamesFailed(string? code, int room)
     {
-        const string Before = "Names failed (", After = "): no paths, / finds none.";
+        const string Before = "Names failed (", After = "): N tries again.";
         return Before + EnsureTask.Clip(code ?? "no code", Math.Max(8, room - Before.Length - After.Length)) + After;
     }
 
@@ -407,7 +408,7 @@ internal sealed class FilesView : BrowseView
         var namesNote = names.State switch
         {
             FileNamesState.Off => "Names off in Settings: no paths, / finds none.",
-            FileNamesState.NotReady => "Names not loaded: no paths, / finds none.",
+            FileNamesState.NotReady => "Names not loaded: N fetches them.",
             FileNamesState.Failed => NamesFailed(names.Code, Width - parts[0].Length - 1),
             FileNamesState.Ready when names.Code == "LISTFILE_UNREADABLE" => "Names couldn't be read for this page: some paths are missing.",
             _ => null,
