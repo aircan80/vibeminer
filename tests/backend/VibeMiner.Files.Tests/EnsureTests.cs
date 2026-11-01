@@ -284,6 +284,7 @@ public sealed class EnsureTests
 
         public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken cancellationToken) => inner.ObserveAsync(request, cancellationToken);
 
+        public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken) => inner.RecordAsync(observation, cancellationToken);
         public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) => inner.CountPresentAsync(keys, cancellationToken);
 
         public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken cancellationToken) => inner.ReadHistoryAsync(query, cancellationToken);

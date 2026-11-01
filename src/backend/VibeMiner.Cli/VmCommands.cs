@@ -131,7 +131,8 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
         if (browse is null) return await Fail("BROWSE_NEEDS_TERMINAL", "vm browse needs a terminal on stdin and stdout. For scripts, use the other commands.");
         // Disposed after the browser returns, so after its navigator has stopped every load: closes the session's files.
         await using var session = new BrowseSession(stores, folder, storeFolder, environment);
-        session.UseTables(composeTables);
+        // The real composition shares the session's generated store with the names index (#186).
+        session.UseTables(tables ?? session.ComposeTablesAsync);
         return await browse(session, ct).ConfigureAwait(false);
     }
 

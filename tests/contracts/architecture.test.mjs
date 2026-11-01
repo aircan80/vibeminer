@@ -19,13 +19,15 @@ test('production project dependencies preserve pure engine boundaries and the or
     ObjectAccess: ['Objects', 'Cdn'],
     // Layer 3 builds (D138): builds only on layer 2, with its own table reader and identity.
     Builds: ['ObjectAccess'],
-    // Layer 4 files (D160): a file system per build and locale over layers 3 and 2, never layer 1.
-    Files: ['Builds', 'ObjectAccess'],
+    // Layer 4 files (D160): a file system per build and locale over layers 3 and 2, never layer 1's object store.
+    // Generated is the layer 1 generated store (D210) for the persisted listfile names index (#186).
+    Files: ['Builds', 'ObjectAccess', 'Generated'],
     // Layer 5 formats: reads files through layer 4 (#177). ObjectAccess is for the table definitions only: fetched
     // definitions are layer 2 observations and history (D180). Generated is the layer 1 generated store for decoded tables (D210, #179).
     Formats: ['Files', 'ObjectAccess', 'Generated'],
     // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
-    Cli: ['Objects', 'Cdn', 'ObjectAccess', 'Builds', 'Files', 'Formats'],
+    // Generated: the browse session opens the profile's generated store once, for layer 4's listfile names index (#186) and tables.
+    Cli: ['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats'],
   };
   for (const [project, dependencies] of Object.entries(allowed)) {
     const source = await readFile(path.join(root, `src/backend/VibeMiner.${project}/VibeMiner.${project}.csproj`), 'utf8');

@@ -31,7 +31,7 @@ public sealed class FileViewTests : IAsyncDisposable
         files = new FlakyFileSystem(memory);
         session = new BrowseSession(stores, new DataFolder(data, DataFolderSource.Override), Path.Combine(data, ObjectStore.DefaultFolderName))
         {
-            FileSystem = (_, _, _) => files,
+            FileSystem = (_, _, _, _) => Task.FromResult<IFileSystem>(files),
         };
     }
 

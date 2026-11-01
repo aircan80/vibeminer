@@ -349,6 +349,7 @@ public sealed class FileSystemTests(ITestOutputHelper output)
         public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken cancellationToken) =>
             inner.ObserveAsync(request, cancellationToken);
 
+        public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken) => inner.RecordAsync(observation, cancellationToken);
         public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) =>
             inner.CountPresentAsync(keys, cancellationToken);
 

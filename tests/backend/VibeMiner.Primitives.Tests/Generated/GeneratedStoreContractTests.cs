@@ -192,6 +192,17 @@ public abstract class GeneratedStoreContractTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CompactingKeepsLiveObjectsAndDropsNone()
+    {
+        await Store.PutAsync([Put(1), Put(2), Put(3)]);
+        await Store.DeleteAsync([Key(2)]);
+        await Store.CompactAsync(minDeadFraction: 0, maxPacks: 4);
+        Assert.Equal(Bytes(1, 1000), (await Store.ReadAsync(Key(1))).Bytes);
+        Assert.Equal(Bytes(3, 1000), (await Store.ReadAsync(Key(3))).Bytes);
+        Assert.Equal(GeneratedReadState.Absent, (await Store.ReadAsync(Key(2))).State);
+    }
+
+    [Fact]
     public async Task ConcurrentPutsAndReadsAgree()
     {
         await Task.WhenAll(Enumerable.Range(0, 16).Select(i => Store.PutAsync([Put(i), Put(100 + i % 4)])));

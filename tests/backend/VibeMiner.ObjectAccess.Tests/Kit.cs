@@ -19,11 +19,13 @@ internal sealed class Scenario
     public MemoryStore Store { get; } = new();
     public MemoryStore? Shared { get; init; }
     public ObjectSourceOptions Options { get; init; } = new();
+    /// <summary>The history log the source appends to; the store's own when null.</summary>
+    public IHistoryLog? HistoryLog { get; init; }
     public CdnContext Context => new(Route, Archives);
     public List<CdnKey> Archives { get; } = [];
 
     private ObjectSource? source;
-    public ObjectSource Source => source ??= new ObjectSource(Store, Store, Store, Shared, new ScriptedCdnClient(Cdn),
+    public ObjectSource Source => source ??= new ObjectSource(Store, Store, HistoryLog ?? Store, Shared, new ScriptedCdnClient(Cdn),
         [new VersionServiceObservations(new VersionClient(new HttpClient(Versions))), new WoWDBDefsObservations(Definitions),
             new WowListfileObservations(Listfile)], ObjectVerification.Default, Options);
     public VersionHandler Versions { get; } = new();

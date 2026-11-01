@@ -100,6 +100,20 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
     {
         var (observation, failed) = await observations.FetchAsync(request, cancellationToken).ConfigureAwait(false);
         if (observation is null) return failed!;
+        if (!request.Record) return new(ObjectState.Present, observation, Recorded: false);
+        return await AppendAsync(observation, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken)
+    {
+        if (ObservationRequest.RecordProblem(observation) is { } problem) return Observations.Invalid(problem);
+        cancellationToken.ThrowIfCancellationRequested();
+        return await AppendAsync(observation, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Appends one history entry for the observation, mapping a refused or failed put to StoreFailed.</summary>
+    private async Task<ObservationResult> AppendAsync(Observation observation, CancellationToken cancellationToken)
+    {
         try
         {
             var put = await history.AppendHistoryAsync(new HistoryObservation((HistoryKind)(byte)observation.Kind, observation.Product, observation.Region,

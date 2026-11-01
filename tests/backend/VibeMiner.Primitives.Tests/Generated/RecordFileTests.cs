@@ -195,6 +195,87 @@ public sealed class RecordFileTests
         Assert.Equal(1, store.Reads); // the manifest, once at open
     }
 
+    private static async Task<List<Record>> FromAsync(RecordFile file, long ordinal, CancellationToken ct = default)
+    {
+        var list = new List<Record>();
+        await foreach (var r in file.ReadFromAsync(ordinal, ct)) list.Add(r);
+        return list;
+    }
+
+    [Fact]
+    public async Task ReadFromStreamsFromAnyOrdinalAcrossBlocksAndSegments()
+    {
+        var store = new InMemoryGeneratedStore();
+        var records = Records(3000, length: i => 30 + i % 90);
+        await WriteAsync(store, records, new RecordFileOptions { BlockBytes = 1024, SegmentBytes = 8 << 10 });
+        var file = await OpenAsync(store);
+        var firsts = file.BlockFirstOrdinals;
+        foreach (var from in new long[] { 0, 1, firsts[1] - 1, firsts[1], firsts[1] + 1, firsts[^1], 1500, records.Count - 1 })
+            AssertSame(records[(int)from..], await FromAsync(file, from), from);
+        Assert.Empty(await FromAsync(file, records.Count));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => FromAsync(file, records.Count + 1));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => FromAsync(file, -1));
+    }
+
+    [Fact]
+    public async Task ReadFromFetchesBackToBackBlocksTogether()
+    {
+        var store = new InMemoryGeneratedStore();
+        var records = Records(4000, length: _ => 100);
+        var info = await WriteAsync(store, records, new RecordFileOptions { BlockBytes = 2048, SegmentBytes = 64 << 10 });
+        var file = await OpenAsync(store);
+        var before = store.RangeReads;
+        AssertSame(records, await FromAsync(file, 0));
+        var reads = store.RangeReads - before;
+        // Each segment's blocks fit in one run (segments are under RunBytes), so one range read per segment, not per block.
+        Assert.True(reads <= info.Segments, $"{reads} range reads for {info.Segments} segments");
+        Assert.True(info.Blocks > 4 * reads, $"{info.Blocks} blocks in {reads} reads");
+    }
+
+    [Fact]
+    public async Task ReadFromCapsARunAtRunBytes()
+    {
+        var store = new InMemoryGeneratedStore();
+        // Incompressible records, one segment: the walk splits into runs of at most RunBytes.
+        var random = new Random(5);
+        var records = Enumerable.Range(1, 600).Select(i => { var b = new byte[2000]; random.NextBytes(b); return ((uint)i, b); }).ToList();
+        var info = await WriteAsync(store, records, new RecordFileOptions { BlockBytes = 4096, SegmentBytes = 32 << 20 });
+        Assert.Equal(1, info.Segments);
+        var file = await OpenAsync(store);
+        var before = store.RangeReads;
+        AssertSame(records, await FromAsync(file, 0));
+        var reads = store.RangeReads - before;
+        Assert.True(reads >= info.CompressedBytes / RecordFile.RunBytes && reads < info.Blocks, $"{reads} reads, {info.Blocks} blocks");
+    }
+
+    [Fact]
+    public async Task ReadFromOverADamagedSegmentThrowsCorrupt()
+    {
+        var store = new InMemoryGeneratedStore();
+        var records = Records(2000, length: _ => 100);
+        await WriteAsync(store, records, new RecordFileOptions { BlockBytes = 2048, SegmentBytes = 16 << 10 });
+        var file = await OpenAsync(store);
+        foreach (var key in file.Keys.Skip(1)) store.Damage(key);
+        var e = await Assert.ThrowsAsync<GeneratedStoreException>(() => FromAsync(file, 1000));
+        Assert.Equal(GeneratedStoreCodes.Corrupt, e.Code);
+    }
+
+    [Fact]
+    public async Task ReadFromStopsOnCancellation()
+    {
+        var store = new InMemoryGeneratedStore();
+        var records = Records(2000, length: _ => 100);
+        await WriteAsync(store, records, new RecordFileOptions { BlockBytes = 2048 });
+        var file = await OpenAsync(store);
+        using var cts = new CancellationTokenSource();
+        var seen = 0;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var _ in file.ReadFromAsync(0, cts.Token)) if (++seen == 10) cts.Cancel();
+        });
+        Assert.Equal(10, seen);
+    }
+
     [Fact]
     public async Task FindsPresentAndAbsentIdsWithUnsortedInput()
     {
@@ -231,6 +312,86 @@ public sealed class RecordFileTests
         Assert.Equal(100u, (await file.FindAsync(100))!.Value.Id);
         Assert.Equal(109u, (await file.FindAsync(109))!.Value.Id);
     }
+
+    [Fact]
+    public async Task FindAtOrAfterHitsGapsAndEnds()
+    {
+        var store = new InMemoryGeneratedStore();
+        await WriteAsync(store, Records(10, i => (uint)(100 + i * 10)));
+        var file = await OpenAsync(store);
+        Assert.Equal((3L, 130u), Key(await file.FindAtOrAfterAsync(130)));
+        Assert.Equal((4L, 140u), Key(await file.FindAtOrAfterAsync(131)));
+        Assert.Equal((4L, 140u), Key(await file.FindAtOrAfterAsync(139)));
+        Assert.Equal((0L, 100u), Key(await file.FindAtOrAfterAsync(0)));
+        Assert.Equal((0L, 100u), Key(await file.FindAtOrAfterAsync(99)));
+        Assert.Equal((9L, 190u), Key(await file.FindAtOrAfterAsync(190)));
+        Assert.Null(await file.FindAtOrAfterAsync(191));
+        Assert.Null(await file.FindAtOrAfterAsync(uint.MaxValue));
+        var hit = (await file.FindAtOrAfterAsync(125))!.Value;
+        Assert.Equal(Payload(130, 23), hit.Bytes.ToArray());
+    }
+
+    [Fact]
+    public async Task FindAtOrAfterOnAnEmptyFileIsNull()
+    {
+        var store = new InMemoryGeneratedStore();
+        await WriteAsync(store, []);
+        var file = await OpenAsync(store);
+        Assert.Null(await file.FindAtOrAfterAsync(0));
+        Assert.Null(await file.FindAtOrAfterAsync(uint.MaxValue));
+    }
+
+    [Fact]
+    public async Task FindAtOrAfterCrossesIdChunksWithinBoundedReads()
+    {
+        var store = new InMemoryGeneratedStore();
+        var records = Records(3000, i => (uint)(i * 10 + 10), _ => 40);
+        var info = await WriteAsync(store, records, new RecordFileOptions { BlockBytes = 2048 });
+        Assert.True(info.IdChunks >= 3, $"{info.IdChunks} id chunks");
+        var file = await OpenAsync(store);
+        // Chunk 0 ends at ordinal 1023 (id 10240); one past it is the next chunk's first entry.
+        var lastOfChunk = records[RecordFileFormat.IdChunkEntries - 1].Id;
+        var before = store.RangeReads;
+        Assert.Equal((1024L, lastOfChunk + 10), Key(await file.FindAtOrAfterAsync(lastOfChunk + 1)));
+        Assert.Equal(before + 3, store.RangeReads); // two id chunks, one block
+        Assert.Equal((1023L, lastOfChunk), Key(await file.FindAtOrAfterAsync(lastOfChunk)));
+        Assert.Equal((2048L, 20490u), Key(await file.FindAtOrAfterAsync(20481)));
+        Assert.Equal((2999L, 30000u), Key(await file.FindAtOrAfterAsync(29991)));
+        Assert.Null(await file.FindAtOrAfterAsync(30001));
+        for (var i = 0; i < records.Count; i += 97)
+            Assert.Equal(records[i].Bytes, (await file.FindAtOrAfterAsync(records[i].Id - 9))!.Value.Bytes.ToArray());
+    }
+
+    [Fact]
+    public async Task FindAtOrAfterFollowsIdsNotOrdinals()
+    {
+        var store = new InMemoryGeneratedStore();
+        var rng = new Random(23);
+        var records = Records(2500, i => (uint)(i * 4 + 1)).OrderBy(_ => rng.Next()).ToList();
+        await WriteAsync(store, records);
+        var file = await OpenAsync(store);
+        var ordinalOf = records.Select((r, i) => (r.Id, i)).ToDictionary(x => x.Id, x => (long)x.i);
+        foreach (var asked in new uint[] { 0, 1, 2, 4, 5, 4093, 4096, 4097, 5000, 9997 })
+        {
+            var expected = (asked + 2) / 4 * 4 + 1; // the smallest 4k + 1 at or after asked
+            Assert.Equal((ordinalOf[expected], expected), Key(await file.FindAtOrAfterAsync(asked)));
+        }
+        Assert.Null(await file.FindAtOrAfterAsync(9998));
+    }
+
+    [Fact]
+    public async Task FindAtOrAfterOverADamagedIdIndexThrowsCorrupt()
+    {
+        var store = new InMemoryGeneratedStore();
+        var records = Records(500, length: _ => 40);
+        await WriteAsync(store, records, new RecordFileOptions { BlockBytes = 1024, SegmentBytes = 4096 });
+        var file = await OpenAsync(store);
+        store.Damage(file.Keys[^1]); // the id index lives in the last segment
+        var e = await Assert.ThrowsAsync<GeneratedStoreException>(() => file.FindAtOrAfterAsync(records[0].Id));
+        Assert.Equal(GeneratedStoreCodes.Corrupt, e.Code);
+    }
+
+    private static (long Ordinal, uint Id)? Key(Record? record) => record is { } r ? (r.Ordinal, r.Id) : null;
 
     [Fact]
     public async Task DuplicateIdIsRefusedAndTheWriterGoesOn()
@@ -609,6 +770,7 @@ public sealed class RecordFileTests
         public ValueTask<GeneratedRead> ReadAsync(GeneratedKey key, CancellationToken ct = default) => inner.ReadAsync(key, ct);
         public ValueTask<GeneratedRangeRead> ReadRangeAsync(GeneratedKey key, long offset, Memory<byte> destination, CancellationToken ct = default) => inner.ReadRangeAsync(key, offset, destination, ct);
         public Task DeleteAsync(IReadOnlyList<GeneratedKey> keys, CancellationToken ct = default) => inner.DeleteAsync(keys, ct);
+        public Task<GeneratedCompactReport> CompactAsync(double minDeadFraction = 0.25, int maxPacks = 1, CancellationToken ct = default) => inner.CompactAsync(minDeadFraction, maxPacks, ct);
         public Task<IReadOnlyList<GeneratedPutOutcome>> PutAsync(IReadOnlyList<GeneratedPut> batch, CancellationToken ct = default) =>
             Armed && ++puts == failAt ? throw new GeneratedStoreException(GeneratedStoreCodes.WriteFailed, "Scripted failure.") : inner.PutAsync(batch, ct);
     }
@@ -621,6 +783,7 @@ public sealed class RecordFileTests
         public ValueTask<GeneratedRead> ReadAsync(GeneratedKey key, CancellationToken ct = default) => inner.ReadAsync(key, ct);
         public ValueTask<GeneratedRangeRead> ReadRangeAsync(GeneratedKey key, long offset, Memory<byte> destination, CancellationToken ct = default) => inner.ReadRangeAsync(key, offset, destination, ct);
         public Task DeleteAsync(IReadOnlyList<GeneratedKey> keys, CancellationToken ct = default) => inner.DeleteAsync(keys, ct);
+        public Task<GeneratedCompactReport> CompactAsync(double minDeadFraction = 0.25, int maxPacks = 1, CancellationToken ct = default) => inner.CompactAsync(minDeadFraction, maxPacks, ct);
         public Task<IReadOnlyList<GeneratedPutOutcome>> PutAsync(IReadOnlyList<GeneratedPut> batch, CancellationToken ct = default)
         {
             Puts++;
@@ -636,6 +799,7 @@ public sealed class RecordFileTests
         public ValueTask<GeneratedRead> ReadAsync(GeneratedKey key, CancellationToken ct = default) => inner.ReadAsync(key, ct);
         public ValueTask<GeneratedRangeRead> ReadRangeAsync(GeneratedKey key, long offset, Memory<byte> destination, CancellationToken ct = default) => inner.ReadRangeAsync(key, offset, destination, ct);
         public Task DeleteAsync(IReadOnlyList<GeneratedKey> keys, CancellationToken ct = default) => inner.DeleteAsync(keys, ct);
+        public Task<GeneratedCompactReport> CompactAsync(double minDeadFraction = 0.25, int maxPacks = 1, CancellationToken ct = default) => inner.CompactAsync(minDeadFraction, maxPacks, ct);
         public Task<IReadOnlyList<GeneratedPutOutcome>> PutAsync(IReadOnlyList<GeneratedPut> batch, CancellationToken ct = default)
         {
             cts.Cancel();

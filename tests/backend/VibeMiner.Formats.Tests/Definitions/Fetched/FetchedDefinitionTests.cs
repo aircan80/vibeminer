@@ -274,6 +274,7 @@ public sealed class FetchedDefinitionTests
             await cancel.CancelAsync();
             return new(ObjectState.StoreFailed, result.Observation, false, "OBJECT_ACCESS_CANCELED", "The history write was canceled.");
         }
+        public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken) => inner.RecordAsync(observation, cancellationToken);
         public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken token) => inner.CountPresentAsync(keys, token);
         public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken token) => inner.HasKeysAsync(keys, token);
         public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken token) => inner.ReadHistoryAsync(query, token);

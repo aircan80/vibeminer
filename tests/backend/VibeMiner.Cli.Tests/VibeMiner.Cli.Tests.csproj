@@ -5,6 +5,7 @@
   <ProjectReference Include="../VibeMiner.Builds.Testing/VibeMiner.Builds.Testing.csproj" />
   <ProjectReference Include="../VibeMiner.Files.Testing/VibeMiner.Files.Testing.csproj" />
   <ProjectReference Include="../VibeMiner.Formats.Testing/VibeMiner.Formats.Testing.csproj" />
+  <ProjectReference Include="../VibeMiner.Generated.Testing/VibeMiner.Generated.Testing.csproj" />
   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
   <PackageReference Include="xunit" Version="2.9.3" />
   <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1"><PrivateAssets>all</PrivateAssets></PackageReference>

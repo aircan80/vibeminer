@@ -3,6 +3,7 @@ using VibeMiner.Builds;
 using VibeMiner.Files;
 using VibeMiner.Files.Names;
 using VibeMiner.Formats.Tables;
+using VibeMiner.Generated;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 
@@ -13,7 +14,10 @@ namespace VibeMiner.Cli.Browse;
 /// read-only for one load and close it; only an action (<c>r</c>, <c>a</c>, <c>m</c>, <c>g</c>/<c>G</c>) and the tables composition
 /// ask for the writer lock, and they share one handle (<see cref="SharedWriter"/>). The Files views share one session-owned
 /// read-only store and file system instead (<see cref="OpenFilesAsync"/>), since opening a build and loading the names are too
-/// slow to redo per load. Dispose the session when browse exits: it closes the tables composition and the files.
+/// slow to redo per load. The profile's generated store (<c>generated-v1/</c>) is opened once per session, as its one writer, and
+/// shared by the names index (#186) and the tables composition (<see cref="GeneratedStoreAsync"/>); when another writer (the app)
+/// holds it, names are off rather than failing the view. Dispose the session when browse exits: it closes the tables
+/// composition, the files and then the generated store.
 /// </summary>
 internal sealed class BrowseSession : IAsyncDisposable
 {
@@ -33,7 +37,8 @@ internal sealed class BrowseSession : IAsyncDisposable
         Environment = environment ?? CliEnvironment.Current();
         NameSwitch = new SettingsNameSwitch(folder.Path);
         // The seams are read when the store opens, so a test may set them after construction.
-        files = new FilesCache(OpenReadAsync, objects => FileSystem(objects, Builds(objects), NameSwitch));
+        FileSystem = DefaultFileSystemAsync;
+        files = new FilesCache(OpenReadAsync, (objects, ct) => FileSystem(objects, Builds(objects), NameSwitch, ct));
     }
 
     public DataFolder Folder { get; }
@@ -100,12 +105,40 @@ internal sealed class BrowseSession : IAsyncDisposable
     internal IFileNameSwitch NameSwitch { get; set; }
 
     /// <summary>
-    /// Makes layer 4 over a read-only store's objects and builds, with the names switch. A test seam: the real one is
-    /// <see cref="VibeMiner.Files.FileSystem"/>. Browse never fetches names: handles only read the stored copy, and nothing calls
+    /// Makes layer 4 over a store's objects and builds, with the names switch. A test seam: the real one is
+    /// <see cref="VibeMiner.Files.FileSystem"/> with the session's generated store for names (<see cref="GeneratedStoreAsync"/>). Browse never fetches names: handles only read the stored copy, and nothing calls
     /// <see cref="IFileNames.UpdateAsync"/>.
     /// </summary>
-    internal Func<IObjectSource, IBuilds, IFileNameSwitch, IFileSystem> FileSystem { get; set; } =
-        (objects, builds, names) => new VibeMiner.Files.FileSystem(builds, objects, new FileSystemOptions { Names = names });
+    internal Func<IObjectSource, IBuilds, IFileNameSwitch, CancellationToken, Task<IFileSystem>> FileSystem { get; set; }
+
+    /// <summary>
+    /// Opens the data folder's generated store at <c>generated-v1/</c>. A test seam: the real one is <see cref="GeneratedStore.OpenAsync"/>.
+    /// </summary>
+    internal Func<string, CancellationToken, Task<IGeneratedStore>> OpenGeneratedStore { get; set; } =
+        async (folder, ct) => await GeneratedStore.OpenAsync(folder, cancellationToken: ct).ConfigureAwait(false);
+
+    private readonly SemaphoreSlim generatedOpening = new(1, 1);
+    private IGeneratedStore? generatedStore;
+
+    private async Task<IFileSystem> DefaultFileSystemAsync(IObjectSource objects, IBuilds builds, IFileNameSwitch names, CancellationToken ct) =>
+        new VibeMiner.Files.FileSystem(builds, objects, new FileSystemOptions { Names = names, NamesStore = await GeneratedStoreAsync(ct).ConfigureAwait(false) });
+
+    /// <summary>
+    /// The session's generated store (names index and tables), opened once per session; null leaves names off. GENERATED_STORE_BUSY (the app
+    /// holds it) and any other failure to open it are null, and the next file system tries again.
+    /// </summary>
+    internal async Task<IGeneratedStore?> GeneratedStoreAsync(CancellationToken ct)
+    {
+        await generatedOpening.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (generatedStore is not null) return generatedStore;
+            try { generatedStore = await OpenGeneratedStore(Path.Combine(Folder.Path, GeneratedStore.DefaultFolderName), ct).ConfigureAwait(false); }
+            catch (Exception e) when (e is GeneratedStoreException or IOException or UnauthorizedAccessException) { return null; }
+            return generatedStore;
+        }
+        finally { generatedOpening.Release(); }
+    }
 
     /// <summary>
     /// Opens a build and locale through the session's file system, reusing the last one opened. Dispose the lease when the load
@@ -121,11 +154,19 @@ internal sealed class BrowseSession : IAsyncDisposable
     /// <summary>Drops the session's store, file system and open build: the next <see cref="OpenFilesAsync"/> opens them again.</summary>
     public ValueTask InvalidateFilesAsync() => files.InvalidateAsync();
 
-    /// <summary>Closes the tables composition and the session's files (each once no lease holds it). Call after every load has ended.</summary>
+    /// <summary>Closes the tables composition and the session's files (each once no lease holds it), then the generated store. Call
+    /// after every load has ended.</summary>
     public async ValueTask DisposeAsync()
     {
-        try { if (tables is not null) await tables.DisposeAsync().ConfigureAwait(false); }
-        finally { await files.DisposeAsync().ConfigureAwait(false); }
+        try
+        {
+            try { if (tables is not null) await tables.DisposeAsync().ConfigureAwait(false); }
+            finally { await files.DisposeAsync().ConfigureAwait(false); }
+        }
+        finally
+        {
+            if (Interlocked.Exchange(ref generatedStore, null) is IAsyncDisposable store) await store.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -133,6 +174,16 @@ internal sealed class BrowseSession : IAsyncDisposable
     /// root wires it, and the tables views then say tables aren't available. A test seam too.
     /// </summary>
     internal Func<BrowseSession, CancellationToken, Task<TablesLease>>? OpenTables { get; set; }
+
+    /// <summary>
+    /// The real tables composition for this session (<see cref="UseTables"/>): over the session's generated store and names switch,
+    /// so names and tables share one writer of <c>generated-v1/</c>. When that store can't be opened, the composition opens its
+    /// own, which reports GENERATED_STORE_BUSY as before.
+    /// </summary>
+    internal async Task<TablesLease> ComposeTablesAsync(IStoreHandle handle, string dataFolder, bool fetchDefinitions, CancellationToken ct) =>
+        await GeneratedStoreAsync(ct).ConfigureAwait(false) is { } shared
+            ? await TablesComposition.LeaseAsync(handle, shared, NameSwitch, fetchDefinitions, ct, Builds(handle.Objects)).ConfigureAwait(false)
+            : await TablesComposition.LeaseAsync(handle, dataFolder, fetchDefinitions, ct).ConfigureAwait(false);
 
     /// <summary>Free bytes on the volume holding a folder, for Download all; throws when it can't be read. A test seam.</summary>
     internal Func<string, long> FreeSpace { get; set; } = folder => new DriveInfo(Path.GetFullPath(folder)).AvailableFreeSpace;

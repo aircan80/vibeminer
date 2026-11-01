@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using VibeMiner.Builds;
 using VibeMiner.Files.Formats;
 using VibeMiner.Files.Names;
+using VibeMiner.Generated;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 
@@ -22,12 +23,15 @@ public sealed record FileSystemOptions
     public ITactKeys Keys { get; init; } = TactKeys.None;
     /// <summary>The community file names switch (D105); null leaves names off.</summary>
     public IFileNameSwitch? Names { get; init; }
+    /// <summary>The generated store the names index and its download staging live in (#186); null leaves names off.</summary>
+    public IGeneratedStore? NamesStore { get; init; }
 }
 
 /// <summary>
 /// The real <see cref="IFileSystem"/>: opens builds through layer 3 and asks layer 2 which encoded copies are stored. A handle
 /// holds the opened <see cref="IBuild"/>, so a file is a ROOT and ENCODING lookup in memory plus a batched index check. One
-/// <see cref="FileNames"/> over the same layer 2 source names files for every handle; handles never fetch names.
+/// <see cref="FileNames"/> over the same layer 2 source and <see cref="FileSystemOptions.NamesStore"/> names files for every handle;
+/// handles never fetch names, and a names read that fails only leaves names out.
 /// </summary>
 public sealed class FileSystem : IFileSystem
 {
@@ -47,7 +51,7 @@ public sealed class FileSystem : IFileSystem
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.ProgressInterval, TimeSpan.Zero, nameof(options));
         ArgumentNullException.ThrowIfNull(options.Time, nameof(options));
         this.builds = builds; this.objects = objects; this.options = options;
-        names = new FileNames(objects, options.Names);
+        names = new FileNames(objects, options.NamesStore, options.Names);
     }
 
     public IFileNames Names => names;
@@ -186,7 +190,7 @@ internal sealed partial class BuildFiles : IBuildFiles
         var pendingNames = new List<string?>(batch);
         using var ids = build.FileDataIds(Locale, filter.FromId).GetEnumerator();
         // Names walk beside the build's ids (both ascend), so naming a batch is a merge, not a lookup per file.
-        var named = new NameCursor();
+        await using var named = new NameCursor(cancellationToken);
         var more = true;
         var walked = 0;
         // The first FileDataID the next batch can hold.
@@ -196,7 +200,7 @@ internal sealed partial class BuildFiles : IBuildFiles
             // The names as they are now, read once per batch; a newer copy restarts the walk where the listing is.
             var index = await names.CurrentAsync(cancellationToken).ConfigureAwait(false);
             if (prefix is not null && index is null) yield break;
-            named.Use(index, next);
+            await named.UseAsync(index, next).ConfigureAwait(false);
             pending.Clear();
             pendingNames.Clear();
             while (pending.Count < batch && (more = ids.MoveNext()))
@@ -206,8 +210,10 @@ internal sealed partial class BuildFiles : IBuildFiles
                 var id = ids.Current;
                 if (id > filter.ToId) { more = false; break; }
                 next = (ulong)id + 1;
-                var name = named.NameOf(id);
-                if (prefix is not null && (name is null || !ListfileIndex.HasPrefix(name, prefix))) continue;
+                var name = await named.NameOfAsync(id).ConfigureAwait(false);
+                // A names read that failed: with a prefix nothing more can match, so the listing ends here.
+                if (prefix is not null && named.Failed) { more = false; break; }
+                if (prefix is not null && (name is null || !NameFolding.HasPrefix(name, prefix))) continue;
                 if (Variants.Pick(build.Resolve(id).Variants, localeBit) is not { } variant) continue;
                 if (filter.Encrypted is { } encrypted && IsEncrypted(variant) != encrypted) continue;
                 pending.Add((id, variant));
@@ -275,11 +281,11 @@ internal sealed partial class BuildFiles : IBuildFiles
         cancellationToken.ThrowIfCancellationRequested();
         // The names as they are now, read once for the lookup and the label.
         var index = await names.CurrentAsync(cancellationToken).ConfigureAwait(false);
-        var found = Find(build, file, index);
+        var found = await FindAsync(build, file, index, cancellationToken).ConfigureAwait(false);
         var resolved = found.Resolution;
         if (resolved.State == FileResolutionState.UnknownFile || resolved.FileDataId is not { } fileDataId) return new(FileLookupState.UnknownFile, null);
         if (Variants.Pick(resolved.Variants, localeBit) is not { } variant) return new(FileLookupState.NotInLocale, null);
-        var (path, source) = index?.NameOf(fileDataId) is { } name ? (name, FilePathSource.Listfile)
+        var (path, source) = index is not null && await index.NameOfAsync(fileDataId, cancellationToken).ConfigureAwait(false) is { } name ? (name, FilePathSource.Listfile)
             : found.ByRootHash ? (file.Path, FilePathSource.RootHash) : (null, FilePathSource.None);
         var storage = await StorageOfAsync([(fileDataId, variant)], cancellationToken).ConfigureAwait(false);
         var stat = ToFile(fileDataId, variant, storage[0], path, source);
@@ -351,34 +357,35 @@ internal sealed partial class BuildFiles : IBuildFiles
     /// <summary>A lookup's resolution, and whether a path matched ROOT's name hash.</summary>
     private readonly record struct Found(FileResolution Resolution, bool ByRootHash);
 
-    /// <summary><see cref="Find"/>, reading the names only when ROOT's name hash misses the path.</summary>
+    /// <summary>The lookup below, reading the names only when ROOT's name hash misses the path.</summary>
     private async ValueTask<Found> FindAsync(IBuild build, FileRef file, CancellationToken cancellationToken)
     {
-        if (file.Path is not { } path) return Find(build, file, null);
+        if (file.Path is not { } path) return await FindAsync(build, file, null, cancellationToken).ConfigureAwait(false);
         var byRoot = build.Resolve(path);
         if (byRoot.State != FileResolutionState.UnknownFile) return new(byRoot, true);
-        return FromListfile(build, path, await names.CurrentAsync(cancellationToken).ConfigureAwait(false)) is { } listed ? new(listed, false) : new(byRoot, false);
+        var index = await names.CurrentAsync(cancellationToken).ConfigureAwait(false);
+        return await FromListfileAsync(build, path, index, cancellationToken).ConfigureAwait(false) is { } listed ? new(listed, false) : new(byRoot, false);
     }
 
     /// <summary>
     /// A FileDataID resolves as it is. A path resolves by ROOT's name hash first, then through <paramref name="index"/>: of the
     /// FileDataIDs it gives the name, those this build lists in this locale, else those it lists at all; the highest of them.
     /// </summary>
-    private Found Find(IBuild build, FileRef file, ListfileIndex? index)
+    private async ValueTask<Found> FindAsync(IBuild build, FileRef file, LoadedNames? index, CancellationToken cancellationToken)
     {
         if (file.FileDataId is { } id) return new(build.Resolve(id), false);
         var path = file.Path ?? throw new ArgumentException("An empty file reference.", nameof(file));
         var byRoot = build.Resolve(path);
         if (byRoot.State != FileResolutionState.UnknownFile) return new(byRoot, true);
-        return FromListfile(build, path, index) is { } listed ? new(listed, false) : new(byRoot, false);
+        return await FromListfileAsync(build, path, index, cancellationToken).ConfigureAwait(false) is { } listed ? new(listed, false) : new(byRoot, false);
     }
 
-    private FileResolution? FromListfile(IBuild build, string path, ListfileIndex? index)
+    private async ValueTask<FileResolution?> FromListfileAsync(IBuild build, string path, LoadedNames? index, CancellationToken cancellationToken)
     {
         if (index is null) return null;
         FileResolution? inLocale = null, listed = null;
         // Ascending, so the last kept is the highest.
-        foreach (var id in index.IdsOf(path))
+        foreach (var id in await index.IdsOfAsync(path, cancellationToken).ConfigureAwait(false))
         {
             var resolved = build.Resolve(id);
             if (resolved.State == FileResolutionState.UnknownFile) continue;
@@ -513,28 +520,39 @@ internal sealed partial class BuildFiles : IBuildFiles
 }
 
 /// <summary>
-/// Names for ascending FileDataIDs by walking <see cref="ListfileIndex.From"/> beside them: one step per name passed, so a
-/// listing names its files in one merge rather than a search each.
+/// Names for ascending FileDataIDs by walking <see cref="LoadedNames.FromAsync"/> beside them: one step per name passed, so a
+/// listing names its files in one merge rather than a search each. One streaming read is kept open across batches and restarted
+/// when the copy changes.
 /// </summary>
-internal sealed class NameCursor
+internal sealed class NameCursor(CancellationToken cancellationToken) : IAsyncDisposable
 {
-    private ListfileIndex? index;
-    private IEnumerator<(uint Id, string Name)>? names;
+    private LoadedNames? index;
+    private IAsyncEnumerator<(uint Id, string Name)>? names;
     private bool has;
 
+    /// <summary>Whether a read of the copy being walked failed, so names past it are missing.</summary>
+    public bool Failed => index?.IsDamaged == true;
+
     /// <summary>Walks <paramref name="current"/> from <paramref name="from"/> on, unless it is the copy already being walked.</summary>
-    public void Use(ListfileIndex? current, ulong from)
+    public async ValueTask UseAsync(LoadedNames? current, ulong from)
     {
         if (ReferenceEquals(current, index) && (names is not null || current is null)) return;
+        if (names is not null) await names.DisposeAsync().ConfigureAwait(false);
         index = current;
-        names = current is null || from > uint.MaxValue ? null : current.From((uint)from).GetEnumerator();
-        has = names?.MoveNext() ?? false;
+        names = current is null || from > uint.MaxValue ? null : current.FromAsync((uint)from, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        has = names is not null && await names.MoveNextAsync().ConfigureAwait(false);
     }
 
     /// <summary>The name of <paramref name="id"/>; each call's id must be above the last one's.</summary>
-    public string? NameOf(uint id)
+    public async ValueTask<string?> NameOfAsync(uint id)
     {
-        while (has && names!.Current.Id < id) has = names.MoveNext();
+        while (has && names!.Current.Id < id) has = await names.MoveNextAsync().ConfigureAwait(false);
         return has && names!.Current.Id == id ? names.Current.Name : null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (names is not null) await names.DisposeAsync().ConfigureAwait(false);
+        names = null;
     }
 }

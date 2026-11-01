@@ -55,8 +55,10 @@ public sealed record ObjectResult(ObjectKey Key, ObjectState State, ServedFrom? 
 /// the version service's list of every product; it has no product. <see cref="Definition"/> is one WoWDBDefs table definition
 /// (D081), served by <see cref="WoWDBDefsObservations"/>. <see cref="ListfileRelease"/> is the wow-listfile's latest GitHub
 /// release (the release JSON) and <see cref="ListfilePart"/> one fixed 8 MiB part of that release's CSV asset.
+/// <see cref="ListfileDelta"/> is a release recorded against the one before it, in layer 4's format (opaque here): no source
+/// serves it, so it is never fetched, only recorded with <see cref="IObjectSource.RecordAsync"/>.
 /// </summary>
-public enum ObservationKind { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4, Definition = 5, ListfileRelease = 6, ListfilePart = 7 }
+public enum ObservationKind { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4, Definition = 5, ListfileRelease = 6, ListfilePart = 7, ListfileDelta = 8 }
 
 /// <summary>
 /// One observation to make. <see cref="Product"/> is "" for <see cref="ObservationKind.Summary"/>. A
@@ -65,10 +67,12 @@ public enum ObservationKind { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4, Def
 /// request has a <see cref="Name"/>. A <see cref="ObservationKind.ListfileRelease"/> request is <see cref="Product"/> =
 /// <see cref="ListfileProduct"/> and <see cref="Region"/> = <see cref="ListfileReleaseRegion"/>. A
 /// <see cref="ObservationKind.ListfilePart"/> request is <see cref="Product"/> = the release tag (1-64 of [a-z0-9_-]) and
-/// <see cref="Region"/> = <see cref="ListfilePartRegion"/> of the part index. A request that breaks these rules is Refused with
-/// <c>OBSERVATION_REQUEST_INVALID</c>.
+/// <see cref="Region"/> = <see cref="ListfilePartRegion"/> of the part index. A <see cref="ObservationKind.ListfileDelta"/> is
+/// never fetched. A request that breaks these rules is Refused with <c>OBSERVATION_REQUEST_INVALID</c>.
+/// With <see cref="Record"/> false the observation is fetched and returned but nothing is written to the history log or the
+/// store (<see cref="ObservationResult.Recorded"/> false); the caller can record it later with <see cref="IObjectSource.RecordAsync"/>.
 /// </summary>
-public sealed record ObservationRequest(ObservationKind Kind, string Product, string Region, string? Name = null)
+public sealed record ObservationRequest(ObservationKind Kind, string Product, string Region, string? Name = null, bool Record = true)
 {
     /// <summary>The region every definition observation is recorded under.</summary>
     public const string DefinitionRegion = "wowdbdefs";
@@ -80,6 +84,10 @@ public sealed record ObservationRequest(ObservationKind Kind, string Product, st
     public const int ListfilePartBytes = 8 * 1024 * 1024;
     /// <summary>The number of listfile parts a release can have (0..63, so an asset of at most 512 MiB).</summary>
     public const int ListfileMaxParts = 64;
+    /// <summary>The region every listfile delta is recorded under.</summary>
+    public const string ListfileDeltaRegion = "delta";
+    /// <summary>The largest listfile delta: a history document's limit, 16 MiB.</summary>
+    public const int ListfileMaxDeltaBytes = 16 * 1024 * 1024;
 
     /// <summary>The region a listfile part is recorded under: "p" and the index in decimal, no leading zeros.</summary>
     public static string ListfilePartRegion(int index)
@@ -98,9 +106,39 @@ public sealed record ObservationRequest(ObservationKind Kind, string Product, st
         return index < ListfileMaxParts ? index : null;
     }
 
+    /// <summary>Whether a listfile release tag is 1-64 of [a-z0-9_-].</summary>
+    internal static bool ValidListfileTag(string? tag) =>
+        tag is { Length: > 0 and <= 64 } && tag.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-');
+
+    /// <summary>
+    /// Why <see cref="IObjectSource.RecordAsync"/> refuses this observation, or null. Only a listfile part or delta the caller
+    /// holds is recorded: a part is the release tag, <see cref="ListfilePartRegion"/>, <see cref="WowListfileObservations.AssetUrl"/>
+    /// of the tag and 1 byte to 8 MiB; a delta the tag, <see cref="ListfileDeltaRegion"/>, the same URL and 1 byte to 16 MiB.
+    /// </summary>
+    public static string? RecordProblem(Observation? observation)
+    {
+        if (observation is null) return "There is no observation to record.";
+        var (kind, limit) = observation.Kind switch
+        {
+            ObservationKind.ListfilePart => ("listfile part", ListfilePartBytes),
+            ObservationKind.ListfileDelta => ("listfile delta", ListfileMaxDeltaBytes),
+            _ => ((string?)null, 0),
+        };
+        if (kind is null) return $"Only listfile parts and deltas are recorded from a held observation, not {observation.Kind}.";
+        if (!ValidListfileTag(observation.Product)) return $"A {kind}'s product is the release tag, 1-64 of [a-z0-9_-].";
+        if (observation.Kind == ObservationKind.ListfilePart ? ListfilePartIndex(observation.Region) is null : observation.Region != ListfileDeltaRegion)
+            return observation.Kind == ObservationKind.ListfilePart ? "A listfile part's region is \"p0\"..\"p63\", no leading zeros."
+                : $"A listfile delta's region is \"{ListfileDeltaRegion}\".";
+        if (observation.Url is null || observation.Url.AbsoluteUri != WowListfileObservations.AssetUrl(observation.Product))
+            return $"A {kind}'s URL is its release's asset address.";
+        if (observation.Bytes is not { Length: > 0 } bytes || bytes.Length > limit) return $"A {kind} is 1 to {limit} bytes.";
+        return null;
+    }
+
     /// <summary>Why this request's shape is refused, or null. Product and region rules of the other kinds are their client's.</summary>
     public string? Problem()
     {
+        if (Kind == ObservationKind.ListfileDelta) return "A listfile delta is never fetched; record it with RecordAsync.";
         if (Kind == ObservationKind.ListfileRelease)
         {
             if (Product != ListfileProduct || Region != ListfileReleaseRegion)
@@ -109,8 +147,7 @@ public sealed record ObservationRequest(ObservationKind Kind, string Product, st
         }
         if (Kind == ObservationKind.ListfilePart)
         {
-            if (Product is not { Length: > 0 and <= 64 } || Product.Any(c => c is not ((>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-')))
-                return "A listfile part request's product is the release tag, 1-64 of [a-z0-9_-].";
+            if (!ValidListfileTag(Product)) return "A listfile part request's product is the release tag, 1-64 of [a-z0-9_-].";
             if (ListfilePartIndex(Region) is null) return "A listfile part request's region is \"p0\"..\"p63\", no leading zeros.";
             return Name is null ? null : "Only a definition request has a name, not ListfilePart.";
         }
@@ -257,8 +294,20 @@ public interface IObjectSource
     Task<ObjectResult> GetRangeAsync(ObjectRequest request, long offset, Memory<byte> destination, CdnContext? cdn, FetchPriority priority,
         CancellationToken cancellationToken);
 
-    /// <summary>Fetches one dated build observation and records it in the history log (when this source has one).</summary>
+    /// <summary>
+    /// Fetches one dated build observation and records it in the history log (when this source has one and
+    /// <see cref="ObservationRequest.Record"/> is true).
+    /// </summary>
     Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Records an observation the caller holds (one fetched with <see cref="ObservationRequest.Record"/> false, or a listfile
+    /// delta derived from such) as one history entry, exactly as <see cref="ObserveAsync"/> records a fetched one. Only listfile
+    /// parts and deltas are accepted; anything failing <see cref="ObservationRequest.RecordProblem"/> is Refused with
+    /// <c>OBSERVATION_REQUEST_INVALID</c>. A store failure is StoreFailed. A source without a history log answers as its
+    /// <see cref="ObserveAsync"/> does when it can't record.
+    /// </summary>
+    Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken);
 
     /// <summary>
     /// How many of the keys the profile's own store holds (index only, no bytes read). The Downloaded figure counts this way;

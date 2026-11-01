@@ -30,7 +30,7 @@ internal sealed class Observations
         }
     }
 
-    private static ObservationResult Invalid(string message) => new(ObjectState.Refused, Code: "OBSERVATION_REQUEST_INVALID", Message: message);
+    internal static ObservationResult Invalid(string message) => new(ObjectState.Refused, Code: "OBSERVATION_REQUEST_INVALID", Message: message);
 }
 
 /// <summary>Counts present keys with a few index lookups at once (the store has a pool of read connections).</summary>

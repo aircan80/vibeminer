@@ -351,6 +351,7 @@
         "type": "Project",
         "dependencies": {
           "VibeMiner.Builds": "[1.0.0, )",
+          "VibeMiner.Generated": "[1.0.0, )",
           "VibeMiner.ObjectAccess": "[1.0.0, )"
         }
       },
@@ -381,6 +382,12 @@
           "ZstdSharp.Port": "[0.8.6, )"
         }
       },
+      "vibeminer.generated.testing": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Generated": "[1.0.0, )"
+        }
+      },
       "vibeminer.objectaccess": {
         "type": "Project",
         "dependencies": {
@@ -409,6 +416,7 @@
           "VibeMiner.Cdn": "[1.0.0, )",
           "VibeMiner.Files": "[1.0.0, )",
           "VibeMiner.Formats": "[1.0.0, )",
+          "VibeMiner.Generated": "[1.0.0, )",
           "VibeMiner.ObjectAccess": "[1.0.0, )",
           "VibeMiner.Objects": "[1.0.0, )"
         }

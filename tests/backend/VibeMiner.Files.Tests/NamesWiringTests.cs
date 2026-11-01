@@ -1,5 +1,6 @@
 using VibeMiner.Files.Names;
 using VibeMiner.Files.Testing;
+using VibeMiner.Generated.Testing;
 using Xunit;
 
 namespace VibeMiner.Files.Tests;
@@ -16,7 +17,7 @@ public sealed class NamesWiringTests
     {
         var names = new RealNames();
         var files = Enumerable.Range(1, count).Select(i => new FakeFile((uint)i, Size: i)).ToArray();
-        return (FilesFixture.Real(FilesFixture.Build, ["enUS"], files, new FileSystemOptions { PresenceBatch = batch, Names = names }), names);
+        return (FilesFixture.Real(FilesFixture.Build, ["enUS"], files, new FileSystemOptions { PresenceBatch = batch, Names = names, NamesStore = new VibeMiner.Generated.Testing.InMemoryGeneratedStore() }), names);
     }
 
     private static async Task<IBuildFiles> OpenAsync(RealFiles real) => (await real.Files.ForAsync(FilesFixture.Build, "enUS", Ct)).Files!;
@@ -135,5 +136,33 @@ public sealed class NamesWiringTests
         }
 
         Assert.Equal((uint[])[1u, 2, 3, 5, 6, 8], ids.ToArray());
+    }
+
+    [Fact]
+    public async Task AFailedNamesReadNeverFailsAListingAndIsRepairedForTheNextBatch()
+    {
+        var names = new RealNames();
+        var store = new InMemoryGeneratedStore();
+        var all = Enumerable.Range(1, 6).Select(i => new FakeFile((uint)i, Size: i)).ToArray();
+        var real = FilesFixture.Real(FilesFixture.Build, ["enUS"], all, new FileSystemOptions { PresenceBatch = 2, Names = names, NamesStore = store });
+        await names.UseAsync(real.Files, real.Objects, Named(6, "a"));
+        await using var files = await OpenAsync(real);
+        // The index's segments read back damaged; its manifests still open, so a rebuild can repair it.
+        var status = await real.Files.Names.StatusAsync(Ct);
+        var csv = System.Text.Encoding.UTF8.GetBytes(string.Concat(Named(6, "a").Select(n => $"{n.Key};{n.Value}\n")));
+        var manifests = VibeMiner.Files.Names.ListfileStore.ManifestKeys(status.Tag!, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(csv)));
+        foreach (var key in store.Keys.Where(k => k != manifests.Names && k != manifests.Paths)) store.Damage(key);
+
+        var paths = new List<string?>();
+        await foreach (var f in files.ListAsync(FileFilter.All, Ct)) paths.Add(f.Path);
+        Assert.Equal([null, null, "a/f3.blp", "a/f4.blp", "a/f5.blp", "a/f6.blp"], paths);
+        Assert.Equal("a/f1.blp", (await files.StatAsync(1, Ct)).File!.Path);
+
+        // With a prefix, a failed read ends the listing: nothing past it can be matched.
+        foreach (var key in store.Keys.Where(k => k != manifests.Names && k != manifests.Paths)) store.Damage(key);
+        var ids = new List<uint>();
+        await foreach (var f in files.ListAsync(FileFilter.All with { PathPrefix = "a/" }, Ct)) ids.Add(f.FileDataId);
+        Assert.Empty(ids);
+        Assert.True(await files.ExistsAsync(FileRef.ForPath("a/f2.blp"), Ct));
     }
 }

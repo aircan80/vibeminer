@@ -1515,7 +1515,7 @@ public sealed class RealFilesContractTests : FilesContractTests
         TimeProvider? time = null)
     {
         names = new RealNames();
-        last = FilesFixture.Real(build, locales, files, new FileSystemOptions { MaxReadBytes = maxReadBytes, Names = names, Time = time ?? TimeProvider.System });
+        last = FilesFixture.Real(build, locales, files, new FileSystemOptions { MaxReadBytes = maxReadBytes, Names = names, NamesStore = new VibeMiner.Generated.Testing.InMemoryGeneratedStore(), Time = time ?? TimeProvider.System });
         return last.Files;
     }
 

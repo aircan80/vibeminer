@@ -274,7 +274,7 @@ public sealed class InMemoryFileSystem(long maxReadBytes = 256L << 20) : IFileSy
                 if (id > filter.ToId) yield break;
                 if (fake.Find(id) is not { } file || !FakeBuildFiles.InLocale(file, Locale)) continue;
                 var name = index?.NameOf(id);
-                if (prefix is not null && (name is null || !ListfileIndex.HasPrefix(name, prefix))) continue;
+                if (prefix is not null && (name is null || !NameFolding.HasPrefix(name, prefix))) continue;
                 var listed = ToFileWithoutFormat(file, name, name is null ? FilePathSource.None : FilePathSource.Listfile);
                 if (filter.Storage is { } storage && !storage.Contains(listed.Storage)) continue;
                 if (filter.Encrypted is { } encrypted && listed.Encrypted != encrypted) continue;

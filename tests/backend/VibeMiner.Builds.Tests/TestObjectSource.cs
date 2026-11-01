@@ -72,6 +72,9 @@ internal sealed class TestObjectSource(InMemoryObjectSource inner) : IObjectSour
     public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken cancellationToken)
     { Log(nameof(ObserveAsync)); return Inner.ObserveAsync(request, cancellationToken); }
 
+    public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken)
+    { Log(nameof(RecordAsync)); return Inner.RecordAsync(observation, cancellationToken); }
+
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
     { Log(nameof(CountPresentAsync)); return Inner.CountPresentAsync(keys, cancellationToken); }
 

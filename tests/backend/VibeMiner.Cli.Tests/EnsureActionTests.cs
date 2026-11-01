@@ -54,11 +54,11 @@ public sealed class EnsureActionTests : IAsyncDisposable
         session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), Path.Combine(Data, ObjectStore.DefaultFolderName))
         {
             // The handle being opened is the last one asked for: the writer's for an ensure, the session cache's otherwise.
-            FileSystem = (_, _, _) =>
+            FileSystem = (_, _, _, _) =>
             {
-                if (!stores.Opened[^1].Writer) return readOnly;
+                if (!stores.Opened[^1].Writer) return Task.FromResult<IFileSystem>(readOnly);
                 Interlocked.Increment(ref writerFileSystems);
-                return writer;
+                return Task.FromResult<IFileSystem>(writer);
             },
         };
     }

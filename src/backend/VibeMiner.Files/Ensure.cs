@@ -281,7 +281,7 @@ internal sealed partial class BuildFiles
         var toFetch = new List<(int Index, uint Id)>();
         foreach (var file in refs)
         {
-            var resolved = Find(build, file, index).Resolution;
+            var resolved = (await FindAsync(build, file, index, cancellationToken).ConfigureAwait(false)).Resolution;
             if (resolved.State == FileResolutionState.UnknownFile || resolved.FileDataId is not { } id)
             {
                 if (unknown.Add(EnsureTally.UnknownKey(file))) tally.Settle(tally.Add(file, null, 0), FileEnsureState.UnknownFile, null, 0);

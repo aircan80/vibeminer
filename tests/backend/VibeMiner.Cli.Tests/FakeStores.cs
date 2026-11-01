@@ -101,6 +101,7 @@ internal sealed class FailingHistory(IObjectSource inner, Exception failure) : I
     public Task<ObjectResult> GetRangeAsync(ObjectRequest request, long offset, Memory<byte> destination, CdnContext? cdn, FetchPriority priority, CancellationToken ct) =>
         inner.GetRangeAsync(request, offset, destination, cdn, priority, ct);
     public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken ct) => inner.ObserveAsync(request, ct);
+    public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken) => inner.RecordAsync(observation, cancellationToken);
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.CountPresentAsync(keys, ct);
     public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.HasKeysAsync(keys, ct);
     public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken ct) =>
@@ -116,6 +117,7 @@ internal sealed class FailingObservations(IObjectSource inner, ObservationResult
     public Task<ObjectResult> GetRangeAsync(ObjectRequest request, long offset, Memory<byte> destination, CdnContext? cdn, FetchPriority priority, CancellationToken ct) =>
         inner.GetRangeAsync(request, offset, destination, cdn, priority, ct);
     public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken ct) => Task.FromResult(result);
+    public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken) => inner.RecordAsync(observation, cancellationToken);
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.CountPresentAsync(keys, ct);
     public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.HasKeysAsync(keys, ct);
     public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken ct) => inner.ReadHistoryAsync(query, ct);
@@ -132,6 +134,7 @@ internal sealed class ScriptedObservations(IObjectSource inner, Func<Observation
     public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken ct) =>
         script(request) is { } result ? Task.FromResult(result) : inner.ObserveAsync(request, ct);
     public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.HasKeysAsync(keys, ct);
+    public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken) => inner.RecordAsync(observation, cancellationToken);
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.CountPresentAsync(keys, ct);
     public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken ct) => inner.ReadHistoryAsync(query, ct);
 }
@@ -196,6 +199,7 @@ internal sealed class CountingObjectSource(IObjectSource inner) : IObjectSource
         return inner.ObserveAsync(request, ct);
     }
 
+    public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken) => inner.RecordAsync(observation, cancellationToken);
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.CountPresentAsync(keys, ct);
     public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.HasKeysAsync(keys, ct);
     public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken ct) => inner.ReadHistoryAsync(query, ct);

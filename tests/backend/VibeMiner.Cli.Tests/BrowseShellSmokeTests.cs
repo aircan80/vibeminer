@@ -208,7 +208,7 @@ public sealed class BrowseShellSmokeTests(ITestOutputHelper output)
         memory.Names.Use(new Dictionary<uint, string> { [10] = "interface/icons/a.blp", [11] = "interface/x.bin", [12] = "sound/y.ogg" });
         await using var session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), StoreFolder)
         {
-            FileSystem = (_, _, _) => memory,
+            FileSystem = (_, _, _, _) => Task.FromResult<IFileSystem>(memory),
         };
 
         static bool Idle(BrowseShell sh) => !sh.StatusText.Contains("loading...");

@@ -154,6 +154,7 @@
         "type": "Project",
         "dependencies": {
           "VibeMiner.Builds": "[1.0.0, )",
+          "VibeMiner.Generated": "[1.0.0, )",
           "VibeMiner.ObjectAccess": "[1.0.0, )"
         }
       },

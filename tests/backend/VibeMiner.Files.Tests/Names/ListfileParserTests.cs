@@ -5,27 +5,45 @@ using Xunit;
 namespace VibeMiner.Files.Tests.Names;
 
 /// <summary>
-/// The listfile parser's rules (D105, ported from the legacy ListfileCsvParser) and the in-memory names index, over
-/// authored listfiles only.
+/// The listfile parser's rules (D105, ported from the legacy ListfileCsvParser) and the name folding rules, over authored
+/// listfiles only. Lookups on the persisted index are in <see cref="ListfileStoreTests"/>.
 /// </summary>
-public sealed class ListfileIndexTests
+public sealed class ListfileParserTests
 {
-    private const string Sample = "1;Interface/Icons/Alpha.blp\n5;world/maps/Azeroth/Azeroth.wdt\n900;Sound/Music/Theme.mp3\n";
-
-    private static ListfileIndex Parse(string text) => Parse(Encoding.UTF8.GetBytes(text));
-
-    private static ListfileIndex Parse(byte[] bytes, ListfileParser? parser = null)
+    /// <summary>What the parser sent to its sink.</summary>
+    private sealed class Parsed
     {
-        parser ??= new ListfileParser();
-        parser.Feed(bytes);
-        return parser.Complete();
+        public SortedDictionary<uint, string> Names { get; } = [];
+        public long Count { get; set; }
+        public string? NameOf(uint id) => Names.TryGetValue(id, out var name) ? name : null;
+        public void Add(uint id, ReadOnlySpan<byte> name)
+        {
+            Assert.True(Names.Count == 0 || Names.Keys.Last() < id);
+            Names.Add(id, Encoding.UTF8.GetString(name));
+        }
     }
 
-    private static ListfileFormatException Refused(string text, ListfileParser? parser = null) =>
-        Refused(Encoding.UTF8.GetBytes(text), parser);
+    private static ListfileParser Parser(Parsed into, int maxNames = ListfileParser.MaxNames, int maxBlob = ListfileParser.MaxBlobBytes) =>
+        new(into.Add, maxNames, maxBlob);
+    private const string Sample = "1;Interface/Icons/Alpha.blp\n5;world/maps/Azeroth/Azeroth.wdt\n900;Sound/Music/Theme.mp3\n";
 
-    private static ListfileFormatException Refused(byte[] bytes, ListfileParser? parser = null) =>
-        Assert.Throws<ListfileFormatException>(() => Parse(bytes, parser));
+    private static Parsed Parse(string text) => Parse(Encoding.UTF8.GetBytes(text));
+
+    private static Parsed Parse(byte[] bytes, int maxNames = ListfileParser.MaxNames, int maxBlob = ListfileParser.MaxBlobBytes)
+    {
+        var parsed = new Parsed();
+        var parser = Parser(parsed, maxNames, maxBlob);
+        parser.Feed(bytes);
+        parsed.Count = parser.Finish();
+        Assert.Equal(parsed.Names.Count, parsed.Count);
+        return parsed;
+    }
+
+    private static ListfileFormatException Refused(string text, int maxNames = ListfileParser.MaxNames, int maxBlob = ListfileParser.MaxBlobBytes) =>
+        Refused(Encoding.UTF8.GetBytes(text), maxNames, maxBlob);
+
+    private static ListfileFormatException Refused(byte[] bytes, int maxNames = ListfileParser.MaxNames, int maxBlob = ListfileParser.MaxBlobBytes) =>
+        Assert.Throws<ListfileFormatException>(() => Parse(bytes, maxNames, maxBlob));
 
     [Fact]
     public void ParsesAscendingLines()
@@ -78,7 +96,7 @@ public sealed class ListfileIndexTests
     [Fact]
     public void RefusesALineLongerThanTheLimitAcrossChunks()
     {
-        var parser = new ListfileParser();
+        var parser = Parser(new Parsed());
         parser.Feed("1;"u8);
         var error = Assert.Throws<ListfileFormatException>(() => parser.Feed(new byte[ListfileParser.MaxLineBytes]));
         Assert.Contains("longer than", error.Message);
@@ -104,7 +122,6 @@ public sealed class ListfileIndexTests
         var index = Parse($"1;a{string.Concat(marks)}b.blp\n2;‮cd‎\n");
         Assert.Equal("ab.blp", index.NameOf(1));
         Assert.Equal("cd", index.NameOf(2));
-        Assert.Equal(new uint[] { 1u }, index.IdsOf("AB.BLP"));
         // Neighbours that aren't bidi marks stay.
         Assert.Equal("‍⁥ ⁪", Parse("1;‍⁥ ⁪\n").NameOf(1));
     }
@@ -130,36 +147,35 @@ public sealed class ListfileIndexTests
     [Fact]
     public void CapsTheNumberOfNames()
     {
-        Assert.Equal(2, Parse(Encoding.UTF8.GetBytes("1;a\n2;b\n"), new ListfileParser(2, 1024)).Count);
-        Assert.Contains("more than 2 names", Refused("1;a\n2;b\n3;c\n", new ListfileParser(2, 1024)).Message);
+        Assert.Equal(2, Parse(Encoding.UTF8.GetBytes("1;a\n2;b\n"), 2, 1024).Count);
+        Assert.Contains("more than 2 names", Refused("1;a\n2;b\n3;c\n", 2, 1024).Message);
     }
 
     [Fact]
     public void CapsTheNameBytes()
     {
-        Assert.Equal(2, Parse(Encoding.UTF8.GetBytes("1;abc\n2;de\n"), new ListfileParser(10, 5)).Count);
-        Assert.Contains("larger than", Refused("1;abc\n2;def\n", new ListfileParser(10, 5)).Message);
+        Assert.Equal(2, Parse(Encoding.UTF8.GetBytes("1;abc\n2;de\n"), 10, 5).Count);
+        Assert.Contains("larger than", Refused("1;abc\n2;def\n", 10, 5).Message);
     }
 
     [Fact]
-    public void GrowsPastItsInitialStorage()
+    public void ParsesManyNames()
     {
         var text = new StringBuilder();
         for (var id = 0; id < 5000; id++) text.Append(id * 3).Append(";dir/").Append(new string('n', 40)).Append(id).Append('\n');
         var index = Parse(text.ToString());
         Assert.Equal(5000, index.Count);
         Assert.Equal($"dir/{new string('n', 40)}4999", index.NameOf(14997));
-        Assert.Equal(new uint[] { 4999u * 3 }, index.IdsOf($"DIR\\{new string('N', 40)}4999"));
     }
 
     [Fact]
     public void ParsesTheSameWhenFedOneByteAtATime()
     {
         var bytes = Encoding.UTF8.GetBytes("1;a‎é\r\n\n7;Dir/B.blp\r\n4000000000;" + new string('z', ListfileParser.MaxNameBytes));
-        var parser = new ListfileParser();
+        var index = new Parsed();
+        var parser = Parser(index);
         foreach (var value in bytes) parser.Feed([value]);
-        var index = parser.Complete();
-        Assert.Equal(3, parser.Count);
+        Assert.Equal(3, parser.Finish());
         Assert.Equal("aé", index.NameOf(1));
         Assert.Equal("Dir/B.blp", index.NameOf(7));
         Assert.Equal(new string('z', ListfileParser.MaxNameBytes), index.NameOf(4_000_000_000));
@@ -171,133 +187,66 @@ public sealed class ListfileIndexTests
         var bytes = Encoding.UTF8.GetBytes(Sample + "901;x\r\n");
         for (var split = 0; split <= bytes.Length; split++)
         {
-            var parser = new ListfileParser();
+            var index = new Parsed();
+            var parser = Parser(index);
             parser.Feed(bytes.AsSpan(0, split));
             parser.Feed(bytes.AsSpan(split));
-            var index = parser.Complete();
-            Assert.Equal(4, index.Count);
+            Assert.Equal(4, parser.Finish());
             Assert.Equal("world/maps/Azeroth/Azeroth.wdt", index.NameOf(5));
             Assert.Equal("x", index.NameOf(901));
         }
     }
 
     [Fact]
-    public void RefusesFeedAfterCompleteAndCompleteReturnsTheSameIndex()
+    public void RefusesFeedAfterFinishAndFinishReturnsTheSameCount()
     {
-        var parser = new ListfileParser();
+        var parser = Parser(new Parsed());
         parser.Feed("1;a\n"u8);
-        var index = parser.Complete();
-        Assert.Same(index, parser.Complete());
+        Assert.Equal(1, parser.Finish());
+        Assert.Equal(1, parser.Finish());
         Assert.Throws<InvalidOperationException>(() => parser.Feed("2;b\n"u8));
     }
 
     [Fact]
     public void ARefusalFailsTheParserForGood()
     {
-        var parser = new ListfileParser();
+        var parser = Parser(new Parsed());
         parser.Feed("1;a\n2;"u8);
-        Assert.Throws<ListfileFormatException>(() => parser.Complete());
-        Assert.Throws<InvalidOperationException>(() => parser.Complete());
+        Assert.Throws<ListfileFormatException>(() => parser.Finish());
+        Assert.Throws<InvalidOperationException>(() => parser.Finish());
         Assert.Throws<InvalidOperationException>(() => parser.Feed("3;c\n"u8));
     }
 
     [Fact]
     public void ARefusalInFeedFailsTheParser()
     {
-        var parser = new ListfileParser();
+        var parser = Parser(new Parsed());
         Assert.Throws<ListfileFormatException>(() => parser.Feed("2;a\n1;b\n"u8));
         Assert.Throws<InvalidOperationException>(() => parser.Feed("3;c\n"u8));
-        Assert.Throws<InvalidOperationException>(() => parser.Complete());
-    }
-
-    [Theory]
-    [InlineData(1L)]
-    [InlineData(1L << 22)]
-    public void TheSizeHintNeverChangesTheIndex(long expectedBytes)
-    {
-        var text = new StringBuilder();
-        for (var id = 1; id <= 3000; id++) text.Append(id).Append(";dir/file").Append(id).Append(".blp\n");
-        var index = Parse(Encoding.UTF8.GetBytes(text.ToString()), new ListfileParser(expectedBytes));
-        Assert.Equal(3000, index.Count);
-        Assert.Equal("dir/file1.blp", index.NameOf(1));
-        Assert.Equal("dir/file3000.blp", index.NameOf(3000));
-        Assert.Equal(new uint[] { 2999u }, index.IdsOf("DIR/FILE2999.BLP"));
-        Assert.Equal(3000, index.From(0).Count());
+        Assert.Throws<InvalidOperationException>(() => parser.Finish());
     }
 
     [Fact]
     public void TheNameBytesCapCountsNamesAfterBidiMarksAreRemoved() =>
-        Assert.Equal("abc", Parse(Encoding.UTF8.GetBytes("1;a\u200Eb\u200Fc\n"), new ListfileParser(10, 3)).NameOf(1));
+        Assert.Equal("abc", Parse(Encoding.UTF8.GetBytes("1;a\u200Eb\u200Fc\n"), 10, 3).NameOf(1));
 
     [Fact]
-    public void IdsOfIgnoresCaseAndSlashDirection()
+    public void SameNameFoldsOnlyAsciiLettersAndSlashes()
     {
-        var index = Parse(Sample);
-        Assert.Equal(new uint[] { 1u }, index.IdsOf("Interface/Icons/Alpha.blp"));
-        Assert.Equal(new uint[] { 1u }, index.IdsOf("interface\\icons\\alpha.BLP"));
-        Assert.Equal(new uint[] { 5u }, index.IdsOf("WORLD\\MAPS/AZEROTH\\AZEROTH.WDT"));
-        Assert.Equal(new uint[] { 900u }, index.IdsOf("sound/music/theme.mp3"));
-        Assert.Empty(index.IdsOf("sound/music/theme.mp"));
-        Assert.Empty(index.IdsOf("sound/music/theme.mp3 "));
-        Assert.Empty(index.IdsOf(""));
-        Assert.Empty(index.IdsOf("\uD800"));
-        Assert.Empty(index.IdsOf(new string('a', ListfileParser.MaxNameBytes + 1)));
-    }
-
-    [Fact]
-    public void IdsOfFoldsOnlyAsciiLetters()
-    {
-        var index = Parse("1;Café.blp\n");
-        Assert.Equal(new uint[] { 1u }, index.IdsOf("CAFé.BLP"));
-        Assert.Empty(index.IdsOf("CAFÉ.BLP"));
-    }
-
-    [Fact]
-    public void IdsOfReturnsEveryIdOfARepeatedNameAscending()
-    {
-        var index = Parse("3;Dir/Same.blp\n4;other\n8;dir\\SAME.blp\n9;DIR/same.BLP\n");
-        Assert.Equal(new uint[] { 3u, 8, 9 }, index.IdsOf("dir/same.blp"));
-        Assert.Equal("dir\\SAME.blp", index.NameOf(8));
-    }
-
-    [Fact]
-    public void HashCollisionsFallBackToComparingNames()
-    {
-        // Every name hashes the same, so each lookup has to compare names.
-        var parser = new ListfileParser(100, 1 << 16, _ => 42);
-        var index = Parse(Encoding.UTF8.GetBytes("2;b.blp\n3;a.blp\n10;A.BLP\n11;c.blp\n"), parser);
-        Assert.Equal(new uint[] { 3u, 10 }, index.IdsOf("a.blp"));
-        Assert.Equal(new uint[] { 2u }, index.IdsOf("B.blp"));
-        Assert.Equal(new uint[] { 11u }, index.IdsOf("c.blp"));
-        Assert.Empty(index.IdsOf("d.blp"));
-    }
-
-    [Fact]
-    public void TheDefaultHashIgnoresCaseAndSlashDirection()
-    {
-        Assert.Equal(ListfileIndex.Hash("a/B.blp"u8), ListfileIndex.Hash("A\\b.BLP"u8));
-        Assert.NotEqual(ListfileIndex.Hash("a/b.blp"u8), ListfileIndex.Hash("a/c.blp"u8));
-    }
-
-    [Fact]
-    public void FromListsAscendingFromAnId()
-    {
-        var index = Parse(Sample);
-        Assert.Equal([(1u, "Interface/Icons/Alpha.blp"), (5u, "world/maps/Azeroth/Azeroth.wdt"), (900u, "Sound/Music/Theme.mp3")], index.From(0));
-        Assert.Equal([(5u, "world/maps/Azeroth/Azeroth.wdt"), (900u, "Sound/Music/Theme.mp3")], index.From(5));
-        Assert.Equal([(900u, "Sound/Music/Theme.mp3")], index.From(6));
-        Assert.Empty(index.From(901));
-        Assert.Empty(index.From(uint.MaxValue));
+        Assert.True(NameFolding.SameName("Interface/Icons/Alpha.blp"u8, "interface\\icons\\alpha.BLP"u8));
+        Assert.True(NameFolding.SameName("Café.blp"u8, "CAFé.BLP"u8));
+        Assert.False(NameFolding.SameName("Café.blp"u8, "CAFÉ.BLP"u8));
+        Assert.False(NameFolding.SameName("a.mp3"u8, "a.mp3 "u8));
     }
 
     [Fact]
     public void HasPrefixIgnoresAsciiCaseAndSlashDirection()
     {
-        Assert.True(ListfileIndex.HasPrefix("Sound/Music/Theme.mp3", "SOUND\\music/"));
-        Assert.True(ListfileIndex.HasPrefix("Sound/Music/Theme.mp3", ""));
-        Assert.True(ListfileIndex.HasPrefix("a.blp", "A.BLP"));
-        Assert.False(ListfileIndex.HasPrefix("a.blp", "a.blp2"));
-        Assert.False(ListfileIndex.HasPrefix("Café/x", "CAFÉ"));
-        Assert.False(ListfileIndex.HasPrefix("sound/x", "sounds"));
+        Assert.True(NameFolding.HasPrefix("Sound/Music/Theme.mp3", "SOUND\\music/"));
+        Assert.True(NameFolding.HasPrefix("Sound/Music/Theme.mp3", ""));
+        Assert.True(NameFolding.HasPrefix("a.blp", "A.BLP"));
+        Assert.False(NameFolding.HasPrefix("a.blp", "a.blp2"));
+        Assert.False(NameFolding.HasPrefix("Café/x", "CAFÉ"));
+        Assert.False(NameFolding.HasPrefix("sound/x", "sounds"));
     }
 }

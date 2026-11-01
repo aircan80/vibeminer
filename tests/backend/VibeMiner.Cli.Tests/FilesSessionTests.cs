@@ -32,7 +32,7 @@ public sealed class FilesSessionTests : IDisposable
         files = new CountingFileSystem(memory);
         session = new BrowseSession(stores, new DataFolder(data, DataFolderSource.Override), Path.Combine(data, ObjectStore.DefaultFolderName))
         {
-            FileSystem = (_, _, names) => { Interlocked.Increment(ref made); givenSwitch = names; return files; },
+            FileSystem = (_, _, names, _) => { Interlocked.Increment(ref made); givenSwitch = names; return Task.FromResult<IFileSystem>(files); },
         };
     }
 
@@ -118,6 +118,62 @@ public sealed class FilesSessionTests : IDisposable
             Assert.True(asked.Calls > 0);
         }
         Assert.Empty(stores.Source.Observed);
+    }
+
+    [Fact]
+    public async Task TheRealFileSystemKeepsNamesInTheDataFoldersGeneratedStore()
+    {
+        await using var real = new BrowseSession(stores, new DataFolder(data, DataFolderSource.Override), Path.Combine(data, ObjectStore.DefaultFolderName));
+        real.NameSwitch = new CountingSwitch(true);
+        string? opened = null;
+        var generated = new VibeMiner.Generated.Testing.InMemoryGeneratedStore();
+        real.OpenGeneratedStore = (folder, _) => { opened = folder; return Task.FromResult<VibeMiner.Generated.IGeneratedStore>(generated); };
+        await using (var lease = await real.OpenFilesAsync(new(A, "enUS"), default))
+            // On, with a store for the index but nothing stored yet.
+            Assert.Equal(FileNamesState.NotReady, (await lease.Names.StatusAsync(default)).State);
+        Assert.Equal(Path.Combine(data, "generated-v1"), opened);
+        Assert.Same(generated, await real.GeneratedStoreAsync(default));
+    }
+
+    [Fact]
+    public async Task FilesThenTablesShareOneGeneratedStore()
+    {
+        await using var real = new BrowseSession(stores, new DataFolder(data, DataFolderSource.Override), Path.Combine(data, ObjectStore.DefaultFolderName));
+        real.NameSwitch = new CountingSwitch(true);
+        var opens = 0;
+        real.OpenGeneratedStore = async (folder, ct) => { opens++; return await VibeMiner.Generated.GeneratedStore.OpenAsync(folder, cancellationToken: ct); };
+        real.UseTables(real.ComposeTablesAsync);
+        await using (var lease = await real.OpenFilesAsync(new(A, "enUS"), default))
+            Assert.Equal(FileNamesState.NotReady, (await lease.Names.StatusAsync(default)).State);
+        // :tables after Files: the composition uses the session's store instead of opening (and finding busy) a second one.
+        await using (var tables = await real.OpenTables!(real, default))
+        {
+            var opened = await tables.Tables.ForAsync(A, "enUS", default);
+            Assert.Equal(FilesOpenState.NeedsNetwork, opened.State);
+        }
+        Assert.Equal(1, opens);
+    }
+
+    [Fact]
+    public async Task AGeneratedStoreAnotherWriterHoldsLeavesNamesOff()
+    {
+        await using var real = new BrowseSession(stores, new DataFolder(data, DataFolderSource.Override), Path.Combine(data, ObjectStore.DefaultFolderName));
+        real.NameSwitch = new CountingSwitch(true);
+        var tries = 0;
+        real.OpenGeneratedStore = (_, _) =>
+        {
+            tries++;
+            throw new VibeMiner.Generated.GeneratedStoreException(VibeMiner.Generated.GeneratedStoreCodes.Busy, "Another writer holds the folder.");
+        };
+        await using (var lease = await real.OpenFilesAsync(new(A, "enUS"), default))
+        {
+            Assert.Equal(FilesOpenState.NeedsNetwork, lease.Result.State);
+            Assert.Equal(FileNamesState.Off, (await lease.Names.StatusAsync(default)).State);
+        }
+        // A later file system tries again.
+        await real.InvalidateFilesAsync();
+        await using (await real.OpenFilesAsync(new(A, "enUS"), default)) { }
+        Assert.Equal(2, tries);
     }
 
     // ---------------------------------------------------------------- the files cache

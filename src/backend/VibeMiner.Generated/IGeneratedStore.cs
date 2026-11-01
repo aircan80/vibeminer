@@ -30,6 +30,12 @@ public interface IGeneratedStore
 
     /// <summary>Removes objects; a key that isn't stored is ignored.</summary>
     Task DeleteAsync(IReadOnlyList<GeneratedKey> keys, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reclaims the space of deleted objects: rewrites up to <paramref name="maxPacks"/> sealed packs whose dead share is at least
+    /// <paramref name="minDeadFraction"/>. Live objects read the same before and after; bounded by <paramref name="maxPacks"/>.
+    /// </summary>
+    Task<GeneratedCompactReport> CompactAsync(double minDeadFraction = 0.25, int maxPacks = 1, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Fixed bounds of the generated store.</summary>

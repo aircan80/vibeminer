@@ -4,7 +4,7 @@ using VibeMiner.Objects;
 namespace VibeMiner.ObjectAccess;
 
 /// <summary>
-/// CDN only: every call fetches and verifies, nothing is stored and nothing is recorded. Objects over 64 MiB are refused
+/// CDN only: every call fetches and verifies, nothing is stored and nothing is recorded (RecordAsync answers Present, not recorded). Objects over 64 MiB are refused
 /// (there is nowhere to stage them). Anything reading the store's index directly, like the Downloaded figure, sees 0%.
 /// </summary>
 public sealed class CdnObjectSource : IObjectSource
@@ -61,6 +61,17 @@ public sealed class CdnObjectSource : IObjectSource
     {
         var (observation, failed) = await observations.FetchAsync(request, cancellationToken).ConfigureAwait(false);
         return observation is null ? failed! : new(ObjectState.Present, observation, Recorded: false);
+    }
+
+    /// <summary>
+    /// No history log: a valid observation is answered as <see cref="ObserveAsync"/> answers, Present and not recorded; an
+    /// invalid one is Refused.
+    /// </summary>
+    public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(ObservationRequest.RecordProblem(observation) is { } problem ? Observations.Invalid(problem)
+            : new ObservationResult(ObjectState.Present, observation, Recorded: false));
     }
 
     /// <summary>Nothing is stored, so nothing counts as downloaded.</summary>
@@ -153,6 +164,14 @@ public sealed class LocalObjectSource(IObjectReader store, IHistoryReader? histo
 
     public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(new ObservationResult(ObjectState.NeedsNetwork, Code: "OBJECT_ACCESS_NEEDS_NETWORK", Message: "This source is local only."));
+
+    /// <summary>Local only and read-only: answered as <see cref="ObserveAsync"/> is (NeedsNetwork); an invalid observation is Refused.</summary>
+    public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(ObservationRequest.RecordProblem(observation) is { } problem ? Observations.Invalid(problem)
+            : new ObservationResult(ObjectState.NeedsNetwork, Code: "OBJECT_ACCESS_NEEDS_NETWORK", Message: "This source is local only."));
+    }
 
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) =>
         Presence.CountAsync(store, keys, cancellationToken);

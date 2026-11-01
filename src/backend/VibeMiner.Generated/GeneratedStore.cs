@@ -2,10 +2,15 @@ using VibeMiner.Objects;
 
 namespace VibeMiner.Generated;
 
-/// <summary>Bounds and timing of a <see cref="GeneratedStore"/>, passed to its layer 1 pack store. The defaults are layer 1's.</summary>
+/// <summary>Bounds and timing of a <see cref="GeneratedStore"/>, passed to its layer 1 pack store. The defaults are layer 1's but the pack size.</summary>
 public sealed record GeneratedStoreOptions
 {
-    public long MaxPackBytes { get; init; } = 2L << 30;
+    /// <summary>
+    /// A pack seals at this size and only sealed packs compact. Smaller than the object store's 2 GiB: generated data is rewritten
+    /// often (a listfile download stages about 150 MB and deletes it, #186), so packs must seal for that space to come back.
+    /// </summary>
+    public const long DefaultMaxPackBytes = 256L << 20;
+    public long MaxPackBytes { get; init; } = DefaultMaxPackBytes;
     public int CommitObjects { get; init; } = 128;
     public long CommitBytes { get; init; } = 16L << 20;
     public TimeSpan CommitDelay { get; init; } = TimeSpan.FromMilliseconds(250);

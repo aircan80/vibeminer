@@ -95,8 +95,36 @@ public sealed class RecordFile
             if (chunks[mid].FirstId <= id) { c = mid; lo = mid + 1; } else hi = mid - 1;
         }
         if (c < 0) return null;
-        var ordinal = await FindOrdinalAsync(c, id, cancellationToken).ConfigureAwait(false);
-        if (ordinal < 0) return null;
+        var (ordinal, found) = await FindOrdinalAsync(c, id, cancellationToken).ConfigureAwait(false);
+        if (ordinal < 0 || found != id) return null;
+        return await ReadIndexedAsync(ordinal, id, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The record with the smallest id at or after <paramref name="id"/>, or null when every id is smaller.</summary>
+    public async Task<Record?> FindAtOrAfterAsync(uint id, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (chunks.Length == 0) return null;
+        int lo = 0, hi = chunks.Length - 1, c = 0;
+        while (lo <= hi)
+        {
+            var mid = (lo + hi) >>> 1;
+            if (chunks[mid].FirstId <= id) { c = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        var (ordinal, found) = await FindOrdinalAsync(c, id, cancellationToken).ConfigureAwait(false);
+        if (ordinal < 0)
+        {
+            // Every id in chunk c is smaller: the answer is the next chunk's first entry.
+            if (c + 1 == chunks.Length) return null;
+            (ordinal, found) = await FindOrdinalAsync(c + 1, chunks[c + 1].FirstId, cancellationToken).ConfigureAwait(false);
+            if (ordinal < 0) throw Corrupt("An id chunk doesn't start at its first id.");
+        }
+        return await ReadIndexedAsync(ordinal, found, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The record at <paramref name="ordinal"/>, which the id index says has <paramref name="id"/>.</summary>
+    private async Task<Record> ReadIndexedAsync(long ordinal, uint id, CancellationToken cancellationToken)
+    {
         var b = BlockOf(ordinal);
         var record = (await ReadBlockAsync(b, (int)(ordinal - blocks[b].FirstOrdinal), 1, cancellationToken).ConfigureAwait(false))[0];
         if (record.Id != id) throw Corrupt("The id index points at a record with another id.");
@@ -104,15 +132,74 @@ public sealed class RecordFile
     }
 
     /// <summary>Every record in ordinal order, one block at a time.</summary>
-    public async IAsyncEnumerable<Record> ReadAllAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public IAsyncEnumerable<Record> ReadAllAsync(CancellationToken cancellationToken = default) => ReadFromAsync(0, cancellationToken);
+
+    /// <summary>
+    /// Every record from <paramref name="firstOrdinal"/> to the end, in ordinal order. Blocks that sit back to back in one segment
+    /// are fetched together, up to <see cref="RunBytes"/> of compressed bytes per range read; at most one run's records are held.
+    /// </summary>
+    public async IAsyncEnumerable<Record> ReadFromAsync(long firstOrdinal, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(firstOrdinal);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(firstOrdinal, Count);
         cancellationToken.ThrowIfCancellationRequested();
-        for (var b = 0; b < blocks.Length; b++)
-            foreach (var record in await ReadBlockAsync(b, 0, (int)RecordsIn(b), cancellationToken).ConfigureAwait(false))
+        if (firstOrdinal == Count) yield break;
+        var b = BlockOf(firstOrdinal);
+        var skip = (int)(firstOrdinal - blocks[b].FirstOrdinal);
+        while (b < blocks.Length)
+        {
+            var end = RunEnd(b);
+            var first = blocks[b].Frame;
+            var last = blocks[end - 1].Frame;
+            var length = (int)(last.Offset + last.CompressedLength - first.Offset);
+            var compressed = ArrayPool<byte>.Shared.Rent(length);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                yield return record;
+                await ReadSegmentAsync(first.Segment, first.Offset, compressed.AsMemory(0, length), "A block", cancellationToken).ConfigureAwait(false);
+                // One block decoded at a time, as the caller gets that far: a short walk doesn't pay for the whole run.
+                for (var i = b; i < end; i++, skip = 0)
+                    foreach (var record in DecodeBlock(i, compressed.AsSpan((int)(blocks[i].Frame.Offset - first.Offset), (int)blocks[i].Frame.CompressedLength), skip))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        yield return record;
+                    }
             }
+            finally { ArrayPool<byte>.Shared.Return(compressed); }
+            b = end;
+        }
+    }
+
+    /// <summary>The most compressed bytes one run of <see cref="ReadFromAsync"/> fetches with a single range read, unless one block alone is larger.</summary>
+    internal const int RunBytes = 256 << 10;
+
+    /// <summary>The block after the last of the run starting at <paramref name="b"/>: same segment, back to back, within <see cref="RunBytes"/>.</summary>
+    private int RunEnd(int b)
+    {
+        var first = blocks[b].Frame;
+        long bytes = first.CompressedLength;
+        var e = b + 1;
+        for (; e < blocks.Length; e++)
+        {
+            var frame = blocks[e].Frame;
+            var previous = blocks[e - 1].Frame;
+            if (frame.Segment != first.Segment || frame.Offset != (long)previous.Offset + previous.CompressedLength || bytes + frame.CompressedLength > RunBytes) break;
+            bytes += frame.CompressedLength;
+        }
+        return e;
+    }
+
+    /// <summary>Block <paramref name="b"/>'s records from <paramref name="skip"/>, from its compressed frame.</summary>
+    private Record[] DecodeBlock(int b, ReadOnlySpan<byte> frame, int skip)
+    {
+        var length = (int)blocks[b].Frame.Length;
+        var body = ArrayPool<byte>.Shared.Rent(length);
+        try
+        {
+            DecompressInto(frame, body.AsSpan(0, length), "A block");
+            var n = RecordsIn(b);
+            return ParseBlock(blocks[b], body.AsSpan(0, length), n, skip, (int)(n - skip));
+        }
+        finally { ArrayPool<byte>.Shared.Return(body); }
     }
 
     private int BlockOf(long ordinal)
@@ -171,7 +258,8 @@ public sealed class RecordFile
         return records;
     }
 
-    private async Task<long> FindOrdinalAsync(int c, uint id, CancellationToken cancellationToken)
+    /// <summary>The first entry of id chunk <paramref name="c"/> with an id at or after <paramref name="id"/>; ordinal -1 when none.</summary>
+    private async Task<(long Ordinal, uint Id)> FindOrdinalAsync(int c, uint id, CancellationToken cancellationToken)
     {
         var body = await ReadAndDecompressAsync(chunks[c].Frame, "An id chunk", cancellationToken).ConfigureAwait(false);
         try { return FindInChunk(body.AsSpan(0, (int)chunks[c].Frame.Length), c, id); }
@@ -217,12 +305,13 @@ public sealed class RecordFile
         if (written != output.Length) throw Corrupt($"{what} decompressed to {written} bytes, not {output.Length}.");
     }
 
-    private long FindInChunk(ReadOnlySpan<byte> body, int c, uint id)
+    private (long Ordinal, uint Id) FindInChunk(ReadOnlySpan<byte> body, int c, uint id)
     {
         var chunk = chunks[c];
         var limit = c + 1 < chunks.Length ? chunks[c + 1].FirstId : (ulong)uint.MaxValue + 1;
         ulong current = chunk.FirstId;
         long ordinal = 0, found = -1;
+        uint foundId = 0;
         var at = 0;
         for (var i = 0; i < chunk.Entries; i++)
         {
@@ -232,19 +321,22 @@ public sealed class RecordFile
             ordinal += UnZigZag(ReadVar(body, ref at, "An id chunk"));
             if (current >= limit) throw Corrupt("An id chunk overlaps the next one.");
             if (ordinal < 0 || ordinal >= Count) throw Corrupt("An id chunk points past the last record.");
-            if (current == id) found = ordinal;
+            if (found < 0 && current >= id) { found = ordinal; foundId = (uint)current; }
         }
         if (at != body.Length) throw Corrupt("An id chunk has bytes after its last entry.");
-        return found;
+        return (found, foundId);
     }
 
-    private async Task ReadFrameAsync(FrameRef frame, Memory<byte> bytes, string what, CancellationToken cancellationToken)
+    private Task ReadFrameAsync(FrameRef frame, Memory<byte> bytes, string what, CancellationToken cancellationToken) =>
+        ReadSegmentAsync(frame.Segment, frame.Offset, bytes, what, cancellationToken);
+
+    private async Task ReadSegmentAsync(uint segmentIndex, uint offset, Memory<byte> bytes, string what, CancellationToken cancellationToken)
     {
-        var segment = manifest.Segments[(int)frame.Segment];
+        var segment = manifest.Segments[(int)segmentIndex];
         GeneratedRangeRead read;
         try
         {
-            read = await store.ReadRangeAsync(segment.Key, frame.Offset, bytes, cancellationToken).ConfigureAwait(false);
+            read = await store.ReadRangeAsync(segment.Key, offset, bytes, cancellationToken).ConfigureAwait(false);
         }
         catch (ArgumentOutOfRangeException e) { throw Corrupt($"{what}'s segment is shorter than the manifest says.", e); }
         if (read.State == GeneratedReadState.Absent) throw Corrupt($"{what}'s segment is missing.");

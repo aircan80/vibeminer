@@ -33,7 +33,7 @@ internal static class EnsureTask
         catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.Busy) { return Busy; }
         await using (store)
         {
-            var files = session.FileSystem(store.Objects, session.Builds(store.Objects), session.NameSwitch);
+            var files = await session.FileSystem(store.Objects, session.Builds(store.Objects), session.NameSwitch, ct).ConfigureAwait(false);
             try
             {
                 progress.Report("opening the build: ENCODING, ROOT, indexes; x cancels");

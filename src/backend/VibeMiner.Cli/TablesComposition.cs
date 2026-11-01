@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using VibeMiner.Builds;
 using VibeMiner.Cli.Browse;
 using VibeMiner.Files;
+using VibeMiner.Files.Names;
 using VibeMiner.Formats.Definitions;
 using VibeMiner.Formats.Generated;
 using VibeMiner.Formats.Tables;
@@ -23,7 +24,10 @@ namespace VibeMiner.Cli;
 /// another build. Only a complete load is kept (<see cref="IsComplete"/>), at most <see cref="MaxKeyedBuilds"/> of them, the
 /// oldest going first; an incomplete one serves its open and is read again next time.
 /// </para>
-/// Dispose the handles it gave first, then this (it closes the generated store), then the store handle, which the caller owns.
+/// Names (D261): its file systems read the community names from the same generated store, behind the data folder's
+/// <c>communityListfile</c> switch, so the table list can find DB2s by listfile name (#186).
+/// Dispose the handles it gave first, then this (it closes the generated store it opened; a shared one stays open), then the
+/// store handle, which the caller owns.
 /// <c>vm browse</c> keeps one for the whole session (<see cref="Browse.SessionTables"/>).
 /// </summary>
 internal sealed partial class TablesComposition : ITables, IAsyncDisposable
@@ -34,13 +38,17 @@ internal sealed partial class TablesComposition : ITables, IAsyncDisposable
     private readonly IAsyncDisposable? store;
     private readonly Func<IBuilds, FileSystemOptions, TablesOptions, ITables> service;
     private readonly TablesOptions options;
+    // Names and their store for every file system this composition makes.
+    private readonly FileSystemOptions files;
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Dictionary<BuildRef, BuildTactKeySet> keys = [];
     private readonly Queue<BuildRef> keyOrder = new();
     private int disposed;
 
-    private TablesComposition(IStoreHandle handle, GeneratedStore store, TableDefinitions definitions)
-        : this(handle.Objects, store, Real(handle.Objects, definitions, new GeneratedTables(store))) { }
+    private TablesComposition(IStoreHandle handle, IGeneratedStore generated, IAsyncDisposable? owned, TableDefinitions definitions, IFileNameSwitch? names,
+        IBuilds? builds)
+        : this(handle.Objects, owned, Real(handle.Objects, definitions, new GeneratedTables(generated)), new FileSystemOptions { Names = names, NamesStore = generated },
+            builds) { }
 
     private static Func<IBuilds, FileSystemOptions, TablesOptions, ITables> Real(IObjectSource objects, TableDefinitions definitions, GeneratedTables generated) =>
         (builds, files, options) => new TablesService(new FileSystem(builds, objects, files), definitions, generated, options);
@@ -50,9 +58,11 @@ internal sealed partial class TablesComposition : ITables, IAsyncDisposable
     /// with the layer 4 options and tables options of that open (no keys for the bootstrap; one build's snapshot otherwise).
     /// <paramref name="store"/> is closed on dispose.
     /// </summary>
-    internal TablesComposition(IObjectSource objects, IAsyncDisposable? store, Func<IBuilds, FileSystemOptions, TablesOptions, ITables> service)
+    internal TablesComposition(IObjectSource objects, IAsyncDisposable? store, Func<IBuilds, FileSystemOptions, TablesOptions, ITables> service,
+        FileSystemOptions? files = null, IBuilds? builds = null)
     {
-        builds = new BuildOpener(objects);
+        this.files = files ?? new FileSystemOptions();
+        this.builds = builds ?? new BuildOpener(objects);
         this.store = store;
         this.service = service;
         // One scheduler for every handle this composition opens, so their priorities share the slots (D263).
@@ -67,24 +77,53 @@ internal sealed partial class TablesComposition : ITables, IAsyncDisposable
     /// definitions (D081) for this run; it fetches only through a writer handle. Throws <see cref="GeneratedStoreException"/>
     /// when the generated store can't be opened (GENERATED_STORE_BUSY while the app holds it).
     /// </summary>
-    public static async Task<TablesComposition> OpenAsync(IStoreHandle handle, string dataFolder, bool fetchDefinitions, CancellationToken ct)
+    public static Task<TablesComposition> OpenAsync(IStoreHandle handle, string dataFolder, bool fetchDefinitions, CancellationToken ct) =>
+        OpenAsync(handle, dataFolder, fetchDefinitions, null, ct);
+
+    /// <summary>The above over <paramref name="builds"/> instead of layer 3's opener when set (a test seam).</summary>
+    internal static async Task<TablesComposition> OpenAsync(IStoreHandle handle, string dataFolder, bool fetchDefinitions, IBuilds? builds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(handle);
+        var definitions = await DefinitionsAsync(handle, fetchDefinitions, ct).ConfigureAwait(false);
+        var store = await GeneratedStore.OpenAsync(GeneratedFolder(dataFolder), cancellationToken: ct).ConfigureAwait(false);
+        return new TablesComposition(handle, store, store, definitions, new SettingsNameSwitch(dataFolder), builds);
+    }
+
+    /// <summary>
+    /// Composes layer 5 over <paramref name="handle"/> and a generated store the caller owns and keeps open (the browse session's,
+    /// shared with its names index), with <paramref name="names"/> as the community names switch.
+    /// </summary>
+    public static async Task<TablesComposition> OpenAsync(IStoreHandle handle, IGeneratedStore generated, IFileNameSwitch? names, bool fetchDefinitions,
+        CancellationToken ct, IBuilds? builds = null)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        ArgumentNullException.ThrowIfNull(generated);
+        var definitions = await DefinitionsAsync(handle, fetchDefinitions, ct).ConfigureAwait(false);
+        return new TablesComposition(handle, generated, null, definitions, names, builds);
+    }
+
+    private static async Task<TableDefinitions> DefinitionsAsync(IStoreHandle handle, bool fetchDefinitions, CancellationToken ct)
+    {
         var bundled = await BundledDefinitions.OpenAsync(ct).ConfigureAwait(false);
-        var definitions = fetchDefinitions
+        return fetchDefinitions
             ? new TableDefinitions(bundled, new FetchedDefinitions(handle.Objects), new FixedSwitch(true))
             : new TableDefinitions(bundled, null, null);
-        var store = await GeneratedStore.OpenAsync(GeneratedFolder(dataFolder), cancellationToken: ct).ConfigureAwait(false);
-        return new TablesComposition(handle, store, definitions);
     }
 
     /// <summary>
     /// A <see cref="TablesLease"/> over an open store handle: closing it disposes the composition, then the handle. When
     /// composing throws, the caller still owns the handle.
     /// </summary>
-    public static async Task<TablesLease> LeaseAsync(IStoreHandle handle, string dataFolder, bool fetchDefinitions, CancellationToken ct)
+    public static async Task<TablesLease> LeaseAsync(IStoreHandle handle, string dataFolder, bool fetchDefinitions, CancellationToken ct) =>
+        Lease(handle, await OpenAsync(handle, dataFolder, fetchDefinitions, ct).ConfigureAwait(false));
+
+    /// <summary>A <see cref="TablesLease"/> over a shared generated store (<see cref="OpenAsync(IStoreHandle, IGeneratedStore, IFileNameSwitch?, bool, CancellationToken)"/>).</summary>
+    public static async Task<TablesLease> LeaseAsync(IStoreHandle handle, IGeneratedStore generated, IFileNameSwitch? names, bool fetchDefinitions,
+        CancellationToken ct, IBuilds? builds = null) =>
+        Lease(handle, await OpenAsync(handle, generated, names, fetchDefinitions, ct, builds).ConfigureAwait(false));
+
+    private static TablesLease Lease(IStoreHandle handle, TablesComposition tables)
     {
-        var tables = await OpenAsync(handle, dataFolder, fetchDefinitions, ct).ConfigureAwait(false);
         return new TablesLease(tables, async () =>
         {
             try { await tables.DisposeAsync().ConfigureAwait(false); }
@@ -100,7 +139,7 @@ internal sealed partial class TablesComposition : ITables, IAsyncDisposable
         if (failure is not null) return failure;
         // One snapshot for both sides: what layer 4 decrypts with is what the generated store files the rows under.
         var snapshot = set!;
-        return await service(builds, new FileSystemOptions { Keys = snapshot.Keys },
+        return await service(builds, files with { Keys = snapshot.Keys },
             options with { Keys = b => b == build ? snapshot.Status : TactKeyStatus.None }).ForAsync(build, locale, cancellationToken).ConfigureAwait(false);
     }
 
@@ -132,7 +171,7 @@ internal sealed partial class TablesComposition : ITables, IAsyncDisposable
         try
         {
             if (KeysOf(build) is { } raced) return (raced, null);
-            var opened = await service(builds, new FileSystemOptions(), options).ForAsync(build, locale, ct).ConfigureAwait(false);
+            var opened = await service(builds, files, options).ForAsync(build, locale, ct).ConfigureAwait(false);
             if (opened is not { State: FilesOpenState.Open, Tables: { } tables }) return (null, opened);
             BuildTactKeySet set;
             await using (tables) set = await BuildTactKeys.LoadAsync(tables, TablePriority.Interactive, ct).ConfigureAwait(false);

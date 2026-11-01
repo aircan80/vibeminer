@@ -12,11 +12,13 @@ namespace VibeMiner.Objects;
 /// GitHub releases/latest API URL and its reply the release JSON as served. The CSV is bigger than one document, so it is
 /// recorded in fixed 8 MiB parts: a part entry's product is the release tag, its region "p" + the part index in decimal
 /// without leading zeros (0..63), its URL the asset's releases/download URL, and its reply bytes
-/// [index * 8 MiB, min((index + 1) * 8 MiB, size)) of the asset.
+/// [index * 8 MiB, min((index + 1) * 8 MiB, size)) of the asset. A listfile delta entry records a release against the one
+/// before it: its product is the release tag, its region "delta", its URL the asset's releases/download URL (as for its
+/// parts), and its reply a delta document in layer 4's format (docs/formats/listfile-delta.md), opaque to layers 1 and 2.
 /// </summary>
-public enum HistoryKind : byte { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4, Definition = 5, ListfileRelease = 6, ListfilePart = 7 }
+public enum HistoryKind : byte { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4, Definition = 5, ListfileRelease = 6, ListfilePart = 7, ListfileDelta = 8 }
 
-/// <summary>One raw version-service, WoWDBDefs or wow-listfile reply as it was received: what was asked, where, when, and the exact bytes.</summary>
+/// <summary>One raw version-service, WoWDBDefs or wow-listfile reply (or a listfile delta derived from them) as it was received: what was asked, where, when, and the exact bytes.</summary>
 public sealed record HistoryObservation(HistoryKind Kind, string Product, string Region, DateTimeOffset ObservedAt, string Url, ReadOnlyMemory<byte> Reply);
 
 /// <summary>A history log entry. The reply bytes are the <see cref="Document"/> object; Read it to get them.</summary>
@@ -69,7 +71,7 @@ public static class HistoryRecordFormat
     internal static bool TryParse(ReadOnlySpan<byte> b, out Parsed parsed)
     {
         parsed = default;
-        if (b.Length < 28 + 1 + 1 + 1 + 2 || b[0] != 1 || b[1] is < (byte)HistoryKind.Versions or > (byte)HistoryKind.ListfilePart || b[2] != 0 || b[3] != 0) return false;
+        if (b.Length < 28 + 1 + 1 + 1 + 2 || b[0] != 1 || b[1] is < (byte)HistoryKind.Versions or > (byte)HistoryKind.ListfileDelta || b[2] != 0 || b[3] != 0) return false;
         var kind = (HistoryKind)b[1];
         var at = 28;
         int pl = b[at++]; if (pl > 64 || at + pl > b.Length) return false;

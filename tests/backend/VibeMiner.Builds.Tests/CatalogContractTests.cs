@@ -400,6 +400,7 @@ public abstract class CatalogContract
                 : inner.ObserveAsync(request, cancellationToken);
         }
 
+        public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken) => inner.RecordAsync(observation, cancellationToken);
         public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) => inner.CountPresentAsync(keys, cancellationToken);
         public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) => inner.HasKeysAsync(keys, cancellationToken);
 

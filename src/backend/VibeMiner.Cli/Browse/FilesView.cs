@@ -392,6 +392,7 @@ internal sealed class FilesView : BrowseView
             FileNamesState.Off => "Names off in Settings: no paths, / finds none.",
             FileNamesState.NotReady => "Names not loaded: no paths, / finds none.",
             FileNamesState.Failed => NamesFailed(names.Code, Width - parts[0].Length - 1),
+            FileNamesState.Ready when names.Code == "LISTFILE_UNREADABLE" => "Names couldn't be read for this page: some paths are missing.",
             _ => null,
         };
         if (namesNote is not null) parts.Add(namesNote);

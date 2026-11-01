@@ -44,7 +44,7 @@ internal sealed class FilesLease : IAsyncDisposable
 /// leases may be held and released from any thread. The read-only store sees what a writer commits after it opened
 /// (each lookup is a new index read), so a Download all in the same session needs no reopen; <see cref="Invalidate"/> forces one.
 /// </summary>
-internal sealed class FilesCache(Func<CancellationToken, Task<IStoreHandle>> openStore, Func<IObjectSource, IFileSystem> createFileSystem) : IAsyncDisposable
+internal sealed class FilesCache(Func<CancellationToken, Task<IStoreHandle>> openStore, Func<IObjectSource, CancellationToken, Task<IFileSystem>> createFileSystem) : IAsyncDisposable
 {
     /// <summary>The store handle and the file system over it, with a count of the cache, entries and leases holding them.</summary>
     internal sealed class Shared(IStoreHandle store, IFileSystem files)
@@ -140,7 +140,7 @@ internal sealed class FilesCache(Func<CancellationToken, Task<IStoreHandle>> ope
     {
         var store = await openStore(ct).ConfigureAwait(false);
         Shared made;
-        try { made = new Shared(store, createFileSystem(store.Objects)); }
+        try { made = new Shared(store, await createFileSystem(store.Objects, ct).ConfigureAwait(false)); }
         catch { await store.DisposeAsync().ConfigureAwait(false); throw; }
         lock (gate)
         {

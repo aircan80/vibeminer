@@ -47,6 +47,11 @@
           "SQLitePCLRaw.core": "2.1.13"
         }
       },
+      "ZstdSharp.Port": {
+        "type": "Transitive",
+        "resolved": "0.8.6",
+        "contentHash": "iP4jVLQoQmUjMU88g1WObiNr6YKZGvh4aOXn3yOJsHqZsflwRsxZPcIBvNXgjXO3vQKSLctXGLTpcBPLnWPS8A=="
+      },
       "vibeminer.builds": {
         "type": "Project",
         "dependencies": {
@@ -56,6 +61,13 @@
       },
       "vibeminer.cdn": {
         "type": "Project"
+      },
+      "vibeminer.generated": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Objects": "[1.0.0, )",
+          "ZstdSharp.Port": "[0.8.6, )"
+        }
       },
       "vibeminer.objectaccess": {
         "type": "Project",

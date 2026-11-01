@@ -2,6 +2,10 @@ using System.Text;
 
 namespace VibeMiner.Files.Names;
 
+/// <summary>Receives one validated listfile entry: its FileDataID and its name's UTF-8 bytes with direction marks removed. The span is
+/// only valid during the call.</summary>
+internal delegate void ListfileEntrySink(uint fileDataId, ReadOnlySpan<byte> name);
+
 /// <summary>
 /// Reads wow-listfile's CSV (D105) in chunks of any size; a line may straddle chunks. One <c>FileDataID;name</c> per
 /// line, LF or CRLF, FileDataIDs strictly ascending canonical decimals up to 4294967295. A line is at most
@@ -10,11 +14,11 @@ namespace VibeMiner.Files.Names;
 /// are skipped; the last line may lack its newline. Bidirectional formatting characters (U+061C, U+200E, U+200F,
 /// U+202A–U+202E, U+2066–U+2069) are removed from names. Anything else refuses the whole file with
 /// <see cref="ListfileFormatException"/>. Same rules as the legacy <c>ListfileCsvParser</c>.
-/// After a refusal the parser is failed: every later <see cref="Feed"/> or <see cref="Complete"/> throws
-/// <see cref="InvalidOperationException"/>, and its storage is released.
+/// Nothing is kept (#186): each entry goes to the <see cref="ListfileEntrySink"/> as its line is parsed, and <see cref="Finish"/>
+/// ends the file. After a refusal the parser is failed: every later <see cref="Feed"/> or <see cref="Finish"/> throws
+/// <see cref="InvalidOperationException"/>.
 /// The name-bytes cap is 512 MiB because D105 caps the downloaded asset at 512 MiB, and the names are never longer
-/// than the file. Storage starts near the expected file size when one is given and otherwise grows geometrically,
-/// never past the caps, so memory is bounded by them.
+/// than the file.
 /// </summary>
 internal sealed class ListfileParser
 {
@@ -22,42 +26,28 @@ internal sealed class ListfileParser
     public const int MaxLineBytes = 10 + 1 + MaxNameBytes + 1;
     public const int MaxNames = 8_000_000;
     public const int MaxBlobBytes = 512 << 20;
-    private const int InitialEntries = 1024;
-    private const int InitialBlob = 64 << 10;
     private static readonly UTF8Encoding Strict = new(false, true);
     private readonly int maxNames, maxBlob;
     private readonly byte[] carry = new byte[MaxLineBytes];
     private int carried;
     private long previous = -1;
     private long line;
-    private uint[] ids;
-    private int[] ends;
-    private byte[] blob;
-    private int blobLength;
-    private ListfileIndex? index;
+    private long blobLength;
     private bool failed;
-    private readonly ListfileIndex.NameHasher? hasher;
+    private readonly ListfileEntrySink sink;
+    private bool finished;
 
-    /// <summary><paramref name="expectedBytes"/> is the CSV's size when known (the asset size), used only to size the
-    /// starting storage; a wrong hint costs memory or copies, never correctness.</summary>
-    public ListfileParser(long expectedBytes = 0) : this(MaxNames, MaxBlobBytes, null, expectedBytes) { }
-
-    /// <summary>Smaller caps and a replacement name hash, for tests.</summary>
-    internal ListfileParser(int maxNames, int maxBlob, ListfileIndex.NameHasher? hasher = null, long expectedBytes = 0)
+    /// <summary>Every entry goes to <paramref name="sink"/>. Smaller caps for tests.</summary>
+    internal ListfileParser(ListfileEntrySink sink, int maxNames = MaxNames, int maxBlob = MaxBlobBytes)
     {
+        ArgumentNullException.ThrowIfNull(sink);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxNames, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maxNames, MaxNames);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxBlob, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maxBlob, MaxBlobBytes);
+        this.sink = sink;
         this.maxNames = maxNames;
         this.maxBlob = maxBlob;
-        this.hasher = hasher;
-        // About 40 bytes a line in the real file; the blob is a little smaller than the file.
-        var expected = Math.Max(expectedBytes, 0);
-        var entries = (int)Math.Min(Math.Max(expected / 40, InitialEntries), maxNames);
-        ids = new uint[entries];
-        ends = new int[entries];
-        blob = new byte[(int)Math.Min(Math.Max(expected, InitialBlob), maxBlob)];
     }
 
     public long Count { get; private set; }
@@ -65,7 +55,7 @@ internal sealed class ListfileParser
     public void Feed(ReadOnlySpan<byte> chunk)
     {
         Usable();
-        if (index is not null) throw new InvalidOperationException("The parser is complete.");
+        if (finished) throw new InvalidOperationException("The parser is complete.");
         try { FeedLines(chunk); }
         catch (ListfileFormatException) { Fail(); throw; }
     }
@@ -99,27 +89,21 @@ internal sealed class ListfileParser
         }
     }
 
-    /// <summary>Parses a last line without a newline and returns the index. An empty file, or one with no names, is
-    /// refused. Calling it again returns the same index. Arrays with more than an eighth unused are trimmed.</summary>
-    public ListfileIndex Complete()
+    /// <summary>The end of the file: parses a last line without a newline (to the sink) and returns the name count. An empty file,
+    /// or one with no names, is refused. Calling it again returns the same count.</summary>
+    public long Finish()
     {
         Usable();
-        if (index is not null) return index;
+        if (finished) return Count;
         try
         {
             if (carried > 0) { var length = carried; carried = 0; Line(carry.AsSpan(0, length)); }
             if (Count == 0) throw Invalid("The file has no names.");
         }
         catch (ListfileFormatException) { Fail(); throw; }
-        var count = (int)Count;
-        if (Wasteful(ids.Length, count)) { Array.Resize(ref ids, count); Array.Resize(ref ends, count); }
-        if (Wasteful(blob.Length, blobLength)) Array.Resize(ref blob, blobLength);
-        index = new ListfileIndex(ids, ends, blob, count, hasher);
-        ids = []; ends = []; blob = [];
-        return index;
+        finished = true;
+        return Count;
     }
-
-    private static bool Wasteful(int capacity, int used) => capacity - used > capacity / 8;
 
     private void Usable()
     {
@@ -129,7 +113,6 @@ internal sealed class ListfileParser
     private void Fail()
     {
         failed = true;
-        ids = []; ends = []; blob = [];
     }
 
     private void Line(ReadOnlySpan<byte> text)
@@ -171,30 +154,11 @@ internal sealed class ListfileParser
         }
         if (length == 0) throw Invalid($"Line {line} has a name made only of direction marks.");
         if (Count == maxNames) throw Invalid($"The file has more than {maxNames:N0} names.");
-        if ((long)blobLength + length > maxBlob) throw Invalid("The names are larger than VibeMiner allows.");
-        EnsureBlob(blobLength + length);
-        kept[..length].CopyTo(blob.AsSpan(blobLength));
+        if (blobLength + length > maxBlob) throw Invalid("The names are larger than VibeMiner allows.");
         blobLength += length;
-        EnsureEntries((int)Count + 1);
         previous = id;
-        ids[Count] = (uint)id;
-        ends[Count] = blobLength;
         Count++;
-    }
-
-    private void EnsureEntries(int needed)
-    {
-        if (needed <= ids.Length) return;
-        var size = (int)Math.Min((long)ids.Length * 2, maxNames);
-        Array.Resize(ref ids, size);
-        Array.Resize(ref ends, size);
-    }
-
-    private void EnsureBlob(int needed)
-    {
-        if (needed <= blob.Length) return;
-        var size = (int)Math.Min(Math.Max((long)blob.Length * 2, needed), maxBlob);
-        Array.Resize(ref blob, size);
+        sink((uint)id, kept[..length]);
     }
 
     private static ListfileFormatException Invalid(string detail) => new(detail);

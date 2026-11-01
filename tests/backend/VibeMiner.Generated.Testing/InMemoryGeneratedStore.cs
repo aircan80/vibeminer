@@ -86,6 +86,18 @@ public sealed class InMemoryGeneratedStore : IGeneratedStore
         return Task.FromResult<IReadOnlyList<GeneratedPutOutcome>>(outcomes);
     }
 
+    /// <summary>How many times <see cref="CompactAsync"/> was called.</summary>
+    public int Compactions => Volatile.Read(ref compactions);
+    private int compactions;
+
+    /// <summary>Memory holds no dead bytes, so a compaction only counts the call.</summary>
+    public Task<GeneratedCompactReport> CompactAsync(double minDeadFraction = 0.25, int maxPacks = 1, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref compactions);
+        return Task.FromResult(new GeneratedCompactReport(0, 0, 0, 0, 0));
+    }
+
     public Task DeleteAsync(IReadOnlyList<GeneratedKey> keys, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(keys);

@@ -175,4 +175,33 @@ public sealed class GeneratedStoreTests
         Assert.True(report.PacksCompacted >= 1);
         for (var i = 3; i < 8; i++) Assert.Equal(Bytes(i, 20_000), (await store.ReadAsync(Key(i))).Bytes);
     }
+
+    [Fact]
+    public void PacksSealAtAQuarterGibByDefault() => Assert.Equal(256L << 20, new GeneratedStoreOptions().MaxPackBytes);
+
+    private static long PackBytes(TempDirectory t) => Directory.EnumerateFiles(Path.Combine(Dir(t), "packs")).Sum(f => new FileInfo(f).Length);
+
+    [Fact]
+    public async Task DeletedStagingIsReclaimedOnceItsPacksSeal()
+    {
+        const int pack = 1 << 20, part = 256 << 10;
+        using var t = new TempDirectory();
+        await using var store = await GeneratedStore.OpenAsync(Dir(t), Quick with { MaxPackBytes = pack });
+        // A download's staging (16 parts, 4 MiB over several packs), then the index built from it, then the staging deleted.
+        var staging = Enumerable.Range(0, 16).Select(i => new GeneratedPut(Key(i), Bytes(i, part))).ToArray();
+        foreach (var put in staging) await store.PutAsync([put]);
+        var live = Enumerable.Range(100, 2).Select(i => new GeneratedPut(Key(i), Bytes(i, part))).ToArray();
+        await store.PutAsync(live);
+        Assert.True(PackBytes(t) > 18L * part);
+        await store.DeleteAsync([.. staging.Select(p => p.Key)]);
+
+        // As an update compacts: rounds until one compacts nothing.
+        for (var round = 0; round < 8; round++)
+            if ((await store.CompactAsync(maxPacks: 4)).PacksCompacted == 0) break;
+
+        // What stays is the live bytes plus at most the active pack's dead share.
+        Assert.True(PackBytes(t) < 2L * part + pack + 64 * 1024, $"{PackBytes(t)} bytes of packs");
+        foreach (var put in live) Assert.Equal(put.Bytes.ToArray(), (await store.ReadAsync(put.Key)).Bytes);
+        Assert.False(await store.HasAsync(Key(0)));
+    }
 }

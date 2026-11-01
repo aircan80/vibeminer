@@ -50,7 +50,7 @@ public sealed class FilesViewTests : IAsyncDisposable
         gated = new GatedFileSystem(memory);
         session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), Path.Combine(Data, ObjectStore.DefaultFolderName))
         {
-            FileSystem = (_, _, _) => gated,
+            FileSystem = (_, _, _, _) => Task.FromResult<IFileSystem>(gated),
         };
     }
 

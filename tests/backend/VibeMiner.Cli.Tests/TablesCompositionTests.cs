@@ -101,6 +101,83 @@ public sealed class TablesCompositionTests : IDisposable
     }
 
     private static readonly BuildRef X = new("wow", new string('a', 32), new string('b', 32), "us");
+
+    // ---------------------------------------------------------------- names (D261, #186)
+
+    /// <summary>A DB2 the definition manifest doesn't name, found only by its listfile name.</summary>
+    private const uint UnnamedDb2 = 3_999_999_999;
+
+    private static VibeMiner.Builds.Testing.InMemoryBuilds BuildWithAnUnnamedDb2()
+    {
+        var variant = new FileVariant(0x2, 0, VibeMiner.Cdn.CdnKey.Parse(new string('c', 32)), 100, null, null, null);
+        var metadata = new BuildMetadata("WOW-63796patch11.2.5_Retail", VibeMiner.Cdn.CdnKey.Parse(new string('1', 32)), VibeMiner.Cdn.CdnKey.Parse(new string('2', 32)), VibeMiner.Cdn.CdnKey.Parse(new string('3', 32)), 0, 1, ["enUS"]);
+        return new VibeMiner.Builds.Testing.InMemoryBuilds().Add(X, new(metadata, [new(UnnamedDb2, null, [variant])]));
+    }
+
+    private sealed class NamesOn : VibeMiner.Files.Names.IFileNameSwitch
+    {
+        public Task<bool> NamesEnabledAsync(CancellationToken cancellationToken) => Task.FromResult(true);
+    }
+
+    /// <summary>Loads a listfile naming <see cref="UnnamedDb2"/> into <paramref name="generated"/>, as the engine's update does.</summary>
+    private async Task NameTheDb2Async(IGeneratedStore generated)
+    {
+        var csv = System.Text.Encoding.UTF8.GetBytes($"{UnnamedDb2};DBFilesClient/Unnamed.db2\n");
+        const string tag = "r1";
+        var release = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object?>
+        {
+            ["tag_name"] = tag,
+            ["published_at"] = "2026-10-28T19:21:00Z",
+            ["assets"] = new object[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["name"] = WowListfileObservations.AssetName, ["size"] = csv.Length,
+                    ["browser_download_url"] = WowListfileObservations.AssetUrl(tag),
+                    ["digest"] = "sha256:" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(csv)),
+                },
+            },
+        });
+        stores.Source.AddListfile(tag, release, csv);
+        var status = await new VibeMiner.Files.Names.FileNames(stores.Source, generated, new NamesOn()).UpdateAsync(true, default);
+        Assert.Equal(VibeMiner.Files.Names.FileNamesState.Ready, status.State);
+    }
+
+    private static async Task<List<uint>> ListedAsync(ITables tables)
+    {
+        var opened = await tables.ForAsync(X, "enUS", default);
+        Assert.Equal(FilesOpenState.Open, opened.State);
+        var ids = new List<uint>();
+        await using (opened.Tables!)
+            await foreach (var entry in opened.Tables!.ListAsync(TableListFilter.All, TablePriority.Interactive, default)) ids.Add(entry.FileDataId);
+        return ids;
+    }
+
+    [Fact]
+    public async Task VmTablesFindsADb2ByItsListfileName()
+    {
+        await using (var generated = await GeneratedStore.OpenAsync(TablesComposition.GeneratedFolder(data))) await NameTheDb2Async(generated);
+        var handle = await stores.OpenReadOnlyAsync("/data/vm/objects", default);
+        await using (var tables = await TablesComposition.OpenAsync(handle, data, false, BuildWithAnUnnamedDb2(), default))
+            Assert.Contains(UnnamedDb2, await ListedAsync(tables));
+        // With the data folder's names switch off, the same DB2 isn't found.
+        await File.WriteAllTextAsync(Path.Combine(data, SettingsNameSwitch.FileName), """{"version":1,"values":{"communityListfile":false}}""");
+        await using (var tables = await TablesComposition.OpenAsync(handle, data, false, BuildWithAnUnnamedDb2(), default))
+            Assert.DoesNotContain(UnnamedDb2, await ListedAsync(tables));
+        await handle.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task BrowseTablesFindADb2ByItsListfileNameOverTheSessionsStore()
+    {
+        await using var session = new BrowseSession(stores, new DataFolder(data, DataFolderSource.Override), Path.Combine(data, ObjectStore.DefaultFolderName));
+        var builds = BuildWithAnUnnamedDb2();
+        session.Builds = _ => builds;
+        session.UseTables(session.ComposeTablesAsync);
+        await NameTheDb2Async((await session.GeneratedStoreAsync(default))!);
+        await using var lease = await session.OpenTables!(session, default);
+        Assert.Contains(UnnamedDb2, await ListedAsync(lease.Tables));
+    }
     private static readonly BuildRef Y = new("wow", new string('c', 32), new string('b', 32), "us");
     private const string KeyName = "ABCDEF0123456789";
     private static readonly byte[] KeyBytes = Enumerable.Range(1, 16).Select(i => (byte)i).ToArray();

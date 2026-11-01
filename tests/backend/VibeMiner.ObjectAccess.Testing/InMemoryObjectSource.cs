@@ -7,7 +7,7 @@ namespace VibeMiner.ObjectAccess.Testing;
 /// <summary>
 /// The standard <see cref="IObjectSource"/> test double for layer 3 and up: serves synthetic objects from memory, with
 /// scripted 404s, outages and refusals, version, definition and listfile replies with their real URLs, scripted observation failures,
-/// and counts what was asked. The shared contract tests run it beside the real source.
+/// unrecorded fetches and recording of held listfile parts and deltas, and counts what was asked. The shared contract tests run it beside the real source.
 /// Like the real source it publishes its store commits: a key the first time an answer stores it, and keys dropped with <see cref="Remove"/>.
 /// </summary>
 public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
@@ -21,6 +21,8 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
     private readonly Dictionary<string, (string Name, string Revision, byte[] Bytes)> definitions = [];
     private readonly Dictionary<(string, string, ObservationKind), ObservationResult> failures = [];
     private readonly List<ObservationRequest> observed = [];
+    private readonly List<Observation> recorded = [];
+    private string? recordFailure;
     private readonly HashSet<ObjectKey> stored = [];
     private readonly List<HistoryEntry> history = [];
     private readonly StoreCommitFeed commits = new();
@@ -98,6 +100,12 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
         return this;
     }
 
+    /// <summary>
+    /// Every later <see cref="RecordAsync"/> of a valid observation is StoreFailed with this code (null records again), as the real
+    /// source answers a store that can't take the entry.
+    /// </summary>
+    public InMemoryObjectSource FailRecording(string? code = "OBJECT_STORE_DISK_FULL") { lock (gate) recordFailure = code; return this; }
+
     public StoreCommitSubscription Subscribe(int capacity = StoreCommitFeed.DefaultCapacity) => commits.Subscribe(capacity);
     private InMemoryObjectSource Script(ObjectResult result) { lock (gate) scripted[result.Key] = result; return this; }
 
@@ -106,6 +114,8 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
     public IReadOnlyList<ObjectKey> Fetched { get { lock (gate) return fetched.ToArray(); } }
     /// <summary>Every <see cref="ObserveAsync"/> call made, in order, refused and failed ones included.</summary>
     public IReadOnlyList<ObservationRequest> Observed { get { lock (gate) return observed.ToArray(); } }
+    /// <summary>Every <see cref="RecordAsync"/> call made, in order, refused and failed ones included.</summary>
+    public IReadOnlyList<Observation> RecordCalls { get { lock (gate) return recorded.ToArray(); } }
 
     private async Task<ObjectResult> AnswerAsync(ObjectRequest request, CdnContext? cdn, FetchPriority priority, bool withBytes, CancellationToken token)
     {
@@ -193,15 +203,36 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
                 bytes = reply;
             }
             var observation = new Observation(request.Kind, request.Product, request.Region, url, Time.GetUtcNow(), bytes);
-            var put = HistoryRecordFormat.Objects(new HistoryObservation((HistoryKind)(byte)request.Kind, request.Product, request.Region,
-                observation.ObservedAt, url.AbsoluteUri, bytes));
-            objects[put[0].Key] = bytes;
-            var newlyStored = stored.Add(put[0].Key);
-            history.Add(new HistoryEntry((HistoryKind)(byte)request.Kind, request.Product, request.Region, observation.ObservedAt, url.AbsoluteUri, put[0].Key, put[1].Key));
-            // Publish never blocks, so it's safe under the lock here.
-            if (newlyStored) commits.Publish([put[0].Key], []);
-            return Task.FromResult(new ObservationResult(ObjectState.Present, observation, true));
+            if (!request.Record) return Task.FromResult(new ObservationResult(ObjectState.Present, observation, Recorded: false));
+            return Task.FromResult(Append(observation));
         }
+    }
+
+    public Task<ObservationResult> RecordAsync(Observation observation, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (gate)
+        {
+            if (observation is not null) recorded.Add(observation);
+            if (ObservationRequest.RecordProblem(observation) is { } problem) return Task.FromResult(Invalid(problem));
+            if (recordFailure is { } code) return Task.FromResult(new ObservationResult(ObjectState.StoreFailed, observation, false, code, "Scripted store failure."));
+            return Task.FromResult(Append(observation!));
+        }
+    }
+
+    /// <summary>Adds the observation's history entry and its document, as the real source's append does. Call under the lock.</summary>
+    private ObservationResult Append(Observation observation)
+    {
+        var bytes = (byte[])observation.Bytes.Clone();
+        var put = HistoryRecordFormat.Objects(new HistoryObservation((HistoryKind)(byte)observation.Kind, observation.Product, observation.Region,
+            observation.ObservedAt, observation.Url.AbsoluteUri, bytes));
+        objects[put[0].Key] = bytes;
+        var newlyStored = stored.Add(put[0].Key);
+        history.Add(new HistoryEntry((HistoryKind)(byte)observation.Kind, observation.Product, observation.Region, observation.ObservedAt,
+            observation.Url.AbsoluteUri, put[0].Key, put[1].Key));
+        // Publish never blocks, so it's safe under the lock here.
+        if (newlyStored) commits.Publish([put[0].Key], []);
+        return new ObservationResult(ObjectState.Present, observation, true);
     }
 
     // GitHub answers a range past the end of the asset with a 416, which the real client reports as HttpStatus.

@@ -652,7 +652,7 @@ public sealed class ObjectStoreTests
         // Only a summary has no product, and a summary never has one.
         Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "")));
         Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", HistoryKind.Summary)));
-        Assert.Throws<ArgumentOutOfRangeException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", (HistoryKind)8)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", (HistoryKind)9)));
     }
 
     [Fact]
@@ -727,12 +727,44 @@ public sealed class ObjectStoreTests
         }
     }
 
+    [Fact]
+    public async Task AListfileDeltaKeepsItsTagRegionAndUrlAndSurvivesARebuildFromThePacks()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        const string tag = "202611010042";
+        const string url = $"https://github.com/wowdev/wow-listfile/releases/download/{tag}/community-listfile-withcapitals.csv";
+        var delta = new HistoryObservation(HistoryKind.ListfileDelta, tag, "delta", new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero),
+            url, "an opaque delta document"u8.ToArray());
+        var objects = HistoryRecordFormat.Objects(delta);
+        Assert.Equal(8, objects[1].Bytes.Span[1]);
+        Assert.True(HistoryRecordFormat.TryParse(objects[1].Bytes.Span, out var parsed));
+        Assert.Equal((HistoryKind.ListfileDelta, tag, "delta", url, delta.ObservedAt.ToUnixTimeMilliseconds(), objects[0].Key),
+            (parsed.Kind, parsed.Product, parsed.Region, parsed.Url, parsed.ObservedMs, parsed.Document));
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            await store.AppendHistoryAsync(delta);
+            await store.AppendHistoryAsync(Synthetic.Observation(2));
+        }
+        foreach (var f in Directory.GetFiles(dir, "objects.sqlite3*")) File.Delete(f);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.True(store.OpenReport.IndexRebuilt);
+            var entry = Assert.Single(await store.ReadHistoryAsync(new HistoryQuery(Kind: HistoryKind.ListfileDelta)));
+            Assert.Equal((tag, "delta", url, delta.ObservedAt), (entry.Product, entry.Region, entry.Url, entry.ObservedAt));
+            Assert.Equal(delta.Reply.ToArray(), (await store.ReadAsync(entry.Document)).Bytes);
+        }
+        // A delta always names its release.
+        Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(delta with { Product = "" }));
+    }
+
     [Theory]
     [InlineData(1, 0)]   // versions with no product
     [InlineData(6, 0)]   // a listfile release with no product
     [InlineData(7, 0)]   // a listfile part with no tag
     [InlineData(4, 3)]   // a summary with a product
-    [InlineData(8, 3)]   // a kind past listfile part
+    [InlineData(8, 0)]   // a listfile delta with no tag
+    [InlineData(9, 3)]   // a kind past listfile delta
     [InlineData(0, 3)]
     public void TheRecordGrammarTiesAnEmptyProductToTheSummary(byte kind, int productLength)
     {
