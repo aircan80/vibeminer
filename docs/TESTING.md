@@ -21,6 +21,12 @@ Keep domain, application policies, pure parsers and protocol translation directl
 
 Port Java fixtures and acceptance expectations selectively. Preserve original authorship and licensing when transferring tests; record the source path/revision. Don't copy tests that only mirror an abandoned Java implementation detail. Coverage percentages can reveal gaps but don't replace behavioral evidence; no getter tests or boilerplate to inflate counts.
 
+## Layer-scoped unit tests
+
+Each code layer in [ARCHITECTURE.md](ARCHITECTURE.md) has its own test project, and its unit tests stay inside that layer. A test may exercise less than its layer, never more. Everything below the layer is the in-memory fake of that layer's interface, held to the real code by the shared contract tests in the lower layer's own project. A layer 3 test never opens a pack, a real SQLite object index or a socket.
+
+When you change one layer, run only that layer's unit tests. Callers above use the fake, so they can't see an implementation change. A change to a layer's interface or fake also runs the contract tests and the test projects of the layers that call it. A change to shared test helpers or build files runs everything. CI on `main` runs every suite after each push, and integration and e2e tests stay cross-layer by design.
+
 ## Async tests
 
 Tests must await real completion and observe failures. Avoid `.Result`, `.Wait()`, arbitrary sleeps, timing-sensitive assertions and live services. Bounded timeouts are deadlock guards, not performance claims.
