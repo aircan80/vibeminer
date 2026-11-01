@@ -52,4 +52,12 @@ public sealed class BuildIdentityTests
         Assert.False(Products.IsKnown("WOW"));
         Assert.False(Products.IsKnown(null));
     }
+
+    // #208: the 1.60 line is WoW: Forever, and wow_classic_titan is China's Titan Reforged (D475).
+    [Theory]
+    [InlineData("wowf", "Forever")]
+    [InlineData("wow_classic_beta", "Forever Beta")]
+    [InlineData("wow_cn_beta", "Forever Beta (China)")]
+    [InlineData("wow_classic_titan", "Titan Reforged (China)")]
+    public void IdentifiedProductsCarryTheirEditionLabel(string product, string label) => Assert.Equal(label, Products.Label(product));
 }

@@ -31,7 +31,7 @@ const tableEntries = tableManifest.map(entry => ({ tableId: entry.tableHash.toLo
 const offlineEmpty = process.env.VIBEMINER_FIXTURE_OFFLINE_EMPTY === '1';
 const saved = new Map(offlineEmpty ? [] : [['wow', { ...seed, connection: 'notChecked' }]]);
 // VIBEMINER_FIXTURE_LONG_PRODUCTS=1 (#52): two more products with long real-style ids, one saved build each, so list cells meet ids as long as wow_classic_era_ptr.
-const longProducts = process.env.VIBEMINER_FIXTURE_LONG_PRODUCTS === '1' ? [{ id: 'wow_classic_era_ptr', label: 'Classic Era PTR', description: 'Authored long product id' }, { id: 'wow_classic_beta', label: 'Classic Beta', description: 'Authored long product id' }] : [];
+const longProducts = process.env.VIBEMINER_FIXTURE_LONG_PRODUCTS === '1' ? [{ id: 'wow_classic_era_ptr', label: 'Classic Era PTR', description: 'Authored long product id' }, { id: 'wow_classic_beta', label: 'Forever Beta', description: 'Authored long product id' }] : [];
 for (const [index, product] of longProducts.entries()) {
   const build = { ...structuredClone(seed.builds[0]), productId: product.id, id: String(index + 1).repeat(64) };
   saved.set(product.id, { ...structuredClone(seed), productId: product.id, connection: 'notChecked', builds: [build] });

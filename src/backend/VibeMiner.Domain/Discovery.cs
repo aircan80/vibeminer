@@ -33,10 +33,10 @@ public static class ProductRegistry
         new Product("wow_classic_era", "Classic Era", "World of Warcraft Classic Era"),
         new Product("wow_classic_era_ptr", "Classic Era PTR", "Classic Era public test realm"),
         new Product("wow_anniversary", "Anniversary", "World of Warcraft anniversary"),
-        new Product("wow_classic_beta", "Classic Beta", "World of Warcraft Classic beta"),
-        new Product("wow_cn_beta", "Edition unconfirmed", "Reviewed product ID; edition unconfirmed"),
-        new Product("wowf", "Edition unconfirmed", "Reviewed product ID; edition unconfirmed"),
-        new Product("wow_classic_titan", "Edition unconfirmed", "Reviewed product ID; edition unconfirmed") });
+        new Product("wow_classic_beta", "Forever Beta", "WoW: Forever beta"),
+        new Product("wow_cn_beta", "Forever Beta (China)", "WoW: Forever beta for China"),
+        new Product("wowf", "Forever", "WoW: Forever"),
+        new Product("wow_classic_titan", "Titan Reforged (China)", "World of Warcraft Classic Titan Reforged, China only") });
 
     /// <summary>
     /// UTF-8 byte length of the longest registered product ID. Storage and proof checks bound a saved product

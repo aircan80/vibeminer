@@ -156,7 +156,7 @@
     },
     {
       "productId": "wow_classic_beta",
-      "label": "Classic Beta",
+      "label": "Forever Beta",
       "builds": [],
       "buildCount": 0,
       "lastObservedAt": null,
@@ -165,7 +165,7 @@
     },
     {
       "productId": "wow_cn_beta",
-      "label": "Edition unconfirmed",
+      "label": "Forever Beta (China)",
       "builds": [],
       "buildCount": 0,
       "lastObservedAt": null,
@@ -174,7 +174,7 @@
     },
     {
       "productId": "wowf",
-      "label": "Edition unconfirmed",
+      "label": "Forever",
       "builds": [],
       "buildCount": 0,
       "lastObservedAt": null,
@@ -183,7 +183,7 @@
     },
     {
       "productId": "wow_classic_titan",
-      "label": "Edition unconfirmed",
+      "label": "Titan Reforged (China)",
       "builds": [],
       "buildCount": 0,
       "lastObservedAt": null,

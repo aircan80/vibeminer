@@ -44,6 +44,15 @@ public sealed class BuildCatalogHostTests
     private static JsonElement ProductOf(JsonElement catalog, string id) =>
         catalog.GetProperty("products").EnumerateArray().Single(p => p.GetProperty("productId").GetString() == id);
 
+    // The layer 3 list is a copy of the engine registry (D017, D475): same ids, same order, same labels except wowxptr's "PTR 2".
+    [Fact]
+    public void TheLayer3ProductListMatchesTheEngineRegistry()
+    {
+        Assert.Equal(ProductRegistry.Products.Select(p => p.Id), Products.Reviewed.Select(p => p.Id));
+        foreach (var product in ProductRegistry.Products.Where(p => p.Id != "wowxptr"))
+            Assert.Equal(product.Label, Products.Label(product.Id));
+    }
+
     [Fact]
     public async Task HelloAdvertisesTheCatalogOnlyWhenComposed()
     {

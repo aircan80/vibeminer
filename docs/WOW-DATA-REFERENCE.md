@@ -10,12 +10,12 @@ FileDataIDs and table hashes come from the pinned manifest. "Bundled" means the 
 
 | Table | DB2 FDID | Table hash | Layout | Bundled | Notes |
 | --- | ---: | --- | --- | --- | --- |
-| Item | 841626 | `50238EC2` | `996192AA` | yes | Classic Beta `1.60.1.70450`: `9A2A4834` (adds ItemPetFoodID, AmmunitionType). |
-| ItemSparse | 1572924 | `919BE54E` | `1C17D17F` | yes | Classic Beta `1.60.1.70450`: `6FCC3191`. Variable-length sparse records. |
+| Item | 841626 | `50238EC2` | `996192AA` | yes | Forever `1.60.1.70450`: `9A2A4834` (adds ItemPetFoodID, AmmunitionType). |
+| ItemSparse | 1572924 | `919BE54E` | `1C17D17F` | yes | Forever `1.60.1.70450`: `6FCC3191`. Variable-length sparse records. |
 | ItemClass | 1140189 | `B977271E` | `35680EB8` | yes | Same layout in both studied builds. Historical DBC FDID 841655 is a different source. |
 | ItemSubClass | 1261604 | `95D8638F` | `1E67DB87` | yes | DBC FDID 841660. |
 | ItemXItemEffect | 3177687 | `00CB674F` | `96F083AD` | yes | `$noninline,relation$ItemID`. |
-| ItemEffect | 969941 | `4002A5B1` | `4CA77678` | yes | Same layout in Classic Beta `1.60.1.70450`. Classic layouts carry `$noninline,relation$ParentItemID` (see Item → effects). |
+| ItemEffect | 969941 | `4002A5B1` | `4CA77678` | yes | Same layout in Forever `1.60.1.70450`. Classic layouts carry `$noninline,relation$ParentItemID` (see Item → effects). |
 | SpellName | 1990283 | `46C66698` | `782EE721` | yes | |
 | Spell | 1140089 | `E111669E` | `E3D134FB` | no | Description/aura text. DBC FDID 841662. |
 | SpellEffect | 1140088 | `F04238A5` | `5362E3D4` | no | Keyed by relation SpellID + DifficultyID + EffectIndex. |
@@ -75,10 +75,10 @@ Creature display rules:
 - `CreatureModelData.ModelScale`, `GeoBox[6]` and the display scale are source facts. VibeMiner does not reconstruct world size from them.
 - Portraits: `PortraitTextureFileDataID` (a texture), `PortraitCreatureDisplayInfoID` (another display) and an app-rendered image are three different things.
 
-Item → effects on Classic (#86). The link table depends on the build. The bundled ItemEffect definition tells which for a listed build, and for an unlisted one whose version-line layouts agree. On the 1.x line they don't (Classic Beta 1.60's `4CA77678` has no ParentItemID), so an unlisted 1.x build such as 1.15.9.70576 is decided by its ItemEffect file's layout:
+Item → effects on Classic (#86). The link table depends on the build. The bundled ItemEffect definition tells which for a listed build, and for an unlisted one whose version-line layouts agree. On the 1.x line they don't (Forever 1.60's `4CA77678` has no ParentItemID), so an unlisted 1.x build such as 1.15.9.70576 is decided by its ItemEffect file's layout:
 
-- No WoWDBDefs definition (pinned `b9a63096`, or the newest fetched `a50ca6f` on 2026-10-25) lists ItemXItemEffect for any 1.14–1.15, 2.5, 3.4/3.80, 4.4 or 5.5 build. Its only Classic-line builds are Classic Beta `1.60.1`.
-- Every ItemEffect layout listed for those builds has `ParentItemID`. 5.5.0–5.5.3 (and 4.4.1–4.4.2, 3.4.4–3.4.5, 3.80.0, 1.15.3–1.15.8) use `EB717848`: ID and eight inputs (no PlayerConditionID, TriggerType signed8), then ParentItemID as column 9. Older Classic layouts (`95B79695`, `D696840A`, `F2A2E644`, 1.13–4.4) have ParentItemID too; only `54C10519` onward (9.1+ Retail) and Classic Beta 1.60's `4CA77678` drop it. 5.5.4 (67090–70449), 3.80.2, 2.5.5–2.5.6 and 1.15.9 use `1BF9CF3A`: the ten fields of Retail `4CA77678` in the same order and widths (LegacySlotIndex u8, TriggerType u8, Charges signed16, CoolDownMSec and CategoryCoolDownMSec signed32, SpellCategoryID u16, SpellID signed32, ChrSpecializationID u16, PlayerConditionID signed32, unverified name), then ParentItemID signed32 as column 10.
+- No WoWDBDefs definition (pinned `b9a63096`, or the newest fetched `a50ca6f` on 2026-10-25) lists ItemXItemEffect for any 1.14–1.15, 2.5, 3.4/3.80, 4.4 or 5.5 build. Its only 1.x builds that list it are Forever `1.60.1`.
+- Every ItemEffect layout listed for those builds has `ParentItemID`. 5.5.0–5.5.3 (and 4.4.1–4.4.2, 3.4.4–3.4.5, 3.80.0, 1.15.3–1.15.8) use `EB717848`: ID and eight inputs (no PlayerConditionID, TriggerType signed8), then ParentItemID as column 9. Older Classic layouts (`95B79695`, `D696840A`, `F2A2E644`, 1.13–4.4) have ParentItemID too; only `54C10519` onward (9.1+ Retail) and Forever 1.60's `4CA77678` drop it. 5.5.4 (67090–70449), 3.80.2, 2.5.5–2.5.6 and 1.15.9 use `1BF9CF3A`: the ten fields of Retail `4CA77678` in the same order and widths (LegacySlotIndex u8, TriggerType u8, Charges signed16, CoolDownMSec and CategoryCoolDownMSec signed32, SpellCategoryID u16, SpellID signed32, ChrSpecializationID u16, PlayerConditionID signed32, unverified name), then ParentItemID signed32 as column 10.
 - Real files from the official CDN, 2026-10-25: MoP Classic `wow_classic` 5.5.4.70579 (not listed by the pinned definitions; it opens by layout) and Classic Era `wow_classic_era` 1.15.9.70003 both have ItemEffect (FDID 969941) with layout `1BF9CF3A`. 5.5.4.70579: 21,455 declared rows, 21,291 readable, 40 encrypted sections, no copies. 1.15.9.70003: 16,965 rows, complete, no copies. Neither file needs Retail's raw-width rule (D079) for Charges, SpellCategoryID or ChrSpecializationID. On 5.5.4.70631 SpellCategoryID's stored values carry constant junk upper bits; D087 narrowing reads it at its declared u16, so it still reaches effects as a declared-width value.
 - ItemXItemEffect: 1.15.9.70003's ROOT has no enUS file for FDID 3177687 (`CONTENT_VARIANT_MISSING`); on 5.5.4.70579 no definition covers the build, so it is never downloaded.
 - Observed links, same in both builds: Thunderfury (Item 19019) → ItemEffect 101091 (TriggerType 2, SpellID 21992). Sulfuras (17182) → 101343 (slot 1, TriggerType 2, SpellID 21162) and 101344 (slot 2, TriggerType 1, SpellID 21142). Hearthstone (6948) on 1.15.9 → 98264 (SpellID 8690). At most 3 rows share one ParentItemID on 5.5.4.70579, 5 on 1.15.9.70003; none is 0.
@@ -124,7 +124,7 @@ Effects rules:
 
   A missing row in a partial table proves nothing about the build.
 - **Malformed text exists.** One invalid ItemSparse Description was seen among 175,625 emitted Retail rows. Text issues are kept per cell; the row stays usable.
-- **Classic Beta `1.60.1.70450` table objects are archive-only.** Loose URLs for Item and ItemClass return 404, so archive index lookup and HTTP Range reads are required. Its Item table comes back encrypted.
+- **Forever `1.60.1.70450` table objects are archive-only.** Loose URLs for Item and ItemClass return 404, so archive index lookup and HTTP Range reads are required. Its Item table comes back encrypted.
 
 ## Definitions (WoWDBDefs)
 
@@ -211,12 +211,14 @@ Product registry ([Discovery.cs](../src/backend/VibeMiner.Domain/Discovery.cs)):
 | `wow_classic_era` | Classic Era |
 | `wow_classic_era_ptr` | Classic Era PTR |
 | `wow_anniversary` | Anniversary |
-| `wow_classic_beta` | Classic Beta |
-| `wow_cn_beta` | edition unconfirmed |
-| `wowf` | edition unconfirmed |
-| `wow_classic_titan` | edition unconfirmed |
+| `wow_classic_beta` | Forever Beta |
+| `wow_cn_beta` | Forever Beta (China) |
+| `wowf` | Forever |
+| `wow_classic_titan` | Titan Reforged (China) |
 
 Friendly labels are community names, not Blizzard-authenticated. Keep raw IDs visible.
+
+The 1.60 line is WoW: Forever ([D475](DECISIONS.md)); older notes called it Classic Beta. Notes on `1.60.1.70450` don't record which product served it. On 2026-11-01 `wow_cn_beta` serves 70450 and `wow_classic_beta` serves 70532.
 
 IDs run up to 19 bytes (`wow_classic_era_ptr`). Storage checks derive their bound from the longest listed ID ([D075](DECISIONS.md)); never hard-code a shorter one.
 

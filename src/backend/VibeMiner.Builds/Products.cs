@@ -20,10 +20,10 @@ public static class Products
         new("wow_classic_era", "Classic Era"),
         new("wow_classic_era_ptr", "Classic Era PTR"),
         new("wow_anniversary", "Anniversary"),
-        new("wow_classic_beta", "Classic Beta"),
-        new("wow_cn_beta", "Edition unconfirmed"),
-        new("wowf", "Edition unconfirmed"),
-        new("wow_classic_titan", "Edition unconfirmed") });
+        new("wow_classic_beta", "Forever Beta"),
+        new("wow_cn_beta", "Forever Beta (China)"),
+        new("wowf", "Forever"),
+        new("wow_classic_titan", "Titan Reforged (China)") });
 
     public static readonly IReadOnlyList<string> Ids = Array.AsReadOnly(Reviewed.Select(p => p.Id).ToArray());
 
