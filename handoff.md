@@ -4,7 +4,7 @@ How to continue VibeMiner on another machine or in another session. The owner (a
 
 ## Where things stand
 
-The storage rewrite has rebuilt the engine as seven code layers. Layers 1–6 and the CLI are on `main`. CI is green at 72cacb68; the run for b108726b (#204) was in progress at handoff. The Electron app still runs on the old code, except for the Discovery build list, which now comes from layer 3 (#205).
+The storage rewrite has rebuilt the engine as seven code layers. Layers 1–6 and the CLI are on `main`. CI is green at b108726b. Nothing was in progress at handoff. The Electron app still runs on the old code, except for the Discovery build list, which now comes from layer 3 (#205).
 
 | Layer | Project(s) | State |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ The storage rewrite has rebuilt the engine as seven code layers. Layers 1–6 an
 | 3 Builds | `VibeMiner.Builds` | Done. Catalog, open build, resolver, Downloaded figure, Download all, region choice |
 | 4 Files | `VibeMiner.Files` | Done. A file system per build and locale: List, Stat, Get, ReadRange, OpenRead, Ensure, names, formats |
 | 5 Formats | `VibeMiner.Formats` | Done. DB2 reader and definitions, ITables with direct reads and tables shared across builds, preload, BLP, M2/SKIN |
-| 6 Game concepts | `VibeMiner.Concepts` | Done (#204, b108726b). QA passed; closes when CI on b108726b is green |
+| 6 Game concepts | `VibeMiner.Concepts` | Done and closed (#204, b108726b) |
 | 7 Features | `VibeMiner.Cli` (`vm`, `vm browse`), `VibeMiner.Composition` | `vm browse` has `:store :history :builds :files :tables :settings :items :creatures`. The app's Discovery list uses layer 3 |
 
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first. It has the layers, the rules, the stores and testing by layer. Decisions are in [docs/DECISIONS.md](docs/DECISIONS.md); the storage rewrite uses D121 onwards.
