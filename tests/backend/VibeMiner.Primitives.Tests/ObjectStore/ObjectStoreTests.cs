@@ -586,6 +586,76 @@ public sealed class ObjectStoreTests
         Assert.Equal(20, (await again.VerifyAsync()).Checked - 2);
     }
 
+    /// <summary>A pack file the store can't read still counts for the next pack number (spec 1); 100 bytes, so open leaves it alone.</summary>
+    private static void PlantUnreadablePack(string dir, int seq) => File.WriteAllBytes(PackPath(dir, seq), new byte[100]);
+
+    [Fact]
+    public async Task TheLastPackNumberIsHandedOutAndTheRollAfterItIsRefusedWithLimit()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var options = Quick with { MaxPackBytes = 400_000 };
+        var a = Synthetic.Headerless(1, 300_000); var b = Synthetic.Headerless(2, 300_000); var c = Synthetic.Headerless(3, 300_000);
+        var small = Synthetic.Headerless(4, 1000);
+        await using (var store = await ObjectStore.OpenAsync(dir, options)) await store.PutAsync([a]);
+        PlantUnreadablePack(dir, 999_998);
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            Assert.Contains(store.OpenReport.Problems, p => p.Contains("999998", StringComparison.Ordinal));
+            Assert.Equal(PutOutcome.Stored, (await store.PutAsync([b]))[0].Outcome);   // rolls to the last number
+            Assert.Equal(999_999, Row(dir, b.Key).pack);
+            var refused = await Assert.ThrowsAsync<ObjectStoreException>(async () => await store.PutAsync([c]));
+            Assert.Equal(ObjectStoreCodes.Limit, refused.Code);
+            Assert.False(File.Exists(PackPath(dir, 1_000_000)));
+            Assert.False(await store.HasAsync(c.Key));
+            // The store keeps working inside the pack it has.
+            Assert.Equal(PutOutcome.Stored, (await store.PutAsync([small]))[0].Outcome);
+            foreach (var o in new[] { a, b, small }) Assert.Equal(o.Bytes.ToArray(), (await store.ReadAsync(o.Key)).Bytes);
+        }
+        // The packs row for 999,999 alone keeps the limit across sessions.
+        File.Delete(PackPath(dir, 999_998));
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            Assert.False(store.OpenReport.IndexRebuilt, string.Join("; ", store.OpenReport.Problems));
+            Assert.Equal(ObjectStoreCodes.Limit, (await Assert.ThrowsAsync<ObjectStoreException>(async () => await store.PutAsync([c]))).Code);
+            foreach (var o in new[] { a, b, small }) Assert.Equal(o.Bytes.ToArray(), (await store.ReadAsync(o.Key)).Bytes);
+            Assert.Equal(0, (await store.VerifyAsync(full: true)).CorruptCount);
+        }
+    }
+
+    [Fact]
+    public async Task ACompactionTargetPastTheLastPackNumberIsRefusedWithLimitAndChangesNothing()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var options = Quick with { MaxPackBytes = 400_000 };
+        var a = Synthetic.Headerless(1, 300_000); var b = Synthetic.Headerless(2, 300_000);
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            await store.PutAsync([a]); await store.PutAsync([b]);               // pack 1 sealed, pack 2 active
+            await store.DeleteAsync([a.Key]);                                    // pack 1 is all dead
+        }
+        PlantUnreadablePack(dir, 999_999);
+        var rows = Rows(dir);
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            var refused = await Assert.ThrowsAsync<ObjectStoreException>(() => store.CompactAsync(new CompactOptions(0.01, 10)));
+            Assert.Equal(ObjectStoreCodes.Limit, refused.Code);
+            Assert.True(File.Exists(PackPath(dir, 1)));
+            Assert.False(File.Exists(PackPath(dir, 1_000_000)));
+            Assert.Equal(rows, Rows(dir));
+            Assert.Equal(b.Bytes.ToArray(), (await store.ReadAsync(b.Key)).Bytes);
+            Assert.Equal(ReadState.Absent, (await store.ReadAsync(a.Key)).State);
+            var small = Synthetic.Headerless(3, 1000);
+            Assert.Equal(PutOutcome.Stored, (await store.PutAsync([small]))[0].Outcome);
+        }
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            Assert.False(store.OpenReport.IndexRebuilt, string.Join("; ", store.OpenReport.Problems));
+            Assert.Equal(b.Bytes.ToArray(), (await store.ReadAsync(b.Key)).Bytes);
+        }
+    }
+
     [Fact]
     public async Task ManyReadersAndOneWriterNeverSeeABadOrMissingCommittedObject()
     {
