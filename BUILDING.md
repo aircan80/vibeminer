@@ -9,6 +9,8 @@ VibeMiner now has a runnable Electron/React interface and a C# discovery engine 
 - Electron **44.9.0**, React **19.3.1**, TypeScript **7.0.2**, Vite **8.3.4**; exact dependencies are locked in `package-lock.json` and the NuGet project lockfiles.
 - Git and native desktop libraries required by Electron on the development platform.
 
+On Fedora, `tools/setup-fedora.sh` installs everything above that's missing: the system packages, the pinned .NET SDK and Node in `.local/toolchains/`, npm, and the project dependencies. It's safe to run again, and `--dry-run` only reports.
+
 If you have local SDKs under the ignored `.local/toolchains/`, load them with:
 
 ```bash
