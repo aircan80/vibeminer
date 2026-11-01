@@ -19,7 +19,7 @@ public sealed class GeneratedTable
 
     internal GeneratedTable(GeneratedTableSource source, GeneratedKey nodeKey, TableMetadata metadata, RecordFile file, Func<CancellationToken, Task> discard)
     {
-        Source = source; NodeKey = nodeKey; Header = metadata.Header; Sections = metadata.Sections; Completion = metadata.Completion; KeysUsed = metadata.KeysUsed;
+        Source = source; NodeKey = nodeKey; Scoped = metadata.Identity.EncodingIn is not null; Header = metadata.Header; Sections = metadata.Sections; Completion = metadata.Completion; KeysUsed = metadata.KeysUsed; HoleKeys = metadata.HoleKeys;
         this.file = file; this.discard = discard;
     }
 
@@ -30,6 +30,10 @@ public sealed class GeneratedTable
     /// <summary>The key names the table depends on, sorted.</summary>
     public IReadOnlyList<string> KeysUsed { get; }
     public long RowCount => file.Count;
+    /// <summary>The keys of the layer 4 holes the decode met, sorted; each is among <see cref="KeysUsed"/>.</summary>
+    public IReadOnlyList<string> HoleKeys { get; }
+    /// <summary>The decode read through encrypted chunks, so the table is filed under its source's encoding scope (D350).</summary>
+    internal bool Scoped { get; }
     /// <summary>The node the table is filed under: N(KeysUsed) for the key status it was stored or opened with.</summary>
     internal GeneratedKey NodeKey { get; }
 

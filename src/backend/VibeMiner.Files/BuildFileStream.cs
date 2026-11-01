@@ -18,13 +18,15 @@ internal sealed class BuildFileStream : FileReadStream
     private readonly FileReader reader;
     private readonly BlteLayout layout;
     private readonly FileHole[] holes;
+    private readonly string[] chunkKeys;
     private long position;
     private bool disposed;
     private byte[]? chunk;
     private int chunkIndex = -1;
 
-    private BuildFileStream(FileReader reader, BlteLayout layout, FileHole[] holes)
+    private BuildFileStream(FileReader reader, BlteLayout layout, FileHole[] holes, string[] chunkKeys)
     {
+        this.chunkKeys = chunkKeys;
         this.reader = reader; this.layout = layout; this.holes = holes;
     }
 
@@ -36,11 +38,12 @@ internal sealed class BuildFileStream : FileReadStream
     /// </summary>
     public static async Task<FileOpen> OpenAsync(FileReader reader, CancellationToken cancellationToken)
     {
-        if (reader.Size == 0) return new(FileReadState.Complete, new BuildFileStream(reader, new(true, 0, 0, 0, []), []));
+        if (reader.Size == 0) return new(FileReadState.Complete, new BuildFileStream(reader, new(true, 0, 0, 0, []), [], []));
         var layout = await reader.LayoutAsync(cancellationToken).ConfigureAwait(false);
         foreach (var c in layout.Chunks) reader.CheckChunk(layout, c);
 
         var holes = new List<FileHole>();
+        var keys = new SortedSet<string>(StringComparer.Ordinal);
         var chunks = layout.Chunks;
         var window = new byte[Math.Min(PeekWindow, (int)Math.Min(int.MaxValue, layout.EncodedLength))];
         for (var i = 0; i < chunks.Count;)
@@ -51,7 +54,7 @@ internal sealed class BuildFileStream : FileReadStream
             {
                 var length = Math.Min(BlteChunks.EnvelopeLength, chunks[i].EncodedSize);
                 await reader.ReadEncodedAsync(chunks[i].EncodedOffset, window.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
-                AddHole(reader, chunks[i], window.AsSpan(0, length), holes);
+                AddHole(reader, chunks[i], window.AsSpan(0, length), holes, keys);
                 i++;
                 continue;
             }
@@ -61,25 +64,29 @@ internal sealed class BuildFileStream : FileReadStream
                 runBytes += chunks[++runEnd].EncodedSize;
             await reader.ReadEncodedAsync(chunks[i].EncodedOffset, window.AsMemory(0, runBytes), cancellationToken).ConfigureAwait(false);
             for (int c = i, at = 0; c <= runEnd; at += chunks[c].EncodedSize, c++)
-                AddHole(reader, chunks[c], window.AsSpan(at, Math.Min(BlteChunks.EnvelopeLength, chunks[c].EncodedSize)), holes);
+                AddHole(reader, chunks[c], window.AsSpan(at, Math.Min(BlteChunks.EnvelopeLength, chunks[c].EncodedSize)), holes, keys);
             i = runEnd + 1;
         }
 
         var inHoles = holes.Sum(h => h.Length);
         var state = inHoles == 0 ? FileReadState.Complete : inHoles == layout.DecodedLength ? FileReadState.Protected : FileReadState.Partial;
-        return new(state, new BuildFileStream(reader, layout, [.. holes]));
+        return new(state, new BuildFileStream(reader, layout, [.. holes], [.. keys]));
     }
 
-    /// <summary>Adds the chunk's hole, merged into the last one when it is the same key and adjacent. An empty chunk covers nothing.</summary>
-    private static void AddHole(FileReader reader, BlteChunk c, ReadOnlySpan<byte> prefix, List<FileHole> holes)
+    /// <summary>Adds an encrypted chunk's key, and its hole, merged into the last one when it is the same key and adjacent. An empty
+    /// chunk covers nothing.</summary>
+    private static void AddHole(FileReader reader, BlteChunk c, ReadOnlySpan<byte> prefix, List<FileHole> holes, SortedSet<string> keys)
     {
-        if (c.DecodedSize == 0 || reader.HoleKeyOf(prefix) is not { } key) return;
+        if (c.DecodedSize == 0) return;
+        if (FileReader.EncryptedKeyOf(prefix) is { } encrypted) keys.Add(encrypted);
+        if (reader.HoleKeyOf(prefix) is not { } key) return;
         if (holes.Count > 0 && holes[^1] is var last && last.KeyName == key && last.Offset + last.Length == c.DecodedOffset)
             holes[^1] = last with { Length = last.Length + c.DecodedSize };
         else holes.Add(new(c.DecodedOffset, c.DecodedSize, key));
     }
 
     public override IReadOnlyList<FileHole> Holes => holes;
+    public override IReadOnlyList<string> ChunkKeys => chunkKeys;
     public override bool CanRead => !disposed;
     public override bool CanSeek => !disposed;
     public override bool CanWrite => false;

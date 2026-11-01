@@ -20,11 +20,14 @@ namespace VibeMiner.Files.Testing;
 /// side shares one EKey between files of identical content). The listed format follows the real rules: a stored file's first
 /// <see cref="Content"/> bytes up to its first hole, when it has no <see cref="ReadFailure"/>, go through the same detection
 /// with the listed name; anything else gets the listed name's extension (none when the file has no name).
+/// <see cref="DecryptedKeys"/> are the keys of encrypted chunks a known key opened: the stream's
+/// <see cref="FileReadStream.ChunkKeys"/> lists them with the holes' keys.
 /// The fake assumes <see cref="Holes"/> are sorted and doesn't model the real side's first-chunk size cap on detection.
 /// </summary>
 public sealed record FakeFile(uint FileDataId, string? Path = null, long? Size = 0, FileStorage Storage = FileStorage.NotStored,
     bool Encrypted = false, IReadOnlyList<string>? Locales = null, string? ContentKey = null,
-    bool NotInEncoding = false, byte[]? Content = null, IReadOnlyList<FileHole>? Holes = null, FakeReadFailure? ReadFailure = null);
+    bool NotInEncoding = false, byte[]? Content = null, IReadOnlyList<FileHole>? Holes = null, FakeReadFailure? ReadFailure = null,
+    IReadOnlyList<string>? DecryptedKeys = null);
 
 /// <summary>
 /// A scripted read failure: a state that carries nothing and isn't a lookup state or TooLarge. <see cref="ObservedAt"/> is passed
@@ -399,7 +402,7 @@ public sealed class InMemoryFileSystem(long maxReadBytes = 256L << 20) : IFileSy
             var holes = found.Holes ?? [];
             // The open read the file's layout, so it is stored even when its reads will fail.
             fake.MarkFetched(found.FileDataId);
-            return Task.FromResult(new FileOpen(StateOf(content.Length, holes.Sum(h => h.Length)), new FakeReadStream(content, holes, onRead)));
+            return Task.FromResult(new FileOpen(StateOf(content.Length, holes.Sum(h => h.Length)), new FakeReadStream(content, holes, onRead, found.DecryptedKeys ?? [])));
         }
 
         public async Task<EnsureResult> EnsureAsync(EnsureSelection selection, EnsurePriority priority, IProgress<EnsureProgress>? progress,
@@ -604,8 +607,11 @@ public sealed class InMemoryFileSystem(long maxReadBytes = 256L << 20) : IFileSy
     /// An async-only stream over the content, which the fake never changes after Add, so it outlives the handle. With
     /// <paramref name="failure"/>, every read that would return bytes throws <see cref="FileReadException"/> and leaves the position.
     /// </summary>
-    private sealed class FakeReadStream(byte[] content, IReadOnlyList<FileHole> holes, FakeReadFailure? failure) : FileReadStream
+    private sealed class FakeReadStream(byte[] content, IReadOnlyList<FileHole> holes, FakeReadFailure? failure, IReadOnlyList<string> decrypted)
+        : FileReadStream
     {
+        public override IReadOnlyList<string> ChunkKeys { get; } =
+            [.. holes.Select(h => h.KeyName).Concat(decrypted).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
         private long position;
         private bool disposed;
 

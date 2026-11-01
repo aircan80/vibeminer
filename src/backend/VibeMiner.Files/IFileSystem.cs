@@ -173,6 +173,13 @@ public abstract class FileReadStream : Stream
 {
     /// <summary>Every hole of the file, ascending, known when the stream opened. Still readable after dispose.</summary>
     public abstract IReadOnlyList<FileHole> Holes { get; }
+
+    /// <summary>
+    /// The key names (16 upper hex) of every encrypted chunk of the file, decrypted or a hole, distinct and in ordinal order, from
+    /// the envelopes read at open. Bytes read from a decrypted chunk depend on its key, so a cache of them carries these keys (#187,
+    /// D350). Still readable after dispose. By default the holes' keys.
+    /// </summary>
+    public virtual IReadOnlyList<string> ChunkKeys => [.. Holes.Select(hole => hole.KeyName).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
 }
 
 /// <summary>A stream read started inside a hole.</summary>

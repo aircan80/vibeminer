@@ -13,22 +13,166 @@ public sealed class GeneratedTablesTests
     private static readonly TimeSpan Guard = TimeSpan.FromSeconds(30);
 
     [Fact]
-    public async Task Every_identity_ingredient_but_region_changes_the_table()
+    public async Task Every_identity_ingredient_changes_the_table()
     {
         var store = new InMemoryGeneratedStore();
         var tables = new GeneratedTables(store);
         await tables.StoreAsync(Source(), TactKeyStatus.None, Content(SimpleRows(3)));
+        await tables.StoreAsync(Source(locale: null), TactKeyStatus.None, Content(SimpleRows(4)));
 
-        Assert.NotNull(await tables.OpenAsync(Source(), TactKeyStatus.None));
-        Assert.NotNull(await tables.OpenAsync(Source(region: "eu"), TactKeyStatus.None));
+        Assert.Equal(3, (await tables.OpenAsync(Source(), TactKeyStatus.None))!.RowCount);
+        // A table without locstrings has no locale: it is apart from every locale's table.
+        Assert.Equal(4, (await tables.OpenAsync(Source(locale: null), TactKeyStatus.None))!.RowCount);
         foreach (var other in new[]
         {
-            Source(product: "wowt"), Source(buildConfig: "1123456789abcdef0123456789abcdef"), Source(cdnConfig: "0edcba9876543210fedcba9876543210"),
             Source(locale: "deDE"), Source(contentKey: "10112233445566778899aabbccddeeff"), Source(definition: "def-sha256+01020305"),
         })
             Assert.Null(await tables.OpenAsync(other, TactKeyStatus.None));
-        // The misses read only the start of their own chain, so the stored table is untouched.
+        // The misses read only the start of their own chain, so the stored tables are untouched.
+        Assert.Equal(3, (await tables.OpenAsync(Source(), TactKeyStatus.None))!.RowCount);
+    }
+
+    [Fact]
+    public void The_identity_is_the_v2_text_with_no_build()
+    {
+        Assert.Equal("vibeminer-generated-table v2", GeneratedTableSource.IdentityFormat);
+        Assert.Equal(string.Join('\n', "vibeminer-generated-table v2", "enUS", ContentKey, "def-sha256+01020304",
+            "reader-options=" + Source().ReaderOptions, "db2-values-v3", "rows-v1"), Source().IdentityText);
+        Assert.Equal(string.Join('\n', "vibeminer-generated-table v2", "-", ContentKey, "def-sha256+01020304",
+            "reader-options=" + Source().ReaderOptions, "db2-values-v3", "rows-v1"), Source(locale: null).IdentityText);
+        Assert.Equal(Source(), Source(limits: new Db2Limits()));
+        Assert.NotEqual(Source(), Source(locale: null));
+        Assert.Throws<ArgumentException>(() => Source(locale: "xxXX"));
+    }
+
+    [Fact]
+    public async Task A_table_with_holes_is_filed_under_its_hole_scope_and_one_without_is_shared()
+    {
+        var tables = new GeneratedTables(new InMemoryGeneratedStore());
+        var a = Source();
+        GeneratedTableSource Scoped(string scope) => new("enUS", ContentKey, "def-sha256+01020304", new Db2Limits(), scope);
+        var holed = Content(SimpleRows(1), K1) with { HoleKeys = [K1] };
+        var stored = await tables.StoreAsync(Scoped("build a"), TactKeyStatus.None, holed);
+        Assert.Equal(stored.Identity, tables.IdentityOf(Scoped("build a"), TactKeyStatus.None, [K1], encrypted: true));
+        Assert.NotEqual(stored.Identity, tables.IdentityOf(Scoped("build a"), TactKeyStatus.None, [K1]));
+
+        // Another build's encoding may hide other chunks: it never sees build a's partial table.
+        Assert.Equal(1, (await tables.OpenAsync(Scoped("build a"), TactKeyStatus.None))!.RowCount);
+        Assert.Null(await tables.OpenAsync(Scoped("build b"), TactKeyStatus.None));
+        Assert.Null(await tables.OpenAsync(a, TactKeyStatus.None));
+
+        // A table without holes is the same for every build: once b stores it, every scope reads it first, a's too.
+        await tables.StoreAsync(Scoped("build b"), TactKeyStatus.None, Content(SimpleRows(3)));
+        Assert.Equal(3, (await tables.OpenAsync(Scoped("build c"), TactKeyStatus.None))!.RowCount);
+        Assert.Equal(3, (await tables.OpenAsync(a, TactKeyStatus.None))!.RowCount);
+        Assert.Equal(3, (await tables.OpenAsync(Scoped("build a"), TactKeyStatus.None))!.RowCount);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => tables.StoreAsync(a, TactKeyStatus.None, Content(SimpleRows(1), K1) with { HoleKeys = [K1] }));
+        Assert.Throws<ArgumentException>(() => tables.IdentityOf(a, TactKeyStatus.None, [K1], encrypted: true));
+    }
+
+    [Fact]
+    public async Task A_table_read_through_a_decrypted_chunk_is_filed_under_its_scope_with_no_hole()
+    {
+        var tables = new GeneratedTables(new InMemoryGeneratedStore());
+        GeneratedTableSource Scoped(string scope) => new("enUS", ContentKey, "def-sha256+01020304", new Db2Limits(), scope);
+        var content = Content(SimpleRows(2)) with { KeysUsed = [K1], ChunkKeys = [K1] };
+        var stored = await tables.StoreAsync(Scoped("build a"), Known(K1), content);
+        Assert.Empty(stored.HoleKeys);
+        Assert.Equal(VibeMiner.Formats.Tables.TableState.Ready, VibeMiner.Formats.Tables.TableStates.Generated(stored).State);
+        Assert.Equal(stored.Identity, tables.IdentityOf(Scoped("build a"), Known(K1), [K1], encrypted: true));
+        Assert.Null(await tables.OpenAsync(Scoped("build b"), Known(K1)));
+        await Assert.ThrowsAsync<ArgumentException>(() => tables.StoreAsync(Scoped("build a"), Known(K1),
+            Content(SimpleRows(1)) with { ChunkKeys = [K2] }));
+    }
+
+    [Fact]
+    public async Task GetOrBuild_never_hands_one_scopes_encrypted_table_to_another()
+    {
+        var tables = new GeneratedTables(new InMemoryGeneratedStore());
+        GeneratedTableSource Scoped(string scope) => new("enUS", ContentKey, "def-sha256+01020304", new Db2Limits(), scope);
+        var release = new TaskCompletionSource();
+        var builds = 0;
+        // Flights are per encoding scope: b never waits on a's build, and builds its own clear table.
+        var first = tables.GetOrBuildAsync(Scoped("build a"), TactKeyStatus.None, async _ =>
+        {
+            Interlocked.Increment(ref builds);
+            await release.Task;
+            return Content(SimpleRows(1), K1) with { HoleKeys = [K1] };
+        });
+        var second = tables.GetOrBuildAsync(Scoped("build b"), TactKeyStatus.None, _ =>
+        {
+            Interlocked.Increment(ref builds);
+            return Task.FromResult(Content(SimpleRows(2)));
+        });
+        release.SetResult();
+        Assert.Equal(1, (await first.WaitAsync(Guard)).RowCount);
+        Assert.Equal(2, (await second.WaitAsync(Guard)).RowCount);
+        Assert.Equal(2, builds);
+    }
+
+    [Fact]
+    public async Task One_scopes_failed_build_is_never_another_scopes_answer()
+    {
+        var tables = new GeneratedTables(new InMemoryGeneratedStore());
+        GeneratedTableSource Scoped(string scope) => new("enUS", ContentKey, "def-sha256+01020304", new Db2Limits(), scope);
+        var release = new TaskCompletionSource();
+        var first = tables.GetOrBuildAsync(Scoped("build a"), TactKeyStatus.None, async _ =>
+        {
+            await release.Task;
+            throw new InvalidOperationException("build a's layer 4 failed");
+        });
+        var second = tables.GetOrBuildAsync(Scoped("build b"), TactKeyStatus.None, _ => Task.FromResult(Content(SimpleRows(2))));
+        release.SetResult();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => first.WaitAsync(Guard));
+        Assert.Equal(2, (await second.WaitAsync(Guard)).RowCount);
+    }
+
+    [Fact]
+    public async Task A_stored_table_records_its_files_layout_by_content_key_alone()
+    {
+        var store = new InMemoryGeneratedStore();
+        var tables = new GeneratedTables(store);
+        Assert.Null(await tables.LayoutOfAsync(ContentKey));
+        // Another locale and definition of the same file: the layout is the file's, so one record answers for both.
+        await tables.StoreAsync(Source(), TactKeyStatus.None, Content(SimpleRows(2)));
+        await tables.StoreAsync(Source(locale: null, definition: "other"), TactKeyStatus.None, Content(SimpleRows(2)));
+        Assert.Equal("01020304", await tables.LayoutOfAsync(ContentKey));
+        Assert.Null(await tables.LayoutOfAsync("10112233445566778899aabbccddeeff"));
+
+        var record = Assert.Single(await ClassifyAsync(store), k => k.Value == Kind.Layout).Key;
+        using (var json = JsonDocument.Parse((await store.ReadAsync(record)).Bytes!))
+            Assert.Equal(["vibeminer-generated-table-layout v1", ContentKey, "01020304"],
+                json.RootElement.EnumerateObject().Select(p => p.Value.GetString()!).ToArray());
+        store.Damage(record);
+        Assert.Null(await tables.LayoutOfAsync(ContentKey));
+        Assert.DoesNotContain(record, store.Keys);
+        // The tables themselves are untouched and the next store writes the record again.
         Assert.NotNull(await tables.OpenAsync(Source(), TactKeyStatus.None));
+        await tables.StoreAsync(Source(definition: "third"), TactKeyStatus.None, Content(SimpleRows(1)));
+        Assert.Equal("01020304", await tables.LayoutOfAsync(ContentKey));
+    }
+
+    [Fact]
+    public async Task A_layout_record_of_another_shape_or_file_reads_as_none_and_is_deleted()
+    {
+        var store = new InMemoryGeneratedStore();
+        var tables = new GeneratedTables(store);
+        await tables.StoreAsync(Source(), TactKeyStatus.None, Content(SimpleRows(1)));
+        var record = Assert.Single(await ClassifyAsync(store), k => k.Value == Kind.Layout).Key;
+        foreach (var bytes in new[]
+        {
+            "{\"Format\":\"vibeminer-generated-table-layout v1\",\"ContentKey\":\"10112233445566778899aabbccddeeff\",\"Layout\":\"01020304\"}",
+            "{\"Format\":\"vibeminer-generated-table-layout v1\",\"ContentKey\":\"" + ContentKey + "\",\"Layout\":\"0102030\"}",
+            "{\"Format\":\"vibeminer-generated-table-layout v2\",\"ContentKey\":\"" + ContentKey + "\",\"Layout\":\"01020304\"}",
+            "not json",
+        })
+        {
+            await store.DeleteAsync([record]);
+            await store.PutAsync([new GeneratedPut(record, System.Text.Encoding.UTF8.GetBytes(bytes))]);
+            Assert.Null(await tables.LayoutOfAsync(ContentKey));
+            Assert.DoesNotContain(record, store.Keys);
+        }
     }
 
     [Fact]
@@ -92,10 +236,11 @@ public sealed class GeneratedTablesTests
         var tables = new GeneratedTables(new InMemoryGeneratedStore());
         var content = Content(SimpleRows(2, "mixed"), K1, K2, K3) with
         {
+            HoleKeys = [K3],
             Sections = [new Db2Section(0, 2, 0, K1, true, IsDecrypted: true), new Db2Section(1, 3, 0, K2, true)],
             Completion = new Db2Completion(5, 2, 0, 1, 3, 0, "unencryptedSections", 1234),
         };
-        var stored = await tables.StoreAsync(Source(), Known(K1), content);
+        var stored = await tables.StoreAsync(new("enUS", ContentKey, "def-sha256+01020304", new Db2Limits(), "build a"), Known(K1), content);
         var (state, reason, counts) = VibeMiner.Formats.Tables.TableStates.Generated(stored);
         Assert.Equal((VibeMiner.Formats.Tables.TableState.Partial, 1), (state, counts.ExcludedSections));
         Assert.Equal([K2, K3], reason!.KeyNames);
@@ -154,7 +299,7 @@ public sealed class GeneratedTablesTests
     public async Task Stored_node_and_metadata_echo_the_identity()
     {
         var store = new InMemoryGeneratedStore();
-        await new GeneratedTables(store).StoreAsync(Source(region: "eu"), TactKeyStatus.None, Content(SimpleRows(2)));
+        await new GeneratedTables(store).StoreAsync(Source(), TactKeyStatus.None, Content(SimpleRows(2)));
         var kinds = await ClassifyAsync(store);
         var manifest = Assert.Single(kinds, k => k.Value == Kind.Manifest).Key;
         var node = Assert.Single(kinds, k => k.Value == Kind.Node).Key;
@@ -164,18 +309,17 @@ public sealed class GeneratedTablesTests
         using var nodeJson = JsonDocument.Parse((await store.ReadAsync(node)).Bytes!);
         foreach (var identity in new[] { metadata.RootElement.GetProperty("Identity"), nodeJson.RootElement.GetProperty("Identity") })
         {
-            Assert.Equal("vibeminer-generated-table v1", identity.GetProperty("Format").GetString());
-            Assert.Equal("wow", identity.GetProperty("Product").GetString());
-            Assert.Equal(BuildConfig, identity.GetProperty("BuildConfig").GetString());
-            Assert.Equal(CdnConfig, identity.GetProperty("CdnConfig").GetString());
+            Assert.Equal("vibeminer-generated-table v2", identity.GetProperty("Format").GetString());
             Assert.Equal("enUS", identity.GetProperty("Locale").GetString());
             Assert.Equal(ContentKey, identity.GetProperty("ContentKey").GetString());
-            Assert.Equal("def-sha256+01020304", identity.GetProperty("DefinitionVersion").GetString());
+            Assert.Equal("def-sha256+01020304", identity.GetProperty("Definition").GetString());
             Assert.Equal(Source().ReaderOptions, identity.GetProperty("ReaderOptions").GetString());
             Assert.Matches("^[0-9a-f]{64}$", identity.GetProperty("ReaderOptions").GetString());
             Assert.Equal("db2-values-v3", identity.GetProperty("Reader").GetString());
             Assert.Equal("rows-v1", identity.GetProperty("Rows").GetString());
-            Assert.DoesNotContain("eu", identity.GetRawText());
+            Assert.Equal(JsonValueKind.Null, identity.GetProperty("EncodingIn").ValueKind);
+            Assert.Equal(["Format", "Locale", "ContentKey", "Definition", "ReaderOptions", "Reader", "Rows", "EncodingIn"],
+                identity.EnumerateObject().Select(p => p.Name).ToArray());
         }
         Assert.Equal("WDC5", metadata.RootElement.GetProperty("Header").GetProperty("Format").GetString());
         Assert.Equal(0, nodeJson.RootElement.GetProperty("Keys").GetArrayLength());

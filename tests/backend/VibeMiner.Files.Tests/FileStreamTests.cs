@@ -93,6 +93,7 @@ public sealed class FileStreamTests
         Assert.Equal(FileReadState.Complete, open.State);
         await using var stream = open.Stream!;
         Assert.Empty(stream.Holes);
+        Assert.Empty(stream.ChunkKeys);
         Assert.Equal(10_000, stream.Length);
         Assert.Equal(0, stream.Position);
         Assert.True(stream.CanRead && stream.CanSeek && !stream.CanWrite);
@@ -245,11 +246,14 @@ public sealed class FileStreamTests
         var s = await OpenAsync([VariantOf(o)], [o], new FileSystemOptions { Keys = new TactKeys().Add(KeyA, SecretA).Add(KeyB, SecretB) });
         var open = await s.Files.OpenReadAsync(1u, Ct);
         Assert.Equal(FileReadState.Complete, open.State);
+        // A decrypted chunk is no hole, but its key is listed: its bytes depend on it.
+        Assert.Equal([NameB, NameA], open.Stream!.ChunkKeys);
         await using (var stream = open.Stream!) Assert.Equal(o.Decoded, await ReadAllAsync(stream, 77, 100));
 
         var wrong = await OpenAsync([VariantOf(o)], [o], new FileSystemOptions { Keys = new TactKeys().Add(KeyA, SecretB) });
         await using var bad = await StreamAsync(wrong);
         Assert.Equal([new FileHole(400, 100, NameB)], bad.Holes);
+        Assert.Equal([NameB, NameA], bad.ChunkKeys);
         bad.Position = 120;
         var failed = await Assert.ThrowsAsync<FileReadException>(() => bad.ReadAsync(new byte[10], Ct).AsTask());
         Assert.Equal((FileReadState.WrongKey, "BLTE_KEY_MISMATCH"), (failed.State, failed.Code));

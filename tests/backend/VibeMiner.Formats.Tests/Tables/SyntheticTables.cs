@@ -338,6 +338,7 @@ public sealed class CountingFileSystem(IFileSystem inner) : IFileSystem
     {
         private int done;
         public override IReadOnlyList<FileHole> Holes => inner.Holes;
+        public override IReadOnlyList<string> ChunkKeys => inner.ChunkKeys;
         public override bool CanRead => inner.CanRead;
         public override bool CanSeek => inner.CanSeek;
         public override bool CanWrite => false;
@@ -392,7 +393,10 @@ public sealed class CountingGeneratedTables(IGeneratedTables inner) : IGenerated
     public Task<GeneratedTable> StoreAsync(GeneratedTableSource source, ITactKeyStatus keys, GeneratedTableContent content, CancellationToken cancellationToken = default) =>
         inner.StoreAsync(source, keys, content, cancellationToken);
 
-    public string IdentityOf(GeneratedTableSource source, ITactKeyStatus keys, IReadOnlyCollection<string> keysUsed) => inner.IdentityOf(source, keys, keysUsed);
+    public Task<string?> LayoutOfAsync(string contentKey, CancellationToken cancellationToken = default) => inner.LayoutOfAsync(contentKey, cancellationToken);
+
+    public string IdentityOf(GeneratedTableSource source, ITactKeyStatus keys, IReadOnlyCollection<string> keysUsed, bool encrypted = false) =>
+        inner.IdentityOf(source, keys, keysUsed, encrypted);
 
     public async Task<GeneratedTable> GetOrBuildAsync(GeneratedTableSource source, ITactKeyStatus keys, Func<CancellationToken, Task<GeneratedTableContent>> build,
         CancellationToken cancellationToken = default)

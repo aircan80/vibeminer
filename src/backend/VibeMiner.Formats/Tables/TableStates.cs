@@ -75,22 +75,20 @@ internal static class TableStates
     /// A table in the generated store: Encrypted when every section is hidden (keyed, with a hole layer 4 couldn't decrypt) and no
     /// row was read, Partial when some section is hidden or a BLTE hole was left out, else Ready. A keyed section layer 4 decrypted
     /// is read like any other (D310), so a table whose keyed sections all decrypted is Ready. The reason's key names are the
-    /// missing ones: the hidden sections' keys and the hole names. A hole named like a decrypted section's key can't be told
-    /// apart once stored (hole names aren't kept); it lies in a hidden section, whose own key still names it.
+    /// missing ones: the hidden sections' keys and the hole names, which the store keeps apart from the keys used (D350).
     /// </summary>
     public static (TableState State, TableStateReason? Reason, TableCounts Counts) Generated(GeneratedTable table) =>
-        Generated(table.Header, table.Sections, table.Completion, table.KeysUsed, table.RowCount);
+        Generated(table.Header, table.Sections, table.Completion, table.HoleKeys, table.RowCount);
 
     /// <summary>The same, from a table's parts: the generated store's, or a direct read's before the table is stored (D330).</summary>
     public static (TableState State, TableStateReason? Reason, TableCounts Counts) Generated(Db2TableHeader header, IReadOnlyList<Db2Section> sections,
-        Db2Completion completion, IReadOnlyList<string> keysUsed, long rowCount)
+        Db2Completion completion, IReadOnlyCollection<string> holeKeys, long rowCount)
     {
-        var table = (Header: header, Sections: sections, Completion: completion, KeysUsed: keysUsed, RowCount: rowCount);
+        var table = (Header: header, Sections: sections, Completion: completion, RowCount: rowCount);
         var hidden = table.Sections.Count(section => section.IsEncrypted && !section.IsDecrypted);
-        // KeysUsed is every keyed section's key plus the hole names; without the decrypted sections' keys the missing ones are left.
-        var decrypted = table.Sections.Where(section => section.IsDecrypted).Select(section => section.Key).ToHashSet(StringComparer.Ordinal);
+        // The missing keys: the hidden sections' and the holes'. Keys used also name decrypted sections and chunks, which aren't missing.
         var keys = KeyNames(table.Sections.Where(section => section.IsEncrypted && !section.IsDecrypted).Select(section => section.Key)
-            .Concat(table.KeysUsed.Where(name => !decrypted.Contains(name))));
+            .Concat(holeKeys));
         var state = table.RowCount == 0 && hidden > 0 && hidden == table.Sections.Count ? TableState.Encrypted
             : hidden > 0 || keys.Count > 0 ? TableState.Partial
             : TableState.Ready;

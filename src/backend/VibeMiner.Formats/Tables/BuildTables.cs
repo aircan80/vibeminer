@@ -132,12 +132,36 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
         if (resolution.State == DefinitionState.NoMatch) return notChecked;
         if (TableStates.Definition(resolution.State) is { } unusable)
             return new(id, table.Name, unusable, false, TableStates.DefinitionReason(resolution), null, contentKey);
-        var stored = await generated.OpenAsync(Source(contentKey!, resolution.Definition!), status, cancellationToken).ConfigureAwait(false);
+        var stored = await StoredAsync(contentKey!, resolution.Definition!, status, cancellationToken).ConfigureAwait(false);
         return stored is not null ? Checked(id, table.Name, contentKey, stored) : notChecked;
     }
 
-    private GeneratedTableSource Source(string contentKey, TableDefinition definition) =>
-        new(Build, Locale, contentKey, definition.Sha256, limits);
+    /// <summary>
+    /// The stored table this build reads the file with, found without reading the file: the block is picked by the layout the
+    /// store remembers for the content key (any build may have stored it), else by the build alone when that picks one block. A
+    /// table whose header layout wouldn't pick the same block on this build isn't this build's.
+    /// </summary>
+    private async Task<GeneratedTable?> StoredAsync(string contentKey, TableDefinition definition, ITactKeyStatus status, CancellationToken cancellationToken)
+    {
+        var layout = await generated.LayoutOfAsync(contentKey, cancellationToken).ConfigureAwait(false);
+        if (Source(contentKey, definition, layout) is not { } source) return null;
+        var stored = await generated.OpenAsync(source, status, cancellationToken).ConfigureAwait(false);
+        return stored is not null && Source(contentKey, definition, stored.Header.LayoutHash) == source ? stored : null;
+    }
+
+    /// <summary>
+    /// The source a table is filed under (D350): the block the reader selects for this build and <paramref name="layout"/>, or for
+    /// the build alone without one. Null when that isn't exactly one block; the reader then refuses the file, and nothing is stored.
+    /// </summary>
+    private GeneratedTableSource? Source(string contentKey, TableDefinition definition, string? layout)
+    {
+        var selection = layout is null ? definition.Document.SelectBuild(version) : definition.Document.SelectFile(version, layout);
+        return selection.Blocks is [var block] ? GeneratedTableSource.For(block, Locale, contentKey, limits, EncodingScope) : null;
+    }
+
+    /// <summary>Where this build's tables read through encrypted chunks are filed: which chunks are encrypted follows the build's
+    /// encoding of the file, not its content key (D350).</summary>
+    private string EncodingScope => $"{Build.Product} {Build.BuildConfig} {Build.CdnConfig}";
 
     private static TableEntry Checked(uint id, string? name, string? contentKey, GeneratedTable table)
     {
@@ -186,7 +210,7 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
         var status = keys(Build);
         var local = await definitions.ResolveAsync(definition.TableId, version, null, locale, DefinitionLookup.Local, cancellationToken).ConfigureAwait(false);
         if (local.State == DefinitionState.Resolved
-            && await generated.OpenAsync(Source(contentKey!, local.Definition!), status, cancellationToken).ConfigureAwait(false) is { } hit)
+            && await StoredAsync(contentKey!, local.Definition!, status, cancellationToken).ConfigureAwait(false) is { } hit)
             return new(Checked(id, definition.Name, contentKey, hit), hit, definition, local);
 
         // From here the file is read: in a slot. A caller joining a build another one started holds its own lane's slot while it
@@ -215,8 +239,9 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
             return new(new(id, definition.Name, unusable, true, TableStates.DefinitionReason(resolution), null, contentKey), null, definition, resolution);
 
         var document = resolution.Definition!.Document;
-        var source = Source(contentKey!, resolution.Definition);
-        if (direct && priority == TablePriority.Interactive && !builds.HasFailed(source))
+        // No one block for the file: the reader refuses it, which the decode below says without storing anything.
+        var source = Source(contentKey!, resolution.Definition, layout);
+        if (source is not null && direct && priority == TablePriority.Interactive && !builds.HasFailed(source))
         {
             // The build may have ended while this call waited for its slot.
             if (await generated.OpenAsync(source, status, cancellationToken).ConfigureAwait(false) is { } built)
@@ -227,8 +252,11 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
         var opens = new List<Db2Open>();
         try
         {
-            var stored = await generated.GetOrBuildAsync(source, status, token => DecodeAsync(id, document, opens, token), cancellationToken).ConfigureAwait(false);
-            builds.Stored(source);
+            // No one block for the file (another layout on a listed build, a head that isn't a DB2): the reader refuses it, and
+            // nothing is stored.
+            if (source is null) await RefuseAsync(id, document, opens, cancellationToken).ConfigureAwait(false);
+            var stored = await generated.GetOrBuildAsync(source!, status, token => DecodeAsync(id, document, opens, token), cancellationToken).ConfigureAwait(false);
+            builds.Stored(source!);
             return new(Checked(id, definition.Name, contentKey, stored), stored, definition, resolution);
         }
         catch (OpenFailedException failed)
@@ -307,13 +335,26 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
             throw new OpenFailedException(open);
         }
         lock (opens) opens.Add(open);
-        return new GeneratedTableContent(table.Header, table.Sections, table.Completion, [.. KeysUsed(table, open)], RowsAsync(open, token), open);
+        return new GeneratedTableContent(table.Header, table.Sections, table.Completion, [.. KeysUsed(table, open)], RowsAsync(open, token), open,
+            HoleKeys(open), open.ChunkKeys);
     }
 
+    /// <summary>Opens a file no one block reads, for the reader's refusal; it throws as a decode does.</summary>
+    private async Task RefuseAsync(uint id, DbdDocument document, List<Db2Open> opens, CancellationToken token)
+    {
+        var content = await DecodeAsync(id, document, opens, token).ConfigureAwait(false);
+        await content.Owner!.DisposeAsync().ConfigureAwait(false);
+        throw new InvalidOperationException("The reader opened a file for which the definition selects no one block.");
+    }
+
+    private static IReadOnlyList<string> HoleKeys(Db2Open open) => TableStates.KeyNames(open.Holes.Select(hole => hole.Name));
+
     /// <summary>The key names a decode depends on, sorted. Decrypted sections' keys too: their rows depend on the key, so the identity
-    /// carries its fingerprint (#179, D310).</summary>
+    /// carries its fingerprint (#179, D310); and every encrypted BLTE chunk's key, decrypted or a hole, since a wrong or corrected
+    /// key changes the bytes, and another build may ship the same content clear (D350).</summary>
     private static IReadOnlyList<string> KeysUsed(Db2Table table, Db2Open open) =>
-        TableStates.KeyNames(table.Sections.Where(section => section.IsEncrypted).Select(section => section.Key).Concat(open.Holes.Select(hole => hole.Name)));
+        TableStates.KeyNames(table.Sections.Where(section => section.IsEncrypted).Select(section => section.Key).Concat(open.Holes.Select(hole => hole.Name))
+            .Concat(open.ChunkKeys));
 
     /// <summary>
     /// Opens the DB2 file for a direct read (D330) in the caller's slot and starts the table's build in the background. The entry and
@@ -335,8 +376,9 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
         {
             var used = KeysUsed(table, open);
             var rows = table.ReadableRowCount;
-            var (state, reason, counts) = TableStates.Generated(table.Header, table.Sections, table.Completion, used, rows);
-            var identity = generated.IdentityOf(source, status, used);
+            var holes = HoleKeys(open);
+            var (state, reason, counts) = TableStates.Generated(table.Header, table.Sections, table.Completion, holes, rows);
+            var identity = generated.IdentityOf(source, status, used, holes.Count > 0 || open.ChunkKeys.Count > 0);
             BuildInBackground(id, document, source, status);
             return new DirectRead(new(id, name, state, true, reason, counts, contentKey), identity, table, rows, open, slot);
         }

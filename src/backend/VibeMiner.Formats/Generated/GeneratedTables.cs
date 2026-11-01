@@ -13,6 +13,8 @@ namespace VibeMiner.Formats.Generated;
 /// record file manifest at GeneratedKey.Hash("table" || N(D)).
 /// Lookup starts at S = {} and follows nodes whose keys grow (at most <see cref="MaxChainSteps"/>) until a node's keys equal its own
 /// set. Rows are streamed into the record file; memory is one row, one block and the writer's id list.
+/// Storing a table also records its file's header layout hash at GeneratedKey.Hash(TableLayout.FormatName "\n" content key), so a
+/// caller can pick the definition block before reading the file (D350).
 /// Segments are content-addressed and may be shared by tables with the same rows, so only segments that read damaged are deleted;
 /// stale nodes and files are left for a later collection.
 /// </summary>
@@ -40,6 +42,13 @@ public sealed class GeneratedTables : IGeneratedTables
         ArgumentNullException.ThrowIfNull(keys);
         cancellationToken.ThrowIfCancellationRequested();
         var lookup = new Lookup(source, keys);
+        // The table every build shares first: read from no encrypted chunk, it is never less complete than this scope's own (D310).
+        if (await OpenChainAsync(lookup, cancellationToken).ConfigureAwait(false) is { } shared) return shared;
+        return lookup.Scoped() is { } scoped ? await OpenChainAsync(scoped, cancellationToken).ConfigureAwait(false) : null;
+    }
+
+    private async Task<GeneratedTable?> OpenChainAsync(Lookup lookup, CancellationToken cancellationToken)
+    {
         var set = Array.Empty<string>();
         for (var step = 0; step < MaxChainSteps; step++)
         {
@@ -82,9 +91,15 @@ public sealed class GeneratedTables : IGeneratedTables
         }
         if (content.Completion.ExcludedEncryptedSections != content.Sections.Count(s => s.IsEncrypted && !s.IsDecrypted))
             throw new ArgumentException("The completion's excluded encrypted sections don't match the encrypted sections.", nameof(content));
+        var holeKeys = UsedKeys(content.HoleKeys ?? [], nameof(content));
+        if (!holeKeys.All(used.Contains) || !(content.ChunkKeys ?? []).All(used.Contains))
+            throw new ArgumentException("A hole's or encrypted chunk's key isn't among the keys used.", nameof(content));
+        if (content.Encrypted && source.EncodingScope is null)
+            throw new ArgumentException("A table read through encrypted chunks is filed under the source's encoding scope, and it has none.", nameof(source));
         cancellationToken.ThrowIfCancellationRequested();
 
-        var lookup = new Lookup(source, keys);
+        var shared = new Lookup(source, keys);
+        var lookup = content.Encrypted ? shared.Scoped()! : shared;
         var finalKey = lookup.Node(used);
 
         // Already stored and whole: keep it. Whatever is there and not whole has been deleted by the check.
@@ -100,7 +115,7 @@ public sealed class GeneratedTables : IGeneratedTables
             if (orphan.State == GeneratedReadState.Corrupt) await store.DeleteAsync([ManifestKey(finalKey)], cancellationToken).ConfigureAwait(false);
         }
 
-        var metadata = new TableMetadata(TableMetadata.FormatName, source.Echo(), content.Header, [.. content.Sections], content.Completion, used);
+        var metadata = new TableMetadata(TableMetadata.FormatName, lookup.Echo, content.Header, [.. content.Sections], content.Completion, used, holeKeys);
         using (var writer = new RecordFileWriter(store, options))
         {
             var buffer = new ArrayBufferWriter<byte>(256);
@@ -112,20 +127,48 @@ public sealed class GeneratedTables : IGeneratedTables
             await writer.CompleteAsync(ManifestKey(finalKey), TableJson.Encode(metadata), cancellationToken).ConfigureAwait(false);
         }
 
-        var nodeBytes = TableJson.Encode(new TableNode(TableNode.FormatName, source.Echo(), used));
+        var nodeBytes = TableJson.Encode(new TableNode(TableNode.FormatName, lookup.Echo, used));
         await store.PutAsync([new GeneratedPut(finalKey, nodeBytes)], cancellationToken).ConfigureAwait(false);
+        if (IsLayout(content.Header.LayoutHash))
+            await store.PutAsync([new GeneratedPut(LayoutKey(source.ContentKey),
+                TableJson.Encode(new TableLayout(TableLayout.FormatName, source.ContentKey, content.Header.LayoutHash)))], cancellationToken).ConfigureAwait(false);
         await LinkChainAsync(lookup, used, nodeBytes, cancellationToken).ConfigureAwait(false);
 
         return await OpenFileAsync(lookup, finalKey, used, cancellationToken).ConfigureAwait(false)
             ?? throw TableJson.Corrupt("The table read back damaged right after it was stored.");
     }
 
-    public string IdentityOf(GeneratedTableSource source, ITactKeyStatus keys, IReadOnlyCollection<string> keysUsed)
+    public async Task<string?> LayoutOfAsync(string contentKey, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(contentKey);
+        cancellationToken.ThrowIfCancellationRequested();
+        var key = LayoutKey(contentKey);
+        var read = await store.ReadAsync(key, cancellationToken).ConfigureAwait(false);
+        if (read.State == GeneratedReadState.Absent) return null;
+        TableLayout? layout = null;
+        if (read.State == GeneratedReadState.Present && read.Bytes is { Length: <= TableLayout.MaxBytes } bytes)
+        {
+            try { layout = TableJson.Decode<TableLayout>(bytes, "A layout record"); }
+            catch (GeneratedStoreException e) when (e.Code == GeneratedStoreCodes.Corrupt) { }
+        }
+        if (layout is not null && layout.Format == TableLayout.FormatName && layout.ContentKey == contentKey && IsLayout(layout.Layout)) return layout.Layout;
+        await store.DeleteAsync([key], cancellationToken).ConfigureAwait(false);
+        return null;
+    }
+
+    private static bool IsLayout(string? value) => value is { Length: 8 } && value.All(char.IsAsciiHexDigit);
+
+    private static GeneratedKey LayoutKey(string contentKey) =>
+        GeneratedKey.Hash(Encoding.UTF8.GetBytes(TableLayout.FormatName + "\n" + contentKey));
+
+    public string IdentityOf(GeneratedTableSource source, ITactKeyStatus keys, IReadOnlyCollection<string> keysUsed, bool encrypted = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(keys);
         ArgumentNullException.ThrowIfNull(keysUsed);
-        return new Lookup(source, keys).Node(UsedKeys(keysUsed, nameof(keysUsed))).Hex;
+        if (encrypted && source.EncodingScope is null) throw new ArgumentException("A table read through encrypted chunks needs the source's encoding scope.", nameof(source));
+        var lookup = new Lookup(source, keys);
+        return (encrypted ? lookup.Scoped()! : lookup).Node(UsedKeys(keysUsed, nameof(keysUsed))).Hex;
     }
 
     /// <summary>The keys a table depends on as it is filed: checked, distinct, in ordinal order.</summary>
@@ -146,14 +189,15 @@ public sealed class GeneratedTables : IGeneratedTables
         ArgumentNullException.ThrowIfNull(keys);
         ArgumentNullException.ThrowIfNull(build);
         var lookup = new Lookup(source, keys);
-        var flightKey = lookup.Node([]);
+        // One flight per encoding scope: a build's decode runs on its own files, so its failure is never another build's answer.
+        var flightKey = (lookup.Scoped() ?? lookup).Node([]);
         for (var round = 0; round < MaxSharedRounds; round++)
         {
             if (await OpenAsync(source, keys, cancellationToken).ConfigureAwait(false) is { } hit) return hit;
             var table = await JoinAsync(flightKey, source, keys, build, cancellationToken).ConfigureAwait(false);
             // The flight was started with its first caller's key status. When a key this table uses has another status for this
             // caller (it arrived in between), the table isn't this caller's: go round again.
-            if (lookup.Node(table.KeysUsed) == table.NodeKey) return table;
+            if ((table.Scoped ? lookup.Scoped() : lookup)?.Node(table.KeysUsed) == table.NodeKey) return table;
         }
         return await StoreAsync(source, keys, await build(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
@@ -273,7 +317,8 @@ public sealed class GeneratedTables : IGeneratedTables
         try { metadata = TableJson.Decode<TableMetadata>(file.Metadata.Span, "The table metadata"); }
         catch (GeneratedStoreException e) when (e.Code == GeneratedStoreCodes.Corrupt) { }
         if (metadata is null || metadata.Format != TableMetadata.FormatName || metadata.Identity != lookup.Echo || metadata.Header is null ||
-            metadata.Sections is null || metadata.Completion is null || metadata.KeysUsed is null || !metadata.KeysUsed.SequenceEqual(used))
+            metadata.Sections is null || metadata.Completion is null || metadata.KeysUsed is null || !metadata.KeysUsed.SequenceEqual(used) ||
+            !IsKeySet(metadata.HoleKeys) || !metadata.HoleKeys.All(used.Contains) || (metadata.HoleKeys.Count > 0 && lookup.Echo.EncodingIn is null))
         {
             await store.DeleteAsync([nodeKey, manifestKey], cancellationToken).ConfigureAwait(false);
             return null;
@@ -307,14 +352,19 @@ public sealed class GeneratedTables : IGeneratedTables
         return GeneratedKey.Hash(identity);
     }
 
-    /// <summary>One lookup's base hash and key statuses, each key asked once so a lookup sees one snapshot.</summary>
-    private sealed class Lookup(GeneratedTableSource source, ITactKeyStatus keys)
+    /// <summary>One lookup's base hash and key statuses, each key asked once so a lookup sees one snapshot.
+    /// The shared one and its <see cref="Scoped"/> sibling (null without an encoding scope) see the same snapshot.</summary>
+    private sealed class Lookup(GeneratedTableSource source, ITactKeyStatus keys, bool scoped = false, Dictionary<string, string>? statuses = null)
     {
-        private readonly byte[] baseHash = source.BaseHash();
-        private readonly Dictionary<string, string> statuses = new(StringComparer.Ordinal);
+        private readonly byte[] baseHash = source.BaseHash(scoped);
+        private readonly Dictionary<string, string> statuses = statuses ?? new(StringComparer.Ordinal);
+        private Lookup? sibling;
 
         public GeneratedTableSource Source { get; } = source;
-        public TableIdentity Echo { get; } = source.Echo();
+        public TableIdentity Echo { get; } = source.Echo(scoped);
+
+        /// <summary>The lookup of tables read through encrypted chunks, filed under the encoding scope; null when the source has none.</summary>
+        public Lookup? Scoped() => scoped ? this : Source.EncodingScope is null ? null : sibling ??= new Lookup(Source, keys, true, this.statuses);
 
         public GeneratedKey Node(IReadOnlyList<string> set)
         {

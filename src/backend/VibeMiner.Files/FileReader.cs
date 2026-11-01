@@ -236,6 +236,10 @@ internal sealed class FileReader
         catch (BlteFormatException) { return false; }
     }
 
+    /// <summary>The key name (16 uppercase hex) of an 'E' chunk, its key known or not, else null; read as <see cref="HoleKeyOf"/> is.</summary>
+    public static string? EncryptedKeyOf(ReadOnlySpan<byte> chunkPrefix) =>
+        BlteChunks.Peek(chunkPrefix) is ((byte)'E', { } name) ? name.ToString("X16", System.Globalization.CultureInfo.InvariantCulture) : null;
+
     /// <summary>
     /// The key name (16 uppercase hex) of an 'E' chunk whose key isn't known, else null, from the chunk's first
     /// min(<see cref="BlteChunks.EnvelopeLength"/>, EncodedSize) bytes. Unverified, for listing holes; a bad envelope throws

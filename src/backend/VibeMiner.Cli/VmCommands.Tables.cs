@@ -117,7 +117,8 @@ internal sealed partial class VmCommands
                 {
                     ok = true, dataFolder = DataFolderJson(), store = new { path = storeFolder, writer },
                     build = new { product = build.Product, version = build.VersionsName, buildConfig = buildRef.BuildConfig, cdnConfig = buildRef.CdnConfig, region = buildRef.Region },
-                    locale, fetchDefinitions, tableCount = results.Length, checkMs, counts,
+                    // Tables the generated store already held when listed, from any build that shares them (D350).
+                    locale, fetchDefinitions, tableCount = results.Length, storedBeforeCheck = listed.Count(e => e.Checked), checkMs, counts,
                     pages = pages.Select(p => new { name = p.Name, fileDataId = p.FileDataId, state = p.State.ToString(), pageState = p.PageState.ToString(), rows = p.Rows, firstMs = p.FirstMs, secondMs = p.SecondMs }),
                     tables = results.Select(e => new
                     {

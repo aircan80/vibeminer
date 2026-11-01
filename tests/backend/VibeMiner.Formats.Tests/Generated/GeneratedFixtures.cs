@@ -11,14 +11,12 @@ namespace VibeMiner.Formats.Tests.Generated;
 
 public static class GeneratedFixtures
 {
-    public const string BuildConfig = "0123456789abcdef0123456789abcdef";
-    public const string CdnConfig = "fedcba9876543210fedcba9876543210";
     public const string ContentKey = "00112233445566778899aabbccddeeff";
     public const string K1 = "1111111111111111", K2 = "2222222222222222";
 
-    public static GeneratedTableSource Source(string product = "wow", string buildConfig = BuildConfig, string cdnConfig = CdnConfig,
-        string? region = null, string locale = "enUS", string contentKey = ContentKey, string definition = "def-sha256+01020304", Db2Limits? limits = null) =>
-        new(new BuildRef(product, buildConfig, cdnConfig, region), locale, contentKey, definition, limits ?? new Db2Limits());
+    public static GeneratedTableSource Source(string? locale = "enUS", string contentKey = ContentKey, string definition = "def-sha256+01020304",
+        Db2Limits? limits = null) =>
+        new(locale, contentKey, definition, limits ?? new Db2Limits());
 
     public static TactKeyStatus Known(params string[] names) => new(names.ToDictionary(n => n, n => "fp-" + n));
 
@@ -66,29 +64,30 @@ public static class GeneratedFixtures
         for (var i = 0; i < expected.Count; i++) SameRow(expected[i], actual[i]);
     }
 
-    public enum Kind { Node, Manifest, Segment }
+    public enum Kind { Node, Manifest, Segment, Layout }
 
-    /// <summary>Sorts the store's objects into nodes (JSON), manifests (open as record files) and segments (the rest).</summary>
+    /// <summary>Sorts the store's objects into nodes and layout records (JSON), manifests (open as record files) and segments (the rest).</summary>
     public static async Task<Dictionary<GeneratedKey, Kind>> ClassifyAsync(InMemoryGeneratedStore store)
     {
         var kinds = new Dictionary<GeneratedKey, Kind>();
         foreach (var key in store.Keys)
         {
             var read = await store.ReadAsync(key);
-            if (read.Bytes is { } bytes && IsNode(bytes)) kinds[key] = Kind.Node;
+            if (read.Bytes is { } bytes && FormatOf(bytes) == "vibeminer-generated-table-node v1") kinds[key] = Kind.Node;
+            else if (read.Bytes is { } layout && FormatOf(layout) == "vibeminer-generated-table-layout v1") kinds[key] = Kind.Layout;
             else if ((await RecordFile.OpenAsync(store, key)).State == GeneratedReadState.Present) kinds[key] = Kind.Manifest;
             else kinds[key] = Kind.Segment;
         }
         return kinds;
     }
 
-    private static bool IsNode(byte[] bytes)
+    private static string? FormatOf(byte[] bytes)
     {
         try
         {
             using var json = JsonDocument.Parse(bytes);
-            return json.RootElement.TryGetProperty("Format", out var f) && f.GetString() == "vibeminer-generated-table-node v1";
+            return json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("Format", out var f) ? f.GetString() : null;
         }
-        catch (JsonException) { return false; }
+        catch (JsonException) { return null; }
     }
 }

@@ -4,8 +4,8 @@ using VibeMiner.Generated;
 namespace VibeMiner.Formats.Generated;
 
 /// <summary>The identity echo stored in every node and table's metadata; checked against the source on open.</summary>
-internal sealed record TableIdentity(string Format, string Product, string BuildConfig, string CdnConfig, string Locale, string ContentKey,
-    string DefinitionVersion, string ReaderOptions, string Reader, string Rows);
+internal sealed record TableIdentity(string Format, string? Locale, string ContentKey, string Definition, string ReaderOptions, string Reader,
+    string Rows, string? EncodingIn);
 
 /// <summary>
 /// A lookup node (JSON): the identity echo and the sorted key names the table depends on as far as this node knows. Keys equal to
@@ -17,9 +17,19 @@ internal sealed record TableNode(string Format, TableIdentity Identity, IReadOnl
     public const int MaxBytes = 1 << 20;
 }
 
+/// <summary>
+/// The layout hash a stored table's header gave its DB2 file (JSON), filed by the file's content key alone: the bytes fix it, so it
+/// holds for every build that lists the file, and the definition block that file reads with can be picked before reading it (D350).
+/// </summary>
+internal sealed record TableLayout(string Format, string ContentKey, string Layout)
+{
+    public const string FormatName = "vibeminer-generated-table-layout v1";
+    public const int MaxBytes = 1 << 10;
+}
+
 /// <summary>A table's record file metadata (JSON).</summary>
 internal sealed record TableMetadata(string Format, TableIdentity Identity, Db2TableHeader Header, IReadOnlyList<Db2Section> Sections,
-    Db2Completion Completion, IReadOnlyList<string> KeysUsed)
+    Db2Completion Completion, IReadOnlyList<string> KeysUsed, IReadOnlyList<string> HoleKeys)
 {
     public const string FormatName = "vibeminer-generated-table-metadata v1";
 }

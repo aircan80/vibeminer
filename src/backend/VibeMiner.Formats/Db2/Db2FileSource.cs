@@ -68,10 +68,12 @@ public sealed class Db2FileSource:IDb2ByteSource,IAsyncDisposable
     private bool disposed;
 
     private Db2FileSource(FileReadStream stream,IReadOnlyList<Db2Hole> holes)
-    {this.stream=stream;Holes=holes;Length=stream.Length;}
+    {this.stream=stream;Holes=holes;Length=stream.Length;ChunkKeys=[..stream.ChunkKeys];}
 
     public long Length{get;}
     public IReadOnlyList<Db2Hole> Holes{get;}
+    /// <summary>The key names of every encrypted chunk, decrypted or a hole, as layer 4 listed them at open.</summary>
+    public IReadOnlyList<string> ChunkKeys{get;}
 
     /// <summary>
     /// Opens <paramref name="file"/> on <paramref name="files"/>. On a layer 4 state with no stream, <see cref="Db2SourceOpen.Source"/>
@@ -210,8 +212,8 @@ public sealed class Db2Open:IAsyncDisposable
     private readonly Db2FileSource? source;
 
     internal Db2Open(Db2OpenState state,Db2Table? table,Db2FileSource? source,string? code,string? message,DateTimeOffset? observedAt,
-        IReadOnlyList<Db2Hole>? holes=null)
-    {State=state;Table=table;this.source=source;Code=code;Message=message;ObservedAt=observedAt;Holes=holes??[];}
+        IReadOnlyList<Db2Hole>? holes=null,IReadOnlyList<string>? chunkKeys=null)
+    {State=state;Table=table;this.source=source;Code=code;Message=message;ObservedAt=observedAt;Holes=holes??[];ChunkKeys=chunkKeys??[];}
 
     public Db2OpenState State{get;}
     public Db2Table? Table{get;}
@@ -220,6 +222,9 @@ public sealed class Db2Open:IAsyncDisposable
     public DateTimeOffset? ObservedAt{get;}
     /// <summary>The file's holes, as layer 4 listed them, whenever its stream opened (also when the open then failed); else empty.</summary>
     public IReadOnlyList<Db2Hole> Holes{get;}
+    /// <summary>The key names of every encrypted chunk of an opened file, decrypted or a hole (layer 4's
+    /// <see cref="FileReadStream.ChunkKeys"/>); empty unless <see cref="State"/> is Open.</summary>
+    public IReadOnlyList<string> ChunkKeys{get;}
 
     public ValueTask DisposeAsync()=>source?.DisposeAsync()??ValueTask.CompletedTask;
 }
@@ -246,7 +251,7 @@ public static partial class Db2Reader
                     "Every byte of the file needs TACT key "+string.Join(", ",source.Holes.Select(hole=>hole.Name).Distinct())+".",null,source.Holes);
             }
             var table=await OpenCoreAsync(source,definition,buildVersion,limits,token).ConfigureAwait(false);
-            return new(Db2OpenState.Open,table,source,null,null,null,source.Holes);
+            return new(Db2OpenState.Open,table,source,null,null,null,source.Holes,source.ChunkKeys);
         }
         catch(Exception failure) when(failure is Db2FormatException or Db2SourceException)
         {

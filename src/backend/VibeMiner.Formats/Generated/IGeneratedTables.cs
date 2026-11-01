@@ -20,7 +20,12 @@ public interface IGeneratedTables
     Task<GeneratedTable> GetOrBuildAsync(GeneratedTableSource source, ITactKeyStatus keys, Func<CancellationToken, Task<GeneratedTableContent>> build,
         CancellationToken cancellationToken = default);
 
+    /// <summary>The layout hash (8 hex) of the DB2 file with this content key, as the header of a table stored from it gave it; null
+    /// when none was stored. A damaged record is deleted and reads as null.</summary>
+    Task<string?> LayoutOfAsync(string contentKey, CancellationToken cancellationToken = default);
+
     /// <summary>The <see cref="GeneratedTable.Identity"/> a table with these keys used is filed under for this key status, without
-    /// touching the store, so a page served before the table is built carries the identity it will have.</summary>
-    string IdentityOf(GeneratedTableSource source, ITactKeyStatus keys, IReadOnlyCollection<string> keysUsed);
+    /// touching the store, so a page served before the table is built carries the identity it will have. <paramref name="encrypted"/>:
+    /// the decode read through encrypted chunks (holes or decrypted), so the table is filed under the source's encoding scope.</summary>
+    string IdentityOf(GeneratedTableSource source, ITactKeyStatus keys, IReadOnlyCollection<string> keysUsed, bool encrypted = false);
 }

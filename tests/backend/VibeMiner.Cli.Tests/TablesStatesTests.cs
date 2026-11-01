@@ -83,6 +83,7 @@ public sealed class TablesStatesTests
         Assert.Equal("enUS", doc.GetProperty("locale").GetString());
         Assert.False(doc.GetProperty("fetchDefinitions").GetBoolean());
         Assert.Equal(5, doc.GetProperty("tableCount").GetInt32());
+        Assert.Equal(0, doc.GetProperty("storedBeforeCheck").GetInt32());
         Assert.True(doc.GetProperty("checkMs").GetDouble() >= 0);
 
         var counts = doc.GetProperty("counts");
