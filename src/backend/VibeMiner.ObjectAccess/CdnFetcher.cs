@@ -62,7 +62,7 @@ internal sealed class ByteBudget(long bytes)
     }
 }
 
-internal sealed class CdnFetcher
+internal sealed partial class CdnFetcher
 {
     private const int Unit = 64 << 10;
     /// <summary>What a loose reply with no declared length (a config, say) is charged and the most it may be; a longer one is TooLarge.</summary>

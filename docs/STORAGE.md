@@ -88,7 +88,7 @@ Code: [`src/backend/VibeMiner.ObjectAccess/`](../src/backend/VibeMiner.ObjectAcc
 | --- | --- |
 | `GetKeyAsync(request, cdn, priority)` | One object with its bytes (when it fits in 64 MiB) |
 | `GetKeysAsync(requests, cdn, priority, progress)` | Makes every object present; one result per request, in order, no bytes |
-| `GetRangeAsync(request, offset, destination, cdn, priority)` | A byte range, after making the object present |
+| `GetRangeAsync(request, offset, destination, cdn, priority)` | A byte range, after making the object present. A big loose encoded object with no local copy is read by range instead: only its proven header and the proven chunks under the range are fetched, and nothing is stored ([D340](DECISIONS.md)) |
 | `ObserveAsync(request)` | One dated build observation, saved in the history log |
 | `CountPresentAsync(keys)` | How many keys the profile's own store holds, for the Downloaded figure |
 | `HasKeysAsync(keys)` | Whether the profile's own store holds each key, in order (index only, no CDN call), for layer 4's stored state ([D161](DECISIONS.md)) |
@@ -102,7 +102,7 @@ Results are `Present` (with where this call got it, `Store`, `SharedStore` or `C
 | Implementation | Behaviour |
 | --- | --- |
 | `ObjectSource` | Own store, then the shared dev store (read-only; copied in through Put, which checks it again, and recorded with origin `SharedStore`; never pointed into), then the CDN. A copy that fails its read checks is deleted and fetched again |
-| `CdnObjectSource` | CDN only: fetches and checks every time, stores nothing, refuses objects over 64 MiB, counts 0 present, has no history |
+| `CdnObjectSource` | CDN only: fetches and checks every time, stores nothing, refuses whole objects over 64 MiB (ranges of big loose ones are read by range, [D340](DECISIONS.md)), counts 0 present, has no history |
 | `LocalObjectSource` | Local only, a true offline mode: own store, then the shared store; anything missing is `NeedsNetwork`, and nothing touches the network |
 | `InMemoryObjectSource` (tests) | Synthetic objects with scripted 404s, outages and refusals; the double for layer 3 and up |
 

@@ -142,12 +142,12 @@ internal sealed class IndexVerifier(ObjectKey key, long declared, int offsetWidt
 /// </summary>
 internal sealed class BlteVerifier(ObjectKey key, long declared) : ObjectVerifier(key, declared)
 {
-    private const int MaxChunks = 65_536;
     private readonly IncrementalHash md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
-    private byte[] header = new byte[8];
+    private byte[] header = new byte[BlteChunkTable.PrefixBytes];
     private int headerFill;
     private long headerLength = -1;  // -1 until the 8-byte prefix is in; 0 headerless
-    private int chunk, chunkCount;
+    private BlteChunkTable? table;
+    private int chunk;
     private long chunkRemaining, verified;
     private readonly byte[] digest = new byte[16];
 
@@ -167,57 +167,39 @@ internal sealed class BlteVerifier(ObjectKey key, long declared) : ObjectVerifie
                 continue;
             }
             if (headerLength == 0) { md5.AppendData(data); return; }
-            if (chunk >= chunkCount) Fail(ObjectRefusalCodes.BlteInvalid, "Bytes after the last BLTE chunk.");
+            if (chunk >= table!.ChunkCount) Fail(ObjectRefusalCodes.BlteInvalid, "Bytes after the last BLTE chunk.");
             var n = (int)Math.Min(chunkRemaining, data.Length);
             md5.AppendData(data[..n]); data = data[n..]; chunkRemaining -= n;
             if (chunkRemaining == 0)
             {
                 md5.GetHashAndReset(digest);
-                if (!digest.AsSpan().SequenceEqual(header.AsSpan(12 + chunk * 24 + 8, 16))) Fail(ObjectRefusalCodes.BlteInvalid, $"BLTE chunk {chunk} MD5 mismatch.");
-                verified += BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(12 + chunk * 24));
+                if (!table.ChunkMatches(chunk, digest)) Fail(ObjectRefusalCodes.BlteInvalid, $"BLTE chunk {chunk} MD5 mismatch.");
+                verified += table.ChunkLength(chunk);
                 chunk++;
-                if (chunk < chunkCount) chunkRemaining = BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(12 + chunk * 24));
+                if (chunk < table.ChunkCount) chunkRemaining = table.ChunkLength(chunk);
             }
         }
     }
 
     private void Prefix()
     {
-        if (!header.AsSpan(0, 4).SequenceEqual("BLTE"u8)) Fail(ObjectRefusalCodes.BlteInvalid, "Not a BLTE object.");
-        headerLength = BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(4));
-        if (headerLength == 0)
-        {
-            if (Declared < 9) Fail(ObjectRefusalCodes.BlteInvalid, "A headerless BLTE object needs a mode byte.");
-            md5.AppendData(header); return;
-        }
-        if (headerLength < 12 + 24 || headerLength > 12 + 24L * MaxChunks || headerLength >= Declared)
-            Fail(ObjectRefusalCodes.BlteInvalid, "BLTE header length is invalid.");
+        headerLength = BlteChunkTable.HeaderLengthOf(header, Declared);
+        if (headerLength == 0) { md5.AppendData(header); return; }
         var full = new byte[headerLength]; header.CopyTo(full, 0); header = full;
     }
 
     private void HeaderComplete()
     {
-        if (!KeyEquals(MD5.HashData(header))) Fail(ObjectRefusalCodes.KeyMismatch, "The BLTE header MD5 is not the key.");
-        if (header[8] != 0x0F) Fail(ObjectRefusalCodes.BlteUnsupported, "Unsupported BLTE chunk table format.");
-        chunkCount = (header[9] << 16) | (header[10] << 8) | header[11];
-        if (chunkCount == 0 || headerLength != 12 + 24L * chunkCount) Fail(ObjectRefusalCodes.BlteInvalid, "BLTE chunk table size is invalid.");
-        long total = headerLength;
-        for (var i = 0; i < chunkCount; i++)
-        {
-            var size = BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(12 + i * 24));
-            if (size == 0) Fail(ObjectRefusalCodes.BlteInvalid, "A BLTE chunk lacks its mode byte.");
-            total += size;
-        }
-        if (total != Declared) Fail(ObjectRefusalCodes.SizeMismatch, "BLTE chunk sizes don't add up to the declared length.");
+        table = BlteChunkTable.Parse(Key, Declared, header);
         verified = headerLength;
-        chunkRemaining = BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(12));
+        chunkRemaining = table.ChunkLength(0);
     }
 
     protected override void Finish()
     {
         if (headerLength < 0 || headerLength > 0 && headerFill < header.Length) Fail(ObjectRefusalCodes.BlteInvalid, "BLTE is truncated.");
         if (headerLength == 0) { if (!KeyEquals(md5.GetHashAndReset())) Fail(ObjectRefusalCodes.KeyMismatch, "The MD5 of the headerless BLTE object is not the key."); return; }
-        if (chunk != chunkCount) Fail(ObjectRefusalCodes.BlteInvalid, "BLTE is truncated.");
+        if (chunk != table!.ChunkCount) Fail(ObjectRefusalCodes.BlteInvalid, "BLTE is truncated.");
     }
     public override void Dispose() => md5.Dispose();
 }

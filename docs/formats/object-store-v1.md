@@ -188,6 +188,8 @@ First 8 bytes: `BLTE`, then the header length `H` as u32 BE. Not `BLTE`: `OBJECT
 7. The chunks follow in order. The MD5 of each chunk's encoded bytes (mode byte included) must equal its descriptor, else `OBJECT_BLTE_INVALID`, decided as soon as the chunk's last byte arrives.
 8. **Proven length:** `H` plus the sizes of the chunks proven so far, and 0 until the header is proven.
 
+Checks 1-6 are public as `BlteChunkTable.Prove` (plus `ReadHeaderLength` for the prefix and `CheckChunk` for check 7 on one chunk), so layer 2 can prove a range of a large loose object chunk by chunk without storing it ([D340](../DECISIONS.md)). It applies no store size limit.
+
 Chunk modes (`N`, `Z`, `E`, others) are opaque. An encrypted (`E`) chunk is checked by its MD5 like any other and stored as served; nothing is decrypted, and nothing is zero-filled.
 
 ### 4.4 HistoryRecord (6)

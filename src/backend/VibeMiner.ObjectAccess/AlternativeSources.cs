@@ -4,8 +4,8 @@ using VibeMiner.Objects;
 namespace VibeMiner.ObjectAccess;
 
 /// <summary>
-/// CDN only: every call fetches and verifies, nothing is stored and nothing is recorded (RecordAsync answers Present, not recorded). Objects over 64 MiB are refused
-/// (there is nowhere to stage them). Anything reading the store's index directly, like the Downloaded figure, sees 0%.
+/// CDN only: every call fetches and verifies, nothing is stored and nothing is recorded (RecordAsync answers Present, not recorded). Whole objects over 64 MiB are
+/// refused (there is nowhere to stage them); a range of a chunked loose one is fetched chunk by chunk (D340). Anything reading the store's index directly, like the Downloaded figure, sees 0%.
 /// </summary>
 public sealed class CdnObjectSource : IObjectSource
 {
@@ -48,7 +48,12 @@ public sealed class CdnObjectSource : IObjectSource
     public async Task<ObjectResult> GetRangeAsync(ObjectRequest request, long offset, Memory<byte> destination, CdnContext? cdn, FetchPriority priority,
         CancellationToken cancellationToken)
     {
-        // The whole object is fetched and verified first: a bare byte range of an object can't be checked against its key.
+        ArgumentNullException.ThrowIfNull(request);
+        // A big loose encoded object: only the proven chunks under the range (D340). Anything else is fetched and verified
+        // whole first, since a bare byte range of it can't be checked against its key.
+        if (cdn is not null && fetcher.CanFetchRange(request)
+            && await fetcher.FetchRangeAsync(request, offset, destination, cdn, priority, cancellationToken).ConfigureAwait(false) is { } ranged)
+            return ranged;
         var whole = await GetKeyAsync(request, cdn, priority, cancellationToken).ConfigureAwait(false);
         if (!whole.IsPresent) return whole;
         ArgumentOutOfRangeException.ThrowIfNegative(offset);

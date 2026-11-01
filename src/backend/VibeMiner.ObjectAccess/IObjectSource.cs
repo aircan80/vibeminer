@@ -332,6 +332,11 @@ public sealed record ObjectSourceOptions
     public long InteractiveInFlightBytes { get; init; } = 64L << 20;
     /// <summary>Objects larger than this are streamed into staging instead of memory (the store's whole-Put limit).</summary>
     public long InMemoryObjectBytes { get; init; } = 64L << 20;
+    /// <summary>
+    /// A range read of a loose encoded object at least this long that isn't stored fetches only the BLTE header and the chunks
+    /// under the range, each proven by its MD5, and stores nothing (D340). Smaller objects are fetched whole and stored first.
+    /// </summary>
+    public long RangeFetchMinBytes { get; init; } = 64L << 20;
     /// <summary>A host that failed is tried last for this long.</summary>
     public TimeSpan HostCooldown { get; init; } = TimeSpan.FromSeconds(30);
     public TimeProvider Time { get; init; } = TimeProvider.System;

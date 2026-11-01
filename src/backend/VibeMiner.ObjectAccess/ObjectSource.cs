@@ -91,6 +91,11 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
             if (read.State == ReadState.Present) return new(request.Key, ObjectState.Present, attempt == 0 ? ServedFrom.Store : ServedFrom.Cdn, read.Info?.Origin, read.Info?.Length);
             if (attempt > 0) return new(request.Key, ObjectState.Refused, Code: "OBJECT_ACCESS_" + read.State.ToString().ToUpperInvariant(), Message: read.Problem);
             if (read.State != ReadState.Absent) await DropDamagedAsync(request.Key, cancellationToken).ConfigureAwait(false);
+            // A big loose object with no local copy: fetch and prove only the chunks under the range, storing nothing (D340).
+            if (cdn is not null && fetcher.CanFetchRange(request)
+                && (shared is null || !await shared.HasAsync(request.Key, cancellationToken).ConfigureAwait(false))
+                && await fetcher.FetchRangeAsync(request, offset, destination, cdn, priority, cancellationToken).ConfigureAwait(false) is { } ranged)
+                return ranged;
             var made = (await GetKeysAsync([request], cdn, priority, null, cancellationToken).ConfigureAwait(false))[0];
             if (!made.IsPresent) return made;
         }
