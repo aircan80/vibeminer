@@ -27,6 +27,8 @@ test('production project dependencies preserve pure engine boundaries and the or
     // Layer 5 formats: reads files through layer 4 (#177). ObjectAccess is for the table definitions only: fetched
     // definitions are layer 2 observations and history (D180). Generated is the layer 1 generated store for decoded tables (D210, #179).
     Formats: ['Files', 'ObjectAccess', 'Generated'],
+    // Layer 6 game concepts (#204): joins layer 5 tables and reads images and models through layer 5 only; layer 4 types come through it.
+    Concepts: ['Formats'],
     // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
     // Generated: the browse session opens the profile's generated store once, for layer 4's listfile names index (#186) and tables.
     // Composition is the layer 7 composition shared with the desktop Host (#205).
@@ -51,13 +53,13 @@ test('backend projects reference only their own code layer or lower ones', async
   // reference no layer project, so 3 keeps them above the new layer 1-2 projects), Host at 7 (composition).
   const production = {
     Domain: 0, 'Protocols.Tact': 0, 'Formats.Wow': 0,
-    Objects: 1, Cdn: 1, Generated: 1, ObjectAccess: 2, Builds: 3, Files: 4, Formats: 5,
+    Objects: 1, Cdn: 1, Generated: 1, ObjectAccess: 2, Builds: 3, Files: 4, Formats: 5, Concepts: 6,
     Application: 3, Infrastructure: 3, Host: 7, Cli: 7, Composition: 7,
   };
-  const layerProjects = new Set(['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Cli', 'Composition']);
+  const layerProjects = new Set(['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Concepts', 'Cli', 'Composition']);
   const legacy = new Set(Object.keys(production).filter(name => !layerProjects.has(name)));
-  const fakes = { 'Cdn.Testing': 1, 'Generated.Testing': 1, 'Objects.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Formats.Testing': 5, 'Objects.CrashWriter': 1 };
-  const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Files.Tests': 4, 'Formats.Tests': 5, 'Cli.Tests': 7 };
+  const fakes = { 'Cdn.Testing': 1, 'Generated.Testing': 1, 'Objects.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Formats.Testing': 5, 'Concepts.Testing': 6, 'Objects.CrashWriter': 1 };
+  const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Files.Tests': 4, 'Formats.Tests': 5, 'Concepts.Tests': 6, 'Cli.Tests': 7 };
   // Cross-layer integration projects drive real lower layers by design (D137), so they have no single layer.
   // Formats.Comparison cross-checks the layer 5 reader against the legacy Formats.Wow one until slice 9 deletes it (#177).
   const exemptTests = new Set(['Backend.Tests', 'Storage.IntegrationTests', 'Formats.Comparison']);

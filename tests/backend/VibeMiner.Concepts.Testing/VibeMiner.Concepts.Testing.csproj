@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable></PropertyGroup><ItemGroup>
+  <!-- The in-memory layer 6 fakes (InMemoryItems), the standard test doubles for layer 7. -->
+  <ProjectReference Include="../../../src/backend/VibeMiner.Concepts/VibeMiner.Concepts.csproj" />
+</ItemGroup></Project>

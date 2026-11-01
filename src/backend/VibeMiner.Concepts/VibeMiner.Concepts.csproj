@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
+  <!-- Layer 6 game concepts (#204): Items, Creatures and item effects, built by joining layer 5 tables and reading images and models through layer 5. Sees layer 4 (IFileSystem, FileRef) only through Formats. -->
+  <ProjectReference Include="../VibeMiner.Formats/VibeMiner.Formats.csproj" />
+  <InternalsVisibleTo Include="VibeMiner.Concepts.Tests" />
+</ItemGroup></Project>
