@@ -228,7 +228,9 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
             observation.ObservedAt, observation.Url.AbsoluteUri, bytes));
         objects[put[0].Key] = bytes;
         var newlyStored = stored.Add(put[0].Key);
-        history.Add(new HistoryEntry((HistoryKind)(byte)observation.Kind, observation.Product, observation.Region, observation.ObservedAt,
+        // The history record keeps the time to the millisecond, as layer 1 stores it.
+        var observedMs = DateTimeOffset.FromUnixTimeMilliseconds(observation.ObservedAt.ToUnixTimeMilliseconds());
+        history.Add(new HistoryEntry((HistoryKind)(byte)observation.Kind, observation.Product, observation.Region, observedMs,
             observation.Url.AbsoluteUri, put[0].Key, put[1].Key));
         // Publish never blocks, so it's safe under the lock here.
         if (newlyStored) commits.Publish([put[0].Key], []);

@@ -5,6 +5,13 @@ using VibeMiner.Objects.Testing;
 
 namespace VibeMiner.ObjectAccess.Tests;
 
+internal static class StoreSeeding
+{
+    /// <summary>Puts valid objects into a store the test sets up, and insists they were stored.</summary>
+    public static async Task SeedAsync(this InMemoryObjectStore store, params PutObject[] objects) =>
+        Xunit.Assert.All(await store.PutAsync(objects), r => Xunit.Assert.Equal(PutOutcome.Stored, r.Outcome));
+}
+
 /// <summary>A synthetic archive: members back to back (with optional gaps), and where the "index" says each one is.</summary>
 internal sealed record SyntheticArchive(CdnKey Key, byte[] Bytes, IReadOnlyDictionary<ObjectKey, ArchiveLocation> Locations)
 {
@@ -16,8 +23,8 @@ internal sealed class Scenario
     public const string L3 = "level3.blizzard.com", Us = "us.cdn.blizzard.com";
     public static readonly CdnRoute Route = new([L3, Us], "tpr/wow");
     public FakeCdn Cdn { get; } = new() { Time = new ManualTime(new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero)) };
-    public MemoryStore Store { get; } = new();
-    public MemoryStore? Shared { get; init; }
+    public InMemoryObjectStore Store { get; } = new();
+    public InMemoryObjectStore? Shared { get; init; }
     public ObjectSourceOptions Options { get; init; } = new();
     /// <summary>The history log the source appends to; the store's own when null.</summary>
     public IHistoryLog? HistoryLog { get; init; }

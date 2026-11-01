@@ -32,7 +32,7 @@ public sealed class StoreCommitsTests
     {
         var s = new Scenario();
         var o = s.Serve(Synthetic.Config(2));
-        s.Store.Add(o);
+        await s.Store.SeedAsync(o);
         s.Store.Corrupt(o.Key);
         using var subscription = s.Source.Subscribe();
         var r = await s.Source.GetKeyAsync(new(o.Key), s.Context, FetchPriority.Interactive, None);

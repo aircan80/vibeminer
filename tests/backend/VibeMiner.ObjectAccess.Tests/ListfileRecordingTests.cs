@@ -139,7 +139,8 @@ public sealed class ListfileRecordingTests
             var r = await s.Source.RecordAsync(o, None);
             Assert.Equal((ObjectState.Present, true), (r.State, r.Recorded));
         }
-        Assert.Equal([HistoryKind.ListfilePart, HistoryKind.ListfileDelta], (await s.Source.ReadHistoryAsync(new(), None)).Select(e => e.Kind));
+        // Entries observed at the same moment come back in record-key order, as the real store returns them.
+        Assert.Equal([HistoryKind.ListfilePart, HistoryKind.ListfileDelta], (await s.Source.ReadHistoryAsync(new(), None)).Select(e => e.Kind).Order());
     }
 
     [Theory]

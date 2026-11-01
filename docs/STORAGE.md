@@ -25,7 +25,7 @@ The storage rewrite (#153-#160) splits local data into three layers. Layer 1, th
 - **Formats** ([D129](DECISIONS.md)): anything newer is refused by name and never truncated.
 - **Second store** ([D130](DECISIONS.md)): a read-only store, such as the shared dev store, can be read alongside the profile's own.
 - **Generated kind**: a second store in `generated-v1/` (`ObjectStoreOptions.Kind = Generated`) holds prepared data under key type 7, whose 16-byte key the writer chooses. Only the length is checked; no history, no staging. The kind is in every pack header and the index, and a folder of the other kind is refused (`OBJECT_STORE_KIND_MISMATCH`). See [the format spec](formats/object-store-v1.md).
-- **Interfaces** ([D131](DECISIONS.md)): the layers above use `IObjectReader`, `IObjectWriter`, `IHistoryReader`/`IHistoryLog`, `IObjectStoreMaintenance` and `IObjectVerifier` (`ObjectVerification.Default`, the one instance Put uses). Tests use `InMemoryObjectStore`, kept in step with the real store by `ObjectStoreContractTests`.
+- **Interfaces** ([D131](DECISIONS.md)): the layers above use `IObjectReader`, `IObjectWriter`, `IHistoryReader`/`IHistoryLog`, `IObjectStoreMaintenance` and `IObjectVerifier` (`ObjectVerification.Default`, the one instance Put uses). Tests use `InMemoryObjectStore` (in `tests/backend/VibeMiner.Objects.Testing`), kept in step with the real store by `ObjectStoreContractTests`.
 
 ### Data folder
 

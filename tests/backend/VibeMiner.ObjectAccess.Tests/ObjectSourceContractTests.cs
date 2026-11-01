@@ -84,6 +84,9 @@ public abstract class ObjectSourceContract
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => source.GetKeyAsync(new(o.Key), Context, FetchPriority.Interactive, cancel.Token));
     }
 
+    /// <summary>A history record keeps its observation time to the millisecond (HistoryRecordFormat).</summary>
+    private static DateTimeOffset ToMs(DateTimeOffset at) => DateTimeOffset.FromUnixTimeMilliseconds(at.ToUnixTimeMilliseconds());
+
     [Fact]
     public async Task AVersionReplyIsObserved()
     {
@@ -93,7 +96,7 @@ public abstract class ObjectSourceContract
         Assert.NotEmpty(r.Observation!.Bytes);
         Assert.Equal(VersionClient.UrlFor("wow", "us", VersionDocumentKind.Versions), r.Observation.Url);
         var entry = Assert.Single(await source.ReadHistoryAsync(new(Product: "wow"), None));
-        Assert.Equal((HistoryKind.Versions, "us", r.Observation.ObservedAt), (entry.Kind, entry.Region, entry.ObservedAt));
+        Assert.Equal((HistoryKind.Versions, "us", ToMs(r.Observation.ObservedAt)), (entry.Kind, entry.Region, entry.ObservedAt));
         var document = await source.GetKeyAsync(new(entry.Document), Context, FetchPriority.Interactive, None);
         Assert.Equal(r.Observation.Bytes, document.Bytes);
     }
@@ -119,7 +122,7 @@ public abstract class ObjectSourceContract
         Assert.Equal(WoWDBDefsClient.DefinitionUrl(Revision, TableName), r.Observation!.Url.AbsoluteUri);
         Assert.Equal(MapDbd, r.Observation.Bytes);
         var entry = Assert.Single(await source.ReadHistoryAsync(new(Product: TableId, Kind: HistoryKind.Definition), None));
-        Assert.Equal((TableId, "wowdbdefs", r.Observation.Url.AbsoluteUri, r.Observation.ObservedAt), (entry.Product, entry.Region, entry.Url, entry.ObservedAt));
+        Assert.Equal((TableId, "wowdbdefs", r.Observation.Url.AbsoluteUri, ToMs(r.Observation.ObservedAt)), (entry.Product, entry.Region, entry.Url, entry.ObservedAt));
         var document = await source.GetKeyAsync(new(entry.Document), null, FetchPriority.Interactive, None);
         Assert.Equal(MapDbd, document.Bytes);
         Assert.Empty(await source.ReadHistoryAsync(new(Kind: HistoryKind.Versions), None));

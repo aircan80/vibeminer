@@ -8,6 +8,7 @@
   <ProjectReference Include="../../../src/backend/VibeMiner.Generated/VibeMiner.Generated.csproj" />
   <ProjectReference Include="../VibeMiner.Generated.Testing/VibeMiner.Generated.Testing.csproj" />
   <ProjectReference Include="../VibeMiner.Cdn.Testing/VibeMiner.Cdn.Testing.csproj" />
+  <ProjectReference Include="../VibeMiner.Objects.Testing/VibeMiner.Objects.Testing.csproj" />
   <ProjectReference Include="../VibeMiner.Objects.CrashWriter/VibeMiner.Objects.CrashWriter.csproj" />
   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
   <PackageReference Include="xunit" Version="2.9.3" />

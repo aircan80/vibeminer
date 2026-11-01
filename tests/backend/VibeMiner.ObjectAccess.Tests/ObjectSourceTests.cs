@@ -458,14 +458,14 @@ public sealed class ObjectSourceTests
     [Fact]
     public async Task TheSharedDevStoreIsCopiedInAndRecordedAsSuchWithNoCdnRequest()
     {
-        var shared = new MemoryStore();
+        var shared = new InMemoryObjectStore();
         var s = new Scenario { Shared = shared };
         var o = Synthetic.Chunked(8, 3000, 3000);
-        shared.Add(o);
+        await shared.SeedAsync(o);
         var one = await s.Source.GetKeyAsync(new(o.Key, o.DeclaredLength), s.Context, FetchPriority.Interactive, None);
         Assert.Equal((ServedFrom.SharedStore, ObjectOrigin.SharedStore), (one.ServedFrom!.Value, s.Store.OriginOf(o.Key)!.Value));
         Assert.Equal(o.Bytes.ToArray(), one.Bytes);
-        var p = Synthetic.Config(8); shared.Add(p);
+        var p = Synthetic.Config(8); await shared.SeedAsync(p);
         var many = await s.Source.GetKeysAsync([new(p.Key)], s.Context, FetchPriority.Background, null, None);
         Assert.Equal(ServedFrom.SharedStore, many[0].ServedFrom);
         Assert.Empty(s.Cdn.Requests);
@@ -476,11 +476,12 @@ public sealed class ObjectSourceTests
     [Fact]
     public async Task ABadCopyInTheSharedStoreIsNotTakenAndTheCdnServesIt()
     {
-        var shared = new MemoryStore();
+        var shared = new InMemoryObjectStore();
         var s = new Scenario { Shared = shared };
         var o = Synthetic.Config(3);
         var wrong = o.Bytes.ToArray(); wrong[5] ^= 1;
-        shared.Add(o with { Bytes = wrong });
+        await shared.SeedAsync(o);
+        shared.Tamper(o.Key, wrong);
         s.Serve(o);
         var r = await s.Source.GetKeyAsync(new(o.Key), s.Context, FetchPriority.Interactive, None);
         Assert.Equal((ServedFrom.Cdn, ObjectOrigin.Cdn), (r.ServedFrom!.Value, s.Store.OriginOf(o.Key)!.Value));
@@ -489,12 +490,13 @@ public sealed class ObjectSourceTests
     [Fact]
     public async Task ALargeSharedCopyWithABadChunkIsFetchedFromTheCdnAndTheBatchCarriesOn()
     {
-        var shared = new MemoryStore();
+        var shared = new InMemoryObjectStore();
         var s = new Scenario { Shared = shared, Options = new ObjectSourceOptions { InMemoryObjectBytes = 1 << 20 } };
         var big = s.Serve(Synthetic.Chunked(21, Enumerable.Repeat(256 * 1024, 12).ToArray()));
         var wrong = big.Bytes.ToArray(); wrong[^1000] ^= 1;     // a byte in the last chunk
-        shared.Add(big with { Bytes = wrong });
-        var fromShared = Synthetic.Chunked(22, 3000, 3000); shared.Add(fromShared);
+        await shared.SeedAsync(big);
+        shared.Tamper(big.Key, wrong);
+        var fromShared = Synthetic.Chunked(22, 3000, 3000); await shared.SeedAsync(fromShared);
         var fromCdn = s.Serve(Synthetic.Config(23));
 
         var r = await s.Source.GetKeysAsync([new(fromShared.Key, fromShared.DeclaredLength), new(big.Key, big.DeclaredLength), new(fromCdn.Key)],
@@ -510,7 +512,7 @@ public sealed class ObjectSourceTests
     {
         var s = new Scenario();
         var o = s.Serve(Synthetic.Config(2));
-        s.Store.Add(o);
+        await s.Store.SeedAsync(o);
         s.Store.Corrupt(o.Key);
         var r = await s.Source.GetKeyAsync(new(o.Key), s.Context, FetchPriority.Interactive, None);
         Assert.Equal((ObjectState.Present, ServedFrom.Cdn), (r.State, r.ServedFrom!.Value));
@@ -545,9 +547,9 @@ public sealed class ObjectSourceTests
     [Fact]
     public async Task TheLocalOnlySourceNeverTouchesTheNetwork()
     {
-        var store = new MemoryStore(); var shared = new MemoryStore();
-        var a = Synthetic.Config(1); store.Add(a);
-        var b = Synthetic.Config(2); shared.Add(b);
+        var store = new InMemoryObjectStore(); var shared = new InMemoryObjectStore();
+        var a = Synthetic.Config(1); await store.SeedAsync(a);
+        var b = Synthetic.Config(2); await shared.SeedAsync(b);
         var local = new LocalObjectSource(store, store, shared);
         Assert.Equal(ServedFrom.Store, (await local.GetKeyAsync(new(a.Key), null, FetchPriority.Interactive, None)).ServedFrom);
         Assert.Equal(ServedFrom.SharedStore, (await local.GetKeyAsync(new(b.Key), null, FetchPriority.Interactive, None)).ServedFrom);

@@ -28,6 +28,7 @@ test('a layer 1 interface or fake change also runs the callers without slow test
   const callers = [primitives, `${objectAccess} --filter Speed!=Slow`, `${builds} --filter Speed!=Slow`, `${files} --filter Speed!=Slow`, `${formats} --filter Speed!=Slow`, `${cli} --filter Speed!=Slow`];
   assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.Objects/IObjectReader.cs', publicApi: true }]), callers);
   assert.deepEqual(commands(['tests/backend/VibeMiner.Cdn.Testing/FakeCdn.cs']), callers);
+  assert.deepEqual(commands(['tests/backend/VibeMiner.Objects.Testing/InMemoryObjectStore.cs']), callers);
 });
 
 test('a layer 2 interface change also runs layers 3, 4 and 5 and the CLI', () => {

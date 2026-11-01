@@ -13,8 +13,9 @@ public abstract class ObjectStoreContractTests : IAsyncLifetime
 {
     protected IObjectReader Reader { get; private set; } = null!;
     protected IObjectWriter Writer { get; private set; } = null!;
-    protected abstract Task<(IObjectReader reader, IObjectWriter writer)> CreateAsync();
-    public async Task InitializeAsync() => (Reader, Writer) = await CreateAsync();
+    protected IHistoryLog History { get; private set; } = null!;
+    protected abstract Task<(IObjectReader reader, IObjectWriter writer, IHistoryLog history)> CreateAsync();
+    public async Task InitializeAsync() => (Reader, Writer, History) = await CreateAsync();
     public abstract Task DisposeAsync();
 
     [Fact]
@@ -180,6 +181,42 @@ public abstract class ObjectStoreContractTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TheHistoryLogReadsBackFilteredOldestFirstAndPaged()
+    {
+        var at = new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero);
+        var observations = new[]
+        {
+            Synthetic.Observation(1, "wow", "us", at: at.AddMinutes(3)), Synthetic.Observation(2, "wow", "eu", at: at.AddMinutes(1)),
+            Synthetic.Observation(3, "wow", "us", HistoryKind.Cdns, at.AddMinutes(2)), Synthetic.Observation(4, "wowt", "us", at: at.AddMinutes(1)),
+            Synthetic.Observation(5, "", "us", HistoryKind.Summary, at.AddMinutes(4)) with { Url = "https://us.version.battle.net/v2/summary" },
+        };
+        foreach (var o in observations) Assert.All(await History.AppendHistoryAsync(o), r => Assert.Equal(PutOutcome.Stored, r.Outcome));
+        // The same observation again is one entry; a Put of the two objects is the same as an append.
+        Assert.All(await History.AppendHistoryAsync(observations[1]), r => Assert.Equal(PutOutcome.AlreadyPresent, r.Outcome));
+        var later = observations[0] with { ObservedAt = at.AddMinutes(9) };
+        Assert.Equal([PutOutcome.AlreadyPresent, PutOutcome.Stored], (await Writer.PutAsync(HistoryRecordFormat.Objects(later))).Select(r => r.Outcome));
+
+        var all = await History.ReadHistoryAsync(new HistoryQuery());
+        Assert.Equal(6, all.Count);
+        Assert.Equal(all.OrderBy(e => e.ObservedAt).ThenBy(e => Convert.ToHexString(e.Record.KeyBytes())).Select(e => e.Record), all.Select(e => e.Record));
+        var first = all.Single(e => e.ObservedAt == at.AddMinutes(3));
+        var expected = HistoryRecordFormat.Objects(observations[0]);
+        Assert.Equal((HistoryKind.Versions, "wow", "us", observations[0].Url, expected[0].Key, expected[1].Key),
+            (first.Kind, first.Product, first.Region, first.Url, first.Document, first.Record));
+        Assert.Equal(observations[0].Reply.ToArray(), (await Reader.ReadAsync(first.Document)).Bytes);
+
+        Assert.Equal(2, (await History.ReadHistoryAsync(new HistoryQuery("wow", "us", HistoryKind.Versions))).Count);
+        Assert.Single(await History.ReadHistoryAsync(new HistoryQuery(Region: "eu")));
+        var summary = Assert.Single(await History.ReadHistoryAsync(new HistoryQuery(Kind: HistoryKind.Summary)));
+        Assert.Equal(("", "us", observations[4].Url), (summary.Product, summary.Region, summary.Url));
+        var page1 = await History.ReadHistoryAsync(new HistoryQuery(Limit: 4));
+        var page2 = await History.ReadHistoryAsync(new HistoryQuery(After: page1[^1], Limit: 4));
+        Assert.Equal((4, 2), (page1.Count, page2.Count));
+        Assert.Equal(all.Select(e => e.Record), page1.Concat(page2).Select(e => e.Record));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () => await History.ReadHistoryAsync(new HistoryQuery(Limit: 0)));
+    }
+
+    [Fact]
     public async Task BatchBoundsAndCancellationBeforeStartAreThrown()
     {
         await Assert.ThrowsAsync<ObjectStoreException>(() => Writer.PutAsync(Enumerable.Range(0, 4097).Select(i => Synthetic.Headerless(i, 9)).ToList()));
@@ -193,20 +230,20 @@ public sealed class RealObjectStoreContractTests : ObjectStoreContractTests
 {
     private readonly TempDirectory directory = new();
     private ObjectStore? store;
-    protected override async Task<(IObjectReader reader, IObjectWriter writer)> CreateAsync()
+    protected override async Task<(IObjectReader reader, IObjectWriter writer, IHistoryLog history)> CreateAsync()
     {
         store = await ObjectStore.OpenAsync(ObjectStoreTestKit.StoreDir(directory), ObjectStoreTestKit.Quick);
-        return (store, store);
+        return (store, store, store);
     }
     public override async Task DisposeAsync() { if (store is not null) await store.DisposeAsync(); directory.Dispose(); }
 }
 
 public sealed class InMemoryObjectStoreContractTests : ObjectStoreContractTests
 {
-    protected override Task<(IObjectReader reader, IObjectWriter writer)> CreateAsync()
+    protected override Task<(IObjectReader reader, IObjectWriter writer, IHistoryLog history)> CreateAsync()
     {
         var fake = new InMemoryObjectStore();
-        return Task.FromResult<(IObjectReader, IObjectWriter)>((fake, fake));
+        return Task.FromResult<(IObjectReader, IObjectWriter, IHistoryLog)>((fake, fake, fake));
     }
     public override Task DisposeAsync() => Task.CompletedTask;
 }

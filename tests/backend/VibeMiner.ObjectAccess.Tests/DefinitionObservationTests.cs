@@ -1,6 +1,7 @@
 using VibeMiner.Cdn;
 using VibeMiner.ObjectAccess.Testing;
 using VibeMiner.Objects;
+using VibeMiner.Objects.Testing;
 using Xunit;
 
 namespace VibeMiner.ObjectAccess.Tests;
@@ -104,7 +105,7 @@ public sealed class DefinitionObservationTests
     [Fact]
     public async Task TheLocalOnlySourceNeverFetchesADefinition()
     {
-        var store = new MemoryStore();
+        var store = new InMemoryObjectStore();
         var local = new LocalObjectSource(store, store);
         var r = await local.ObserveAsync(Map, None);
         Assert.Equal((ObjectState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK", false), (r.State, r.Code, r.Recorded));

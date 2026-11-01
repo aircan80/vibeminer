@@ -212,6 +212,12 @@
         "dependencies": {
           "VibeMiner.Objects": "[1.0.0, )"
         }
+      },
+      "vibeminer.objects.testing": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Objects": "[1.0.0, )"
+        }
       }
     }
   }

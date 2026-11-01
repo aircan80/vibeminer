@@ -51,7 +51,7 @@ test('backend projects reference only their own code layer or lower ones', async
   };
   const layerProjects = new Set(['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Cli']);
   const legacy = new Set(Object.keys(production).filter(name => !layerProjects.has(name)));
-  const fakes = { 'Cdn.Testing': 1, 'Generated.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Formats.Testing': 5, 'Objects.CrashWriter': 1 };
+  const fakes = { 'Cdn.Testing': 1, 'Generated.Testing': 1, 'Objects.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Formats.Testing': 5, 'Objects.CrashWriter': 1 };
   const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Files.Tests': 4, 'Formats.Tests': 5, 'Cli.Tests': 7 };
   // Cross-layer integration projects drive real lower layers by design (D137), so they have no single layer.
   // Formats.Comparison cross-checks the layer 5 reader against the legacy Formats.Wow one until slice 9 deletes it (#177).
@@ -95,6 +95,6 @@ test('backend projects reference only their own code layer or lower ones', async
     'Backend.Tests references only the legacy Host and Infrastructure');
   // Storage.IntegrationTests drives real layers 1-5 (D137, #195) against the fakes, never a legacy project or the CLI.
   assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Storage.IntegrationTests/VibeMiner.Storage.IntegrationTests.csproj')).sort(),
-    ['Cdn.Testing', 'Files.Testing', 'Formats', 'Generated.Testing', 'ObjectAccess', 'ObjectAccess.Testing', 'Objects.CrashWriter'],
+    ['Cdn.Testing', 'Files.Testing', 'Formats', 'Generated.Testing', 'ObjectAccess', 'ObjectAccess.Testing', 'Objects.CrashWriter', 'Objects.Testing'],
     'Storage.IntegrationTests references only layers 1-5 and their fakes');
 });

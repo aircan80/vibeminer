@@ -3,5 +3,6 @@
   <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
   <InternalsVisibleTo Include="VibeMiner.Primitives.Tests" />
   <InternalsVisibleTo Include="VibeMiner.Objects.CrashWriter" />
+  <InternalsVisibleTo Include="VibeMiner.Objects.Testing" />
   <InternalsVisibleTo Include="VibeMiner.ObjectStore.Benchmark" />
 </ItemGroup></Project>

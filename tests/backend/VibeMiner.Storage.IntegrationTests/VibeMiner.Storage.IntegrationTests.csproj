@@ -4,10 +4,10 @@
   <!-- The reset chain (#195): layers 3-5 and the generated store over the real layer 1 stores. -->
   <ProjectReference Include="../../../src/backend/VibeMiner.Formats/VibeMiner.Formats.csproj" />
   <ProjectReference Include="../VibeMiner.Cdn.Testing/VibeMiner.Cdn.Testing.csproj" />
+  <ProjectReference Include="../VibeMiner.Objects.Testing/VibeMiner.Objects.Testing.csproj" />
   <ProjectReference Include="../VibeMiner.Objects.CrashWriter/VibeMiner.Objects.CrashWriter.csproj" />
   <!-- Shared scenario helpers, linked from the layer 2 unit project. -->
   <Compile Include="../VibeMiner.ObjectAccess.Tests/Kit.cs" Link="Kit.cs" />
-  <Compile Include="../VibeMiner.ObjectAccess.Tests/MemoryStore.cs" Link="MemoryStore.cs" />
   <!-- Synthetic build metadata and DB2 writers, linked from the layer 3 and layer 5 unit projects. -->
   <Compile Include="../VibeMiner.Builds.Tests/Formats/BlteWriter.cs" Link="Synthetic/BlteWriter.cs" />
   <Compile Include="../VibeMiner.Builds.Tests/Formats/EncodingWriter.cs" Link="Synthetic/EncodingWriter.cs" />

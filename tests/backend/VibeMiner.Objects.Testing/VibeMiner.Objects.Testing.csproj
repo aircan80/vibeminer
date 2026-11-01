@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable></PropertyGroup><ItemGroup>
+  <!-- The in-memory layer 1 object store, the standard test double for the layers above; ObjectStoreContractTests keeps it in step with the real store. -->
+  <ProjectReference Include="../../../src/backend/VibeMiner.Objects/VibeMiner.Objects.csproj" />
+</ItemGroup></Project>

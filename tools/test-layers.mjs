@@ -28,7 +28,7 @@ export const layers = [
   {
     layer: 1, name: 'Primitives',
     src: ['src/backend/VibeMiner.Objects/', 'src/backend/VibeMiner.Cdn/', 'src/backend/VibeMiner.Generated/'],
-    fakes: ['tests/backend/VibeMiner.Cdn.Testing/', 'tests/backend/VibeMiner.Generated.Testing/'],
+    fakes: ['tests/backend/VibeMiner.Cdn.Testing/', 'tests/backend/VibeMiner.Generated.Testing/', 'tests/backend/VibeMiner.Objects.Testing/'],
     paths: ['tests/backend/VibeMiner.Primitives.Tests/', 'tests/backend/VibeMiner.Objects.CrashWriter/'],
     testProject: 'tests/backend/VibeMiner.Primitives.Tests',
   },

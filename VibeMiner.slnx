@@ -21,6 +21,7 @@
     <Project Path="tests/backend/VibeMiner.Primitives.Tests/VibeMiner.Primitives.Tests.csproj" />
     <Project Path="tests/backend/VibeMiner.Cdn.Testing/VibeMiner.Cdn.Testing.csproj" />
     <Project Path="tests/backend/VibeMiner.Generated.Testing/VibeMiner.Generated.Testing.csproj" />
+    <Project Path="tests/backend/VibeMiner.Objects.Testing/VibeMiner.Objects.Testing.csproj" />
     <Project Path="tests/backend/VibeMiner.ObjectAccess.Tests/VibeMiner.ObjectAccess.Tests.csproj" />
     <Project Path="tests/backend/VibeMiner.ObjectAccess.Testing/VibeMiner.ObjectAccess.Testing.csproj" />
     <Project Path="tests/backend/VibeMiner.Cli.Tests/VibeMiner.Cli.Tests.csproj" />
