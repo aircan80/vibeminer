@@ -110,8 +110,8 @@ Results are `Present` (with where this call got it, `Store`, `SharedStore` or `C
 
 **Fetching.** Missing objects are planned (above) and run by a fixed set of workers, never one task per object:
 
-1. A worker claims its members in an in-flight table. A key another caller is fetching is awaited instead; an interactive caller that joins promotes the waiting transfer. If the owner is canceled, the waiter fetches the key itself.
-2. Just before the transfer, each member is checked against the store again, so an object an interactive call stored meanwhile isn't fetched twice; the range shrinks to the members left.
+1. A worker claims its members in an in-flight table. A key another caller is fetching is awaited instead; an interactive caller that joins promotes the waiting transfer and its follow-up requests (split runs, retries), and nothing beyond that transfer. If the owner is canceled, the waiter fetches the key itself; if the joiner is canceled, the transfer finishes and stores its members ([D342](DECISIONS.md)).
+2. Just before the transfer, each member is checked against the store again, so an object an interactive call stored meanwhile isn't fetched twice. The range is cut around every member it no longer has (stored meanwhile, or being fetched by another caller, which the plan keeps as an unclaimed member): one single-range request per run of members left, one after another, so those bytes aren't fetched again as gap ([D342](DECISIONS.md)).
 3. It takes its bytes from a 256 MiB in-flight budget, then a stream ([D134](DECISIONS.md)).
 4. Each member of a range reply is checked with `ObjectVerification.Default`. Verified members are put in batches of up to 4,096; interactive batches commit at once, background ones join the store's group commit.
 5. A member that fails its check gets one request of its own, which tries every host, before it is refused: one bad object fails only itself. A merged range that fails on every host for a passing reason (timeout, 5xx, broken connection, a 200 to the range) is retried one object at a time ([#150](https://github.com/aircan80/vibeminer/issues/150)); a 404 or no connection answers for every member.

@@ -421,12 +421,16 @@ public sealed class ObjectSourceTests
     public async Task AScreenWaitingOnAQueuedBackgroundObjectPromotesItAndSharesTheTransfer()
     {
         var s = new Scenario { Options = new() { Streams = new() { MinBackground = 1, MaxBackground = 2, Interactive = 1 } } };
-        var blocker = s.Serve(Synthetic.Headerless(1, 300));
-        var queued = s.Serve(Synthetic.Headerless(2, 300));
+        var one = s.Serve(Synthetic.Headerless(1, 300));
+        var two = s.Serve(Synthetic.Headerless(2, 300));
+        // The two workers race for the one stream: whichever reaches the CDN first is held, and the other is the queued one.
         var hold = new TaskCompletionSource();
-        s.Cdn.BeforeAnswer = (r, token) => r.Key == Scenario.KeyOf(blocker.Key) ? hold.Task.WaitAsync(token) : Task.CompletedTask;
-        var bulk = s.Source.GetKeysAsync([new(blocker.Key, 300), new(queued.Key, 300)], s.Context, FetchPriority.Background, null, None);
-        await Until(() => s.Source.Streams.BackgroundQueued == 1);   // blocker holds the one stream; queued waits behind it
+        var holding = new TaskCompletionSource<CdnKey>(TaskCreationOptions.RunContinuationsAsynchronously);
+        s.Cdn.BeforeAnswer = (r, token) => holding.TrySetResult(r.Key) || r.Key == holding.Task.Result ? hold.Task.WaitAsync(token) : Task.CompletedTask;
+        var bulk = s.Source.GetKeysAsync([new(one.Key, 300), new(two.Key, 300)], s.Context, FetchPriority.Background, null, None);
+        var held = await holding.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var queued = held == Scenario.KeyOf(one.Key) ? two : one;
+        await Until(() => s.Source.Streams.BackgroundQueued == 1);   // the held one has the stream; queued waits behind it
         var screen = await s.Source.GetKeyAsync(new(queued.Key, 300), s.Context, FetchPriority.Interactive, None).WaitAsync(TimeSpan.FromSeconds(30));
         Assert.True(screen.IsPresent);
         Assert.Equal(queued.Bytes.ToArray(), screen.Bytes);
@@ -462,6 +466,131 @@ public sealed class ObjectSourceTests
         Assert.True((await waiting.WaitAsync(TimeSpan.FromSeconds(10)))[0].IsPresent);
         hold.SetResult();
         Assert.All(await bulk.WaitAsync(TimeSpan.FromSeconds(30)), x => Assert.True(x.IsPresent));
+    }
+
+    [Fact]
+    public async Task AScreenJoiningAFailedRangeAlsoPromotesTheRetryThatIsAlreadyWaiting()
+    {
+        // Regression: a merged range that fails is retried one member at a time on fresh tickets. Promotion reached only the
+        // range's own ticket, so the retry already waiting stayed behind other background work and held the screen's key back.
+        var s = new Scenario { Options = new() { Streams = new() { MinBackground = 1, MaxBackground = 1, Interactive = 1 } } };
+        var members = Enumerable.Range(0, 3).Select(i => Synthetic.Headerless(i, 300)).ToArray();
+        var archive = s.Archive(20, members);
+        var blocker = s.Serve(Synthetic.Headerless(30, 300));
+        s.Cdn.SetMode(Scenario.L3, FakeHostMode.Unavailable).SetMode(Scenario.Us, FakeHostMode.Unavailable);
+        var rangeAsked = new TaskCompletionSource();
+        var rangeGo = new TaskCompletionSource();
+        var blocking = new TaskCompletionSource();
+        var hold = new TaskCompletionSource();
+        s.Cdn.BeforeAnswer = (r, token) =>
+        {
+            if (r.Key == archive.Key && r.Length == 900 && rangeAsked.TrySetResult()) return rangeGo.Task.WaitAsync(token);
+            if (r.Key == Scenario.KeyOf(blocker.Key)) { blocking.TrySetResult(); return hold.Task.WaitAsync(token); }
+            return Task.CompletedTask;
+        };
+        var bulk = s.Source.GetKeysAsync(members.Select(m => archive.Request(m)).ToArray(), s.Context, FetchPriority.Background, null, None);
+        await rangeAsked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var other = s.Source.GetKeysAsync([new(blocker.Key, 300)], s.Context, FetchPriority.Background, null, None);
+        await Until(() => s.Source.Streams.BackgroundQueued == 1);   // the blocker waits for the range's stream
+        rangeGo.SetResult();                                          // the range fails on both hosts; the blocker gets the stream
+        await blocking.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await Until(() => s.Source.Streams.BackgroundQueued == 1);   // the first member's retry waits behind the blocker
+        s.Cdn.SetMode(Scenario.L3, FakeHostMode.Normal).SetMode(Scenario.Us, FakeHostMode.Normal);
+
+        var screen = await s.Source.GetKeyAsync(archive.Request(members[2]), s.Context, FetchPriority.Interactive, None).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(members[2].Bytes.ToArray(), screen.Bytes);
+        Assert.False(other.IsCompleted);
+        Assert.All(await bulk.WaitAsync(TimeSpan.FromSeconds(30)), r => Assert.True(r.IsPresent));
+        hold.SetResult();
+        Assert.True((await other.WaitAsync(TimeSpan.FromSeconds(30)))[0].IsPresent);
+        Assert.Equal(0, s.Source.Streams.BackgroundActive + s.Source.Streams.InteractiveActive);
+    }
+
+    [Fact]
+    public async Task ACanceledScreenLeavesThePromotedRangeToFinishAndStoreEveryMember()
+    {
+        var s = new Scenario { Options = new() { Streams = new() { MinBackground = 1, MaxBackground = 2, Interactive = 1 } } };
+        var members = Enumerable.Range(0, 3).Select(i => Synthetic.Headerless(i, 300)).ToArray();
+        var archive = s.Archive(21, members);
+        var blocker = s.Serve(Synthetic.Headerless(30, 300));
+        var blocking = new TaskCompletionSource();
+        var rangeAsked = new TaskCompletionSource();
+        var hold = new TaskCompletionSource();
+        var rangeGo = new TaskCompletionSource();
+        s.Cdn.BeforeAnswer = (r, token) =>
+        {
+            if (r.Key == Scenario.KeyOf(blocker.Key)) { blocking.TrySetResult(); return hold.Task.WaitAsync(token); }
+            if (r.Key == archive.Key) { rangeAsked.TrySetResult(); return rangeGo.Task.WaitAsync(token); }
+            return Task.CompletedTask;
+        };
+        var first = s.Source.GetKeysAsync([new(blocker.Key, 300)], s.Context, FetchPriority.Background, null, None);
+        await blocking.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var bulk = s.Source.GetKeysAsync(members.Select(m => archive.Request(m)).ToArray(), s.Context, FetchPriority.Background, null, None);
+        await Until(() => s.Source.Streams.BackgroundQueued == 1);
+        using var cancel = new CancellationTokenSource();
+        var screen = s.Source.GetKeyAsync(archive.Request(members[1]), s.Context, FetchPriority.Interactive, cancel.Token);
+        await rangeAsked.Task.WaitAsync(TimeSpan.FromSeconds(30));   // promoted: it took the interactive stream
+        await cancel.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => screen);
+        rangeGo.SetResult();
+        Assert.All(await bulk.WaitAsync(TimeSpan.FromSeconds(30)), r => Assert.True(r.IsPresent));
+        Assert.All(members, m => Assert.Equal(ObjectOrigin.Cdn, s.Store.OriginOf(m.Key)));
+        Assert.Single(s.Cdn.Requests, r => r.Key == archive.Key);
+        hold.SetResult();
+        Assert.True((await first.WaitAsync(TimeSpan.FromSeconds(30)))[0].IsPresent);
+        Assert.Equal(0, s.Source.Streams.BackgroundActive + s.Source.Streams.InteractiveActive);
+    }
+
+    [Fact]
+    public async Task ARangeSpanningAKeyAScreenIsFetchingIsSplitAroundIt()
+    {
+        var s = new Scenario();
+        var members = Enumerable.Range(0, 3).Select(i => Synthetic.Headerless(i, 300)).ToArray();
+        var archive = s.Archive(22, members);
+        var hold = new TaskCompletionSource();
+        var holding = new TaskCompletionSource();
+        s.Cdn.BeforeAnswer = (r, token) =>
+        {
+            if (r.Key != archive.Key || r.Offset != 300) return Task.CompletedTask;
+            holding.TrySetResult();
+            return hold.Task.WaitAsync(token);
+        };
+        var screen = s.Source.GetKeyAsync(archive.Request(members[1]), s.Context, FetchPriority.Interactive, None);
+        await holding.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var bulk = s.Source.GetKeysAsync(members.Select(m => archive.Request(m)).ToArray(), s.Context, FetchPriority.Background, null, None);
+        await Until(() => s.Store.OriginOf(members[0].Key) is not null && s.Store.OriginOf(members[2].Key) is not null);
+        hold.SetResult();
+        Assert.True((await screen).IsPresent);
+        Assert.All(await bulk.WaitAsync(TimeSpan.FromSeconds(30)), r => Assert.True(r.IsPresent));
+        Assert.Equal([(0L, 300L), (300L, 300L), (600L, 300L)],
+            s.Cdn.Requests.Where(r => r.Key == archive.Key).Select(r => (r.Offset!.Value, r.Length!.Value)).Order());
+    }
+
+    [Fact]
+    public async Task AQueuedRangeSkipsAMemberAScreenStoredBeforeItStarted()
+    {
+        // Regression (D250's note): a plan made before the screen's fetch still spanned the stored member and fetched it again as gap bytes.
+        var s = new Scenario { Options = new() { Streams = new() { MinBackground = 1, MaxBackground = 1, Interactive = 1 } } };
+        var members = Enumerable.Range(0, 3).Select(i => Synthetic.Headerless(i, 300)).ToArray();
+        var archive = s.Archive(23, members);
+        var blocker = s.Serve(Synthetic.Headerless(30, 300));
+        var blocking = new TaskCompletionSource();
+        var hold = new TaskCompletionSource();
+        s.Cdn.BeforeAnswer = (r, token) =>
+        {
+            if (r.Key != Scenario.KeyOf(blocker.Key)) return Task.CompletedTask;
+            blocking.TrySetResult();
+            return hold.Task.WaitAsync(token);
+        };
+        ObjectRequest[] requests = [new(blocker.Key, 300, null, 0), .. members.Select(m => archive.Request(m, 1))];
+        var bulk = s.Source.GetKeysAsync(requests, s.Context, FetchPriority.Background, null, None);
+        await blocking.Task.WaitAsync(TimeSpan.FromSeconds(30));   // the one worker holds the blocker; the range isn't claimed yet
+        var screen = await s.Source.GetKeyAsync(archive.Request(members[1]), s.Context, FetchPriority.Interactive, None).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(screen.IsPresent);
+        hold.SetResult();
+        Assert.All(await bulk.WaitAsync(TimeSpan.FromSeconds(30)), r => Assert.True(r.IsPresent));
+        Assert.Equal([(0L, 300L), (300L, 300L), (600L, 300L)],
+            s.Cdn.Requests.Where(r => r.Key == archive.Key).Select(r => (r.Offset!.Value, r.Length!.Value)).Order());
     }
 
     [Fact]

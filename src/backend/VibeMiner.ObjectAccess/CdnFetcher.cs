@@ -224,7 +224,14 @@ internal sealed partial class CdnFetcher
             var loose = new List<ObjectRequest>();
             foreach (var r in group)
             {
-                if (Join(r.Key, priority) is { } running) { joined.Add((r.Key, running)); continue; }
+                if (Join(r.Key, priority) is { } running)
+                {
+                    joined.Add((r.Key, running));
+                    // Still planned, as a member nobody claims, so a range is split around it instead of fetching it again as gap bytes.
+                    if (r.Locations is { Count: > 0 } at && r.Key.Type == ObjectKeyType.Encoded && r.DeclaredLength is not < 1 && at.All(l => l.Size <= options.InMemoryObjectBytes))
+                        planned.Add(new(CdnKeyOf(r.Key), r.DeclaredLength, at));
+                    continue;
+                }
                 if (KindOf(r.Key) is null)
                 { finish(r.Key, new(r.Key, ObjectState.Refused, Code: "OBJECT_NOT_ON_CDN", Message: "This key type or namespace isn't served by the CDN.")); continue; }
                 if (r.DeclaredLength is < 1)
@@ -243,11 +250,15 @@ internal sealed partial class CdnFetcher
             var plan = RangePlanner.Plan(planned, context.Archives, options.Ranges);
             foreach (var rejected in plan.Rejected)
             {
-                var r = byKey[rejected.EKey];
+                // A joined key gets the result of the transfer it joined.
+                if (!byKey.TryGetValue(rejected.EKey, out var r)) continue;
                 finish(r.Key, new(r.Key, ObjectState.Refused, Code: rejected.Code, Message: rejected.Message));
             }
             foreach (var range in plan.Ranges)
-                work.Add(new(range, null, range.Members.ToDictionary(m => m.EKey, m => byKey[m.EKey]), range.Length));
+            {
+                var members = range.Members.Where(m => byKey.ContainsKey(m.EKey)).ToDictionary(m => m.EKey, m => byKey[m.EKey]);
+                if (members.Count > 0) work.Add(new(range, null, members, range.Length));
+            }
             foreach (var r in loose)
                 work.Add(new(null, r, new Dictionary<CdnKey, ObjectRequest> { [CdnKeyOf(r.Key)] = r },
                     r.DeclaredLength is { } length && length <= options.InMemoryObjectBytes ? length : r.DeclaredLength is null ? UnknownLengthBytes : Unit));
@@ -356,7 +367,14 @@ internal sealed partial class CdnFetcher
         IFetchSink sink, Action<CdnKey, ObjectResult> settle, Action<long> transferred, CancellationToken cancellationToken,
         string? badHost = null, string? badCode = null)
     {
-        // Members another caller took are dropped; the range shrinks to the members left.
+        // Members another caller took (or stored since the plan was made) are dropped, and the range is cut around them: one
+        // single-range request per run of members left, one after another, so no dropped member's bytes are fetched again as gap.
+        if (badHost is null && Runs(range, members) is { Count: > 1 } runs)
+        {
+            for (var i = 0; i < runs.Count; i++)
+                await RangeAsync(runs[i], members, i == 0 ? ticket : Streams.NewTicket(ticket), context, sink, settle, transferred, cancellationToken).ConfigureAwait(false);
+            return;
+        }
         var kept = range.Members.Where(m => members.ContainsKey(m.EKey)).ToArray();
         var start = range.Offset + kept[0].OffsetInRange;
         var end = range.Offset + kept[^1].OffsetInRange + kept[^1].Size;
@@ -407,7 +425,7 @@ internal sealed partial class CdnFetcher
                 {
                     foreach (var m in kept)
                         await RangeAsync(new PlannedRange(shrunk.Archive, range.Offset + m.OffsetInRange, m.Size, [m with { OffsetInRange = 0 }]),
-                            new() { [m.EKey] = members[m.EKey] }, Streams.NewTicket(ticket.CurrentPriority), context, sink, settle, transferred, cancellationToken).ConfigureAwait(false);
+                            new() { [m.EKey] = members[m.EKey] }, Streams.NewTicket(ticket), context, sink, settle, transferred, cancellationToken).ConfigureAwait(false);
                     return;
                 }
                 foreach (var m in kept) settle(m.EKey, FromCdnFailure(members[m.EKey].Key, failure));
@@ -435,7 +453,7 @@ internal sealed partial class CdnFetcher
             // One bad object fails only itself: it gets one request of its own on the other hosts, in ranked order, before it is refused.
             foreach (var (m, code) in retry)
                 await RangeAsync(new PlannedRange(shrunk.Archive, shrunk.Offset + m.OffsetInRange, m.Size, [m with { OffsetInRange = 0 }]),
-                    new() { [m.EKey] = members[m.EKey] }, Streams.NewTicket(ticket.CurrentPriority), context, sink, settle, transferred, cancellationToken,
+                    new() { [m.EKey] = members[m.EKey] }, Streams.NewTicket(ticket), context, sink, settle, transferred, cancellationToken,
                     servedBy, code).ConfigureAwait(false);
         }
         finally
@@ -443,6 +461,28 @@ internal sealed partial class CdnFetcher
             lease?.Dispose();
             units.Release();
         }
+    }
+
+    /// <summary>The range cut into runs of members still in <paramref name="members"/>, each from its first member's start to its last one's end.</summary>
+    private static List<PlannedRange> Runs(PlannedRange range, Dictionary<CdnKey, ObjectRequest> members)
+    {
+        var runs = new List<PlannedRange>();
+        var run = new List<PlannedMember>();
+        void Close()
+        {
+            if (run.Count == 0) return;
+            var start = run[0].OffsetInRange;
+            var end = run[^1].OffsetInRange + run[^1].Size;
+            runs.Add(new(range.Archive, range.Offset + start, end - start, run.Select(m => m with { OffsetInRange = m.OffsetInRange - start }).ToArray()));
+            run = [];
+        }
+        foreach (var m in range.Members)
+        {
+            if (members.ContainsKey(m.EKey)) run.Add(m);
+            else Close();
+        }
+        Close();
+        return runs;
     }
 
     private async Task LooseAsync(ObjectRequest request, StreamScheduler.Ticket ticket, CdnContext context, IFetchSink sink,

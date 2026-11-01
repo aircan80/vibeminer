@@ -31,7 +31,7 @@ public sealed record StreamOptions
 /// <see cref="StreamOptions.MaxBackground"/>: it grows by one after a full limit's worth of successes in a row and drops a quarter
 /// on a timeout, connection failure or 5xx. Interactive work has <see cref="StreamOptions.Interactive"/> streams of its own,
 /// borrows a free background stream when those are busy, and is always granted before any waiting background request.
-/// A waiting background request can be promoted when a screen starts waiting on the same object.
+/// A waiting background request can be promoted when a screen starts waiting on the same object; its follow-up requests go with it.
 /// </summary>
 public sealed class StreamScheduler
 {
@@ -60,6 +60,8 @@ public sealed class StreamScheduler
         internal LinkedListNode<Ticket>? Node;
         /// <summary>Completes when a background ticket is promoted, so a wait that isn't in the stream queue (bytes) can move too.</summary>
         internal readonly TaskCompletionSource Promoted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>Follow-up tickets of the same transfer (a split range, a retry), promoted with this one. Under the lock.</summary>
+        internal List<Ticket>? Followers;
         public FetchPriority CurrentPriority => Priority;
     }
 
@@ -78,6 +80,22 @@ public sealed class StreamScheduler
 
     public Ticket NewTicket(FetchPriority priority) => new(priority);
 
+    /// <summary>
+    /// A ticket for a follow-up request of the transfer <paramref name="parent"/> is for. It starts at the parent's priority and is
+    /// promoted when the parent is, so a screen that joined the transfer isn't held back behind its retries. It lives as long as
+    /// the parent does: promotion never reaches beyond that one transfer.
+    /// </summary>
+    public Ticket NewTicket(Ticket parent)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+        lock (gate)
+        {
+            var ticket = new Ticket(parent.Priority);
+            if (parent.Priority == FetchPriority.Background) (parent.Followers ??= []).Add(ticket);
+            return ticket;
+        }
+    }
+
     public async Task<Lease> AcquireAsync(Ticket ticket, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(ticket);
@@ -92,18 +110,30 @@ public sealed class StreamScheduler
     }
 
     /// <summary>Moves a waiting background request ahead of all background work. A granted or interactive ticket is unchanged.</summary>
+    /// <remarks>Its follow-up tickets (<see cref="NewTicket(Ticket)"/>) are promoted with it.</remarks>
     public void Promote(Ticket ticket)
     {
+        ArgumentNullException.ThrowIfNull(ticket);
         lock (gate)
         {
-            if (ticket.Priority == FetchPriority.Interactive) return;
-            ticket.Priority = FetchPriority.Interactive;
-            ticket.Promoted.TrySetResult();
-            if (ticket.Node is null) return;
-            backgroundQueue.Remove(ticket.Node);
-            ticket.Node = interactiveQueue.AddLast(ticket);
+            if (!Raise(ticket)) return;
             Grant();
         }
+    }
+
+    /// <summary>Under the lock. Promotes the ticket and its followers; false when it was already interactive.</summary>
+    private bool Raise(Ticket ticket)
+    {
+        if (ticket.Priority == FetchPriority.Interactive) return false;
+        ticket.Priority = FetchPriority.Interactive;
+        ticket.Promoted.TrySetResult();
+        if (ticket.Node is not null)
+        {
+            backgroundQueue.Remove(ticket.Node);
+            ticket.Node = interactiveQueue.AddLast(ticket);
+        }
+        if (ticket.Followers is { } followers) { ticket.Followers = null; foreach (var f in followers) Raise(f); }
+        return true;
     }
 
     private void Cancel(Ticket ticket, CancellationToken token)

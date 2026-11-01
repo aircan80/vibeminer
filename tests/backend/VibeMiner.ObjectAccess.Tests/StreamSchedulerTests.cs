@@ -61,6 +61,29 @@ public sealed class StreamSchedulerTests
     }
 
     [Fact]
+    public async Task AFollowUpTicketIsPromotedWithItsTransferAndNothingElseIs()
+    {
+        var s = Make(min: 1, max: 1);
+        var busy = await s.AcquireAsync(s.NewTicket(FetchPriority.Background), CancellationToken.None);
+        var parent = s.NewTicket(FetchPriority.Background);
+        var retry = s.NewTicket(parent);
+        var deeper = s.NewTicket(retry);
+        var unrelated = s.NewTicket(FetchPriority.Background);
+        var waiting = s.AcquireAsync(retry, CancellationToken.None);
+        var other = s.AcquireAsync(unrelated, CancellationToken.None);
+        Assert.False(waiting.IsCompleted);
+        s.Promote(parent);
+        var lease = await waiting;
+        Assert.True(lease.InteractiveSlot);
+        Assert.Equal(FetchPriority.Interactive, deeper.CurrentPriority);
+        Assert.Equal(FetchPriority.Background, unrelated.CurrentPriority);
+        Assert.Equal(FetchPriority.Interactive, s.NewTicket(parent).CurrentPriority);   // made after the promotion
+        Assert.False(other.IsCompleted);
+        lease.Dispose(); busy.Dispose();
+        (await other).Dispose();
+    }
+
+    [Fact]
     public async Task ACanceledWaitLeavesNoTraceAndALeaseIsReleasedOnce()
     {
         var s = Make(min: 1, max: 1);
