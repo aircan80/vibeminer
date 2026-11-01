@@ -160,9 +160,9 @@ public sealed class Db2ReaderTests
     {
         var definition=Definition("int ID\nint Value","$noninline,id$ID<u32>\nValue<u32>");
         var bytes=Build([new(0,0,0,32,0,0,0,0,0,[])],4,[new(U32(99),[7],[],[(8,7),(9,21)]),new(new byte[8],[0,0],[],[],123,[21,22])]);
-        Assert.Equal("DB2_ENCRYPTED",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(new MemoryByteSource(bytes),definition,new Sink()))).Code);
-        Assert.Equal("DB2_LIMIT",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(new MemoryByteSource(bytes),definition,new Sink(),new(MaxIndexBytes:500,AllowPartialEncryptedSections:true)))).Code);
-        var sink=new Sink();var completion=await Read(new MemoryByteSource(bytes),definition,sink,new(AllowPartialEncryptedSections:true));
+        Assert.Equal("DB2_ENCRYPTED",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(MemoryByteSource.Hiding(bytes),definition,new Sink()))).Code);
+        Assert.Equal("DB2_LIMIT",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(MemoryByteSource.Hiding(bytes),definition,new Sink(),new(MaxIndexBytes:500,AllowPartialEncryptedSections:true)))).Code);
+        var sink=new Sink();var completion=await Read(MemoryByteSource.Hiding(bytes),definition,sink,new(AllowPartialEncryptedSections:true));
         Assert.Equal(new Db2Completion(3,1,1,1,2,1,"unencryptedSections",bytes.Length),completion);Assert.Equal([7u,8u],sink.Rows.Select(row=>row.Id));
     }
 
@@ -174,13 +174,90 @@ public sealed class Db2ReaderTests
         var definition=Definition("int ID\nint Value","$noninline,id$ID<u32>\nValue<u32>");var columns=new[]{new Column(0,0,0,32,0,0,0,0,0,[])};
         byte[] Fixture(uint[] first,uint[] second)=>Build(columns,4,[new(U32(99),[7],[],[(8,7)]),new(new byte[8],[0,0],[],[],123,first),new(new byte[4],[0],[],[],456,second)]);
         var clean=Fixture([21,22],[23]);var sink=new Sink();
-        Assert.Equal(new Db2Completion(4,1,1,2,3,0,"unencryptedSections",clean.Length),await Read(new MemoryByteSource(clean),definition,sink,new(AllowPartialEncryptedSections:true)));
+        Assert.Equal(new Db2Completion(4,1,1,2,3,0,"unencryptedSections",clean.Length),await Read(MemoryByteSource.Hiding(clean),definition,sink,new(AllowPartialEncryptedSections:true)));
         Assert.Equal([7u,8u],sink.Rows.Select(row=>row.Id));
         var bytes=kind switch{"readable"=>Fixture([21,22],[7]),"copy"=>Fixture([21,22],[8]),"sections"=>Fixture([21,22],[22]),_=>Fixture([21,21],[23])};sink=new Sink();
-        Assert.Equal("DB2_INVALID",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(new MemoryByteSource(bytes),definition,sink,new(AllowPartialEncryptedSections:true)))).Code);
+        Assert.Equal("DB2_INVALID",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(MemoryByteSource.Hiding(bytes),definition,sink,new(AllowPartialEncryptedSections:true)))).Code);
         Assert.Null(sink.Header);Assert.Empty(sink.Rows);
-        Assert.Equal("DB2_ENCRYPTED",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(new MemoryByteSource(bytes),definition,new Sink()))).Code);
+        Assert.Equal("DB2_ENCRYPTED",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(MemoryByteSource.Hiding(bytes),definition,new Sink()))).Code);
     }
+
+    // D310 (#190): a keyed section with no hole was decrypted by layer 4 and reads like a clear one; its encrypted-ID list
+    // must name exactly its own rows and copy targets. Keys are generated from a seed, never real ones.
+    private static readonly ulong KeyA=MemoryByteSource.TestKeyName(190),KeyB=MemoryByteSource.TestKeyName(191);
+    private static byte[] Decryptable(uint[]? list=null,bool second=false)=>Build([new Column(0,0,0,32,0,0,0,0,0,[])],4,
+        [new(U32(99),[7],[],[(8,21)]),new(U32(5,6),[21,22],[],[(23,21)],KeyA,list??[21,22,23]),..(second?new Part[]{new(U32(9),[30],[],[],KeyB,[30])}:[])]);
+
+    [Fact]
+    public async Task A_keyed_section_without_a_hole_reads_whole_and_names_itself_decrypted()
+    {
+        var definition=Definition("int ID\nint Value","$noninline,id$ID<u32>\nValue<u32>");var bytes=Decryptable();var sink=new Sink();
+        Assert.Equal(new Db2Completion(3,3,2,0,0,0,"complete",bytes.Length),await Read(new MemoryByteSource(bytes),definition,sink));
+        Assert.Equal([(7u,"99"),(21u,"5"),(22u,"6"),(8u,"5"),(23u,"5")],sink.Rows.Select(row=>(row.Id,row.Values[1])));
+        var table=await Db2Reader.OpenAsync(new MemoryByteSource(bytes),definition,"1.2.3.4",new());
+        Assert.Equal(new Db2Section(1,2,1,KeyA.ToString("X16"),true,0,0,true),table.Sections[1]);Assert.False(table.Sections[0].IsDecrypted);
+        Assert.Equal(["5","6","5"],await Values(table.ReadSectionAsync(1)));
+        Assert.IsType<Db2Lookup.Found>(await table.FindAsync(23));Assert.IsType<Db2Lookup.Absent>(await table.FindAsync(40));
+        // The same file with the keyed body a hole stays partial, as before.
+        var hidden=await Db2Reader.OpenAsync(MemoryByteSource.Hiding(bytes),definition,"1.2.3.4",new(AllowPartialEncryptedSections:true));
+        Assert.Equal(new Db2Completion(3,1,0,1,2,2,"unencryptedSections",bytes.Length),hidden.Completion);
+        Assert.False(hidden.Sections[1].IsDecrypted);Assert.True(hidden.Sections[1].IsEncrypted);
+        Assert.IsType<Db2Lookup.Protected>(await hidden.FindAsync(23));
+        Assert.Equal("DB2_ENCRYPTED",Assert.Throws<Db2FormatException>(()=>hidden.ReadSectionAsync(1)).Code);
+    }
+
+    [Fact]
+    public async Task One_decrypted_and_one_hidden_keyed_section_read_the_decrypted_rows_and_protect_the_hidden_ones()
+    {
+        var definition=Definition("int ID\nint Value","$noninline,id$ID<u32>\nValue<u32>");var bytes=Decryptable(second:true);
+        Assert.Equal("DB2_ENCRYPTED",(await Assert.ThrowsAsync<Db2FormatException>(()=>Db2Reader.OpenAsync(MemoryByteSource.Hiding(bytes,2),definition,"1.2.3.4",new()))).Code);
+        var table=await Db2Reader.OpenAsync(MemoryByteSource.Hiding(bytes,2),definition,"1.2.3.4",new(AllowPartialEncryptedSections:true));
+        Assert.Equal(new Db2Completion(4,3,2,1,1,0,"unencryptedSections",bytes.Length),table.Completion);
+        Assert.Equal([false,true,false],table.Sections.Select(section=>section.IsDecrypted));Assert.Equal([false,true,true],table.Sections.Select(section=>section.IsEncrypted));
+        var rows=new List<Db2Row>();await foreach(var row in table.ReadAllAsync())rows.Add(row);
+        Assert.Equal([7u,21u,22u,8u,23u],rows.Select(row=>row.Id));
+        Assert.Equal(new Db2Lookup.Protected(2,KeyB.ToString("X16"),30),await table.FindAsync(30));
+        Assert.IsType<Db2Lookup.NotInReadableSections>(await table.FindAsync(40));
+    }
+
+    [Theory]
+    [InlineData("missesRow")][InlineData("extra")][InlineData("clearRow")][InlineData("otherCopy")][InlineData("empty")]
+    public async Task A_decrypted_section_whose_list_is_not_exactly_its_rows_and_copies_is_invalid(string kind)
+    {
+        // The list is the only proof the decrypted bytes are this section's records, so any mismatch refuses the table.
+        var definition=Definition("int ID\nint Value","$noninline,id$ID<u32>\nValue<u32>");
+        uint[] list=kind switch{"missesRow"=>[21,23],"extra"=>[21,22,23,40],"clearRow"=>[21,22,23,7],"otherCopy"=>[21,22,23,8],_=>[]};
+        var sink=new Sink();var error=await Assert.ThrowsAsync<Db2FormatException>(()=>Read(new MemoryByteSource(Decryptable(list)),definition,sink,new(AllowPartialEncryptedSections:true)));
+        Assert.Equal("DB2_INVALID",error.Code);Assert.Null(sink.Header);Assert.Empty(sink.Rows);
+        // Copy targets may be left out of the list; its rows may not.
+        Assert.Equal("complete",(await Read(new MemoryByteSource(Decryptable([21,22])),definition,new Sink())).Scope);
+    }
+
+    [Fact]
+    public async Task A_decrypted_section_with_inline_IDs_reads_whole()
+    {
+        var definition=Definition("int ID\nint Value","$id$ID<u32>\nValue<u32>");var columns=new[]{new Column(0,0,0,32,0,0,0,0,0,[]),new Column(0,4,32,32,0,0,0,0,0,[])};
+        var bytes=Build(columns,8,[new(U32(7,99),[],[],[]),new(U32(21,5,22,6),[],[],[],KeyA,[21,22])],flags:0);var sink=new Sink();
+        Assert.Equal(new Db2Completion(3,3,0,0,0,0,"complete",bytes.Length),await Read(new MemoryByteSource(bytes),definition,sink));
+        Assert.Equal([(7u,"99"),(21u,"5"),(22u,"6")],sink.Rows.Select(row=>(row.Id,row.Values[1])));
+        var wrong=Build(columns,8,[new(U32(7,99),[],[],[]),new(U32(21,5,22,6),[],[],[],KeyA,[21,23])],flags:0);
+        Assert.Equal("DB2_INVALID",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(new MemoryByteSource(wrong),definition,new Sink()))).Code);
+        Assert.Equal("unencryptedSections",(await Read(MemoryByteSource.Hiding(wrong),definition,new Sink(),new(AllowPartialEncryptedSections:true))).Scope);
+    }
+
+    [Fact]
+    public async Task Strings_in_a_decrypted_section_resolve_from_its_own_records_and_from_clear_ones()
+    {
+        // Offsets are relative to the field: (globalRow - declared) * recordSize + raw lands in the concatenated string tables.
+        var definition=Definition("int ID\nstring Name","$noninline,id$ID<u32>\nName");var columns=new[]{new Column(0,0,0,32,0,0,0,0,0,[])};
+        var bytes=Build(columns,4,[new(U32(18),[7],"\0"u8.ToArray(),[]),new(U32(10,0),[21,22],"\0abc\0de\0"u8.ToArray(),[],KeyA,[21,22])]);var sink=new Sink();
+        Assert.Equal("complete",(await Read(new MemoryByteSource(bytes),definition,sink)).Scope);
+        Assert.Equal([(7u,"de"),(21u,"abc"),(22u,"")],sink.Rows.Select(row=>(row.Id,row.Values[1])));
+        // Hidden, the clear record's string lies in the unavailable section.
+        Assert.Equal("DB2_ENCRYPTED",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(MemoryByteSource.Hiding(bytes),definition,new Sink(),new(AllowPartialEncryptedSections:true)))).Code);
+    }
+
+    private static async Task<List<string>> Values(IAsyncEnumerable<Db2Row> rows){var values=new List<string>();await foreach(var row in rows)values.Add(row.Values[1]);return values;}
 
     [Fact]
     public async Task Every_missing_source_byte_and_trailing_byte_fails_complete_geometry()

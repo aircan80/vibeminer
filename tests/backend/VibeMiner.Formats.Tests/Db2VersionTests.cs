@@ -52,22 +52,27 @@ public sealed class Db2VersionTests
     }
 
     [Fact]
-    public async Task A_keyed_WDC3_table_is_encrypted_with_or_without_partial_admission()
+    public async Task A_keyed_WDC3_table_with_a_hole_is_encrypted_with_or_without_partial_admission()
     {
         var dbd=KeyedDefinition();
         foreach(var allow in new[]{false,true})
         {
+            // The keyed body is a hole, the way layer 4 hands over an encrypted chunk it has no key for.
             var fixture=Keyed("WDC3");var sink=new Sink();
-            var error=await Assert.ThrowsAsync<Db2FormatException>(()=>Read(fixture.Bytes,dbd,sink,new(AllowPartialEncryptedSections:allow)));
-            Assert.Equal("DB2_ENCRYPTED",error.Code);Assert.Null(sink.Header);Assert.Empty(sink.Rows);
-            // Also when the keyed body is a hole, the way layer 4 hands over an encrypted chunk.
             var holed=new MemoryByteSource(fixture.Bytes,[new(fixture.Starts[1],fixture.Ends[1]-fixture.Starts[1],"E chunk 1")]);
-            error=await Assert.ThrowsAsync<Db2FormatException>(()=>Db2Reader.ReadAsync(holed,dbd,"1.2.3.4",new(AllowPartialEncryptedSections:allow),new Sink()));
-            Assert.Equal("DB2_ENCRYPTED",error.Code);
-            await Assert.ThrowsAsync<Db2FormatException>(()=>Db2Reader.OpenAsync(new MemoryByteSource(fixture.Bytes),dbd,"1.2.3.4",new(AllowPartialEncryptedSections:allow)));
+            var error=await Assert.ThrowsAsync<Db2FormatException>(()=>Db2Reader.ReadAsync(holed,dbd,"1.2.3.4",new(AllowPartialEncryptedSections:allow),sink));
+            Assert.Equal("DB2_ENCRYPTED",error.Code);Assert.Null(sink.Header);Assert.Empty(sink.Rows);
+            await Assert.ThrowsAsync<Db2FormatException>(()=>Db2Reader.OpenAsync(holed,dbd,"1.2.3.4",new(AllowPartialEncryptedSections:allow)));
+            // D310: with no hole the keyed section was decrypted and reads whole, with no list to check in WDC3.
+            sink=new Sink();
+            Assert.Equal("complete",(await Read(fixture.Bytes,dbd,sink,new(AllowPartialEncryptedSections:allow))).Scope);
+            Assert.Equal([7u,21u,22u,8u,9u],sink.Rows.Select(row=>row.Id));
         }
-        // The same table as WDC4, with its encrypted-ID list, opens partially.
-        Assert.Equal("unencryptedSections",(await Read(Keyed("WDC4").Bytes,dbd,new Sink(),new(AllowPartialEncryptedSections:true))).Scope);
+        // The same table as WDC4, with its encrypted-ID list, opens partially over the hole, and whole without it.
+        var wdc4=Keyed("WDC4");
+        Assert.Equal("unencryptedSections",(await Db2Reader.ReadAsync(new MemoryByteSource(wdc4.Bytes,[new(wdc4.Starts[1],wdc4.Ends[1]-wdc4.Starts[1],"E chunk 1")]),
+            dbd,"1.2.3.4",new(AllowPartialEncryptedSections:true),new Sink())).Scope);
+        Assert.Equal("complete",(await Read(wdc4.Bytes,dbd,new Sink(),new())).Scope);
     }
 
     [Fact]
@@ -317,7 +322,7 @@ public sealed class Db2VersionTests
     // Section 0 is clear (7, copy 8 of 7, copy 9 of hidden 21); section 1 is keyed and lists 21 and 22.
     private static Built Keyed(string version)=>Build(version,[new Col(0,0,0,32,0,0,0,0,[])],4,[
         new([U32(99)],[7],[],[(8,7),(9,21)],[]),
-        new([new byte[4],new byte[4]],[0,0],[],[],[],123,[21,22]),
+        new([new byte[4],new byte[4]],[21,22],[],[],[],123,[21,22]),
     ]);
 
     // Writes a WDC5 file whose offsets assume the target header size, then drops bytes 4..135 and swaps the magic for

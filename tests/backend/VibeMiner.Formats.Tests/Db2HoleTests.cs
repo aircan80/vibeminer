@@ -122,10 +122,12 @@ public sealed class Db2HoleTests
     }
 
     [Fact]
-    public async Task Clear_source_without_holes_keeps_normal_full_source_policy_and_outer_EOF_checks()
+    public async Task A_keyed_section_without_a_hole_reads_like_a_clear_one_and_outer_EOF_checks_stay()
     {
+        // D310: no hole means layer 4 decrypted the section (or it shipped clear), so it needs no partial admission.
         var fixture=Build();var input=Project(fixture.Bytes,[]);var sink=new Sink();
-        Assert.Equal("DB2_ENCRYPTED",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(input,sink,new()))).Code);
+        Assert.Equal(new Db2Completion(2,2,3,0,0,0,"complete",fixture.Bytes.Length),await Read(input,sink,new()));
+        Assert.Equal([7u,21u,8u,9u,22u],sink.Rows.Select(row=>row.Id));Assert.Equal("555",sink.Rows.Single(row=>row.Id==22).Values[1]);
         var trailing=fixture.Bytes.Concat(new byte[]{0}).ToArray();var malformed=Project(trailing,[Hole(fixture.Starts[1],1)]);
         Assert.Equal("DB2_INVALID",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(malformed,new Sink()))).Code);
     }

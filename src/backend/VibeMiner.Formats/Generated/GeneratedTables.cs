@@ -81,7 +81,7 @@ public sealed class GeneratedTables : IGeneratedTables
             if (section.IsEncrypted && !content.KeysUsed.Contains(section.Key, StringComparer.Ordinal))
                 throw new ArgumentException($"Section {section.Index} is keyed with {section.Key}, which isn't among the keys used.", nameof(content));
         }
-        if (content.Completion.ExcludedEncryptedSections != content.Sections.Count(s => s.IsEncrypted))
+        if (content.Completion.ExcludedEncryptedSections != content.Sections.Count(s => s.IsEncrypted && !s.IsDecrypted))
             throw new ArgumentException("The completion's excluded encrypted sections don't match the encrypted sections.", nameof(content));
         cancellationToken.ThrowIfCancellationRequested();
 

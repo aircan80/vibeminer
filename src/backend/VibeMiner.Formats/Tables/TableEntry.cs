@@ -42,9 +42,9 @@ public enum TableState
     NotChecked,
     /// <summary>Checked: opened, every section readable, rows in the generated store.</summary>
     Ready,
-    /// <summary>Checked: opened, some keyed sections excluded or BLTE holes; <see cref="TableEntry.Counts"/> says how much.</summary>
+    /// <summary>Checked: opened, some keyed sections hidden (their key isn't known) or BLTE holes; <see cref="TableEntry.Counts"/> says how much.</summary>
     Partial,
-    /// <summary>The file is wholly in holes, or opens with every section keyed (0 readable rows); the reason says which.</summary>
+    /// <summary>The file is wholly in holes, or opens with every section keyed and hidden (0 readable rows); the reason says which.</summary>
     Encrypted,
     /// <summary>Shallow: listed, bytes not stored. A check fetches.</summary>
     NotStored,
@@ -82,7 +82,7 @@ public sealed record TableStateReason(string? Code, string? Message, DateTimeOff
 /// <summary>
 /// The scope of an opened table. <see cref="DeclaredRows"/> is what the header declared (records plus copies);
 /// <see cref="ReadableRows"/> the physical rows and copies read. <see cref="ExcludedSections"/> and
-/// <see cref="ExcludedRecords"/> are what keyed sections left out. <see cref="Format"/> is the header magic ("WDC5").
+/// <see cref="ExcludedRecords"/> are what hidden keyed sections (no key, so layer 4 left a hole) left out; a decrypted keyed section is read. <see cref="Format"/> is the header magic ("WDC5").
 /// </summary>
 public sealed record TableCounts(long DeclaredRows, long ReadableRows, int ExcludedSections, long ExcludedRecords, string Format, string LayoutHash);
 

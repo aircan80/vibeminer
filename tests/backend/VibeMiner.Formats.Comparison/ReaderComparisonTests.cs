@@ -36,7 +36,12 @@ namespace Db2Comparison;
 //   kind 0 and 32-bit elements. An input is skipped and counted under StringArraySkip only when the fixture marks its
 //   string array field, the legacy outcome is exactly that error with no rows, the new outcome is anything else, and the
 //   input's own flags and storage for that field are the admitted shape. Every other outcome is compared in full.
-// Skips is a counted list per reason; MagicSkip and StringArraySkip are the only reasons allowed. PairCountDiffers is counted and printed apart.
+// - Keyed sections without a hole (D310, #190): the legacy reader excludes every keyed section; the new reader reads one
+//   whose body no hole overlaps, as layer 4 decrypted it, and checks its encrypted-ID list against its rows. Every base
+//   fixture's keyed body is a hole, but a mutated section key turns a clear section into a keyed one without a hole. An input
+//   whose outcomes differ is skipped and counted under DecryptedSkip only when its header declares such a section. Every
+//   other outcome is compared in full.
+// Skips is a counted list per reason; MagicSkip, StringArraySkip and DecryptedSkip are the only reasons allowed. PairCountDiffers is counted and printed apart.
 public sealed class ReaderComparisonTests(ITestOutputHelper output)
 {
     public static TheoryData<string> Names()
@@ -116,6 +121,25 @@ public sealed class ReaderComparisonTests(ITestOutputHelper output)
         return width==32&&System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan((int)info+8))==0;
     }
 
+    private const string DecryptedSkip="a keyed section with no hole over it: only the new reader reads it (D310, #190)";
+    // True when the WDC5 header declares a keyed section that no fixture hole overlaps, its body taken to end where the next
+    // section (by offset) or the file begins, which is how every fixture lays its sections out.
+    private static bool DeclaresKeyedWithoutHole(Fixture fixture,byte[] bytes)
+    {
+        if(bytes.Length<204||!bytes.AsSpan(0,4).SequenceEqual("WDC5"u8))return false;
+        var count=System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(200));
+        var sections=new List<(ulong Key,long Offset)>();
+        for(var i=0L;i<count&&204+i*40+40<=bytes.Length;i++)
+            sections.Add((System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan((int)(204+i*40))),System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan((int)(204+i*40+8)))));
+        foreach(var (key,offset) in sections)
+        {
+            if(key==0)continue;
+            var end=sections.Select(s=>s.Offset).Where(o=>o>offset).DefaultIfEmpty(bytes.Length).Min();
+            if(!(fixture.Holes??[]).Any(h=>h.Offset<end&&h.Offset+h.Length>offset))return true;
+        }
+        return false;
+    }
+
     [Theory]
     [MemberData(nameof(Names))]
     public async Task Every_truncation_and_single_byte_mutation_gives_identical_canonical_bytes(string name)
@@ -150,13 +174,14 @@ public sealed class ReaderComparisonTests(ITestOutputHelper output)
             if(otherMagic&&WithoutMagicMessage(legacy,current))Interlocked.Increment(ref messageFree);
             if(Canon.Bytes(legacy).AsSpan().SequenceEqual(Canon.Bytes(current)))return;
             if(PairCountDiffers(legacy,current)){Interlocked.Increment(ref pairCount);return;}
+            if(DeclaresKeyedWithoutHole(fixture,input.Bytes)){skips.AddOrUpdate(DecryptedSkip,1,(_,n)=>n+1);return;}
             var part=0;while(part<legacy.Count&&part<current.Count&&legacy[part]==current[part])part++;
             disagreements.Add((input.Mutation,part,part<legacy.Count?legacy[part]:"<end>",part<current.Count?current[part]:"<end>"));
         });
         output.WriteLine($"COMPARED {name} inputs={inputs.Count} duplicates={duplicates} skips={skips.Values.Sum()} otherMagicWithoutMessage={messageFree} pairCountDiffers={pairCount} disagreements={disagreements.Count}");
         output.WriteLine("OUTCOMES "+string.Join(", ",outcomes.OrderBy(o=>o.Key,StringComparer.Ordinal).Select(o=>o.Key+"="+o.Value.ToString(CultureInfo.InvariantCulture))));
         output.WriteLine("SKIPS "+(skips.IsEmpty?"none":string.Join(", ",skips.Select(s=>s.Key+"="+s.Value.ToString(CultureInfo.InvariantCulture)))));
-        Assert.All(skips.Keys,reason=>Assert.Contains(reason,new[]{MagicSkip,StringArraySkip}));
+        Assert.All(skips.Keys,reason=>Assert.Contains(reason,new[]{MagicSkip,StringArraySkip,DecryptedSkip}));
         if(disagreements.IsEmpty)return;
         // Group by the first differing part with numbers kept, so each distinct disagreement shows once with an example.
         var report=new StringBuilder();

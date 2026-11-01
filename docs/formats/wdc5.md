@@ -6,7 +6,7 @@ The reader needs a readable, seekable, caller-owned decoded stream, the DBD docu
 
 ## Layer 5 reader
 
-[`src/backend/VibeMiner.Formats/Db2/`](../../src/backend/VibeMiner.Formats/Db2/) and [`Definitions/`](../../src/backend/VibeMiner.Formats/Definitions/) hold the layer 5 port (#177, D170-D174), revision `db2-values-v2` ([D293](../DECISIONS.md)). It reads bytes through `IDb2ByteSource`, an immutable decoded file with named `Db2Hole` ranges; `Db2FileSource` builds one over a layer 4 file (keeping four 256 KiB blocks of it, [D300](../DECISIONS.md)), and `Db2Reader.OpenAsync(IBuildFiles, ...)` opens a table straight from a handle with a typed `Db2OpenState` (D191). A read touching a hole throws `BLTE_RANGE_UNAVAILABLE`.
+[`src/backend/VibeMiner.Formats/Db2/`](../../src/backend/VibeMiner.Formats/Db2/) and [`Definitions/`](../../src/backend/VibeMiner.Formats/Definitions/) hold the layer 5 port (#177, D170-D174), revision `db2-values-v3` ([D293](../DECISIONS.md), [D310](../DECISIONS.md)). It reads bytes through `IDb2ByteSource`, an immutable decoded file with named `Db2Hole` ranges; `Db2FileSource` builds one over a layer 4 file (keeping four 256 KiB blocks of it, [D300](../DECISIONS.md)), and `Db2Reader.OpenAsync(IBuildFiles, ...)` opens a table straight from a handle with a typed `Db2OpenState` (D191). A read touching a hole throws `BLTE_RANGE_UNAVAILABLE`.
 
 `Db2Reader.OpenAsync` checks the structure and builds the ID, copy and relationship indexes without reading record bodies. The `Db2Table` it returns decodes rows on demand: `ReadSectionAsync`, `ReadAllAsync` and `FindAsync`, which answers `Found`, `Protected`, `Absent` or `NotInReadableSections`. Broken copy chains are counted at open (`UnresolvedCopies`) and throw when read. `Db2Reader.ReadAsync` keeps the legacy single-pass output. It also reads [WDC3 and WDC4](#wdc3-and-wdc4-layer-5-reader-only).
 
@@ -103,7 +103,7 @@ Pallet blocks are laid out kind 3 first, then kind 4, in field order; common dat
 - Fitting values must not merge either ([D117](../DECISIONS.md)). A signed column whose values all fit is checked the same way, since a zero-extended `0x0000FFFF` and its sign extension `0xFFFFFFFF` both read -1 as int16. Such a column keeps its physical 32-bit values as `raw-physical-integer-v1` evidence with no reference, and an ItemEffect rule keeps its raw evidence. An unsigned column whose values all fit has no upper bits, so it can't collide. Inline storage isn't checked: its width is the record's own, and finding a collision there would mean reading every row.
 - Examples: None8 `0xff` read as DBD signed32 is 255; as DBD signed8 it is −1. None32 `0x100` into unsigned8 fails. Kind 5 2-bit −1 into DBD unsigned8 is 255. Pallet `0x780107` into verified unsigned8 is 7; pallet `0x2ff` into verified signed8 is −1; pallet `0xffffffff` into signed8 is −1 with no marker, since it fits as a sign extension. Pallet `0x780107` and `0x790105` together into unsigned8 fail (patterns `0x780100`, `0x790100`).
 - Floats need exactly 32 physical bits and must be finite.
-- Fixed-record strings are 32-bit relative offsets into the concatenated string tables, relative to the offset's own position in the record. 0 is the empty string. In a string array each element's offset is relative to that element, so element i resolves at `(globalRow - declaredRecords) × recordSize + fieldOffset + 4i + raw` ([D295](../DECISIONS.md)); pallet, common and Sparse string arrays and other element widths are `DB2_UNSUPPORTED`. The legacy reader refuses every string array. A string in a keyed section is `DB2_ENCRYPTED`. Strings are strict UTF-8, bounded at 65,536 bytes.
+- Fixed-record strings are 32-bit relative offsets into the concatenated string tables, relative to the offset's own position in the record. 0 is the empty string. In a string array each element's offset is relative to that element, so element i resolves at `(globalRow - declaredRecords) × recordSize + fieldOffset + 4i + raw` ([D295](../DECISIONS.md)); pallet, common and Sparse string arrays and other element widths are `DB2_UNSUPPORTED`. The legacy reader refuses every string array. A string in a hidden keyed section is `DB2_ENCRYPTED`. Strings are strict UTF-8, bounded at 65,536 bytes.
 
 ### Raw integer evidence
 
@@ -152,7 +152,7 @@ The same Item layout narrows different fields on the two builds, so which fields
 
 Supported Sparse profile: flags 5 or 7, external IDs, no separate string table, no pallet or common data, offset map count = record count.
 
-- Each map entry is 6 bytes: u32 absolute offset, u16 size. Maps must cover the record area contiguously with positive sizes; map IDs must equal the external IDs.
+- Each map entry is 6 bytes: u32 absolute offset, u16 size. Maps must cover the record area contiguously with positive sizes; map IDs must equal the external IDs. The area may end in 1-3 zero bytes after the last record when that makes its end 4-byte aligned in the file; any other leftover byte is `DB2_INVALID` ([D310](../DECISIONS.md)). Retail 12.1.5.70688 Spell and ItemSparse pad 18 of their 24 decrypted sections with 2 zero bytes (each starts at offset 2 mod 4); the other 6 start aligned and need none.
 - The real record length comes from the map, not the header record size. The header record size is nominal: one Retail ItemSparse had 321 nominal field bytes and a 328-byte header size.
 - Fields are byte-aligned None storage with contiguous nominal offsets in DBD order. Strings are inline NUL-terminated strict UTF-8.
 - Fields are read with a cursor. After an inline string, nominal offsets no longer locate the next field.
@@ -182,17 +182,26 @@ A section's relationship block is `12 + 8 × n` bytes: u32 count, u32 min, u32 m
 
 ## Keyed (encrypted) sections
 
-A nonzero section key declares a keyed section. Without `AllowPartialEncryptedSections` such a table fails with `DB2_ENCRYPTED`. With it:
+A nonzero section key declares a keyed section: its bytes are shipped in BLTE `E` chunks under that TACT key. There is no DB2-level cipher. Layer 4 decrypts an `E` chunk with Salsa20 when the build's own keys have it (D190, D260): the nonce is the chunk's 4-byte IV padded to 8 bytes, with bytes 0-3 XORed with the chunk index. With no key the chunk is a named hole, never zero-filled. So the reader decides by holes alone ([D310](../DECISIONS.md)):
 
-- Keyed sections and their copies are excluded and counted. Completion scope is `unencryptedSections`; `complete` means nothing was excluded.
-- The header, descriptors, pallet/common data, every encrypted-ID list, ordinary sections, relationship blocks and gaps must all be readable.
+- A keyed section that no hole overlaps is readable. Layer 4 decrypted it (or Blizzard shipped it clear), and it is read and checked exactly like a clear section: rows, copies, strings and relationship block. `Db2Section.IsDecrypted` says so; it needs no partial admission.
+- A keyed section that any hole overlaps is hidden, even when only one of its chunks is missing.
+- Its encrypted-ID list is the only proof the plaintext is this section's. A readable keyed section's physical IDs must all be in its own list, and every ID in the list must be one of its physical IDs or copy targets. Otherwise `DB2_INVALID` before the header callback. Layer 4 can't catch every wrong key on an `N` chunk, and a partial file never gets the CKey check. WDC3 has no lists, so a readable keyed WDC3 section is read without this check. Measured on Retail 12.1.5.70688 (260 readable keyed sections): 190 lists are exactly the section's row IDs, 20 are its row IDs plus its copy targets, and the 50 inline-ID sections pass the check; none lists a foreign ID or misses a row.
+- The reader ignores chunk key names. A decrypted chunk whose key name differs from the section key is still read; the ID check proves it.
+
+Hidden sections, without `AllowPartialEncryptedSections`, make the table fail with `DB2_ENCRYPTED`. With it:
+
+- Hidden sections and their copies are excluded and counted. Completion scope is `unencryptedSections`; `complete` means nothing was excluded.
+- The header, descriptors, pallet/common data, every encrypted-ID list, readable sections, relationship blocks and gaps must all be readable.
 - Each BLTE hole must lie wholly inside one keyed section body. A hole anywhere else fails before the first callback.
 - Partial rows never prove a row is absent from the table or that a target is unique.
-- Encrypted-ID lists are clear, so they are checked: an ID may appear once across all lists (within one list too), and never as a readable physical ID or readable copy target. Otherwise `DB2_INVALID` before the header callback. Follow and reference text treat an ID match in a partial table as the one record with that ID; a file where a hidden record shares a readable ID would make that match wrong without anyone seeing it. The check reuses the encrypted-ID set the reader already builds and charges (64 B per ID against the index budget) and adds one lookup per readable ID and copy target, so no new allocation. The reader revision stays `wdc5-values-v7`: this only refuses files that were never valid. Retail 12.1.5.70448 ItemSparse (48 keyed sections) and Item (49) have no such overlap and still open.
+- Encrypted-ID lists are clear, so they are checked: an ID may appear once across all lists (within one list too), and a hidden section's ID never as a readable physical ID or readable copy target. Otherwise `DB2_INVALID` before the header callback. Follow and reference text treat an ID match in a partial table as the one record with that ID; a file where a hidden record shares a readable ID would make that match wrong without anyone seeing it. The check reuses the encrypted-ID set the reader already builds and charges (64 B per ID against the index budget) and adds one lookup per readable ID and copy target, so no new allocation. Retail 12.1.5.70448 ItemSparse (48 keyed sections) and Item (49) have no such overlap and still open.
 
-A verified source receipt does not mean a complete table: a fully decoded file can still declare keyed sections, and a projection never verifies the full CKey.
+A verified source receipt does not mean a complete table: a fully decoded file can still have hidden sections, and a projection never verifies the full CKey.
 
 Observed, not a format law: in Classic beta and Retail Item files, all global metadata and section 0 were clear, every BLTE hole matched one keyed section exactly, and each `E` chunk's key name equalled its section key (16/16 and 49/49). Our admission does not depend on the key names matching.
+
+DBCD reads keyed sections like clear ones and skips the ones that are all zeros, because CASC libraries zero-fill chunks they can't decrypt. Our holes are never zero-filled, so we don't special-case zeros: zero or repeated IDs fail the usual checks.
 
 ## Limits
 
@@ -230,7 +239,8 @@ Definitions come from pinned WoWDBDefs (CC BY-SA 4.0) and are read by our own bo
 ## References
 
 - Original Java VibeMiner checkpoint `8f353d046d961108f7acc86bfe1381004467afd5`: `Wdc5HeaderInspector`, `Wdc5MetadataInspector`, `FixedSectionIndexParser`, `FieldValueDecoder`, `RecordBitFields`, `SparseSectionIndexParser`, `ValidatedSparseSection`.
-- DBCD `e732093f8864240fc5884bd1bba6b02f3dfc0d56` (MIT): `WDC5Reader`, `WDC5Writer`, `DBStructs`, `DB2Flags`, `BaseReader`, `BitReader`. Its zero-ID repair, negative string clamping, zero-filled encrypted records and dictionary overwrites are tool behavior we do not copy. Its reader's 200-byte header constant disagrees with its own reads; the header is 204 bytes.
+- DBCD `e732093f8864240fc5884bd1bba6b02f3dfc0d56` (MIT): `WDC5Reader`, `WDC5Writer`, `DBStructs`, `DB2Flags`, `BaseReader`, `BitReader`, and for keyed sections (D310) `WDC5Reader`'s section loop and `BaseEncryptionSupportingReader`. Its zero-ID repair, negative string clamping, zero-filled encrypted records and dictionary overwrites are tool behavior we do not copy. Its reader's 200-byte header constant disagrees with its own reads; the header is 204 bytes.
+- TACTSharp `67fd53ac852ca297e9bf95bb41d1a97da202eba4` (MIT, pinned in [tact.md](tact.md)): `BLTE.cs` `TryDecrypt`, for the `E` chunk nonce (D310).
 - WoWDBDefs `b9a63096cdd99b26967f17f9515377ae62cadfd7` (CC BY-SA 4.0): definitions and grammar. Its `code/C#/DBDefsLib` (BSD-3-Clause, read only, nothing copied) was checked for how it orders blocks without builds.
 
 Our reader is original code.

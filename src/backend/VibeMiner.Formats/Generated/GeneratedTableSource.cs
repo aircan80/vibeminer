@@ -16,7 +16,7 @@ namespace VibeMiner.Formats.Generated;
 public sealed record GeneratedTableSource
 {
     public const string IdentityFormat = "vibeminer-generated-table v1";
-    public const string ReaderRevision = "db2-values-v2";
+    public const string ReaderRevision = "db2-values-v3";
     public const string RowEncoding = "rows-v1";
 
     public GeneratedTableSource(BuildRef Build, string Locale, string ContentKey, string DefinitionVersion, Db2Limits ReaderLimits)

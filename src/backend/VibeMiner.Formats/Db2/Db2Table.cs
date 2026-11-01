@@ -23,13 +23,13 @@ public sealed class Db2Table
     public int UnresolvedCopies{get;}
 
     /// <summary>One section's physical rows in file order, then the copies it declares (copies whose chain ends at an
-    /// encrypted ID are skipped). A bad argument or a keyed section (DB2_ENCRYPTED) throws at call time; row and copy
+    /// encrypted ID are skipped). A bad argument or an excluded keyed section (DB2_ENCRYPTED) throws at call time; row and copy
     /// errors throw during enumeration, after the rows before them.</summary>
     public IAsyncEnumerable<Db2Row> ReadSectionAsync(int section,CancellationToken token=default)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(section);ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(section,Sections.Count);
         var info=Sections[section];
-        if(info.IsEncrypted)throw new Db2FormatException("DB2_ENCRYPTED",string.Create(CultureInfo.InvariantCulture,
+        if(info.IsEncrypted&&!info.IsDecrypted)throw new Db2FormatException("DB2_ENCRYPTED",string.Create(CultureInfo.InvariantCulture,
             $"Section {section} is keyed with {info.Key}; its records are not readable."));
         return ReadRange(state.RowStart[section],state.RowStart[section+1],state.CopyStart[section],state.CopyStart[section+1],new(),token);
     }

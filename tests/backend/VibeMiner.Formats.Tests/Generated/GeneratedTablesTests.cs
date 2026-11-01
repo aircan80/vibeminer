@@ -57,6 +57,51 @@ public sealed class GeneratedTablesTests
     }
 
     [Fact]
+    public async Task A_decrypted_keyed_section_stores_and_reopens_under_its_key_and_is_not_counted_excluded()
+    {
+        var tables = new GeneratedTables(new InMemoryGeneratedStore());
+        var rows = SimpleRows(3, "decrypted");
+        var decrypted = Content(rows, K1) with
+        {
+            Sections = [new Db2Section(0, 3, 0, K1, true, IsDecrypted: true)],
+            Completion = new Db2Completion(3, 3, 0, 0, 0, 0, "complete", 1234),
+        };
+        var stored = await tables.StoreAsync(Source(), Known(K1), decrypted);
+        Assert.Equal([K1], stored.KeysUsed);
+        Assert.True(stored.Sections.Single().IsDecrypted);
+        var reopened = await tables.OpenAsync(Source(), Known(K1));
+        Assert.NotNull(reopened);
+        Assert.True(reopened!.Sections.Single().IsDecrypted);
+        SameRows(rows, await All(reopened));
+        // Filed under the key's fingerprint: without it, or with another, it isn't this table.
+        Assert.Null(await tables.OpenAsync(Source(), TactKeyStatus.None));
+        // A decrypted section counted as excluded, or a hidden one not counted, disagrees with the sections.
+        await Assert.ThrowsAsync<ArgumentException>(() => tables.StoreAsync(Source(), Known(K1),
+            Content(rows, K1) with { Sections = decrypted.Sections, Completion = decrypted.Completion with { ExcludedEncryptedSections = 1 } }));
+        await Assert.ThrowsAsync<ArgumentException>(() => tables.StoreAsync(Source(), Known(K1),
+            Content(rows, K1) with { Completion = decrypted.Completion }));
+        // The decrypted section's key must still be among the keys used.
+        await Assert.ThrowsAsync<ArgumentException>(() => tables.StoreAsync(Source(), Known(K1), decrypted with { KeysUsed = [] }));
+    }
+
+    [Fact]
+    public async Task A_partial_reason_names_hidden_sections_keys_and_holes_never_a_decrypted_sections_key()
+    {
+        // D310: section 0 decrypted with K1, section 1 hidden under K2, and a hole named K3 that is no section's key.
+        const string K3 = "3333333333333333";
+        var tables = new GeneratedTables(new InMemoryGeneratedStore());
+        var content = Content(SimpleRows(2, "mixed"), K1, K2, K3) with
+        {
+            Sections = [new Db2Section(0, 2, 0, K1, true, IsDecrypted: true), new Db2Section(1, 3, 0, K2, true)],
+            Completion = new Db2Completion(5, 2, 0, 1, 3, 0, "unencryptedSections", 1234),
+        };
+        var stored = await tables.StoreAsync(Source(), Known(K1), content);
+        var (state, reason, counts) = VibeMiner.Formats.Tables.TableStates.Generated(stored);
+        Assert.Equal((VibeMiner.Formats.Tables.TableState.Partial, 1), (state, counts.ExcludedSections));
+        Assert.Equal([K2, K3], reason!.KeyNames);
+    }
+
+    [Fact]
     public async Task Content_whose_keys_or_completion_disagree_with_its_sections_is_refused()
     {
         var tables = new GeneratedTables(new InMemoryGeneratedStore());
@@ -128,7 +173,7 @@ public sealed class GeneratedTablesTests
             Assert.Equal("def-sha256+01020304", identity.GetProperty("DefinitionVersion").GetString());
             Assert.Equal(Source().ReaderOptions, identity.GetProperty("ReaderOptions").GetString());
             Assert.Matches("^[0-9a-f]{64}$", identity.GetProperty("ReaderOptions").GetString());
-            Assert.Equal("db2-values-v2", identity.GetProperty("Reader").GetString());
+            Assert.Equal("db2-values-v3", identity.GetProperty("Reader").GetString());
             Assert.Equal("rows-v1", identity.GetProperty("Rows").GetString());
             Assert.DoesNotContain("eu", identity.GetRawText());
         }

@@ -12,7 +12,7 @@ public sealed class Db2RelationshipTests
     public async Task Exact_section_keys_external_middle_field_zero_parent_and_cross_section_copy_identity_are_preserved(ushort flags)
     {
         var f=Build(flags,[new([900,0],[7,0],Copies:[(100,901)]),new([901],[8],Copies:[(101,100)])]);var sink=new Sink();
-        var done=await Read(f,sink);Assert.Equal("db2-values-v2",Db2Reader.Revision);
+        var done=await Read(f,sink);Assert.Equal("db2-values-v3",Db2Reader.Revision);
         Assert.Equal(new[]{"ID","Before","Parent","After"},sink.Header!.Columns.Select(c=>c.Name));
         Assert.Equal(new[]{"7","0","8","8","8"},sink.Rows.Select(r=>r.Values[2]));
         Assert.Equal(new uint[]{900,0,901,100,101},sink.Rows.Select(r=>r.Id));
@@ -243,6 +243,20 @@ public sealed class Db2RelationshipTests
         var small=Build(4,[new([9,10],[0,1])]);var gatedInput=new CountedSource(small.Bytes);var gate=new GateSink();var running=Parse(gatedInput,small.Definition,gate);
         await gate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));var reads=gatedInput.Reads;await Task.Yield();Assert.Equal(reads,gatedInput.Reads);Assert.False(running.IsCompleted);
         gate.Release.SetResult();await running;Assert.Equal(2,gate.Count);
+    }
+
+    [Theory]
+    [InlineData(4)][InlineData(5)][InlineData(6)][InlineData(7)]
+    public async Task A_decrypted_keyed_section_reads_its_relationship_block(ushort flags)
+    {
+        // D310 (#190): no hole, so the keyed section and its relationship pairs read like a clear one. Generated key, never a real one.
+        var key=MemoryByteSource.TestKeyName(192);
+        var f=Build(flags,[new([900],[1]),new([901,902],[2,3],Key:key,Protected:[901,902])]);var sink=new Sink();
+        Assert.Equal(new Db2Completion(3,3,0,0,0,0,"complete",f.Bytes.Length),await Read(f,sink));
+        Assert.Equal([(900u,"1"),(901u,"2"),(902u,"3")],sink.Rows.Select(r=>(r.Id,r.Values[2])));
+        var start=f.Tails![1].Start;sink=new();
+        await Parse(new CountedSource(f.Bytes,holes:[new(start,f.Bytes.Length-start,key.ToString("X16"))]),f.Definition,sink,new(AllowPartialEncryptedSections:true));
+        Assert.Equal([(900u,"1")],sink.Rows.Select(r=>(r.Id,r.Values[2])));
     }
 
     [Fact]

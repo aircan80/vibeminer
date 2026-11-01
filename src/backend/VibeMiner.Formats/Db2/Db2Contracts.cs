@@ -45,10 +45,12 @@ public interface IDb2ByteSource
 public sealed record Db2Hole(long Offset,long Length,string Name);
 
 /// <summary>One section as declared at open. <see cref="Key"/> is the section key as 16 upper-case hex digits;
-/// a nonzero key means the section is keyed and its records are not readable. Of a readable section's declared copies,
+/// a nonzero key means the section is keyed (<see cref="IsEncrypted"/>). A keyed section is excluded when a source hole
+/// overlaps it; with no hole its bytes were decrypted (or shipped clear) and it reads like any other, and
+/// <see cref="IsDecrypted"/> is true (D310). Of a readable section's declared copies,
 /// <see cref="ProtectedCopyCount"/> are excluded because their chain ends at an encrypted ID, and
 /// <see cref="UnresolvedCopyCount"/> have a broken chain and throw when read.</summary>
-public sealed record Db2Section(int Index,int RecordCount,int CopyCount,string Key,bool IsEncrypted,int ProtectedCopyCount=0,int UnresolvedCopyCount=0);
+public sealed record Db2Section(int Index,int RecordCount,int CopyCount,string Key,bool IsEncrypted,int ProtectedCopyCount=0,int UnresolvedCopyCount=0,bool IsDecrypted=false);
 
 /// <summary>The named outcome of <see cref="Db2Table.FindAsync"/>.</summary>
 public abstract record Db2Lookup

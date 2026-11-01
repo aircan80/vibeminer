@@ -80,7 +80,9 @@ internal static class Fixtures
         var cross=Sparse([new([Record("")],[0],[(9,8)]),new([Record("other")],[30],[(8,30)])]);
         list.Add(new("sparse-cross-section-chain",cross.Bytes,SparseDbd,"complete"));
         var two=Sparse([new([Record("clear")],[7],[(8,7)]),new([Record("one")],[21],[],123,[21]),new([Record("two")],[30],[],456,[30])]);
-        list.Add(new("sparse-two-keyed-no-holes",two.Bytes,SparseDbd,"unencryptedSections",new Lim(Partial:true)));
+        // D310: a keyed section without a hole is read by the new reader only, so both keyed bodies are holes here.
+        list.Add(new("sparse-two-keyed-holes",two.Bytes,SparseDbd,"unencryptedSections",new Lim(Partial:true),
+            [(two.Starts[1],two.SectionEnds[1]-two.Starts[1]),(two.Starts[2],two.SectionEnds[2]-two.Starts[2])]));
 
         // Broken copy chains, fixed and sparse, so each legacy message variant is compared.
         var (unresolved,unresolvedDbd)=Scalar([(8,77)]);
@@ -189,7 +191,9 @@ internal static class Fixtures
         yield return new("fixed-keyed-hole-partial",bytes,dbd,"unencryptedSections",new Lim(Partial:true),[(hole,bytes.Length-hole)]);
         yield return new("fixed-keyed-hole-not-partial",bytes,dbd,"DB2_ENCRYPTED",null,[(hole,bytes.Length-hole)]);
         var three=BuildFixed(columns,4,[new(U32(99),[7],[],[(8,7)]),new(new byte[8],[0,0],[],[],123,[21,22]),new(new byte[4],[0],[],[],456,[23])]);
-        yield return new("fixed-two-keyed-no-holes-partial",three,dbd,"unencryptedSections",new Lim(Partial:true));
+        // D310: a keyed section without a hole is read by the new reader only, so both keyed bodies are holes here.
+        long Start(int section)=>BinaryPrimitives.ReadUInt32LittleEndian(three.AsSpan(204+section*40+8));
+        yield return new("fixed-two-keyed-holes-partial",three,dbd,"unencryptedSections",new Lim(Partial:true),[(Start(1),Start(2)-Start(1)),(Start(2),three.Length-Start(2))]);
     }
     private static byte[] BuildFixed(Column[] columns,int recordSize,Part[] sections,ushort flags=4,uint packedOffset=0)
     {

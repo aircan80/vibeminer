@@ -277,6 +277,7 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
             throw new OpenFailedException(open);
         }
         lock (opens) opens.Add(open);
+        // Decrypted sections' keys too: their rows depend on the key, so the identity carries its fingerprint (#179, D310).
         var used = TableStates.KeyNames(table.Sections.Where(section => section.IsEncrypted).Select(section => section.Key)
             .Concat(open.Holes.Select(hole => hole.Name)));
         return new GeneratedTableContent(table.Header, table.Sections, table.Completion, [.. used], RowsAsync(open, token), open);

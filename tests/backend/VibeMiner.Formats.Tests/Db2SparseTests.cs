@@ -217,11 +217,59 @@ public sealed class Db2SparseTests
         // Regression for #49, on the profile Retail ItemSparse uses.
         Fixture Two(uint[] second)=>Build([new([Record("clear")],[7],[(8,7)]),new([Record("one")],[21],[],123,[21]),new([Record("two")],[30],[],456,second)]);
         var clean=Two([30]);var sink=new Sink();
-        Assert.Equal(new Db2Completion(3,1,1,2,2,0,"unencryptedSections",clean.Bytes.Length),await Read(new MemoryByteSource(clean.Bytes),sink,new(AllowPartialEncryptedSections:true)));
+        Assert.Equal(new Db2Completion(3,1,1,2,2,0,"unencryptedSections",clean.Bytes.Length),await Read(MemoryByteSource.Hiding(clean.Bytes),sink,new(AllowPartialEncryptedSections:true)));
         Assert.Equal([7u,8u],sink.Rows.Select(row=>row.Id));
         var fixture=Two(kind switch{"readable"=>[7],"copy"=>[8],_=>[21]});sink=new Sink();
-        Assert.Equal("DB2_INVALID",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(new MemoryByteSource(fixture.Bytes),sink,new(AllowPartialEncryptedSections:true)))).Code);
+        Assert.Equal("DB2_INVALID",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(MemoryByteSource.Hiding(fixture.Bytes),sink,new(AllowPartialEncryptedSections:true)))).Code);
         Assert.Null(sink.Header);Assert.Empty(sink.Rows);
+    }
+
+    [Fact]
+    public async Task A_decrypted_sparse_keyed_section_reads_whole_and_its_list_must_name_its_records()
+    {
+        // D310 (#190): the Retail ItemSparse profile with a keyed section that has no hole. Generated key, never a real one.
+        var key=MemoryByteSource.TestKeyName(193);
+        Fixture Two(uint[] list)=>Build([new([Record("clear")],[7],[(8,21)]),new([Record("one"),Record("two")],[21,22],[(23,22)],key,list)]);
+        var clean=Two([21,22,23]);var sink=new Sink();
+        Assert.Equal(new Db2Completion(3,3,2,0,0,0,"complete",clean.Bytes.Length),await Read(new MemoryByteSource(clean.Bytes),sink));
+        Assert.Equal([(7u,"clear"),(21u,"one"),(22u,"two"),(8u,"one"),(23u,"two")],sink.Rows.Select(row=>(row.Id,row.Values[1])));
+        sink=new Sink();
+        Assert.Equal(new Db2Completion(3,1,0,1,2,2,"unencryptedSections",clean.Bytes.Length),await Read(MemoryByteSource.Hiding(clean.Bytes),sink,new(AllowPartialEncryptedSections:true)));
+        Assert.Equal([7u],sink.Rows.Select(row=>row.Id));
+        foreach(var wrong in new uint[][]{[21],[21,22,23,40],[21,22,7]})
+            Assert.Equal("DB2_INVALID",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(new MemoryByteSource(Two(wrong).Bytes),new Sink()))).Code);
+    }
+
+    [Fact]
+    public async Task Zero_padding_to_a_four_byte_boundary_ends_a_sparse_record_area_and_nothing_else_does()
+    {
+        // D310 (#190): Retail 12.1.5.70688 Spell and ItemSparse pad 18 of 24 decrypted sparse sections with 2 zero bytes so the
+        // record area ends 4-byte aligned. Records "ab" and "cd" are 16 bytes each; the gap puts the section at offset 2 mod 4.
+        var key=MemoryByteSource.TestKeyName(194);
+        Fixture Clear(int pad,byte padByte=0)
+        {
+            var probe=Build([new([Record("ab")],[7],[])]);var gap=(6-probe.Starts[0]%4)%4;
+            return Build([new([Record("ab"),Record("cd")],[7,8],[],Pad:pad,PadByte:padByte)],gap);
+        }
+        var clear=Clear(2);Assert.Equal(2,clear.Starts[0]%4);Assert.Equal(0,clear.RecordEnds[0]%4);
+        var sink=new Sink();
+        Assert.Equal(new Db2Completion(2,2,0,0,0,0,"complete",clear.Bytes.Length),await Read(new MemoryByteSource(clear.Bytes),sink));
+        Assert.Equal([(7u,"ab"),(8u,"cd")],sink.Rows.Select(row=>(row.Id,row.Values[1])));
+
+        // The same padding in a keyed section layer 4 decrypted, after a clear one that needs none.
+        Fixture Keyed(int gap)=>Build([new([Record("ab")],[7],[]),new([Record("cd")],[21],[],key,[21],Pad:2)],gap);
+        var keyed=Keyed((6-Keyed(0).Starts[1]%4)%4);
+        Assert.Equal(2,keyed.Starts[1]%4);Assert.Equal(0,keyed.RecordEnds[1]%4);
+        sink=new Sink();
+        Assert.Equal(new Db2Completion(2,2,0,0,0,0,"complete",keyed.Bytes.Length),await Read(new MemoryByteSource(keyed.Bytes),sink));
+        Assert.Equal([7u,21u],sink.Rows.Select(row=>row.Id));
+
+        // A nonzero pad byte, six aligned bytes of padding, and padding that ends unaligned are undeclared bytes.
+        foreach(var wrong in new[]{Clear(2,1),Clear(6),Clear(1),Clear(3)})
+        {
+            var error=await Assert.ThrowsAsync<Db2FormatException>(()=>Read(new MemoryByteSource(wrong.Bytes),new Sink()));
+            Assert.Equal(("DB2_INVALID","Sparse maps leave undeclared record-area bytes."),(error.Code,error.Message));
+        }
     }
 
     [Fact]
@@ -274,7 +322,8 @@ public sealed class Db2SparseTests
         using var output=new MemoryStream();using var writer=new BinaryWriter(output,Encoding.UTF8,true);writer.Write(Encoding.UTF8.GetBytes(name));writer.Write((byte)0);
         writer.Write(quality);writer.Write(ratio);writer.Write((short)-1);writer.Write((short)200);writer.Write(0x12345678u);return output.ToArray();
     }
-    private sealed record Part(byte[][] Records,uint[] Ids,(uint Target,uint Source)[] Copies,ulong Key=0,uint[]? EncryptedIds=null);
+    // Pad: bytes of PadByte written after the records, inside the declared record area.
+    private sealed record Part(byte[][] Records,uint[] Ids,(uint Target,uint Source)[] Copies,ulong Key=0,uint[]? EncryptedIds=null,int Pad=0,byte PadByte=0);
     private sealed record Fixture(byte[] Bytes,int PrefixEnd,int[] Starts,int[] RecordEnds,int[] Maps,int[] MapIds,int[] SectionEnds);
     // layout: "narrow" (32-bit Unknown last), "wideFirst" (64-bit Wide before Name), "wideLast" (Wide after Name).
     private static Fixture Build(Part[] parts,int gap=0,string layout="narrow")
@@ -283,7 +332,7 @@ public sealed class Db2SparseTests
         var starts=new int[parts.Length];var ends=new int[parts.Length];var maps=new int[parts.Length];var mapIds=new int[parts.Length];var sectionEnds=new int[parts.Length];var next=prefix+gap;
         for(var index=0;index<parts.Length;index++)
         {
-            var part=parts[index];starts[index]=next;ends[index]=next+part.Records.Sum(record=>record.Length);
+            var part=parts[index];starts[index]=next;ends[index]=next+part.Records.Sum(record=>record.Length)+part.Pad;
             maps[index]=ends[index]+part.Ids.Length*4+part.Copies.Length*8;mapIds[index]=maps[index]+part.Ids.Length*6;sectionEnds[index]=mapIds[index]+part.Ids.Length*4;next=sectionEnds[index];
         }
         var header=new byte[204];"WDC5"u8.CopyTo(header);Put(header,4,5);Put(header,136,(uint)parts.Sum(part=>part.Ids.Length));Put(header,140,5);Put(header,144,24);
@@ -302,7 +351,7 @@ public sealed class Db2SparseTests
         writer.Write(new byte[gap]);
         for(var index=0;index<parts.Length;index++)
         {
-            var part=parts[index];foreach(var record in part.Records)writer.Write(record);foreach(var id in part.Ids)writer.Write(id);
+            var part=parts[index];foreach(var record in part.Records)writer.Write(record);for(var pad=0;pad<part.Pad;pad++)writer.Write(part.PadByte);foreach(var id in part.Ids)writer.Write(id);
             foreach(var (target,source) in part.Copies){writer.Write(target);writer.Write(source);}
             var at=starts[index];foreach(var record in part.Records){writer.Write((uint)at);writer.Write((ushort)record.Length);at+=record.Length;}foreach(var id in part.Ids)writer.Write(id);
         }

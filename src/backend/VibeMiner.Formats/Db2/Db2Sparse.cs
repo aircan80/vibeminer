@@ -46,7 +46,7 @@ public static partial class Db2Reader
         for(var sectionIndex=0;sectionIndex<sections.Count;sectionIndex++)
         {
             rowStart[sectionIndex]=rowCount;copyStart[sectionIndex]=copyCount;
-            token.ThrowIfCancellationRequested();var section=sections[sectionIndex];if(section.Key!=0)continue;
+            token.ThrowIfCancellationRequested();var section=sections[sectionIndex];if(section.Hidden)continue;
             var tail=Tail(section,true,(flags&2)!=0,nominalRecordSize);long next=section.Offset;
             // Three bounded named regions, never a whole suffix containing a duplicate relationship block.
             for(var first=0;first<section.Count;)
@@ -70,7 +70,10 @@ public static partial class Db2Reader
                 }
                 first+=count;await Task.Yield();
             }
-            if(next!=section.RecordsEnd)throw Fail("INVALID","Sparse maps leave undeclared record-area bytes.");
+            // Blizzard zero-pads the record area to a 4-byte file boundary (D310: 18 of 24 decrypted sparse sections of Retail
+            // 12.1.5.70688 Spell and ItemSparse end 2 bytes short). Only 1-3 zero bytes up to an aligned end are padding.
+            if(next!=section.RecordsEnd&&!await IsSparsePadding(decoded,next,section.RecordsEnd,token))
+                throw Fail("INVALID","Sparse maps leave undeclared record-area bytes.");
             await ForRecords(decoded,tail.Copies,section.Copies,8,(row,_)=>
             {
                 var target=BinaryPrimitives.ReadUInt32LittleEndian(row);var source=BinaryPrimitives.ReadUInt32LittleEndian(row[4..]);
@@ -82,6 +85,13 @@ public static partial class Db2Reader
         rowStart[sections.Count]=rowCount;copyStart[sections.Count]=copyCount;
         if(copies.Any(copy=>rowIndex.ContainsKey(copy.Target)))throw Fail("INVALID","Sparse copy targets overlap readable physical identities.");
         return new(rows,rowIndex,rowStart,copies,copyIndex,copyStart);
+    }
+
+    private static async Task<bool> IsSparsePadding(Db2Bytes decoded,long first,long end,CancellationToken token)
+    {
+        if(end-first is <1 or >3||end%4!=0)return false;
+        var bytes=await decoded.ReadAt(first,(int)(end-first),token);
+        return bytes.All(value=>value==0);
     }
 
     /// <summary>The raw-text evidence emitted by one read call, charged against its aggregate cap.</summary>

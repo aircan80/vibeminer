@@ -526,4 +526,56 @@ public sealed class TablesServiceTests
             (options.MaxReferenceSources, options.MaxReferenceScanRows));
         Assert.Throws<ArgumentNullException>(() => new TablesOptions(null!));
     }
+
+    [Fact]
+    public async Task ALateKeyRebuildsOnlyTheTableItDecryptsAndAChangedKeyRebuildsItAgain()
+    {
+        // Generated test keys (D310, #179): a fixed-seed name and value, never a real key. The keyed table's bytes are the same
+        // file either way; only layer 4's view changes, from a hole (key unknown) to the section's plaintext (key known).
+        var keyName = MemoryByteSource.TestKeyName(190).ToString("X16", System.Globalization.CultureInfo.InvariantCulture);
+        var random = new Random(190);
+        byte[] key = new byte[16], other = new byte[16];
+        random.NextBytes(key); random.NextBytes(other);
+        static string Fingerprint(byte[] value) => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(value));
+        var (keyedBytes, hole) = SyntheticTables.Wdc5(Plain, Rows, new ScenarioKeyedSection(keyName, [3, 4]), 600);
+        ITactKeyStatus status = TactKeyStatus.None;
+        var world = await SyntheticTables.CreateAsync(Build, [Table(100, Stored(100)), Table(600, Stored(600, keyedBytes) with { Holes = [hole!] })],
+            keys: _ => status);
+        var decoded = new List<string>();
+        world.Generated.Decoding = source => { lock (decoded) decoded.Add(source.ContentKey); return Task.CompletedTask; };
+
+        string clearKey, keyedKey;
+        await using (var unknown = await OpenAsync(world))
+        {
+            var clear = await unknown.CheckAsync(100, Now, Ct);
+            var partial = await unknown.CheckAsync(600, Now, Ct);
+            Assert.Equal(TableState.Ready, clear.State);
+            Assert.Equal((TableState.Partial, new TableCounts(4, 2, 1, 2, "WDC5", "01020304")), (partial.State, partial.Counts));
+            Assert.Equal([keyName], partial.Reason!.KeyNames);
+            (clearKey, keyedKey) = (clear.ContentKey!, partial.ContentKey!);
+        }
+        Assert.Equal([clearKey, keyedKey], decoded);
+
+        // The key arrives: layer 4 now decrypts the section, and the status knows its fingerprint.
+        world.Files.Add(Build, ["enUS", "deDE"], [Stored(100), Stored(600, keyedBytes)]);
+        status = new TactKeyStatus(new Dictionary<string, string> { [keyName] = Fingerprint(key) });
+        await using (var known = await OpenAsync(world))
+        {
+            Assert.Equal(TableState.Ready, (await known.CheckAsync(100, Now, Ct)).State);
+            var ready = await known.CheckAsync(600, Now, Ct);
+            Assert.Equal((TableState.Ready, null, new TableCounts(4, 4, 0, 0, "WDC5", "01020304")), (ready.State, ready.Reason, ready.Counts));
+            Assert.Equal([1u, 2u, 3u, 4u], (await known.PageAsync(new(600), Now, Ct)).Rows.Select(row => row.Row.Id));
+            Assert.Equal(TableRowOutcome.Found, (await known.GetAsync(600, 3, Now, Ct)).Outcome);
+        }
+        Assert.Equal([clearKey, keyedKey, keyedKey], decoded);
+
+        // A corrected key value for the same name rebuilds what it decrypted, and still nothing else.
+        status = new TactKeyStatus(new Dictionary<string, string> { [keyName] = Fingerprint(other) });
+        await using (var corrected = await OpenAsync(world))
+        {
+            Assert.Equal(TableState.Ready, (await corrected.CheckAsync(100, Now, Ct)).State);
+            Assert.Equal(TableState.Ready, (await corrected.CheckAsync(600, Now, Ct)).State);
+        }
+        Assert.Equal([clearKey, keyedKey, keyedKey, keyedKey], decoded);
+    }
 }

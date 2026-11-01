@@ -14,8 +14,10 @@ namespace VibeMiner.Formats;
 // Duplicate geometry checks define a conservative supported subset, not a universal wire rule.
 public static partial class Db2Reader
 {
-    public const string Revision="db2-values-v2";
-    internal sealed record Section(ulong Key,long Offset,int Count,int Strings,long RecordsEnd,int IdBytes,int Relations,int MapCount,int Copies,long End);
+    public const string Revision="db2-values-v3";
+    // Hidden: keyed, and a source hole overlaps its body, so its records are excluded. A keyed section without a hole was
+    // decrypted by layer 4 (or shipped clear) and reads like any other (D310).
+    internal sealed record Section(ulong Key,long Offset,int Count,int Strings,long RecordsEnd,int IdBytes,int Relations,int MapCount,int Copies,long End,bool Hidden);
     internal sealed record Storage(int Offset,int Width,int Additional,uint Kind,uint P1,uint P2,uint P3,short FieldBits,ushort FieldOffset)
     {
         public uint[] Palette=[];
@@ -181,8 +183,9 @@ public static partial class Db2Reader
             var span=sparse?checked((long)S(20)-S(8)+ids+copy*8L+map*10L+rel):checked(count*(long)recordSize+str+ids+copy*8L+rel);
             var end=checked(S(8)+span);
             if(end>length||span>0&&S(8)<auxiliaryEnd)throw Fail("INVALID","A section lies outside the source or overlaps descriptors.");
-            sections.Add(new(key,S(8),count,str,S(20),ids,rel,map,copy,end));declared+=count;copies+=copy;strings+=str;
-            if(key!=0){excludedSections++;excluded+=count;excludedCopies+=copy;}
+            var hidden=key!=0&&holes.Any(hole=>hole.Offset<end&&hole.Offset+hole.Length>S(8));
+            sections.Add(new(key,S(8),count,str,S(20),ids,rel,map,copy,end,hidden));declared+=count;copies+=copy;strings+=str;
+            if(hidden){excludedSections++;excluded+=count;excludedCopies+=copy;}
         }
         if(declared!=records||strings!=stringTotal)throw Fail("INVALID","Header and section record/string counts disagree.");
         if(records+copies>limits.MaxRows)throw Fail("LIMIT","Physical plus declared copy rows exceed policy.");
@@ -216,7 +219,9 @@ public static partial class Db2Reader
         LoadAuxiliary(storage,aux,paletteBytes,commonBytes,limits,ref charged,token);
         // Narrowing depends on the pallet and common values, so it is selected once they are loaded, still before Header.
         if(SelectLowBitNarrowing(fields,storage,token))columns=Columns(fields,storage,limits);
-        var encryptedIds=new Dictionary<uint,int>();long prefixEnd=auxiliaryEnd;
+        // Every keyed section has its list. A hidden section's IDs are the protected IDs; a readable keyed section's list is
+        // kept apart and must name exactly its own rows and copy targets (checked after indexing), the only proof of its plaintext.
+        var encryptedIds=new Dictionary<uint,int>();var listedIds=new Dictionary<uint,int>();var listed=new int[sections.Count];long prefixEnd=auxiliaryEnd;
         for(var sectionIndex=0;sectionIndex<sections.Count;sectionIndex++)
         {
             if(sections[sectionIndex].Key==0||!format.EncryptedIdLists)continue;
@@ -228,7 +233,9 @@ public static partial class Db2Reader
             for(var i=0;i<count;i++)
             {
                 token.ThrowIfCancellationRequested();
-                if(!encryptedIds.TryAdd(BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i*4,4)),sectionIndex))throw Fail("INVALID","Encrypted-section ID lists repeat a record ID.");
+                var listedId=BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i*4,4));
+                if(encryptedIds.ContainsKey(listedId)||listedIds.ContainsKey(listedId)||!(sections[sectionIndex].Hidden?encryptedIds:listedIds).TryAdd(listedId,sectionIndex))
+                    throw Fail("INVALID","Encrypted-section ID lists repeat a record ID.");
             }
         }
         var endOfFile=prefixEnd;
@@ -247,6 +254,9 @@ public static partial class Db2Reader
         var index=sparse
             ?await IndexSparse(decoded,sections,limits,encryptedIds,recordSize,flags,token)
             :await IndexFixed(decoded,sections,fields,storage,encryptedIds,recordSize,flags,token);
+        foreach(var (_,section) in listedIds)listed[section]++;
+        // WDC3 has no lists to check: a keyed section without a hole is read on layer 4's word alone.
+        if(format.EncryptedIdLists)VerifyReadableKeyedLists(sections,index,listedIds,listed,token);
         // Copy chains resolve here, in memory; a broken chain still fails only when that copy is read, as it always did.
         // They resolve before the relationship blocks, which admit one extra pair per readable copy of a row (D292).
         var resolutions=new CopyResolution[index.Copies.Length];long copyRows=0;
@@ -264,7 +274,7 @@ public static partial class Db2Reader
         var state=new TableState(decoded,sparse,sparseAlignment,sections.AsReadOnly(),fields,storage,recordSize,records,limits,relationships,
             index.Rows,index.RowIndex,index.RowStart,index.Copies,resolutions,index.CopyIndex,index.CopyStart,encryptedIds,excludedSections>0);
         var sectionInfo=sections.Select((section,i)=>new Db2Section(i,section.Count,section.Copies,section.Key.ToString("X16",CultureInfo.InvariantCulture),section.Key!=0,
-            protectedCopies[i],unresolvedCopies[i])).ToArray();
+            protectedCopies[i],unresolvedCopies[i],section.Key!=0&&!section.Hidden)).ToArray();
         return new(state,new(schema,tableHash,layoutHash,records,copies,recordSize,columns,name),Array.AsReadOnly(sectionInfo),
             new(records,index.Rows.Length,copyRows,excludedSections,excluded,excludedCopies,excludedSections==0&&excludedCopies==0?"complete":"unencryptedSections",length),
             unresolvedCopies.Sum());
@@ -280,7 +290,7 @@ public static partial class Db2Reader
         for(var sectionIndex=0;sectionIndex<sections.Count;sectionIndex++)
         {
             var section=sections[sectionIndex];rowStart[sectionIndex]=rowCount;copyStart[sectionIndex]=copyCount;
-            if(section.Key!=0){global+=section.Count;continue;}
+            if(section.Hidden){global+=section.Count;continue;}
             var tail=Tail(section,false,(flags&2)!=0,recordSize);
             void Add(uint id,int row)
             {
@@ -327,8 +337,29 @@ public static partial class Db2Reader
     private static (Location[] Rows,Dictionary<uint,int> RowIndex,CopyEntry[] Copies,Dictionary<uint,int> CopyIndex) IndexStorage(IReadOnlyList<Section> sections)
     {
         int rows=0,copies=0;
-        foreach(var section in sections)if(section.Key==0){rows=checked(rows+section.Count);copies=checked(copies+section.Copies);}
+        foreach(var section in sections)if(!section.Hidden){rows=checked(rows+section.Count);copies=checked(copies+section.Copies);}
         return (new Location[rows],new(rows),new CopyEntry[copies],new(copies));
+    }
+
+    // A readable keyed section's encrypted-ID list must equal its physical IDs plus its copy targets, as a set. Rows and copy
+    // targets are already unique across the table, so counting the members that carry this section is enough.
+    private static void VerifyReadableKeyedLists(IReadOnlyList<Section> sections,RowIndexes index,Dictionary<uint,int> listedIds,int[] listed,CancellationToken token)
+    {
+        for(var s=0;s<sections.Count;s++)
+        {
+            if(sections[s].Key==0||sections[s].Hidden)continue;
+            var matched=0;
+            for(var row=index.RowStart[s];row<index.RowStart[s+1];row++)
+            {
+                token.ThrowIfCancellationRequested();
+                if(!listedIds.TryGetValue(index.Rows[row].PhysicalId,out var owner)||owner!=s)
+                    throw Fail("INVALID","A readable keyed section has a record ID its encrypted-ID list doesn't name.");
+                matched++;
+            }
+            for(var copy=index.CopyStart[s];copy<index.CopyStart[s+1];copy++)
+                if(listedIds.TryGetValue(index.Copies[copy].Target,out var owner)&&owner==s)matched++;
+            if(matched!=listed[s])throw Fail("INVALID","A readable keyed section's encrypted-ID list names an ID that isn't its record or copy.");
+        }
     }
 
     private static CopyResolution ResolveCopy(CopyEntry copy,RowIndexes index,Dictionary<uint,int> encryptedIds,int maxDepth,CancellationToken token)

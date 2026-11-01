@@ -120,7 +120,7 @@ public static partial class Db2Reader
         if(relation is null)return result;
         for(var s=0;s<sections.Count;s++)
         {
-            token.ThrowIfCancellationRequested();var section=sections[s];if(section.Key!=0)continue;
+            token.ThrowIfCancellationRequested();var section=sections[s];if(section.Hidden)continue;
             if(section.Relations==0)continue;
             var tail=Tail(section,sparse,(flags&2)!=0,recordSize);var header=await source.ReadAt(tail.Relationships,12,token);
             // D292: Blizzard writes one extra pair per copy row, keyed by the copy's terminal row (its source row for a direct

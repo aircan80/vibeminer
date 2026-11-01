@@ -104,7 +104,7 @@ public static partial class Db2Reader
         foreach(var section in sections)
         {
             if(offset>=first+section.Strings){first+=section.Strings;continue;}
-            if(section.Key!=0)throw Fail("ENCRYPTED","A readable record references a string in an unavailable keyed section.");
+            if(section.Hidden)throw Fail("ENCRYPTED","A readable record references a string in an unavailable keyed section.");
             var within=offset-first;var available=section.Strings-within;var bytes=new List<byte>(Math.Min(maximum,256));
             // Records end exactly at the beginning of this section's declared string block.
             var stringsAt=section.Offset+section.Count*(long)recordSize;
