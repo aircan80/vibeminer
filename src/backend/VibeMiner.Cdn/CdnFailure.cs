@@ -13,13 +13,13 @@ public enum CdnFailure
     HttpStatus,
     /// <summary>No headers within the header timeout, or no bytes within the idle timeout. Retryable.</summary>
     Timeout,
-    /// <summary>The connection broke mid-body. Retryable.</summary>
+    /// <summary>The connection broke mid-body, or the body ended before the length its headers declared. Retryable.</summary>
     Network,
     /// <summary>A 200 to a range request; aborted as soon as its headers arrived, the body is never read. Retryable on another host.</summary>
     RangeIgnored,
     /// <summary>A 206 whose Content-Range isn't exactly the requested span, or a 206 to a whole request.</summary>
     RangeMismatch,
-    /// <summary>Content-Length, Content-Range total or the received length differs from the expected length.</summary>
+    /// <summary>Content-Length, Content-Range total or the received length differs from the expected length (a body cut short of its declared headers is Network).</summary>
     SizeConflict,
     /// <summary>The bytes don't pass their key type's check. The code is the verifier's refusal code.</summary>
     VerificationFailed,

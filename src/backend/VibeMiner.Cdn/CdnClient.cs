@@ -187,7 +187,13 @@ public sealed class CdnClient(HttpClient client, CdnClientOptions? options = nul
                 var observed = options.Time.GetUtcNow();
                 var length = CheckHeaders(response, url, request, limit);
                 begin(length);
-                var received = await ReadBodyAsync(response, length, limit, body, cancellationToken);
+                // The headers declared the length (Content-Length, or the exact Content-Range): a body that stops short of it,
+                // even at zero bytes, is a broken transfer, not another length. HTTP/2 in .NET ends such a body cleanly where
+                // HTTP/1.1 throws (#197).
+                var declared = request.IsRange || response.Content.Headers.ContentLength is not null ? length : null;
+                var received = await ReadBodyAsync(response, length, limit, body, declared is not null, cancellationToken);
+                if (received < declared)
+                    throw new Abort(CdnFailure.Network, $"The reply ended after {received} of its {declared} declared bytes.");
                 if (request.IsRange && received != request.Length || !request.IsRange && request.Length is { } expected && received != expected)
                     throw new Abort(CdnFailure.SizeConflict, $"Received {received} bytes, expected {request.Length}.");
                 return new(host, url, response.Version, received, response.Content.Headers.ContentRange?.Length, null,
@@ -262,7 +268,7 @@ public sealed class CdnClient(HttpClient client, CdnClientOptions? options = nul
     }
 
     private async Task<long> ReadBodyAsync(HttpResponseMessage response, long? length, long limit,
-        Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> body, CancellationToken cancellationToken)
+        Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> body, bool headersDeclared, CancellationToken cancellationToken)
     {
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         var buffer = new byte[Slice];
@@ -285,7 +291,7 @@ public sealed class CdnClient(HttpClient client, CdnClientOptions? options = nul
             catch (Exception ex) when (ex is not OperationCanceledException) { throw new SinkFailed(ex); }
             received += count;
         }
-        if (received == 0) throw new Abort(CdnFailure.SizeConflict, "The reply is empty.");
+        if (received == 0 && !headersDeclared) throw new Abort(CdnFailure.SizeConflict, "The reply is empty.");
         return received;
     }
 }

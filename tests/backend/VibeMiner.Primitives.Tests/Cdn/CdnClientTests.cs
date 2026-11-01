@@ -152,6 +152,48 @@ public sealed class CdnClientTests
         Assert.Equal(CdnFailure.SizeConflict, ex.Overall);
     }
 
+    // HTTP/2 in .NET ends the body cleanly when the server stops short of its Content-Length (HTTP/1.1 throws): a broken
+    // transfer, so retryable and the next host is asked, never a size conflict that makes the object Corrupt (#197).
+    [Fact]
+    public async Task ABodyThatEndsBeforeItsDeclaredLengthIsANetworkFailureNotASizeConflict()
+    {
+        var body = Bytes(200_000); var key = Md5Key(body);
+        var calls = 0;
+        var (client, _) = Make((r, _) => Task.FromResult(Interlocked.Increment(ref calls) == 1
+            ? Replies.Make(r, HttpStatusCode.OK, body[..70_000], version: HttpVersion.Version20, contentLength: 200_000)
+            : Replies.Whole200(r, body, HttpVersion.Version20)));
+        var reply = await client.FetchAsync(Route, CdnRequest.Whole(CdnObjectKind.Data, key, 200_000, b => Md5Check(key, b)), CancellationToken.None);
+        Assert.Equal(body, reply.Bytes);
+        Assert.Equal(CdnFailure.Network, Assert.Single(reply.Failed).Failure);
+
+        (client, var handler) = Make((r, _) => Task.FromResult(Replies.Make(r, HttpStatusCode.OK, body[..70_000], version: HttpVersion.Version20, contentLength: 200_000)));
+        var streamed = await Assert.ThrowsAsync<CdnException>(() => client.FetchToAsync(Route, CdnRequest.Whole(CdnObjectKind.Data, key, 200_000),
+            (_, _) => ValueTask.CompletedTask, CancellationToken.None));
+        Assert.Equal(CdnFailure.Network, streamed.Overall);
+        Assert.True(streamed.Retryable);
+        Assert.Single(handler.Requests);
+
+        (client, _) = Make((r, _) => Task.FromResult(Replies.Make(r, HttpStatusCode.PartialContent, Bytes(60), version: HttpVersion.Version20,
+            range: new ContentRangeHeaderValue(0, 99, 1000), contentLength: 100)));
+        var ranged = await Assert.ThrowsAsync<CdnException>(() => client.FetchAsync(Route, CdnRequest.Range(CdnObjectKind.Data, key, 0, 100, 1000), CancellationToken.None));
+        Assert.Equal(CdnFailure.Network, ranged.Overall);
+
+        // No expected length from the caller: the Content-Length alone declares it, so the short body still never passes.
+        (client, _) = Make((r, _) => Task.FromResult(Replies.Make(r, HttpStatusCode.OK, body[..70_000], version: HttpVersion.Version20, contentLength: 200_000)));
+        var undeclared = await Assert.ThrowsAsync<CdnException>(() => client.FetchAsync(Route, CdnRequest.Whole(CdnObjectKind.Data, key), CancellationToken.None));
+        Assert.Equal(CdnFailure.Network, undeclared.Overall);
+
+        // END_STREAM straight after the headers: no body at all, though a length was declared.
+        (client, _) = Make((r, _) => Task.FromResult(Replies.Make(r, HttpStatusCode.OK, [], version: HttpVersion.Version20, contentLength: 100)));
+        var empty = await Assert.ThrowsAsync<CdnException>(() => client.FetchAsync(Route, CdnRequest.Whole(CdnObjectKind.Data, key, 100), CancellationToken.None));
+        Assert.Equal(CdnFailure.Network, empty.Overall);
+
+        // With no length in its headers, a short body is still another length than the one declared.
+        (client, _) = Make((r, _) => Task.FromResult(Replies.Make(r, HttpStatusCode.OK, [], content: new UnsizedContent(Bytes(60)))));
+        var unsized = await Assert.ThrowsAsync<CdnException>(() => client.FetchAsync(Route, CdnRequest.Whole(CdnObjectKind.Data, key, 100), CancellationToken.None));
+        Assert.Equal(CdnFailure.SizeConflict, unsized.Overall);
+    }
+
     [Fact]
     public async Task AReplyOverTheInMemoryLimitIsRefusedWithoutReadingIt()
     {
