@@ -280,6 +280,70 @@ public sealed class BrowseModelTests : IAsyncDisposable
         Assert.Equal(0, stores.Open);
     }
 
+    /// <summary>Goes to builds > wow > its one build, with only the versions reply stored (no cdns, nothing of the build).</summary>
+    private async Task<BrowseFrame> RetailBuildAsync()
+    {
+        Serve("wow", "12.0.1.60000", A);
+        await ObserveServed(ObservationKind.Versions, "wow");
+        await GoAsync(":builds");
+        await DrillAsync(0);
+        return await DrillAsync(0);
+    }
+
+    [Fact]
+    public async Task ABuildShowsTheDownloadedRowAndDOnUnstoredMetadataSaysSoReadOnly()
+    {
+        var detail = await RetailBuildAsync();
+        Assert.Contains(["Downloaded", "d measures (opens the build read-only)"], Cells(detail));
+
+        Assert.True(navigator.TryAction('d'));
+        await SettleTaskAsync();
+        Assert.Equal("downloaded: metadata not stored (NeedsNetwork, BuildConfig); nothing fetched.", navigator.Tasks.Status);
+        Assert.True(navigator.Tasks.Status!.Length <= 80);
+        Assert.All(stores.Opened, o => Assert.False(o.Writer));
+        Assert.Empty(stores.WriterCreate);
+        Assert.Equal(0, stores.Open);
+        Assert.IsType<BuildView>(navigator.Current.View);
+    }
+
+    [Fact]
+    public async Task CancelingDownloadedEndsWithCanceledAndClosesTheStore()
+    {
+        await RetailBuildAsync();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        stores.BeforeOpen = async (_, ct) =>
+        {
+            started.TrySetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+        };
+        Assert.True(navigator.TryAction('d'));
+        await started.Task.WaitAsync(Guard);
+        Assert.Equal("downloaded", navigator.Tasks.Running);
+
+        stores.BeforeOpen = null;
+        Assert.True(navigator.Tasks.Cancel());
+        await SettleTaskAsync();
+        Assert.Equal("downloaded canceled.", navigator.Tasks.Status);
+        Assert.Null(navigator.Tasks.Running);
+        Assert.Equal(0, stores.Open);
+    }
+
+    [Fact]
+    public void DownloadedLinesFitTheStatusAndNameTheState()
+    {
+        var line = BuildView.Measured(new DownloadedFigure(1_204_331, 2_900_112, 77_500_000_000, 188_000_000_000), "us");
+        Assert.Equal("downloaded: 41.2% of 175.1 GiB, 1,204,331 of 2,900,112 objects (us)", line);
+        Assert.True(line.Length <= 80);
+        Assert.Equal("downloaded: 0.0% of 0 B, 0 of 0 objects (eu)", BuildView.Measured(new DownloadedFigure(0, 0, 0, 0), "eu"));
+
+        var build = new BuildRef("wow", A, B, "us");
+        Assert.True(BuildView.NotOpened(new(build, BuildOpenState.NeedsNetwork, null, BuildPart.ArchiveIndex, "OBJECT_ACCESS_NEEDS_NETWORK", "x", null)).Length <= 80);
+        Assert.Equal("downloaded: metadata not stored (NeedsNetwork, Encoding); nothing fetched.",
+            BuildView.NotOpened(new(build, BuildOpenState.NeedsNetwork, null, BuildPart.Encoding, "OBJECT_ACCESS_NEEDS_NETWORK", "x", null)));
+        Assert.Equal("downloaded: can't open: Corrupt at Root (BLTE_CHECKSUM).",
+            BuildView.NotOpened(new(build, BuildOpenState.Corrupt, null, BuildPart.Root, "BLTE_CHECKSUM", "x", null)));
+    }
+
     [Fact]
     public async Task BuildsWithNoSummarySaysRFetchesOne()
     {

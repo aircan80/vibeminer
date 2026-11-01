@@ -82,6 +82,7 @@ Simulated I/O failures, process termination and physical full-volume/power-loss 
 | --- | --- | --- |
 | `VIBEMINER_DATA_DIR` | Desktop main | Engine data folder instead of the chosen or per-OS default one ([D128](DECISIONS.md)). Every test and QA run sets it. |
 | `VIBEMINER_OBJECT_STORE_SCALE` | `tests/backend/VibeMiner.Primitives.Tests` (`ObjectStoreScaleTests`) | `N` runs the object store scale checks over N million objects: lookups under 10 µs, Read, and the open-time index check. `3` (about one Retail build) for everyday checks; `10` for sign-off and for changes to index, lookup or rebuild code (builds share 97-99.5% of their objects, so even heavy real use lands around 5-10M unique objects); `30` is an optional extreme run that nothing requires. Skipped when unset. See [scale store](#object-store-scale-store). |
+| `VIBEMINER_DOWNLOADED_SCALE` | `tests/backend/VibeMiner.Builds.Tests` (`DownloadedTests`) | `1` measures the Downloaded figure of a 2.9M-row ledger (about one Retail build) over the layer 2 fake, under 10 s. Skipped when unset. |
 | `VIBEMINER_OBJECT_STORE_SCALE_REBUILD` | `ObjectStoreScaleTests` | `1` rebuilds the cached scale store even when it matches. |
 | `VIBEMINER_OBJECT_STORE_SCALE_SCAN` | `ObjectStoreScaleTests` | `1` also runs the Scan rebuild at scale (about 13 minutes at 30M, proportionally less below), on a copy. Only needed when the rebuild code changes. |
 | `VIBEMINER_ENGINE_PATH` | Desktop main | Engine binary or DLL to launch |

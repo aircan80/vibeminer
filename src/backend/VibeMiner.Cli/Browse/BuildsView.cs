@@ -1,3 +1,4 @@
+using System.Globalization;
 using VibeMiner.Builds;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
@@ -142,10 +143,42 @@ internal sealed class ProductBuildsView(ReviewedProduct product) : BrowseView
     }
 }
 
-/// <summary>One build: its identity fields exactly, then each region listing.</summary>
+/// <summary>One build: its identity fields exactly, then each region listing. <c>d</c> measures what of it is stored.</summary>
 internal sealed class BuildView(CatalogBuild build) : BrowseView
 {
     public override string Title => build.VersionsName;
+    public override IReadOnlyList<ViewAction> Actions => [Downloaded];
+
+    /// <summary>
+    /// <c>d</c>: opens the build read-only from the store (its ENCODING, ROOT and every archive index, so not on every load) and
+    /// counts which of its objects are stored. The read-only store's source is local only: nothing is fetched or written.
+    /// </summary>
+    private ViewAction Downloaded => new('d', "downloaded: open the build read-only from the store and count what is stored", "downloaded", DownloadedAsync);
+
+    private async Task<string> DownloadedAsync(BrowseSession session, IProgress<string> progress, CancellationToken ct)
+    {
+        var region = build.Regions.FirstOrDefault(g => g.Current) ?? build.Regions.FirstOrDefault();
+        if (region is null) return "downloaded: no region lists a cdn config for this build, so it can't be opened.";
+        await using var store = await session.OpenReadAsync(ct).ConfigureAwait(false);
+        progress.Report($"opening {build.VersionsName} ({region.Region}) from the store: ENCODING, ROOT, indexes; x cancels");
+        var opened = await new BuildOpener(store.Objects).OpenAsync(new BuildRef(build.Product, build.BuildConfig, region.CdnConfig, region.Region), ct)
+            .ConfigureAwait(false);
+        if (opened is not { State: BuildOpenState.Open, Opened: { } open }) return NotOpened(opened);
+        progress.Report($"counting stored objects of {build.VersionsName}; x cancels");
+        await using var figures = new DownloadedFigures(store.Objects);
+        return Measured(await figures.GetAsync(open, ct).ConfigureAwait(false), region.Region);
+    }
+
+    /// <summary>The status line for a measured build, e.g. <c>downloaded: 41.2% of 175.1 GiB, 1,204,331 of 2,900,112 objects (us)</c>.</summary>
+    internal static string Measured(DownloadedFigure f, string region) => string.Create(CultureInfo.InvariantCulture,
+        $"downloaded: {f.Share * 100:0.0}% of {VmCommands.Size(f.TotalBytes)}, {f.StoredObjects:N0} of {f.TotalObjects:N0} objects ({region})");
+
+    /// <summary>
+    /// The status line for an open that isn't Open. Read-only, NeedsNetwork means a part isn't stored; browse never fetches one.
+    /// </summary>
+    internal static string NotOpened(BuildOpenResult r) => r.State == BuildOpenState.NeedsNetwork
+        ? $"downloaded: metadata not stored (NeedsNetwork, {r.Part}); nothing fetched."
+        : $"downloaded: can't open: {r.State} at {r.Part} ({r.Code ?? "no code"}).";
 
     public override Task<ViewContent> LoadAsync(BrowseSession session, CancellationToken ct)
     {
@@ -155,6 +188,7 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
             new(["Build config", build.BuildConfig]), new(["Product config", build.ProductConfig ?? "(none)"]),
             new(["Current", build.Current ? "yes" : "no"]),
             new(["First seen", $"{BrowseSession.Time(build.FirstSeen)} UTC"]), new(["Last seen", $"{BrowseSession.Time(build.LastSeen)} UTC"]),
+            new(["Downloaded", "d measures (opens the build read-only)"]),
         };
         rows.AddRange(build.Fields.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => new BrowseRow([$"field {f.Key}", f.Value])));
         rows.AddRange(build.Regions.Select(g => new BrowseRow([$"region {g.Region}",

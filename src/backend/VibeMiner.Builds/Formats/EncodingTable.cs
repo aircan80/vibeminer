@@ -153,6 +153,24 @@ internal sealed class EncodingTable
         finally { ArrayPool<byte>.Shared.Return(rented); }
     }
 
+    /// <summary>
+    /// Every encoded row in key order (the order <see cref="Open"/> validated), reading one page at a time and checking its
+    /// MD5 again. Lazy; each enumeration is independent.
+    /// </summary>
+    internal IEnumerable<EncodingEncoded> EncodedRows()
+    {
+        var page = new byte[encoded.PageBytes];
+        for (var ordinal = 0; ordinal < encoded.Firsts.Length; ordinal++)
+        {
+            ReadPage(encoded, ordinal, page);
+            for (var at = 0; page.Length - at >= EncodedRecordBytes && !IsZero(page.AsSpan(at, 16)); at += EncodedRecordBytes)
+                yield return EncodedAt(page, at);
+        }
+    }
+
+    private static EncodingEncoded EncodedAt(byte[] page, int at) =>
+        new(new CdnKey(page.AsSpan(at, 16)), U40(page.AsSpan(at + 20)), (int)BinaryPrimitives.ReadUInt32BigEndian(page.AsSpan(at + 16)));
+
     private ReadOnlySpan<byte> ReadPage(Directory directory, int ordinal, byte[] buffer)
     {
         var page = buffer.AsSpan(0, directory.PageBytes);

@@ -75,8 +75,16 @@ internal sealed class TestObjectSource(InMemoryObjectSource inner) : IObjectSour
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
     { Log(nameof(CountPresentAsync)); return Inner.CountPresentAsync(keys, cancellationToken); }
 
-    public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
-    { Log(nameof(HasKeysAsync)); return Inner.HasKeysAsync(keys, cancellationToken); }
+    /// <summary>Runs after the inner source answered HasKeysAsync and before the answer returns, so a test can hold a stale answer.</summary>
+    public Func<IReadOnlyList<ObjectKey>, CancellationToken, Task>? AfterHasKeys { get; set; }
+
+    public async Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
+    {
+        Log(nameof(HasKeysAsync));
+        var answer = await Inner.HasKeysAsync(keys, cancellationToken);
+        if (AfterHasKeys is { } hold) await hold(keys, cancellationToken);
+        return answer;
+    }
 
     public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken cancellationToken)
     {

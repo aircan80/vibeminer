@@ -87,6 +87,7 @@ Code: [`src/backend/VibeMiner.ObjectAccess/`](../src/backend/VibeMiner.ObjectAcc
 | `ObserveAsync(request)` | One dated build observation, saved in the history log |
 | `CountPresentAsync(keys)` | How many keys the profile's own store holds, for the Downloaded figure |
 | `HasKeysAsync(keys)` | Whether the profile's own store holds each key, in order (index only, no CDN call), for layer 4's stored state ([D161](DECISIONS.md)) |
+| `IStoreCommits.Subscribe(capacity)` | Keys stored in or removed from the profile's own store, published after each commit, on a bounded queue that never holds up the writer ([D200](DECISIONS.md)). The real source and the fake have it |
 | `ReadHistoryAsync(query)` | The history log, for the build list |
 
 A request names the key, its declared length (from EN, an index entry or a config size pair; never a CDN config `*-index-size` hint) and the archive index entries that list it, if any. A loose request with no declared length (a config, say) is charged 4 MiB of the in-flight byte budget and may be at most that; a longer reply is refused as `TooLarge`. `Order` groups requests: lower groups go first, which is how Download all puts DOWNLOAD priority 0 first. Within a group, ranges come in CDN-config archive order, then loose objects. The `CdnContext` is the route from the current `cdns` reply and the CDN config's archive list.
@@ -162,6 +163,10 @@ The opened `IBuild` gives metadata (build name, keys, counts, the ROOT locale un
 The opened build also lists its FileDataIDs per locale: ascending, each once, from a starting ID, walking ROOT in place. A file is listed when any of its variants has that locale bit (all-locales variants included); content flags don't filter.
 
 Layer 3 has its own ports of the config, BLTE (whole objects, for ENCODING and ROOT only), EN, ROOT and index parsers in `VibeMiner.Builds/Formats`. Ranged and keyed BLTE stay in layer 4. `InMemoryBuilds` in `VibeMiner.Builds.Testing` is the fake; `BuildsContractTests` runs one suite against it and `BuildOpener`.
+
+### Layer 3: the Downloaded figure
+
+`DownloadedFigures` ([D200](DECISIONS.md)) says how much of an opened build the profile's own store holds: stored and total objects, stored and total bytes, and the share of bytes. The ledger is every EKey ENCODING's encoded table lists, with its encoded size; it is built once per opened build and kept as two flat sorted arrays, 24 B a row (about 70 MB for Retail) for as long as the opened build is kept. The first read of an opened build (and every reopen) measures it with `HasKeysAsync` in batches of 4096; `RefreshAsync` measures again. At most 2 measurements run at once, at most one per build waits for a slot, and at most 4 builds are tracked. `Changed` handlers run on the feed's reader and must be quick: a slow one fills the queue, which costs a re-measure. Bytes are ENCODING's sizes of stored ledger keys only, so merged-range gap bytes and fetched neighbours outside the ledger never count. Between measurements the figure follows layer 2's commit feed: each committed batch moves every tracked build whose ledger lists one of its keys, and raises `Changed` once per build. A commit during a measurement keeps its answer over the measurement's. A full queue drops commits and flags it; the figure then measures again. Another process's writes are never published, so they show after a refresh or a reopen. Measured by hand on 2026-11-01: 2.9M keys through `HasKeysAsync` over a copy of the 3M scale store (on tmpfs) take 2.4-2.9 s; layer 3's own work on a 2.9M-row ledger over the fake is about 0.3 s (`VIBEMINER_DOWNLOADED_SCALE=1` runs that test).
 
 ## Layer 4: files
 

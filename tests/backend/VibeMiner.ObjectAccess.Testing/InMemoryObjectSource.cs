@@ -8,8 +8,9 @@ namespace VibeMiner.ObjectAccess.Testing;
 /// The standard <see cref="IObjectSource"/> test double for layer 3 and up: serves synthetic objects from memory, with
 /// scripted 404s, outages and refusals, version and definition replies with their real URLs, scripted observation failures,
 /// and counts what was asked. The shared contract tests run it beside the real source.
+/// Like the real source it publishes its store commits: a key the first time an answer stores it, and keys dropped with <see cref="Remove"/>.
 /// </summary>
-public sealed class InMemoryObjectSource : IObjectSource
+public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
 {
     private readonly Lock gate = new();
     private readonly Dictionary<ObjectKey, byte[]> objects = [];
@@ -21,6 +22,7 @@ public sealed class InMemoryObjectSource : IObjectSource
     private readonly List<ObservationRequest> observed = [];
     private readonly HashSet<ObjectKey> stored = [];
     private readonly List<HistoryEntry> history = [];
+    private readonly StoreCommitFeed commits = new();
 
     public TimeProvider Time { get; set; } = TimeProvider.System;
     /// <summary>When set, every object request waits for this first (cancellation still ends the wait).</summary>
@@ -60,8 +62,21 @@ public sealed class InMemoryObjectSource : IObjectSource
             ObservedAt: state is ObjectState.NotFound or ObjectState.Unavailable ? Time.GetUtcNow() : null);
         return this;
     }
-    /// <summary>Marks an object as already in the profile's store (it counts as present and its history is listed).</summary>
+    /// <summary>
+    /// Marks an object as already in the profile's store (it counts as present and its history is listed): already stored before
+    /// this source started, or by another process; publishes nothing.
+    /// </summary>
     public InMemoryObjectSource AddStored(ObjectKey key, byte[] bytes) { lock (gate) { objects[key] = bytes; stored.Add(key); } return this; }
+    /// <summary>Drops a stored key (its bytes stay available to fetch again) and publishes it as removed.</summary>
+    public InMemoryObjectSource Remove(ObjectKey key)
+    {
+        bool removed;
+        lock (gate) removed = stored.Remove(key);
+        if (removed) commits.Publish([], [key]);
+        return this;
+    }
+
+    public StoreCommitSubscription Subscribe(int capacity = StoreCommitFeed.DefaultCapacity) => commits.Subscribe(capacity);
     private InMemoryObjectSource Script(ObjectResult result) { lock (gate) scripted[result.Key] = result; return this; }
 
     public IReadOnlyList<(ObjectKey Key, FetchPriority Priority)> Asked { get { lock (gate) return asked.ToArray(); } }
@@ -73,6 +88,7 @@ public sealed class InMemoryObjectSource : IObjectSource
         lock (gate) asked.Add((request.Key, priority));
         if (BeforeAnswer is { } wait) await wait(request.Key, token);
         token.ThrowIfCancellationRequested();
+        ObjectResult result;
         lock (gate)
         {
             if (scripted.TryGetValue(request.Key, out var s)) return s;
@@ -81,12 +97,15 @@ public sealed class InMemoryObjectSource : IObjectSource
                 if (request.DeclaredLength is { } declared && declared != bytes.Length)
                     return new(request.Key, ObjectState.Refused, Code: "OBJECT_SIZE_MISMATCH");
                 var from = stored.Add(request.Key) ? ServedFrom.Cdn : ServedFrom.Store;
-                return new(request.Key, ObjectState.Present, from, ObjectOrigin.Cdn, bytes.Length, withBytes ? (byte[])bytes.Clone() : null);
+                result = new(request.Key, ObjectState.Present, from, ObjectOrigin.Cdn, bytes.Length, withBytes ? (byte[])bytes.Clone() : null);
             }
-            return cdn is null
+            else return cdn is null
                 ? new(request.Key, ObjectState.Unavailable, Code: "OBJECT_ACCESS_NO_CDN_CONTEXT")
                 : new(request.Key, ObjectState.NotFound, Code: "CDN_NOT_FOUND", ObservedAt: Time.GetUtcNow());
         }
+        // Published outside the lock, after the key is stored, so HasKeysAsync already agrees.
+        if (result.ServedFrom == ServedFrom.Cdn) commits.Publish([request.Key], []);
+        return result;
     }
 
     public Task<ObjectResult> GetKeyAsync(ObjectRequest request, CdnContext? cdn, FetchPriority priority, CancellationToken cancellationToken) =>
@@ -145,8 +164,11 @@ public sealed class InMemoryObjectSource : IObjectSource
             var observation = new Observation(request.Kind, request.Product, request.Region, url, Time.GetUtcNow(), bytes);
             var put = HistoryRecordFormat.Objects(new HistoryObservation((HistoryKind)(byte)request.Kind, request.Product, request.Region,
                 observation.ObservedAt, url.AbsoluteUri, bytes));
-            objects[put[0].Key] = bytes; stored.Add(put[0].Key);
+            objects[put[0].Key] = bytes;
+            var newlyStored = stored.Add(put[0].Key);
             history.Add(new HistoryEntry((HistoryKind)(byte)request.Kind, request.Product, request.Region, observation.ObservedAt, url.AbsoluteUri, put[0].Key, put[1].Key));
+            // Publish never blocks, so it's safe under the lock here.
+            if (newlyStored) commits.Publish([put[0].Key], []);
             return Task.FromResult(new ObservationResult(ObjectState.Present, observation, true));
         }
     }

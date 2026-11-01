@@ -175,6 +175,66 @@ public abstract class ObjectSourceContract
         await Assert.ThrowsAsync<ArgumentNullException>(() => source.HasKeysAsync(null!, None));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => source.HasKeysAsync([a.Key], new CancellationToken(true)));
     }
+
+    [Fact]
+    public async Task FetchingPublishesEachNewlyStoredKeyOnceAndHasKeysAlreadyAgrees()
+    {
+        var a = Synthetic.Config(1); var b = Synthetic.Headerless(2, 400);
+        var source = Arrange([a, b]);
+        var subscription = ((IStoreCommits)source).Subscribe();
+        var seen = new List<ObjectKey>();
+        var reader = Task.Run(async () =>
+        {
+            await foreach (var commit in subscription.Reader.ReadAllAsync())
+            {
+                Assert.Empty(commit.Removed);
+                Assert.All(await source.HasKeysAsync(commit.Stored, None), Assert.True);
+                seen.AddRange(commit.Stored);
+            }
+        });
+        await source.GetKeysAsync([new(a.Key), new(b.Key, 400), new(a.Key)], Context, FetchPriority.Background, null, None);
+        subscription.Dispose();   // ends the reader once it has drained what was published
+        await reader;
+        Assert.Equal(new[] { a.Key, b.Key }.Order(), seen.Order());
+        Assert.False(subscription.TakeMissed());
+    }
+
+    [Fact]
+    public async Task FetchingAStoredKeyPublishesNothing()
+    {
+        var a = Synthetic.Config(1);
+        var source = Arrange([a]);
+        await source.GetKeyAsync(new(a.Key), Context, FetchPriority.Interactive, None);
+        using var subscription = ((IStoreCommits)source).Subscribe();
+        await source.GetKeyAsync(new(a.Key), Context, FetchPriority.Interactive, None);
+        await source.GetKeysAsync([new(a.Key)], Context, FetchPriority.Background, null, None);
+        Assert.False(subscription.Reader.TryRead(out _));
+        Assert.False(subscription.TakeMissed());
+    }
+
+    [Fact]
+    public async Task ADisposedSubscriptionGetsNothingMore()
+    {
+        var a = Synthetic.Config(1); var b = Synthetic.Config(2);
+        var source = Arrange([a, b]);
+        var commits = (IStoreCommits)source;
+        var gone = commits.Subscribe();
+        using var kept = commits.Subscribe();
+        await source.GetKeyAsync(new(a.Key), Context, FetchPriority.Interactive, None);
+        Assert.Equal([a.Key], Assert.Single(Drain(gone)).Stored);
+        gone.Dispose();
+        await source.GetKeyAsync(new(b.Key), Context, FetchPriority.Interactive, None);
+        Assert.False(gone.Reader.TryRead(out _));
+        Assert.True(gone.Reader.Completion.IsCompleted);
+        Assert.Equal([a.Key, b.Key], Drain(kept).SelectMany(c => c.Stored));
+    }
+
+    private static List<StoreCommit> Drain(StoreCommitSubscription subscription)
+    {
+        var commits = new List<StoreCommit>();
+        while (subscription.Reader.TryRead(out var commit)) commits.Add(commit);
+        return commits;
+    }
 }
 
 public sealed class RealObjectSourceContractTests : ObjectSourceContract

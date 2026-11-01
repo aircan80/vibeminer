@@ -6,8 +6,9 @@ namespace VibeMiner.ObjectAccess;
 /// <summary>
 /// The real <see cref="IObjectSource"/>: the profile's own store, then the shared dev store (read-only; copied in, never pointed
 /// into), then the CDN. CDN bytes are verified before they are put, in batches, and every object records where it came from.
+/// Each commit it makes to the own store is published to <see cref="IStoreCommits"/> subscribers after the store has committed it.
 /// </summary>
-public sealed class ObjectSource : IObjectSource
+public sealed class ObjectSource : IObjectSource, IStoreCommits
 {
     private readonly IObjectReader store;
     private readonly IObjectWriter writer;
@@ -18,6 +19,7 @@ public sealed class ObjectSource : IObjectSource
     private readonly ObjectSourceOptions options;
     private readonly CdnFetcher fetcher;
     private readonly Sink sink;
+    private readonly StoreCommitFeed commits = new();
 
     public ObjectSource(IObjectReader store, IObjectWriter writer, IHistoryLog history, IObjectReader? sharedStore, ICdnClient cdn,
         IReadOnlyList<IObservationSource> observationSources, IObjectVerifier verifier, ObjectSourceOptions? options = null, ICdnClient? interactiveCdn = null)
@@ -30,6 +32,12 @@ public sealed class ObjectSource : IObjectSource
 
     /// <summary>The shared streams, so callers and tests can see the background limit and what is in use.</summary>
     public StreamScheduler Streams => fetcher.Streams;
+
+    public StoreCommitSubscription Subscribe(int capacity = StoreCommitFeed.DefaultCapacity) => commits.Subscribe(capacity);
+
+    /// <summary>Publishes the keys a committed put actually stored (not already present, not refused).</summary>
+    private void PublishStored(IReadOnlyList<PutResult> put) =>
+        commits.Publish(put.Where(p => p.Outcome == PutOutcome.Stored).Select(p => p.Key).ToArray(), []);
 
     public async Task<ObjectResult> GetKeyAsync(ObjectRequest request, CdnContext? cdn, FetchPriority priority, CancellationToken cancellationToken)
     {
@@ -96,6 +104,7 @@ public sealed class ObjectSource : IObjectSource
         {
             var put = await history.AppendHistoryAsync(new HistoryObservation((HistoryKind)(byte)observation.Kind, observation.Product, observation.Region,
                 observation.ObservedAt, observation.Url.AbsoluteUri, observation.Bytes), cancellationToken).ConfigureAwait(false);
+            PublishStored(put);
             var refused = put.FirstOrDefault(p => p.Outcome is PutOutcome.Refused or PutOutcome.Canceled);
             return refused is null ? new(ObjectState.Present, observation, true)
                 : new(ObjectState.StoreFailed, observation, false, refused.Code ?? "OBJECT_ACCESS_CANCELED", refused.Message);
@@ -136,7 +145,11 @@ public sealed class ObjectSource : IObjectSource
     /// <summary>A stored copy that fails its read checks (or whose pack is gone) is deleted so a fresh copy can be put.</summary>
     private async Task DropDamagedAsync(ObjectKey key, CancellationToken cancellationToken)
     {
-        try { await writer.DeleteAsync([key], cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            var deleted = await writer.DeleteAsync([key], cancellationToken).ConfigureAwait(false);
+            commits.Publish([], deleted.Where(d => d.Outcome == DeleteOutcome.Deleted).Select(d => d.Key).ToArray());
+        }
         catch (ObjectStoreException) { /* the Put that follows reports the store's state */ }
     }
 
@@ -184,6 +197,7 @@ public sealed class ObjectSource : IObjectSource
                     await staging.AppendAsync(slice, cancellationToken).ConfigureAwait(false);
                 }
                 var put = await staging.CommitAsync(cancellationToken).ConfigureAwait(false);
+                PublishStored([put]);
                 return put.Outcome == PutOutcome.Refused ? null : Sink.FromPut(put, ServedFrom.SharedStore, declared);
             }
             catch (ObjectStoreException ex) when (ex.Code == ObjectStoreCodes.StagingRejected)
@@ -213,6 +227,7 @@ public sealed class ObjectSource : IObjectSource
             }
             catch (ObjectStoreException ex)
             { return objects.Select(o => new ObjectResult(o.Request.Key, ObjectState.StoreFailed, Code: ex.Code, Message: ex.Message)).ToArray(); }
+            owner.PublishStored(put);
             return objects.Select((o, i) =>
             {
                 var r = FromPut(put[i], servedFrom, o.DeclaredLength);
@@ -250,6 +265,7 @@ public sealed class ObjectSource : IObjectSource
                     catch (CdnException failure) { return CdnFetcher.FromCdnFailure(request.Key, failure); }
                     catch (ObjectStoreException ex) when (ex.Code == ObjectStoreCodes.StagingRejected) { rejected = (ex.Code, ex.Message); continue; }
                     var put = await staging.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    owner.PublishStored([put]);
                     if (put.Outcome == PutOutcome.Refused) { rejected = (put.Code, put.Message); continue; }
                     return FromPut(put, ServedFrom.Cdn, declaredLength);
                 }
