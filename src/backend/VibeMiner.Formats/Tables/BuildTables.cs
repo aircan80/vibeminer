@@ -14,11 +14,13 @@ namespace VibeMiner.Formats.Tables;
 /// file only when the generated store doesn't hold its rows yet. The handle asks WoWDBDefs at most once (one fetch budget).
 /// A layer 2 failure layer 4 throws while checking stored state (<see cref="ObjectStoreException"/>) is the table's StoreFailed.
 /// Reading a DB2 file (a check that builds, a protected-ID lookup) and each chunk of a scan run in a <paramref name="scheduler"/>
-/// slot of the call's priority; anything served from the generated store takes none (D263).
+/// slot of the call's priority; anything served from the generated store takes none (D263). While a table isn't in the generated
+/// store, an Interactive unfiltered page, row by ID or schema reads the DB2 file directly and starts the build in the background
+/// (D330): the answer is the one the generated path gives once built, identity included.
 /// </summary>
 internal sealed class BuildTables(IBuildFiles files, string version, WowLocale locale, TablesService.Manifest manifest, TableDefinitions definitions,
     IGeneratedTables generated, Db2Limits limits, Func<BuildRef, ITactKeyStatus> keys, int maxScanRows, int maxReferenceSources, long maxReferenceScanRows,
-    ProtectedIds protectedIds, TableWorkScheduler scheduler) : IBuildTables
+    ProtectedIds protectedIds, TableWorkScheduler scheduler, BackgroundBuilds builds) : IBuildTables
 {
     /// <summary>The unmanifested DB2s looked for: listfile names under dbfilesclient/ only, so no other file's head is read.</summary>
     private static readonly FileFilter Db2Names = new() { PathPrefix = "dbfilesclient/", Formats = new HashSet<FileFormat> { FileFormat.Db2 } };
@@ -146,7 +148,8 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
     // CheckAsync
 
     /// <summary>A check's outcome: the entry, the stored table when it opened, and the definition it read with.</summary>
-    private sealed record Opened(TableEntry Entry, GeneratedTable? Table, DefinitionTable? Definition, DefinitionResolution? Resolution);
+    private sealed record Opened(TableEntry Entry, GeneratedTable? Table, DefinitionTable? Definition, DefinitionResolution? Resolution,
+        DirectRead? Direct = null);
 
     public async Task<TableEntry> CheckAsync(TableRef table, TablePriority priority, CancellationToken cancellationToken)
     {
@@ -156,7 +159,12 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
         finally { await ExitAsync().ConfigureAwait(false); }
     }
 
-    private async Task<Opened> OpenAsync(TableRef table, TablePriority priority, CancellationToken cancellationToken)
+    /// <summary>
+    /// A check. With <paramref name="direct"/> at Interactive priority, a table not in the generated store yet comes back as a
+    /// <see cref="DirectRead"/> (the caller disposes it) while its build runs in the background, unless the file doesn't open
+    /// directly or its last background build failed; then, as without it, the call waits for the build.
+    /// </summary>
+    private async Task<Opened> OpenAsync(TableRef table, TablePriority priority, CancellationToken cancellationToken, bool direct = false)
     {
         uint id;
         DefinitionTable? definition;
@@ -183,7 +191,20 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
 
         // From here the file is read: in a slot. A caller joining a build another one started holds its own lane's slot while it
         // waits, so it never waits behind queued work of the other lane.
-        using var slot = await scheduler.EnterAsync(priority, cancellationToken).ConfigureAwait(false);
+        var slot = await scheduler.EnterAsync(priority, cancellationToken).ConfigureAwait(false);
+        DirectRead? handed = null;
+        try
+        {
+            var opened = await OpenSlottedAsync(id, definition, contentKey, status, slot, priority, cancellationToken, direct).ConfigureAwait(false);
+            handed = opened.Direct;
+            return opened;
+        }
+        finally { if (handed is null) slot.Dispose(); }
+    }
+
+    private async Task<Opened> OpenSlottedAsync(uint id, DefinitionTable definition, string? contentKey, ITactKeyStatus status, TableWorkSlot slot,
+        TablePriority priority, CancellationToken cancellationToken, bool direct)
+    {
         // The definition the reader will select from: by the file's own layout, so a build listed only by layout resolves too.
         var (layout, unread) = await LayoutAsync(id, cancellationToken).ConfigureAwait(false);
         var resolution = await ResolveAsync(definition.TableId, layout, cancellationToken).ConfigureAwait(false);
@@ -194,11 +215,20 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
             return new(new(id, definition.Name, unusable, true, TableStates.DefinitionReason(resolution), null, contentKey), null, definition, resolution);
 
         var document = resolution.Definition!.Document;
+        var source = Source(contentKey!, resolution.Definition);
+        if (direct && priority == TablePriority.Interactive && !builds.HasFailed(source))
+        {
+            // The build may have ended while this call waited for its slot.
+            if (await generated.OpenAsync(source, status, cancellationToken).ConfigureAwait(false) is { } built)
+                return new(Checked(id, definition.Name, contentKey, built), built, definition, resolution);
+            if (await DirectAsync(id, definition.Name, contentKey!, document, source, status, slot, cancellationToken).ConfigureAwait(false) is { } read)
+                return new(read.Entry, null, definition, resolution, read);
+        }
         var opens = new List<Db2Open>();
         try
         {
-            var stored = await generated.GetOrBuildAsync(Source(contentKey!, resolution.Definition), status,
-                token => DecodeAsync(id, document, opens, token), cancellationToken).ConfigureAwait(false);
+            var stored = await generated.GetOrBuildAsync(source, status, token => DecodeAsync(id, document, opens, token), cancellationToken).ConfigureAwait(false);
+            builds.Stored(source);
             return new(Checked(id, definition.Name, contentKey, stored), stored, definition, resolution);
         }
         catch (OpenFailedException failed)
@@ -277,10 +307,100 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
             throw new OpenFailedException(open);
         }
         lock (opens) opens.Add(open);
-        // Decrypted sections' keys too: their rows depend on the key, so the identity carries its fingerprint (#179, D310).
-        var used = TableStates.KeyNames(table.Sections.Where(section => section.IsEncrypted).Select(section => section.Key)
-            .Concat(open.Holes.Select(hole => hole.Name)));
-        return new GeneratedTableContent(table.Header, table.Sections, table.Completion, [.. used], RowsAsync(open, token), open);
+        return new GeneratedTableContent(table.Header, table.Sections, table.Completion, [.. KeysUsed(table, open)], RowsAsync(open, token), open);
+    }
+
+    /// <summary>The key names a decode depends on, sorted. Decrypted sections' keys too: their rows depend on the key, so the identity
+    /// carries its fingerprint (#179, D310).</summary>
+    private static IReadOnlyList<string> KeysUsed(Db2Table table, Db2Open open) =>
+        TableStates.KeyNames(table.Sections.Where(section => section.IsEncrypted).Select(section => section.Key).Concat(open.Holes.Select(hole => hole.Name)));
+
+    /// <summary>
+    /// Opens the DB2 file for a direct read (D330) in the caller's slot and starts the table's build in the background. The entry and
+    /// identity are the ones the stored table will have. Null when the file doesn't open, or has broken copy chains (any full read
+    /// then fails): the caller waits for the build, which says why.
+    /// </summary>
+    private async Task<DirectRead?> DirectAsync(uint id, string? name, string contentKey, DbdDocument document, GeneratedTableSource source,
+        ITactKeyStatus status, TableWorkSlot slot, CancellationToken cancellationToken)
+    {
+        Db2Open open;
+        try { open = await Db2Reader.OpenAsync(files, FileRef.Id(id), document, version, limits, cancellationToken).ConfigureAwait(false); }
+        catch (Exception e) when (e is Db2FormatException or Db2SourceException or ObjectStoreException) { return null; }
+        if (open.State != Db2OpenState.Open || open.Table is not { UnresolvedCopies: 0 } table)
+        {
+            await open.DisposeAsync().ConfigureAwait(false);
+            return null;
+        }
+        try
+        {
+            var used = KeysUsed(table, open);
+            var rows = table.ReadableRowCount;
+            var (state, reason, counts) = TableStates.Generated(table.Header, table.Sections, table.Completion, used, rows);
+            var identity = generated.IdentityOf(source, status, used);
+            BuildInBackground(id, document, source, status);
+            return new DirectRead(new(id, name, state, true, reason, counts, contentKey), identity, table, rows, open, slot);
+        }
+        catch
+        {
+            await open.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Builds the table in a Background slot, detached from the call that asked, unless <see cref="BackgroundBuilds"/> says one runs
+    /// or too many do. It joins any build of the same table already running (one decode per table), and holds the handle's files
+    /// open until it ends, also past the handle's dispose. It is never canceled; a failure is remembered so later calls wait for
+    /// the build and answer its state. A full Background queue starts nothing: a later direct read tries again.
+    /// </summary>
+    private void BuildInBackground(uint id, DbdDocument document, GeneratedTableSource source, ITactKeyStatus status)
+    {
+        if (!builds.TryStart(source)) return;
+        // Called inside a running call, so the files are still open.
+        Interlocked.Increment(ref running);
+        _ = BuildAsync();
+
+        async Task BuildAsync()
+        {
+            bool stored = false, failure = false;
+            try
+            {
+                await Task.Yield();
+                using var slot = await scheduler.EnterAsync(TablePriority.Background, CancellationToken.None).ConfigureAwait(false);
+                await generated.GetOrBuildAsync(source, status, token => DecodeAsync(id, document, [], token), CancellationToken.None).ConfigureAwait(false);
+                stored = true;
+            }
+            catch (TablesBusyException) { }
+            // Detached: nobody observes it. Any failure (a reader, layer 4 or store one) sends later calls to the generated path.
+            catch (Exception) { failure = true; }
+            finally
+            {
+                builds.End(source, stored, failure);
+                await ExitAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>A direct read's open DB2 file and the slot it reads in, both released on dispose.</summary>
+    private sealed class DirectRead(TableEntry entry, string identity, Db2Table table, long rowCount, Db2Open open, TableWorkSlot slot) : IAsyncDisposable
+    {
+        public TableEntry Entry => entry;
+        public string Identity => identity;
+        public Db2Table Table => table;
+        public long RowCount => rowCount;
+
+        public async Task<IReadOnlyList<Db2Row>> ReadAsync(long first, int count, CancellationToken token)
+        {
+            var rows = new List<Db2Row>(count);
+            await foreach (var row in table.ReadOrdinalsAsync(first, count, token).ConfigureAwait(false)) rows.Add(row);
+            return rows;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            try { await open.DisposeAsync().ConfigureAwait(false); }
+            finally { slot.Dispose(); }
+        }
     }
 
     private static async IAsyncEnumerable<Db2Row> RowsAsync(Db2Open open, [EnumeratorCancellation] CancellationToken token)
@@ -306,7 +426,11 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
         Enter(priority, cancellationToken);
         try
         {
-            var opened = await OpenAsync(table, priority, cancellationToken).ConfigureAwait(false);
+            var opened = await OpenAsync(table, priority, cancellationToken, direct: true).ConfigureAwait(false);
+            if (opened.Direct is { } read)
+                await using (read)
+                    return new(read.Entry, read.Table.Header.Columns,
+                        await SchemaOfAsync(opened.Definition!, read.Table.Header.LayoutHash, cancellationToken).ConfigureAwait(false));
             if (opened.Table is { } stored)
                 return new(opened.Entry, stored.Header.Columns, await SchemaOfAsync(opened.Definition!, stored, cancellationToken).ConfigureAwait(false));
             return new(opened.Entry, null, opened.Resolution is { State: DefinitionState.Resolved } resolved ? resolved.Schema : null);
@@ -315,9 +439,12 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
     }
 
     /// <summary>The schema of the stored table's own layout, from a local lookup; null when none resolves.</summary>
-    private async Task<TableSchema?> SchemaOfAsync(DefinitionTable definition, GeneratedTable stored, CancellationToken cancellationToken)
+    private Task<TableSchema?> SchemaOfAsync(DefinitionTable definition, GeneratedTable stored, CancellationToken cancellationToken) =>
+        SchemaOfAsync(definition, stored.Header.LayoutHash, cancellationToken);
+
+    private async Task<TableSchema?> SchemaOfAsync(DefinitionTable definition, string layout, CancellationToken cancellationToken)
     {
-        var resolution = await definitions.ResolveAsync(definition.TableId, version, stored.Header.LayoutHash, locale,
+        var resolution = await definitions.ResolveAsync(definition.TableId, version, layout, locale,
             DefinitionLookup.Local, cancellationToken).ConfigureAwait(false);
         return resolution.State == DefinitionState.Resolved ? resolution.Schema : null;
     }
@@ -330,7 +457,18 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
         Enter(priority, cancellationToken);
         try
         {
-            var opened = await OpenAsync(request.Table, priority, cancellationToken).ConfigureAwait(false);
+            var opened = await OpenAsync(request.Table, priority, cancellationToken, direct: request.Filters is not { Count: > 0 }).ConfigureAwait(false);
+            if (opened.Direct is { } direct)
+            {
+                await using (direct)
+                {
+                    if (!TableQueries.IsReadable(direct.Entry.State)) return TableQueries.NotReadable(direct.Entry);
+                    try { return await TableQueries.PageAsync(direct.Entry, direct.Identity, request, direct.RowCount, direct.ReadAsync, cancellationToken).ConfigureAwait(false); }
+                    // A row that doesn't read fails the build too: the generated path below says how.
+                    catch (Exception e) when (e is Db2FormatException or Db2SourceException) { }
+                }
+                opened = await OpenAsync(request.Table, priority, cancellationToken).ConfigureAwait(false);
+            }
             if (opened.Table is not { } stored || !TableQueries.IsReadable(opened.Entry.State)) return TableQueries.NotReadable(opened.Entry);
             try
             {
@@ -376,13 +514,29 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
     {
         TableQueries.Validate(table);
         Enter(priority, cancellationToken);
-        try { return await GetCoreAsync(table, id, priority, cancellationToken).ConfigureAwait(false); }
+        try { return await GetCoreAsync(table, id, priority, cancellationToken, direct: true).ConfigureAwait(false); }
         finally { await ExitAsync().ConfigureAwait(false); }
     }
 
-    private async Task<TableRowResult> GetCoreAsync(TableRef table, uint id, TablePriority priority, CancellationToken cancellationToken)
+    private async Task<TableRowResult> GetCoreAsync(TableRef table, uint id, TablePriority priority, CancellationToken cancellationToken, bool direct = false)
     {
-        var opened = await OpenAsync(table, priority, cancellationToken).ConfigureAwait(false);
+        var opened = await OpenAsync(table, priority, cancellationToken, direct).ConfigureAwait(false);
+        if (opened.Direct is { } read)
+        {
+            await using (read)
+            {
+                try
+                {
+                    // The generated path's order: the row, Absent for a Ready table, else the file's protected IDs.
+                    var (ordinal, lookup) = await read.Table.FindWithOrdinalAsync(id, cancellationToken).ConfigureAwait(false);
+                    if (lookup is Db2Lookup.Found found) return new(read.Entry, TableRowOutcome.Found, new TableRow(ordinal, found.Row), null);
+                    if (read.Entry.State == TableState.Ready) return new(read.Entry, TableRowOutcome.Absent, null, null);
+                    return lookup is Db2Lookup.Protected hit ? new(read.Entry, TableRowOutcome.Protected, null, hit.Key) : new(read.Entry, TableRowOutcome.Unknown, null, null);
+                }
+                catch (Exception e) when (e is Db2FormatException or Db2SourceException) { }
+            }
+            opened = await OpenAsync(table, priority, cancellationToken).ConfigureAwait(false);
+        }
         var entry = opened.Entry;
         if (opened.Table is not { } stored) return new(entry, TableRowOutcome.Unknown, null, null);
         try

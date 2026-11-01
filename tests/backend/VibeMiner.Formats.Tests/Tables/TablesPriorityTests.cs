@@ -79,13 +79,15 @@ public sealed class TablesPriorityTests
         var b3 = tables.CheckAsync(3, Later, Ct);
         await scheduler.WhenAsync(() => scheduler.Queued(Later) == 1).WaitAsync(Guard);
 
-        // Table 5 isn't built yet either: the page builds it in an Interactive slot.
+        // Table 5 isn't built yet either: the page reads it directly in an Interactive slot and queues its build (D330).
         var page = await tables.PageAsync(new(5), Now, Ct).WaitAsync(Guard);
         Assert.Equal(TablePageState.Ok, page.State);
         Assert.Equal(["5", "35"], page.Rows.Single().Row.Values);
         Assert.Equal(TableState.Ready, page.Table.State);
         Assert.False(b1.IsCompleted || b2.IsCompleted || b3.IsCompleted);
         Assert.Equal(0, gates.Decodes(3));
+        Assert.Equal(0, gates.Decodes(5));
+        await scheduler.WhenAsync(() => scheduler.Queued(Later) == 2).WaitAsync(Guard);
 
         // The queued Background build starts once a Background slot frees.
         gates.Release(1);
@@ -94,7 +96,10 @@ public sealed class TablesPriorityTests
         Assert.False(b2.IsCompleted);
         gates.Release(2);
         Assert.Equal(TableState.Ready, (await b2.WaitAsync(Guard)).State);
-        Assert.Equal((0, 0), (scheduler.Running(Later), scheduler.Queued(Later)));
+        // Table 5's build ran last, behind the Background work queued before it.
+        await scheduler.WhenAsync(() => scheduler.Running(Later) == 0 && scheduler.Queued(Later) == 0).WaitAsync(Guard);
+        await gates.Started(5).WaitAsync(Guard);
+        Assert.Equal(1, gates.Decodes(5));
     }
 
     [Fact]
@@ -109,13 +114,13 @@ public sealed class TablesPriorityTests
         var b3 = tables.CheckAsync(3, Later, Ct);
         await scheduler.WhenAsync(() => scheduler.Queued(Later) == 1).WaitAsync(Guard);
 
-        var joined = tables.SchemaAsync(1, Now, Ct);
+        // A check joins the build; a page or schema would read the file directly instead (D330).
+        var joined = tables.CheckAsync(1, Now, Ct);
         await gates.Asked(1, 2).WaitAsync(Guard);
         Assert.Equal(1, scheduler.Running(Now));
         gates.Release(1);
 
-        var schema = await joined.WaitAsync(Guard);
-        Assert.Equal(TableState.Ready, schema.Table.State);
+        Assert.Equal(TableState.Ready, (await joined.WaitAsync(Guard)).State);
         Assert.Equal(TableState.Ready, (await b1.WaitAsync(Guard)).State);
         // One build served both, and the gated Background work still waits.
         Assert.Equal(1, gates.Decodes(1));

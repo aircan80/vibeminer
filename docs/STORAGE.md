@@ -199,6 +199,8 @@ Code: [`src/backend/VibeMiner.Generated/`](../src/backend/VibeMiner.Generated/),
 
 **Generated tables** (layer 5, `VibeMiner.Formats/Generated/`) keep one DB2 table's decoded rows in one record file, encoded as `rows-v1` ([D214](DECISIONS.md)). Identity ([D213](DECISIONS.md)): product, build and CDN config, locale, content key, definition version, the reader's options, reader revision and row encoding, plus the status of each TACT key the table's decoding used. A chain of small node objects finds the table from the current key statuses, so a late key rebuilds only the tables that used it. Damaged pieces read as a miss and are deleted. Old tables a late key replaced stay until a collector exists.
 
+**Before a table is stored** ([D330](DECISIONS.md)-[D332](DECISIONS.md)), an Interactive unfiltered page, row by ID or schema reads the DB2 file directly and starts the table's one build in a Background slot; the answer, identity included, is the one the stored table gives. On a synthetic 400,000-row table cold: 158 ms direct, 1,483 ms waiting for the build.
+
 ### Measured
 
 Synthetic table-like rows (25 values as text: ints, floats, short strings; 2% copies), i9-13900K, btrfs on LUKS on NVMe, Release, workstation GC, page cache warm; `tools/benchmarks/GeneratedStore` ([README](../tools/benchmarks/GeneratedStore/README.md), which also has record-level and cold numbers). Random 50-row `GeneratedTable` pages and lookups after a reopen, three runs. The slow test `RecordFilePageLatencyTests` pins a 50-record page's p99 under 1 ms on this machine (best of 3 rounds; 5 ms on CI runners).

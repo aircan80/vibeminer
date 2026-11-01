@@ -161,6 +161,61 @@ public sealed class Db2TableTests
         }
     }
 
+    // #194: row ordinals are positions in ReadAllAsync order. Section 0 is clear, section 1 keyed and decrypted, section 2
+    // keyed and hidden; copies 10 and 24 end at hidden IDs, so they are protected and have no ordinal.
+    [Fact]
+    public async Task Ordinal_windows_count_and_lookups_match_ReadAllAsync_across_copies_and_keyed_sections()
+    {
+        var definition=Definition("int ID\nint Value","$noninline,id$ID<u32>\nValue<u32>");
+        ulong keyA=MemoryByteSource.TestKeyName(194),keyB=MemoryByteSource.TestKeyName(195);
+        var bytes=Build([new(0,0,0,32,0,0,0,0,0,[])],4,[new(U32(99,100),[7,8],[],[(9,7),(10,40),(11,8)]),
+            new(U32(5,6),[21,22],[],[(23,21),(24,41)],keyA,[21,22,23,24]),new(U32(1,2),[40,41],[],[],keyB,[40,41])]);
+        var table=await Db2Reader.OpenAsync(MemoryByteSource.Hiding(bytes,2),definition,"1.2.3.4",new(AllowPartialEncryptedSections:true));
+        Assert.Equal([false,true,false],table.Sections.Select(section=>section.IsDecrypted));
+        var all=await Rows(table.ReadAllAsync());
+        Assert.Equal([7u,8u,21u,22u,9u,11u,23u],all.Select(row=>row.Id));
+        Assert.Equal(all.Count,table.ReadableRowCount);
+
+        for(var first=0;first<=all.Count;first++)
+            for(var count=0;count<=all.Count+1;count++)
+                Assert.Equal(all.Skip(first).Take(count).Select(Key),(await Rows(table.ReadOrdinalsAsync(first,count,default))).Select(Key));
+
+        for(var ordinal=0;ordinal<all.Count;ordinal++)
+        {
+            var (found,lookup)=await table.FindWithOrdinalAsync(all[ordinal].Id,default);
+            Assert.Equal(ordinal,found);Assert.Equal(Key(all[ordinal]),Key(Assert.IsType<Db2Lookup.Found>(lookup).Row));
+        }
+        foreach(var id in new uint[]{10,24,40,41,5})
+        {
+            var (found,lookup)=await table.FindWithOrdinalAsync(id,default);
+            Assert.Equal(-1,found);Assert.Equal(await table.FindAsync(id),lookup);
+        }
+        Assert.IsType<Db2Lookup.Protected>((await table.FindWithOrdinalAsync(10,default)).Lookup);
+        Assert.IsType<Db2Lookup.NotInReadableSections>((await table.FindWithOrdinalAsync(5,default)).Lookup);
+    }
+
+    [Fact]
+    public async Task Ordinal_reads_clamp_at_the_end_refuse_bad_arguments_and_throw_at_an_unresolved_copy()
+    {
+        var definition=Definition("int ID\nint Value","$noninline,id$ID<u32>\nValue<u32>");
+        // As in the broken-chain test: copies 9 and 16 resolve, 10, 12, 13 and 14 are unresolved but still counted.
+        var bytes=Build([new(0,0,0,32,0,0,0,0,0,[])],4,[new(U32(99,100),[7,8],[],[(9,7),(10,11),(12,13),(13,12),(14,16),(16,9)])]);
+        var table=await Db2Reader.OpenAsync(new MemoryByteSource(bytes),definition,"1.2.3.4",new(MaxCopyDepth:2));
+        Assert.Equal(8,table.ReadableRowCount);
+        Assert.Equal([16u],(await Rows(table.ReadOrdinalsAsync(7,int.MaxValue,default))).Select(row=>row.Id));
+        Assert.Empty(await Rows(table.ReadOrdinalsAsync(8,5,default)));
+        Assert.Equal([9u],(await Rows(table.ReadOrdinalsAsync(2,1,default))).Select(row=>row.Id));
+        await AssertFails("DB2_INVALID",NoSource,()=>Rows(table.ReadOrdinalsAsync(3,1,default)));
+        Assert.Throws<ArgumentOutOfRangeException>(()=>table.ReadOrdinalsAsync(-1,1,default));
+        Assert.Throws<ArgumentOutOfRangeException>(()=>table.ReadOrdinalsAsync(0,-1,default));
+        Assert.Throws<ArgumentOutOfRangeException>(()=>table.ReadOrdinalsAsync(9,1,default));
+        var (ordinal,lookup)=await table.FindWithOrdinalAsync(16,default);
+        Assert.Equal(7,ordinal);Assert.Equal(16u,Assert.IsType<Db2Lookup.Found>(lookup).Row.Id);
+    }
+
+    private static async Task<List<Db2Row>> Rows(IAsyncEnumerable<Db2Row> rows){var list=new List<Db2Row>();await foreach(var row in rows)list.Add(row);return list;}
+    private static string Key(Db2Row row)=>$"{row.Id}|{row.IsCopy}|{row.CopySourceId}|{string.Join(",",row.Values)}|{string.Join(",",(row.TextIssues??[]).Select(issue=>issue.ToString()))}";
+
     private static async Task AssertFails(string code,string message,Func<Task> action)
     {
         var error=await Assert.ThrowsAsync<Db2FormatException>(action);

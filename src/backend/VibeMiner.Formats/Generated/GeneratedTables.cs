@@ -73,8 +73,7 @@ public sealed class GeneratedTables : IGeneratedTables
         ArgumentNullException.ThrowIfNull(content.Completion, nameof(content));
         ArgumentNullException.ThrowIfNull(content.KeysUsed, nameof(content));
         ArgumentNullException.ThrowIfNull(content.Rows, nameof(content));
-        if (content.KeysUsed.Count > TactKeyNames.MaxKeys) throw new ArgumentException($"A table depends on at most {TactKeyNames.MaxKeys} keys.", nameof(content));
-        foreach (var name in content.KeysUsed) TactKeyNames.Check(name, nameof(content));
+        var used = UsedKeys(content.KeysUsed, nameof(content));
         foreach (var section in content.Sections)
         {
             ArgumentNullException.ThrowIfNull(section, nameof(content));
@@ -86,7 +85,6 @@ public sealed class GeneratedTables : IGeneratedTables
         cancellationToken.ThrowIfCancellationRequested();
 
         var lookup = new Lookup(source, keys);
-        string[] used = [.. content.KeysUsed.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
         var finalKey = lookup.Node(used);
 
         // Already stored and whole: keep it. Whatever is there and not whole has been deleted by the check.
@@ -120,6 +118,22 @@ public sealed class GeneratedTables : IGeneratedTables
 
         return await OpenFileAsync(lookup, finalKey, used, cancellationToken).ConfigureAwait(false)
             ?? throw TableJson.Corrupt("The table read back damaged right after it was stored.");
+    }
+
+    public string IdentityOf(GeneratedTableSource source, ITactKeyStatus keys, IReadOnlyCollection<string> keysUsed)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(keys);
+        ArgumentNullException.ThrowIfNull(keysUsed);
+        return new Lookup(source, keys).Node(UsedKeys(keysUsed, nameof(keysUsed))).Hex;
+    }
+
+    /// <summary>The keys a table depends on as it is filed: checked, distinct, in ordinal order.</summary>
+    private static string[] UsedKeys(IReadOnlyCollection<string> keysUsed, string paramName)
+    {
+        if (keysUsed.Count > TactKeyNames.MaxKeys) throw new ArgumentException($"A table depends on at most {TactKeyNames.MaxKeys} keys.", paramName);
+        foreach (var name in keysUsed) TactKeyNames.Check(name, paramName);
+        return [.. keysUsed.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
     }
 
     /// <summary>Rounds of open-then-join before a caller stops sharing and builds for its own key status.</summary>

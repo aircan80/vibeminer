@@ -5,7 +5,7 @@ namespace VibeMiner.Formats;
 
 /// <summary>An opened DB2 table: structure checked and ID indexes built, rows decoded on demand. Immutable, and safe for
 /// concurrent reads when its byte source is. Row decoding errors surface when that row is read.</summary>
-public sealed class Db2Table
+public sealed partial class Db2Table
 {
     private readonly Db2Reader.TableState state;
     internal Db2Table(Db2Reader.TableState state,Db2TableHeader header,IReadOnlyList<Db2Section> sections,Db2Completion completion,int unresolvedCopies)

@@ -247,6 +247,59 @@ public sealed class GeneratedTablesTests
     }
 
     [Fact]
+    public async Task IdentityOf_is_the_identity_the_stored_table_gets()
+    {
+        var store = new InMemoryGeneratedStore();
+        var tables = new GeneratedTables(store);
+        var plain = tables.IdentityOf(Source(), TactKeyStatus.None, []);
+        Assert.Equal(0, store.Count);
+        Assert.Matches("^[0-9a-f]{32}$", plain);
+        Assert.Equal(plain, (await tables.StoreAsync(Source(), TactKeyStatus.None, Content(SimpleRows(2)))).Identity);
+
+        // Unsorted, with a duplicate: filed under the same sorted distinct set.
+        var keyed = tables.IdentityOf(Source(), Known(K1), [K2, K1, K2]);
+        Assert.NotEqual(plain, keyed);
+        Assert.Equal(keyed, (await tables.StoreAsync(Source(), Known(K1), Content(SimpleRows(2), K2, K1, K2))).Identity);
+        Assert.Equal(keyed, tables.IdentityOf(Source(), Known(K1), [K1, K2]));
+        Assert.NotEqual(keyed, tables.IdentityOf(Source(locale: "deDE"), Known(K1), [K1, K2]));
+    }
+
+    [Fact]
+    public async Task IdentityOf_follows_a_key_status_change_as_the_stored_table_does()
+    {
+        var tables = new GeneratedTables(new InMemoryGeneratedStore());
+        var before = tables.IdentityOf(Source(), TactKeyStatus.None, [K1]);
+        Assert.Equal(before, (await tables.StoreAsync(Source(), TactKeyStatus.None, Content(SimpleRows(2), K1))).Identity);
+
+        var known = tables.IdentityOf(Source(), Known(K1), [K1]);
+        Assert.NotEqual(before, known);
+        Assert.Equal(known, (await tables.StoreAsync(Source(), Known(K1), Content(SimpleRows(2), K1))).Identity);
+
+        var refingered = new TactKeyStatus(new Dictionary<string, string> { [K1] = "fp-other" });
+        var changed = tables.IdentityOf(Source(), refingered, [K1]);
+        Assert.NotEqual(known, changed);
+        Assert.Equal(changed, (await tables.StoreAsync(Source(), refingered, Content(SimpleRows(2), K1))).Identity);
+        // A key the table doesn't use changes nothing.
+        Assert.Equal(before, tables.IdentityOf(Source(), Known(K2), [K1]));
+        Assert.Equal(tables.IdentityOf(Source(), TactKeyStatus.None, []), tables.IdentityOf(Source(), Known(K1), []));
+    }
+
+    [Fact]
+    public void IdentityOf_refuses_bad_names_and_null_arguments()
+    {
+        var tables = new GeneratedTables(new InMemoryGeneratedStore());
+        Assert.Throws<ArgumentException>(() => tables.IdentityOf(Source(), TactKeyStatus.None, ["111111111111111"]));
+        Assert.Throws<ArgumentException>(() => tables.IdentityOf(Source(), TactKeyStatus.None, ["111111111111111g"]));
+        Assert.Throws<ArgumentException>(() => tables.IdentityOf(Source(), TactKeyStatus.None, ["aaaaaaaaaaaaaaaa"]));
+        Assert.ThrowsAny<ArgumentException>(() => tables.IdentityOf(Source(), TactKeyStatus.None, [null!]));
+        Assert.Throws<ArgumentException>(() => tables.IdentityOf(Source(), TactKeyStatus.None,
+            [.. Enumerable.Range(0, TactKeyNames.MaxKeys + 1).Select(i => i.ToString("X16", System.Globalization.CultureInfo.InvariantCulture))]));
+        Assert.Throws<ArgumentNullException>(() => tables.IdentityOf(null!, TactKeyStatus.None, []));
+        Assert.Throws<ArgumentNullException>(() => tables.IdentityOf(Source(), null!, []));
+        Assert.Throws<ArgumentNullException>(() => tables.IdentityOf(Source(), TactKeyStatus.None, null!));
+    }
+
+    [Fact]
     public async Task Storing_twice_is_idempotent()
     {
         var store = new InMemoryGeneratedStore();

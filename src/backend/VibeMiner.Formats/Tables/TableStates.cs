@@ -78,8 +78,14 @@ internal static class TableStates
     /// missing ones: the hidden sections' keys and the hole names. A hole named like a decrypted section's key can't be told
     /// apart once stored (hole names aren't kept); it lies in a hidden section, whose own key still names it.
     /// </summary>
-    public static (TableState State, TableStateReason? Reason, TableCounts Counts) Generated(GeneratedTable table)
+    public static (TableState State, TableStateReason? Reason, TableCounts Counts) Generated(GeneratedTable table) =>
+        Generated(table.Header, table.Sections, table.Completion, table.KeysUsed, table.RowCount);
+
+    /// <summary>The same, from a table's parts: the generated store's, or a direct read's before the table is stored (D330).</summary>
+    public static (TableState State, TableStateReason? Reason, TableCounts Counts) Generated(Db2TableHeader header, IReadOnlyList<Db2Section> sections,
+        Db2Completion completion, IReadOnlyList<string> keysUsed, long rowCount)
     {
+        var table = (Header: header, Sections: sections, Completion: completion, KeysUsed: keysUsed, RowCount: rowCount);
         var hidden = table.Sections.Count(section => section.IsEncrypted && !section.IsDecrypted);
         // KeysUsed is every keyed section's key plus the hole names; without the decrypted sections' keys the missing ones are left.
         var decrypted = table.Sections.Where(section => section.IsDecrypted).Select(section => section.Key).ToHashSet(StringComparer.Ordinal);

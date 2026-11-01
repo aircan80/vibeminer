@@ -19,4 +19,8 @@ public interface IGeneratedTables
     /// </summary>
     Task<GeneratedTable> GetOrBuildAsync(GeneratedTableSource source, ITactKeyStatus keys, Func<CancellationToken, Task<GeneratedTableContent>> build,
         CancellationToken cancellationToken = default);
+
+    /// <summary>The <see cref="GeneratedTable.Identity"/> a table with these keys used is filed under for this key status, without
+    /// touching the store, so a page served before the table is built carries the identity it will have.</summary>
+    string IdentityOf(GeneratedTableSource source, ITactKeyStatus keys, IReadOnlyCollection<string> keysUsed);
 }

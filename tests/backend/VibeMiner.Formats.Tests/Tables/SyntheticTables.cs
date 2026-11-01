@@ -386,6 +386,8 @@ public sealed class CountingGeneratedTables(IGeneratedTables inner) : IGenerated
     public Task<GeneratedTable> StoreAsync(GeneratedTableSource source, ITactKeyStatus keys, GeneratedTableContent content, CancellationToken cancellationToken = default) =>
         inner.StoreAsync(source, keys, content, cancellationToken);
 
+    public string IdentityOf(GeneratedTableSource source, ITactKeyStatus keys, IReadOnlyCollection<string> keysUsed) => inner.IdentityOf(source, keys, keysUsed);
+
     public async Task<GeneratedTable> GetOrBuildAsync(GeneratedTableSource source, ITactKeyStatus keys, Func<CancellationToken, Task<GeneratedTableContent>> build,
         CancellationToken cancellationToken = default)
     {

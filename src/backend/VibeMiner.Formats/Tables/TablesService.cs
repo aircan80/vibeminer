@@ -11,7 +11,7 @@ namespace VibeMiner.Formats.Tables;
 /// their rows kept in the generated store. The table list is the definitions' manifest (its tables with a DB2 FileDataID) plus
 /// the DB2 files the manifest doesn't name that layer 4 lists under the listfile's <c>dbfilesclient/</c> names; with the
 /// community names off, none of those are found. The service keeps the protected IDs of the tables it opened (bounded, see
-/// <see cref="ProtectedIds"/>). Expensive work runs in the slots of <see cref="TablesOptions.Scheduler"/>, its own one when none is given.
+/// <see cref="ProtectedIds"/>) and the builds its direct reads started (<see cref="BackgroundBuilds"/>, D330). Expensive work runs in the slots of <see cref="TablesOptions.Scheduler"/>, its own one when none is given.
 /// </summary>
 public sealed class TablesService(IFileSystem files, TableDefinitions definitions, IGeneratedTables generated, TablesOptions options) : ITables
 {
@@ -21,6 +21,7 @@ public sealed class TablesService(IFileSystem files, TableDefinitions definition
     private readonly TablesOptions options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly Lazy<Manifest> manifest = new(() => Manifest.Of(definitions.Tables));
     private readonly ProtectedIds protectedIds = new();
+    private readonly BackgroundBuilds builds = new();
     private readonly TableWorkScheduler scheduler = options?.Scheduler ?? new TableWorkScheduler();
 
     public async Task<TablesOpenResult> ForAsync(BuildRef build, string locale, CancellationToken cancellationToken)
@@ -43,7 +44,7 @@ public sealed class TablesService(IFileSystem files, TableDefinitions definition
             var limits = options.Limits with { AllowPartialEncryptedSections = true, AllowRawTextEvidence = true };
             return new(build, locale, FilesOpenState.Open,
                 new BuildTables(handle, version!, WowLocale.Parse(locale), manifest.Value, definitions, generated, limits, options.Keys,
-                    options.MaxScanRows, options.MaxReferenceSources, options.MaxReferenceScanRows, protectedIds, scheduler), null, null, null);
+                    options.MaxScanRows, options.MaxReferenceSources, options.MaxReferenceScanRows, protectedIds, scheduler, builds), null, null, null);
         }
         catch
         {

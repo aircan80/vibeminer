@@ -33,7 +33,8 @@ public enum TablePriority { Interactive, Background }
 /// One build and locale's tables. Calls may run concurrently. Dispose the handle when done: every later call throws
 /// <see cref="ObjectDisposedException"/>; a list already being read runs on to its end. A table is keyed by its FileDataID;
 /// its definition name is shown next to it. Rows are opened through the generated store, so a second open of the same table
-/// decodes nothing.
+/// decodes nothing. Until a table is in the store, an Interactive unfiltered page, row by ID or schema may be answered from a
+/// direct read of the file while the build runs in the background (D330); the answer, identity included, is the store's.
 /// </summary>
 public interface IBuildTables : IAsyncDisposable
 {

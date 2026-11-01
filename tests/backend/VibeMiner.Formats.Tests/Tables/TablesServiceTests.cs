@@ -18,6 +18,7 @@ public sealed class TablesServiceTests
 {
     private static CancellationToken Ct => CancellationToken.None;
     private const TablePriority Now = TablePriority.Interactive;
+    private const TablePriority Later = TablePriority.Background;
     private static readonly DateTimeOffset Seen = new(2026, 11, 1, 3, 0, 0, TimeSpan.Zero);
     private static readonly IReadOnlyList<ScenarioColumn> Plain = [ScenarioColumn.Id(), ScenarioColumn.Int("Value")];
     private static readonly ScenarioRow[] Rows = [new(1, ["1", "5"]), new(2, ["2", "256"])];
@@ -499,7 +500,8 @@ public sealed class TablesServiceTests
         var page = await tables.PageAsync(new(10), Now, Ct);
         Assert.Equal((TablePageState.NotReadable, TableState.StoreFailed), (page.State, page.Table.State));
         Assert.NotNull(page.Table.Reason!.Code);
-        var row = await tables.GetAsync(10, 1, Now, Ct);
+        // In the background, the row waits for the rebuild, which the hook damages again.
+        var row = await tables.GetAsync(10, 1, Later, Ct);
         Assert.Equal((TableRowOutcome.Unknown, TableState.StoreFailed), (row.Outcome, row.Table.State));
         Assert.NotNull(row.Table.Reason!.Code);
         world.Generated.AfterOpen = null;
