@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BuildCatalog } from '../src/renderer/BuildCatalog';
 import { App } from '../src/renderer/App';
-import { SWITCHED_TEXT, catalogEmpty, catalogRows, lastChecked, OFFLINE_TEXT, productLine, progressText, refreshNotice, regionText, summaryText } from '../src/renderer/build-catalog-view';
+import { SWITCHED_TEXT, catalogEmpty, catalogRows, lastChecked, OFFLINE_TEXT, othersLine, productLine, progressText, refreshNotice, regionText, splitProducts, summaryNote } from '../src/renderer/build-catalog-view';
 import type { BridgeReply, DiscoveryBridge } from '../src/shared/bridge';
 import type { BuildCatalog as Catalog, BuildCatalogRefresh, EngineProgress } from '../../../contracts/generated/discovery';
 import listExample from '../../../contracts/examples/build-catalog.json';
@@ -21,7 +21,7 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 describe('build catalog view model', () => {
   it('lists builds in product order and words regions and product lines', () => {
     const rows = catalogRows(list());
-    expect(rows.map(r => `${r.product.productId} ${r.build.versionsName}`)).toEqual(['wow 11.9.0.90002', 'wow 11.9.0.90001', 'wowt 11.9.5.90010', 'wowxptr 11.9.5.90011', 'wow_classic_era 1.9.9.90020']);
+    expect(rows.map(r => `${r.product.productId} ${r.build.versionsName}`)).toEqual(['wow 11.9.0.90002', 'wow 11.9.0.90001', 'wowt 11.9.5.90010', 'wowxptr 11.9.5.90011', 'wow_classic_era 1.9.9.90020', 'wow_example_new 1.99.0.90030']);
     expect(rows[3].product.label).toBe('PTR 2');
     expect(regionText(['us', 'eu', 'kr'])).toBe('US, EU, KR');
     expect(regionText([])).toBe('No region listed');
@@ -30,21 +30,35 @@ describe('build catalog view model', () => {
     expect(productLine(beta)).toBe('No history yet');
     expect(productLine({ ...beta, lastObservedAt: '2026-10-31T09:00:00Z' })).toBe('No builds listed');
     expect(productLine({ ...wow, buildCount: 140 })).toBe('140 builds, newest 2 shown');
+    // D476: a product with no versions document never gets history; it lists no builds.
+    expect(productLine(beta, ['wow_beta'])).toBe('No builds listed');
+    expect(productLine(beta, ['wowdev4'])).toBe('No history yet');
     expect(catalogEmpty(list())).toBe(false);
     expect(catalogEmpty({ ...list(), products: list().products.map(p => ({ ...p, builds: [], buildCount: 0 })) })).toBe(true);
     expect(lastChecked(list())).toBe('2026-10-31T09:00:00Z');
     expect(lastChecked({ ...list(), products: [] })).toBeNull();
-    expect(progressText({ completed: 3, total: 14 })).toBe('Checking the version service (3 of 13 products)');
-    expect(progressText({ completed: 13, total: 14 })).toBe('Checking the version service (13 of 13 products, then the summary)');
-    expect(progressText({ completed: 14, total: 14 })).toBe('Checked 13 of 13 products and the summary');
+    // D476: the summary first (0 of 1), then it counts as the first of products + 1.
+    expect(progressText({ completed: 0, total: 1 })).toBe('Checking the version service (the product summary)');
+    expect(progressText({ completed: 1, total: 16 })).toBe('Checking the version service (0 of 15 products)');
+    expect(progressText({ completed: 4, total: 16 })).toBe('Checking the version service (3 of 15 products)');
+    expect(progressText({ completed: 16, total: 16 })).toBe('Checked 15 of 15 products and the summary');
     expect(progressText(null)).toBe('Checking the version service…');
   });
-  it('words the summary as vm browse does', () => {
+  it('splits the reviewed products from the other WoW products and counts the others (D476)', () => {
+    const { reviewed, others } = splitProducts(list());
+    expect(reviewed).toHaveLength(14);
+    expect(reviewed.every(p => p.reviewed)).toBe(true);
+    expect(others.map(p => [p.productId, p.label])).toEqual([['wow_example_new', 'wow_example_new']]);
+    expect(othersLine(others)).toBe('1 product, 1 build');
+    expect(othersLine([...others, { ...others[0], productId: 'wowdev', buildCount: 0 }])).toBe('2 products, 1 build');
+    expect(othersLine([{ ...others[0], buildCount: 3 }])).toBe('1 product, 3 builds');
+    expect(splitProducts(null)).toEqual({ reviewed: [], others: [] });
+  });
+  it('keeps a summary note only for a missing or unreadable summary', () => {
     const at = '2026-10-31T09:00:00Z';
-    expect(summaryText({ observedAt: at, readable: true, newProducts: ['a', 'b'] }, same)).toBe(`New in the ${at} summary: a, b (not reviewed).`);
-    expect(summaryText({ observedAt: at, readable: false, newProducts: [] }, same)).toBe(`The summary of ${at} can't be read, so new products are unknown.`);
-    expect(summaryText({ observedAt: at, readable: true, newProducts: [] }, same)).toBe(`Summary of ${at}: no new WoW products.`);
-    expect(summaryText(null, same)).toBe('No product summary recorded yet. Refresh fetches one.');
+    expect(summaryNote({ observedAt: at, readable: true, newProducts: ['a'], withoutVersions: [] }, same)).toBeNull();
+    expect(summaryNote({ observedAt: at, readable: false, newProducts: [], withoutVersions: [] }, same)).toBe(`The summary of ${at} can't be read, so other WoW products aren't listed.`);
+    expect(summaryNote(null, same)).toBe('No product summary recorded yet. Refresh fetches it, and with it the other WoW products.');
   });
   it('tells offline from partial refreshes', () => {
     expect(refreshNotice({ ...refreshed(), failures: [] })).toBeNull();
@@ -73,12 +87,17 @@ describe('build catalog screen', () => {
     const { bridge } = bridgeMock();
     view(bridge);
     const listbox = await screen.findByRole('listbox', { name: 'Builds' });
-    expect(within(listbox).getAllByRole('group').map(g => g.getAttribute('aria-labelledby'))).toHaveLength(13);
+    expect(within(listbox).getAllByRole('group').map(g => g.getAttribute('aria-labelledby'))).toHaveLength(14);
     expect(within(listbox).getByRole('group', { name: /PTR 2 wowxptr/ })).toBeInTheDocument();
     expect(document.getElementById('catalog-group-wow_beta')).toHaveTextContent('Beta wow_beta · No history yet');
     expect(within(listbox).getAllByRole('option')).toHaveLength(5);
     expect(within(listbox).getAllByRole('option')[0]).toHaveTextContent(/11\.9\.0\.90002Current.*US, EU, KR, TW/);
-    expect(screen.getByText(/New in the .* summary: wow_example_new \(not reviewed\)\./)).toBeInTheDocument();
+    // The summary note is gone (D476); its new products are the collapsed list below.
+    expect(screen.queryByText(/New in the .* summary/)).toBeNull();
+    expect(document.querySelector('.dv-catalog-summary')).toBeNull();
+    // The reviewed product with only a cdn row in the summary lists no builds rather than no history.
+    expect(document.getElementById('catalog-group-wow_classic_era_beta')).toHaveTextContent('Classic Era Beta wow_classic_era_beta · No builds listed');
+    expect(screen.queryByRole('listbox', { name: 'Other WoW products, not reviewed' })).toBeNull();
     fireEvent.click(within(listbox).getAllByRole('option')[1]);
     const inspector = screen.getByRole('complementary');
     expect(within(inspector).getByRole('heading', { name: '11.9.0.90001' })).toBeInTheDocument();
@@ -87,6 +106,36 @@ describe('build catalog screen', () => {
     const open = within(inspector).getByRole('button', { name: 'Open build' });
     expect(open).toBeDisabled();
     expect(open).toHaveAccessibleDescription('Opening on the new storage comes next. The Old build list still opens builds.');
+  });
+  it('lists the other WoW products collapsed after the reviewed ones, with their own keys and the one selection (D476)', async () => {
+    const { bridge } = bridgeMock();
+    view(bridge);
+    const main = await screen.findByRole('listbox', { name: 'Builds' });
+    const toggle = screen.getByRole('button', { name: /Other WoW products \(not reviewed\)/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveTextContent('Other WoW products (not reviewed) · 1 product, 1 build');
+    expect(screen.getByLabelText('5 builds shown')).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const others = screen.getByRole('listbox', { name: 'Other WoW products, not reviewed' });
+    expect(toggle).toHaveAttribute('aria-controls', others.id);
+    expect(within(others).getByRole('group', { name: /wow_example_new/ })).toHaveTextContent('wow_example_new · 1 build');
+    expect(screen.getByLabelText('6 builds shown')).toBeInTheDocument();
+    others.focus();
+    fireEvent.keyDown(others, { key: 'Home' });
+    const option = within(others).getByRole('option');
+    expect(option).toHaveAttribute('aria-selected', 'true');
+    expect(within(main).getAllByRole('option').every(o => o.getAttribute('aria-selected') === 'false')).toBe(true);
+    const inspector = screen.getByRole('complementary');
+    expect(within(inspector).getByRole('heading', { name: '1.99.0.90030' })).toBeInTheDocument();
+    // The id once, said to be unreviewed, rather than "wow_example_new · wow_example_new" (UI review).
+    expect(inspector.querySelector('.inspector-product')).toHaveTextContent(/^World of Warcraft · wow_example_new · not reviewed$/);
+    expect(within(inspector).getByText('Product').nextElementSibling).toHaveTextContent(/^wow_example_new · Not reviewed$/);
+    // Collapsing keeps the selection; the inspector still shows it and the toggle says where it is (usability review).
+    fireEvent.click(toggle);
+    expect(screen.queryByRole('listbox', { name: 'Other WoW products, not reviewed' })).toBeNull();
+    expect(within(inspector).getByRole('heading', { name: '1.99.0.90030' })).toBeInTheDocument();
+    expect(toggle).toHaveTextContent('selected build 1.99.0.90030 is in this list');
   });
   it('moves the selection with arrow keys and keeps it, focus included, through a refresh', async () => {
     const pending = deferred<BridgeReply<BuildCatalogRefresh>>();
@@ -104,13 +153,15 @@ describe('build catalog screen', () => {
     fireEvent.keyDown(window, { key: 'F5' });
     await waitFor(() => expect(bridge.catalogRefresh).toHaveBeenCalledTimes(1));
     const id = vi.mocked(bridge.catalogRefresh!).mock.calls[0][0];
-    progress({ requestId: id, completed: 4 });
-    expect(screen.getByText('Checking the version service (4 of 13 products)')).toBeInTheDocument();
-    progress({ requestId: 'someone-else', completed: 9 });
-    expect(screen.getByText('Checking the version service (4 of 13 products)')).toBeInTheDocument();
+    progress({ requestId: id, completed: 0, total: 1 });
+    expect(screen.getByText('Checking the version service (the product summary)')).toBeInTheDocument();
+    progress({ requestId: id, completed: 4, total: 16 });
+    expect(screen.getByText('Checking the version service (3 of 15 products)')).toBeInTheDocument();
+    progress({ requestId: 'someone-else', completed: 9, total: 16 });
+    expect(screen.getByText('Checking the version service (3 of 15 products)')).toBeInTheDocument();
     listbox.focus();
     await act(async () => pending.resolve(success({ ...refreshed(), failures: [] })));
-    await screen.findByText('Refresh complete. Checked 13 products and the summary.');
+    await screen.findByText('Refresh complete. Checked 15 products and the summary.');
     expect(listbox).toHaveFocus();
     expect(within(listbox).getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
   });
@@ -143,7 +194,7 @@ describe('build catalog screen', () => {
     const { bridge } = bridgeMock({ catalogList: vi.fn(() => first.promise) });
     view(bridge);
     fireEvent.click(screen.getByRole('button', { name: /Refresh builds/ }));
-    await screen.findByText('Refresh complete. Checked 13 products and the summary.');
+    await screen.findByText('Refresh complete. Checked 15 products and the summary.');
     await act(async () => first.resolve(success(stale)));
     expect(screen.getAllByRole('option')).toHaveLength(5);
   });
@@ -196,10 +247,10 @@ describe('Discovery slot', () => {
     await screen.findByRole('group', { name: /PTR 2/ });
     fireEvent.click(screen.getAllByRole('option')[1]);
     fireEvent.click(screen.getByRole('button', { name: /Refresh builds/ }));
-    await screen.findByText('Refresh complete. Checked 13 products and the summary.');
+    await screen.findByText('Refresh complete. Checked 15 products and the summary.');
     fireEvent.click(screen.getByRole('button', { name: 'Old build list' }));
     fireEvent.click(await screen.findByRole('button', { name: 'New build list' }));
-    expect(await screen.findByText('Refresh complete. Checked 13 products and the summary.')).toBeInTheDocument();
+    expect(await screen.findByText('Refresh complete. Checked 15 products and the summary.')).toBeInTheDocument();
     expect(screen.getAllByRole('option')[1]).toHaveAttribute('aria-selected', 'true');
     vi.mocked(bridge.catalogRefresh!).mockImplementationOnce(() => new Promise(() => {}));
     fireEvent.click(screen.getByRole('button', { name: /Refresh builds/ }));

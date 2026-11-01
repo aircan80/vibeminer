@@ -7,8 +7,9 @@ using VibeMiner.Objects;
 namespace VibeMiner.Cli.Browse;
 
 /// <summary>
-/// <c>:builds</c>: one row per reviewed product from layer 3's catalog (read-only: the history log only), then the WoW products the
-/// newest stored summary lists that aren't reviewed. Enter lists a product's builds. <c>r</c> refreshes as the store's writer.
+/// <c>:builds</c>: one row per reviewed product from layer 3's catalog (read-only: the history log only), then one per WoW product the
+/// newest stored summary lists that isn't reviewed (D476), labelled "not reviewed". Enter lists a product's builds. <c>r</c> refreshes
+/// as the store's writer.
 /// </summary>
 internal sealed class BuildsView : BrowseView
 {
@@ -26,30 +27,28 @@ internal sealed class BuildsView : BrowseView
         await using (store)
         {
             var catalog = await store.CatalogAsync(ct).ConfigureAwait(false);
+            var summary = await StoredSummary.NewestSummaryAsync(store.Objects, ct).ConfigureAwait(false);
             var rows = new List<BrowseRow>();
             var problems = 0;
-            foreach (var product in Products.Reviewed)
+            // A product the summary lists with no versions document never gets history (D476); say so rather than "no history".
+            var withoutVersions = summary?.Read.WithoutVersions ?? [];
+            foreach (var product in Products.Listed(summary?.Read.NewProducts ?? []))
             {
                 var list = await catalog.ListBuildsAsync(product.Id, ct).ConfigureAwait(false);
                 problems += list.Problems.Count;
                 var current = string.Join(' ', list.Builds.Where(b => b.Current).Select(b => b.VersionsName).Distinct());
-                rows.Add(new([product.Label, product.Id, list.LastObservedAt is null ? "-" : $"{list.Builds.Count:N0}", current,
-                    list.LastObservedAt is { } at ? BrowseSession.Time(at) : "no history", list.Problems.Count == 0 ? "" : $"{list.Problems.Count:N0}"],
+                rows.Add(new([product.Reviewed ? product.Label : "not reviewed", product.Id, list.LastObservedAt is null ? "-" : $"{list.Builds.Count:N0}", current,
+                    list.LastObservedAt is { } at ? BrowseSession.Time(at) : withoutVersions.Contains(product.Id) ? "no versions doc" : "no history", list.Problems.Count == 0 ? "" : $"{list.Problems.Count:N0}"],
                     () => new ProductBuildsView(product)));
             }
-            var summary = await StoredSummary.NewestSummaryAsync(store.Objects, ct).ConfigureAwait(false);
-            string? summaryNote = null;
-            if (summary is { Entry: var entry, Read: var read })
-            {
-                foreach (var id in read.NewProducts) rows.Add(new(["new, not reviewed", id, "-", "", BrowseSession.Time(entry.ObservedAt), ""]));
-                summaryNote = read.NewProducts.Count > 0
-                    ? $"New in the {BrowseSession.Time(entry.ObservedAt)} summary: {string.Join(", ", read.NewProducts)} (not reviewed; adding one is D017)."
-                    : read.Problems.Any(p => p.Code is "SUMMARY_UNREADABLE" or "SUMMARY_COLUMNS_MISSING") ? $"The summary of {BrowseSession.Time(entry.ObservedAt)} UTC can't be read, so new products are unknown."
-                    : $"Summary of {BrowseSession.Time(entry.ObservedAt)} UTC: no new WoW products.";
-            }
+            // The summary's new products are rows above (D476); only a missing or unreadable summary is worth a note.
+            string? summaryNote = summary is null ? "No summary recorded; r fetches it and the unreviewed products."
+                : summary.Value.Read.Problems.Any(p => p.Code is "SUMMARY_UNREADABLE" or "SUMMARY_COLUMNS_MISSING")
+                    ? $"Summary of {BrowseSession.Time(summary.Value.Entry.ObservedAt)} UTC unreadable: only reviewed products listed."
+                    : null;
             var note = string.Join(' ', new[]
             {
-                summaryNote ?? "No summary recorded; r fetches one.",
+                summaryNote,
                 problems > 0 ? $"{problems:N0} catalog problem(s); Enter on a product lists them." : null,
             }.Where(s => s is not null));
             return new(Columns, rows, note);
@@ -59,8 +58,9 @@ internal sealed class BuildsView : BrowseView
     private static readonly string[] Columns = ["Product", "Id", "Builds", "Current", "Last (UTC)", "Problems"];
 
     /// <summary>
-    /// <c>r</c>: versions and cdns for every reviewed product, then the summary, as <c>vm builds refresh</c> does. Takes the writer
-    /// lock (creating a missing store) for the run and lets it go at the end; when the app holds it, says so and changes nothing.
+    /// <c>r</c>: the summary, then versions and cdns for every listed product (reviewed, then the summary's unreviewed ones; the newest
+    /// stored summary's when this one fails), as <c>vm builds refresh</c> does (D476). Takes the writer lock (creating a missing store)
+    /// for the run and lets it go at the end; when the app holds it, says so and changes nothing.
     /// </summary>
     public static readonly ViewAction Refresh = new('r', "refresh: fetch versions, cdns and the summary (writes: takes the writer lock)", "refresh", RefreshAsync);
 
@@ -76,8 +76,12 @@ internal sealed class BuildsView : BrowseView
         await using (store)
         {
             var catalog = await store.CatalogAsync(ct).ConfigureAwait(false);
+            progress.Report("the product summary");
+            var summary = await catalog.RefreshSummaryAsync(ct).ConfigureAwait(false);
+            var unreviewed = summary.Summary.State == ObjectState.Present ? summary.NewProducts
+                : (await StoredSummary.NewestSummaryAsync(store.Objects, ct).ConfigureAwait(false))?.Read.NewProducts ?? [];
             var failed = new List<string>();
-            var ids = Products.Ids;
+            var ids = Products.Listed(unreviewed).Select(p => p.Id).ToList();
             for (var i = 0; i < ids.Count; i++)
             {
                 progress.Report($"versions and cdns for {ids[i]} ({i + 1}/{ids.Count}); x cancels");
@@ -88,11 +92,9 @@ internal sealed class BuildsView : BrowseView
                     failed.Add($"{ids[i]} ({bad.Code ?? bad.State.ToString()})");
                 }
             }
-            progress.Report("the product summary");
-            var summary = await catalog.RefreshSummaryAsync(ct).ConfigureAwait(false);
             var said = Failed(summary.Summary) ? $"summary failed ({summary.Summary.Code ?? summary.Summary.State.ToString()})"
                 : summary.Summary.Observation is null ? "no summary served"
-                : summary.NewProducts.Count == 0 ? "no new products" : $"new: {string.Join(", ", summary.NewProducts)}";
+                : summary.NewProducts.Count == 0 ? "no unreviewed products" : $"{summary.NewProducts.Count} unreviewed";
             return $"refresh done at {DateTimeOffset.UtcNow:HH:mm} UTC: {ids.Count - failed.Count}/{ids.Count} products"
                 + (failed.Count == 0 ? "" : $", failed {string.Join(", ", failed)}") + $"; {said}.";
         }
@@ -103,7 +105,7 @@ internal sealed class BuildsView : BrowseView
 }
 
 /// <summary>One product's builds, newest first sighting first, with its catalog problems in the note. Enter shows a build.</summary>
-internal sealed class ProductBuildsView(ReviewedProduct product) : BrowseView
+internal sealed class ProductBuildsView(ListedProduct product) : BrowseView
 {
     public override string Title => product.Id;
     public override IReadOnlyList<ViewAction> Actions => [BuildsView.Refresh];
@@ -118,8 +120,9 @@ internal sealed class ProductBuildsView(ReviewedProduct product) : BrowseView
             [b.VersionsName, b.Current ? "yes" : "", string.Join(' ', b.Regions.Where(g => !b.Current || g.Current).Select(g => g.Region).Distinct()),
              BrowseSession.Time(b.FirstSeen), BrowseSession.Time(b.LastSeen), b.BuildConfig],
             () => new BuildView(b), b)).ToList();
-        var note = list.LastObservedAt is null ? $"{product.Label}: no versions history. r fetches it (writes)."
-            : $"{product.Label}: {list.Builds.Count:N0} builds, last versions reply {BrowseSession.Time(list.LastObservedAt.Value)} UTC.";
+        var name = product.Reviewed ? product.Label : $"{product.Id} (not reviewed)";
+        var note = list.LastObservedAt is null ? $"{name}: no versions history. r fetches it (writes)."
+            : $"{name}: {list.Builds.Count:N0} builds, last versions reply {BrowseSession.Time(list.LastObservedAt.Value)} UTC.";
         if (list.Problems.Count > 0)
             note += $" {list.Problems.Count:N0} problem(s): {string.Join("; ", list.Problems.Take(3).Select(p => $"{p.Code}: {p.Message}"))}";
         return new(["Version", "Current", "Regions", "First (UTC)", "Last (UTC)", "Build config"], rows, note);

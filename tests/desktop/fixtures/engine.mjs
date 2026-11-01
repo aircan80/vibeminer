@@ -61,7 +61,7 @@ const followEnabled=process.env.VIBEMINER_FIXTURE_FOLLOW==='1';
 // build-catalog-refresh.json {"outcome": ...} picks what catalog.refresh does: ok (default; a new wow build and a newer
 // summary, every product answered), partial (the example's one failure), offline (every product unavailable), busy
 // (OBJECT_STORE_BUSY; the default with readOnly) or slow (two products finish, then it waits for release-catalog-refresh or a
-// cancel: CANCELED). Progress is the Host's: 0, one per product, then the total once the summary is in.
+// cancel: CANCELED). Progress is the Host's (D476): 0 of 1 before the summary, then 1 of products+1 and one per product.
 const buildCatalogMode=process.env.VIBEMINER_FIXTURE_BUILD_CATALOG??null;
 const catalogExample=JSON.parse(readFileSync(path.join(root,'contracts/examples/build-catalog.json'),'utf8'));
 const catalogRefreshExample=JSON.parse(readFileSync(path.join(root,'contracts/examples/build-catalog-refresh.json'),'utf8'));
@@ -74,7 +74,9 @@ function refreshedCatalog(){
   wow.builds.unshift({id:'f'.repeat(64),versionsName:'11.9.1.90100',buildConfig:'66666666666666666666666666666666',current:true,regions:['us','eu'],firstSeenAt:CATALOG_REFRESHED_AT,lastSeenAt:CATALOG_REFRESHED_AT});
   wow.buildCount=wow.builds.length;
   for(const p of next.products)if(p.lastObservedAt||p.buildCount)p.lastObservedAt=CATALOG_REFRESHED_AT;
-  next.summary={observedAt:CATALOG_REFRESHED_AT,readable:true,newProducts:['wow_example_new','wow_example_two']};
+  next.summary={observedAt:CATALOG_REFRESHED_AT,readable:true,newProducts:['wow_example_new','wow_example_two'],withoutVersions:['wow_classic_era_beta','wow_example_two']};
+  // The summary's second new product is listed after the first, with no history yet.
+  next.products.push({productId:'wow_example_two',label:'wow_example_two',reviewed:false,builds:[],buildCount:0,lastObservedAt:null,problems:[],problemCount:0});
   return next;
 }
 async function catalogRefresh(id){
@@ -82,13 +84,13 @@ async function catalogRefresh(id){
   if(outcome==='busy')return fail(id,'OBJECT_STORE_BUSY','Another VibeMiner process, such as vm browse, is writing the build store. Close it, then refresh.');
   const products=storedCatalog.products.map(p=>p.productId),total=products.length+1;
   const controller=new AbortController();active.set(id,controller);
-  let sequence=1;const progress=completed=>send({type:'progress',requestId:id,stage:'Checking the version service',sequence:sequence++,region:null,completed,total,unit:'products'});
+  let sequence=1;const progress=(completed,of=total)=>send({type:'progress',requestId:id,stage:'Checking the version service',sequence:sequence++,region:null,completed,total:of,unit:'products'});
   try{
-    progress(0);
-    if(outcome==='slow'){progress(1);progress(2);writeFileSync(path.join(directory,'waiting-catalog-refresh'),id);await waitForRelease('release-catalog-refresh',controller.signal);}
-    for(let i=1;i<=products.length;i++){await new Promise(r=>setTimeout(r,15));if(controller.signal.aborted)throw new Error('canceled');progress(i);}
-    // The summary counts as the last of the total, as the Host reports it.
-    await new Promise(r=>setTimeout(r,15));if(controller.signal.aborted)throw new Error('canceled');progress(total);
+    progress(0,1);
+    // The summary comes first, as the Host asks for it.
+    await new Promise(r=>setTimeout(r,15));if(controller.signal.aborted)throw new Error('canceled');progress(1);
+    if(outcome==='slow'){progress(2);progress(3);writeFileSync(path.join(directory,'waiting-catalog-refresh'),id);await waitForRelease('release-catalog-refresh',controller.signal);}
+    for(let i=2;i<=total;i++){await new Promise(r=>setTimeout(r,15));if(controller.signal.aborted)throw new Error('canceled');progress(i);}
   }catch{return fail(id,'CANCELED','Refresh stopped. Products checked before stopping keep their new results.');}
   finally{active.delete(id);}
   if(outcome==='offline')return reply(id,{catalog:{...structuredClone(storedCatalog),access:'writer'},refreshedAt:CATALOG_REFRESHED_AT,checked:products.length,newProducts:[],

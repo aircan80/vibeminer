@@ -38,7 +38,7 @@ test('lists stored builds by product with versions, regions and times, and Open 
     await expect(page.getByText('Authored test data', { exact: true })).toBeVisible();
     await expect(options(page)).toHaveCount(5);
     const groups = page.getByRole('listbox', { name: 'Builds' }).getByRole('group');
-    await expect(groups).toHaveCount(13);
+    await expect(groups).toHaveCount(14);
     await expect(groups.nth(2)).toHaveAccessibleName(/^PTR 2 wowxptr/);
     await expect(page.locator('#catalog-group-wow_beta')).toContainText('No history yet');
     const first = options(page).first();
@@ -48,7 +48,17 @@ test('lists stored builds by product with versions, regions and times, and Open 
     await expect(first).toHaveClass(/current/);
     await expect(options(page).nth(1)).not.toHaveClass(/current/);
     await expect(page.locator('.dv-thead')).toHaveText(/Version\s*Regions\s*Last seen/);
-    await expect(page.getByText(/New in the .+ summary: wow_example_new \(not reviewed\)\./)).toBeVisible();
+    // D476: no summary note; the summary's new products are their own list, collapsed after the reviewed ones.
+    await expect(page.getByText(/New in the .+ summary/)).toHaveCount(0);
+    const others = page.getByRole('button', { name: /Other WoW products \(not reviewed\)/ });
+    await expect(others).toHaveAttribute('aria-expanded', 'false');
+    await expect(others).toContainText('1 product, 1 build');
+    await others.click();
+    const otherList = page.getByRole('listbox', { name: 'Other WoW products, not reviewed' });
+    await expect(otherList.getByRole('option')).toHaveCount(1);
+    await expect(otherList.getByRole('group')).toHaveAccessibleName(/^wow_example_new/);
+    await others.click();
+    await expect(otherList).toHaveCount(0);
     await options(page).nth(1).click();
     const inspector = page.getByRole('complementary');
     await expect(inspector.getByRole('heading', { name: '11.9.0.90001' })).toBeVisible();
@@ -65,7 +75,7 @@ test('lists stored builds by product with versions, regions and times, and Open 
   } finally { await session.close(); }
 });
 
-test('refresh shows progress, keeps the selection and focus, and updates the list and the new-product notice', async () => {
+test('refresh shows progress, keeps the selection and focus, and updates the list and the other products', async () => {
   const session = await start();
   try {
     const { page, app, data } = session;
@@ -77,20 +87,20 @@ test('refresh shows progress, keeps the selection and focus, and updates the lis
     await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true');
     await outcome(data, 'slow');
     await page.keyboard.press('F5');
-    await expect(page.locator('.dv-statusbar')).toContainText('Checking the version service (2 of 13 products)');
+    await expect(page.locator('.dv-statusbar')).toContainText('Checking the version service (2 of 15 products)');
     await expect(refreshButton(page)).toHaveText(/Stop refresh/);
     await expect(listbox).toBeFocused();
     await capture(app, page, 'refreshing');
     await listbox.focus();
     await writeFile(path.join(data, 'release-catalog-refresh'), '');
-    await expect(page.locator('.dv-statusbar')).toContainText('Refresh complete. Checked 13 products and the summary.');
+    await expect(page.locator('.dv-statusbar')).toContainText('Refresh complete. Checked 15 products and the summary.');
     await expect(options(page)).toHaveCount(6);
     await expect(options(page).first()).toContainText('11.9.1.90100');
     await expect(options(page).nth(1)).not.toHaveClass(/current/);
     // The selection is the same build, now second-but-one, and focus stayed on the list.
     await expect(page.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('data-build-id', 'b'.repeat(64));
     await expect(listbox).toBeFocused();
-    await expect(page.getByText(/New in the .+ summary: wow_example_new, wow_example_two \(not reviewed\)\./)).toBeVisible();
+    await expect(page.getByRole('button', { name: /Other WoW products \(not reviewed\)/ })).toContainText('2 products, 1 build');
     await outcome(data, 'partial');
     await refreshButton(page).click();
     await expect(page.getByText('Refresh incomplete')).toBeVisible();
@@ -260,11 +270,11 @@ test('switching lists keeps the last refresh outcome, and says when the switch s
     await page.getByRole('button', { name: 'Old build list' }).click();
     await page.getByRole('button', { name: 'New build list' }).click();
     await expect(page.getByText('Refresh incomplete')).toBeVisible();
-    await expect(page.locator('.dv-statusbar')).toContainText('Refresh finished with problems. Checked 13 products and the summary.');
+    await expect(page.locator('.dv-statusbar')).toContainText('Refresh finished with problems. Checked 15 products and the summary.');
     await expect(page.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('data-build-id', 'b'.repeat(64));
     await outcome(data, 'slow');
     await refreshButton(page).click();
-    await expect(page.locator('.dv-statusbar')).toContainText('Checking the version service (2 of 13 products)');
+    await expect(page.locator('.dv-statusbar')).toContainText('Checking the version service (2 of 16 products)');
     await page.getByRole('button', { name: 'Old build list' }).click();
     // The cancel names the running refresh (the old list may cancel its own waits too).
     await expect.poll(async () => { const all = await readRequests(data), refresh = all.filter(r => r.method === 'catalog.refresh').at(-1)!; return all.some(r => r.method === 'request.cancel' && (r.params as { requestId?: string }).requestId === refresh.id); }).toBe(true);

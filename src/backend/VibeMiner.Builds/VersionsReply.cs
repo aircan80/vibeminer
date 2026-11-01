@@ -31,8 +31,8 @@ internal static class VersionsReply
         ArgumentNullException.ThrowIfNull(entry);
         if (entry.Kind != HistoryKind.Versions)
             return Fail(new("VERSIONS_WRONG_KIND", $"The history entry is {entry.Kind}, not a versions reply.", entry.Record));
-        if (!Products.IsKnown(entry.Product))
-            return Fail(new("VERSIONS_UNKNOWN_PRODUCT", "The history entry's product isn't in the registry.", entry.Record));
+        if (!Products.IsWow(entry.Product))
+            return Fail(new("VERSIONS_UNKNOWN_PRODUCT", "The history entry's product isn't a WoW product id.", entry.Record));
         VersionsTable document;
         try { document = VersionsTable.Parse(reply); }
         catch (FormatException e)

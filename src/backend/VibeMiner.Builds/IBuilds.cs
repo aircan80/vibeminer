@@ -5,7 +5,7 @@ using VibeMiner.ObjectAccess;
 namespace VibeMiner.Builds;
 
 /// <summary>
-/// One build to open: a registered product, its build and CDN configs (32 hex digits, kept lowercase) and the <c>cdns</c>
+/// One build to open: a WoW product (<see cref="Products.IsWow"/>), its build and CDN configs (32 hex digits, kept lowercase) and the <c>cdns</c>
 /// row whose route fetches what isn't stored. A null <see cref="Region"/> takes the <c>us</c> row, then any usable row;
 /// <see cref="BuildRegions.ChooseAsync"/> picks a listing whose region has a usable route.
 /// </summary>
@@ -13,7 +13,7 @@ public sealed partial record BuildRef
 {
     public BuildRef(string Product, string BuildConfig, string CdnConfig, string? Region = null)
     {
-        if (!Products.IsKnown(Product)) throw new ArgumentException("The product isn't registered.", nameof(Product));
+        if (!Products.IsWow(Product)) throw new ArgumentException("The product isn't a WoW product id.", nameof(Product));
         if (Region is not null && !RegionPattern().IsMatch(Region)) throw new ArgumentException("A region is 1-32 letters, digits, '-' or '_'.", nameof(Region));
         this.Product = Product; this.BuildConfig = Hex(BuildConfig, nameof(BuildConfig)); this.CdnConfig = Hex(CdnConfig, nameof(CdnConfig));
         this.Region = Region;

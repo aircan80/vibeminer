@@ -50,11 +50,11 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
                                   every object and history record in cdn-store-v1/ (writes: takes the writer lock, the
                                   store's only write). Without --yes it only says what it would wipe
           history list [product]  the dated version-service observations, oldest first (read-only)
-          builds list [product]   the builds of every reviewed product, or one, from the history log (read-only; the first
+          builds list [product]   the builds of every WoW product, or one, from the history log (read-only; the first
                                   use for a product fetches it, which writes and takes the writer lock)
           builds refresh [product]
-                                  fetch versions and cdns for every reviewed product, or one, and the product summary,
-                                  then list (writes: takes the writer lock)
+                                  fetch the product summary, then versions and cdns for every WoW product it lists, or
+                                  one, then list (writes: takes the writer lock)
           tables states <product> [--fetch-definitions]
                                   open the product's current build in enUS and check every table, with timings (writes: takes
                                   the writer lock and downloads table bytes and the metadata they need; --fetch-definitions
@@ -129,8 +129,8 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
         if ((sample is not null || details is not null) && words is not ["concepts", "states", _]) return UsageError("--sample and --details apply only to concepts states.");
         if (sample is < 1 or > MaxSample) return UsageError($"--sample is 1 to {MaxSample}.");
         if (details is < 0 or > MaxDetails || details > (sample ?? DefaultSample)) return UsageError($"--details is 0 to {MaxDetails} and at most --sample.");
-        if (words is ["builds" or "tables" or "concepts", _, var named] && !Products.IsKnown(named))
-            return UsageError($"{named} isn't a reviewed product. Reviewed: {string.Join(", ", Products.Ids)}.");
+        if (words is ["builds" or "tables" or "concepts", _, var named] && !Products.IsWow(named))
+            return UsageError($"{named} isn't a WoW product id: \"wow\" then up to 61 of a-z, 0-9, _ or -. Reviewed: {string.Join(", ", Products.Ids)}.");
 
         try
         {
@@ -391,20 +391,31 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
     }
 
     /// <summary>
-    /// Lists from the history log, read-only. A product with no versions history is fetched first (with the summary): that
-    /// writes, so this run takes the writer lock and says so, creating the store if there is none.
+    /// The products a run without one names (D476): every reviewed one, then the WoW products the newest stored summary lists that
+    /// aren't reviewed.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> ListedAsync(IStoreHandle? store, CancellationToken ct) =>
+        Products.Listed(store is null ? [] : (await StoredSummary.NewestSummaryAsync(store.Objects, ct).ConfigureAwait(false))?.Read.NewProducts ?? [])
+            .Select(p => p.Id).ToList();
+
+    /// <summary>
+    /// Lists from the history log, read-only. A reviewed (or named) product with no versions history is fetched first, with the
+    /// summary: that writes, so this run takes the writer lock and says so, creating the store if there is none. An unreviewed
+    /// product with no history is listed as such; refresh fetches it.
     /// </summary>
     private async Task<int> BuildsList(string storeFolder, string? product, CancellationToken ct)
     {
-        IReadOnlyList<string> products = product is null ? Products.Ids : [product];
         var missing = new List<string>();
         IStoreHandle? store = null;
         try
         {
             try { store = await stores.OpenReadOnlyAsync(storeFolder, ct).ConfigureAwait(false); }
-            catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.Missing) { missing.AddRange(products); }
-            if (store is not null)
-                foreach (var id in products)
+            catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.Missing) { }
+            IReadOnlyList<string> products = product is null ? await ListedAsync(store, ct).ConfigureAwait(false) : [product];
+            var required = products.Where(id => product is not null || Products.IsKnown(id)).ToList();
+            if (store is null) missing.AddRange(required);
+            else
+                foreach (var id in required)
                     if ((await store.Objects.ReadHistoryAsync(new HistoryQuery(Product: id, Kind: HistoryKind.Versions, Limit: 1), ct).ConfigureAwait(false)).Count == 0)
                         missing.Add(id);
             if (missing.Count == 0)
@@ -425,25 +436,34 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
             }
             var writer = await store.CatalogAsync(ct).ConfigureAwait(false);
             var reports = new List<ProductReport>();
+            // The run that fetches also asks for the summary first, so the unreviewed products it lists are current ones.
+            var summary = await writer.RefreshSummaryAsync(ct).ConfigureAwait(false);
+            if (product is null && summary.Summary.State == ObjectState.Present)
+                products = Products.Listed(summary.NewProducts).Select(p => p.Id).ToList();
             foreach (var id in products)
                 reports.Add(missing.Contains(id) ? Refreshed(await writer.RefreshAsync(id, ct).ConfigureAwait(false))
                     : new(id, await writer.ListBuildsAsync(id, ct).ConfigureAwait(false), null));
-            var summary = await writer.RefreshSummaryAsync(ct).ConfigureAwait(false);
             return await ReportBuilds(storeFolder, store, reports, summary);
         }
         finally { if (store is not null) await store.DisposeAsync().ConfigureAwait(false); }
     }
 
-    /// <summary>Fetches versions and cdns for each product and the summary, as the store's writer (creating the store if needed), then lists.</summary>
+    /// <summary>
+    /// Fetches the summary, then versions and cdns for each product (the one named, or every listed one: reviewed, then the summary's
+    /// unreviewed ones, or the newest stored summary's when this one fails; D476), as the store's writer (creating the store if
+    /// needed), then lists.
+    /// </summary>
     private async Task<int> BuildsRefresh(string storeFolder, string? product, CancellationToken ct)
     {
-        IReadOnlyList<string> products = product is null ? Products.Ids : [product];
         await using var store = await stores.OpenWriterAsync(storeFolder, create: true, ct).ConfigureAwait(false);
-        if (!json) error.Write(new Text($"Fetching versions and cdns for {(product is null ? $"{products.Count} products" : product)} and the product summary, as the store's writer.\n"));
         var catalog = await store.CatalogAsync(ct).ConfigureAwait(false);
+        var summary = await catalog.RefreshSummaryAsync(ct).ConfigureAwait(false);
+        IReadOnlyList<string> products = product is not null ? [product]
+            : summary.Summary.State == ObjectState.Present ? Products.Listed(summary.NewProducts).Select(p => p.Id).ToList()
+            : await ListedAsync(store, ct).ConfigureAwait(false);
+        if (!json) error.Write(new Text($"Fetched the product summary; fetching versions and cdns for {(product is null ? $"{products.Count} products" : product)}, as the store's writer.\n"));
         var reports = new List<ProductReport>();
         foreach (var id in products) reports.Add(Refreshed(await catalog.RefreshAsync(id, ct).ConfigureAwait(false)));
-        var summary = await catalog.RefreshSummaryAsync(ct).ConfigureAwait(false);
         return await ReportBuilds(storeFolder, store, reports, summary);
     }
 
@@ -478,7 +498,7 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
                 fetched = reports.Where(r => r.Refresh is not null).Select(r => r.Product),
                 products = reports.Select(r => new
                 {
-                    id = r.Product, label = Products.Label(r.Product), available = r.Available,
+                    id = r.Product, label = Products.Name(r.Product), reviewed = Products.IsKnown(r.Product), available = r.Available,
                     versions = Observed(r.Refresh?.Versions), cdns = Observed(r.Refresh?.Cdns), lastObservedAt = r.List.LastObservedAt,
                     builds = r.List.Builds.Select(b => new
                     {
@@ -498,7 +518,7 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
 
         foreach (var r in reports)
         {
-            output.Write(new Rule(Markup.Escape($"{Products.Label(r.Product)} ({r.Product})")).LeftJustified());
+            output.Write(new Rule(Markup.Escape(Products.IsKnown(r.Product) ? $"{Products.Label(r.Product)} ({r.Product})" : $"{r.Product} (not reviewed)")).LeftJustified());
             if (!r.Available)
             {
                 var v = r.Refresh!.Versions;
@@ -537,8 +557,8 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
                 // An unreadable reply lists nothing, which says nothing about new products.
                 var readable = !summary.Problems.Any(p => p.Code is "SUMMARY_UNREADABLE" or "SUMMARY_COLUMNS_MISSING");
                 if (!readable) output.Write(new Text("The summary couldn't be read, so new products are unknown.\n", new Style(Color.Red)));
-                else if (summary.NewProducts.Count == 0) output.Write(new Text("No new WoW products.\n"));
-                else output.Write(new Text($"New product found: {string.Join(", ", summary.NewProducts)}. Not in the reviewed list, so their builds aren't listed; adding one is a reviewed change (D017).\n"));
+                else if (summary.NewProducts.Count == 0) output.Write(new Text("Every WoW product it lists is reviewed.\n"));
+                else output.Write(new Text($"Not reviewed, listed after the reviewed products: {string.Join(", ", summary.NewProducts)}.\n"));
                 foreach (var problem in summary.Problems.Take(5)) output.Write(new Text($"problem: {problem.Code}: {problem.Message}\n", new Style(Color.Yellow)));
             }
         }

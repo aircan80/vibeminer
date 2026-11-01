@@ -21802,6 +21802,10 @@
           "minLength": 1,
           "maxLength": 64
         },
+        "reviewed": {
+          "description": "False for a WoW product the summary lists that isn't reviewed; its label is then its id, and it comes after every reviewed product (D476).",
+          "type": "boolean"
+        },
         "builds": {
           "description": "Newest first sighting first; at most 100, cut short by the frame budget.",
           "type": "array",
@@ -21842,6 +21846,7 @@
       "required": [
         "productId",
         "label",
+        "reviewed",
         "builds",
         "buildCount",
         "lastObservedAt",
@@ -21871,18 +21876,28 @@
             "minLength": 1,
             "maxLength": 64
           }
+        },
+        "withoutVersions": {
+          "description": "WoW products the summary lists with no versions document (only flagged rows, such as cdn), sorted, at most 100; their refresh answers not found, so they have no history (D476).",
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          }
         }
       },
       "required": [
         "observedAt",
         "readable",
-        "newProducts"
+        "newProducts",
+        "withoutVersions"
       ],
       "additionalProperties": false
     },
     "BuildCatalog": {
       "title": "BuildCatalog",
-      "description": "catalog.list: every reviewed product in registry order with its builds, and the newest stored summary (build-catalog-v1).",
+      "description": "catalog.list: every reviewed product in registry order, then the WoW products the newest stored summary lists that aren't reviewed (D476), each with its builds, and that summary (build-catalog-v1).",
       "type": "object",
       "properties": {
         "access": {
@@ -21985,7 +22000,7 @@
     },
     "BuildCatalogRefresh": {
       "title": "BuildCatalogRefresh",
-      "description": "catalog.refresh: the list after asking the version service for every reviewed product and the summary.",
+      "description": "catalog.refresh: the list after asking the version service for the summary, then every reviewed product and the summary's unreviewed WoW products (D476).",
       "type": "object",
       "properties": {
         "catalog": {
@@ -22000,9 +22015,9 @@
           "maximum": 100
         },
         "failures": {
-          "description": "Empty when everything answered; notFound is an answer.",
+          "description": "Empty when everything answered; notFound is an answer. The summary's failure comes first. At most 160, which holds every document a refresh asks for.",
           "type": "array",
-          "maxItems": 64,
+          "maxItems": 160,
           "items": {
             "$ref": "#/definitions/CatalogRefreshFailure"
           }

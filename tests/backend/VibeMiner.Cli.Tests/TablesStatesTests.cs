@@ -154,7 +154,7 @@ public sealed class TablesStatesTests
     public async Task UsageErrors()
     {
         Assert.Equal(VmCommands.Usage, await Run("tables", "states", "nope"));
-        Assert.Contains("nope isn't a reviewed product", error.ToString());
+        Assert.Contains("nope isn't a WoW product id", error.ToString());
         Assert.Equal(VmCommands.Usage, await Run("tables", "states"));
         Assert.Equal(VmCommands.Usage, await Run("--fetch-definitions", "store", "info"));
         Assert.Empty(stores.Opened);

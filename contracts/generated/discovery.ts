@@ -4515,7 +4515,7 @@ export interface BuildAvailabilityParams {
   archives: boolean;
 }
 /**
- * catalog.list: every reviewed product in registry order with its builds, and the newest stored summary (build-catalog-v1).
+ * catalog.list: every reviewed product in registry order, then the WoW products the newest stored summary lists that aren't reviewed (D476), each with its builds, and that summary (build-catalog-v1).
  */
 export interface BuildCatalog {
   /**
@@ -4531,6 +4531,10 @@ export interface BuildCatalog {
 export interface CatalogProduct {
   productId: string;
   label: string;
+  /**
+   * False for a WoW product the summary lists that isn't reviewed; its label is then its id, and it comes after every reviewed product (D476).
+   */
+  reviewed: boolean;
   /**
    * Newest first sighting first; at most 100, cut short by the frame budget.
    *
@@ -4808,18 +4812,24 @@ export interface CatalogSummary {
    * @maxItems 64
    */
   newProducts: string[];
+  /**
+   * WoW products the summary lists with no versions document (only flagged rows, such as cdn), sorted, at most 100; their refresh answers not found, so they have no history (D476).
+   *
+   * @maxItems 100
+   */
+  withoutVersions: string[];
 }
 /**
- * catalog.refresh: the list after asking the version service for every reviewed product and the summary.
+ * catalog.refresh: the list after asking the version service for the summary, then every reviewed product and the summary's unreviewed WoW products (D476).
  */
 export interface BuildCatalogRefresh {
   catalog: BuildCatalog;
   refreshedAt: SettingsTimestamp;
   checked: number;
   /**
-   * Empty when everything answered; notFound is an answer.
+   * Empty when everything answered; notFound is an answer. The summary's failure comes first. At most 160, which holds every document a refresh asks for.
    *
-   * @maxItems 64
+   * @maxItems 160
    */
   failures: CatalogRefreshFailure[];
   /**

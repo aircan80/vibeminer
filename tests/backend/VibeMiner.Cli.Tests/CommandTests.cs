@@ -215,7 +215,8 @@ public sealed class CommandTests : IDisposable
     [InlineData("history", "list", "wow", "extra")]
     [InlineData("--frobnicate", "store", "info")]
     [InlineData("store", "info", "--data")]
-    [InlineData("builds", "list", "wowdev")]
+    [InlineData("builds", "list", "agent")]
+    [InlineData("builds", "list", "WOW")]
     [InlineData("builds", "refresh", "diablo3")]
     [InlineData("builds", "list", "wow", "extra")]
     public async Task BadUsageExitsWithTwoAndOpensNothing(params string[] args)
@@ -264,7 +265,7 @@ public sealed class CommandTests : IDisposable
     private async Task<int> HistoryCount(HistoryKind? kind = null) => (await stores.Source.ReadHistoryAsync(new HistoryQuery(Kind: kind), default)).Count;
 
     [Fact]
-    public async Task RefreshFetchesEveryReviewedProductAndTheSummaryAsTheWriter()
+    public async Task RefreshFetchesTheSummaryThenEveryWowProductItListsAsTheWriter()
     {
         Serve("wow", "12.0.1.60000", A);
         Serve("wowt", "12.0.5.61000", B);
@@ -282,9 +283,11 @@ public sealed class CommandTests : IDisposable
         Assert.All(Products.Reviewed, p => Assert.Contains($"{p.Label} ({p.Id})", text));
         var beta = text[text.IndexOf("Beta (wow_beta)", StringComparison.Ordinal)..];
         Assert.StartsWith("not available (CDN_NOT_FOUND)", beta[(beta.IndexOf('\n') + 1)..]);
-        Assert.Contains("New product found: wow_classic_era_beta, wowdev.", text);
+        // D476: wow_classic_era_beta is reviewed; wowdev isn't, and is fetched and listed after the reviewed ones; agent isn't WoW.
+        Assert.Contains("Classic Era Beta (wow_classic_era_beta)", text);
+        Assert.Contains("Not reviewed, listed after the reviewed products: wowdev.", text);
+        Assert.True(text.IndexOf("wowdev (not reviewed)", StringComparison.Ordinal) > text.IndexOf("Titan Reforged (China) (wow_classic_titan)", StringComparison.Ordinal));
         Assert.DoesNotContain("agent", text);
-        Assert.DoesNotContain("(wowdev)", text);
         Assert.Equal(1, await HistoryCount(HistoryKind.Summary));
         Assert.Equal(2, await HistoryCount(HistoryKind.Versions));
     }

@@ -256,7 +256,7 @@ public sealed class BrowseModelTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task BuildsListsReviewedProductsTheNewOnesAndDrillsToABuild()
+    public async Task BuildsListsReviewedProductsThenTheUnreviewedOnesAndDrillsToABuild()
     {
         Serve("wow", "12.0.1.60000", A);
         Serve("wowt", "12.0.5.61000", B);
@@ -276,10 +276,11 @@ public sealed class BrowseModelTests : IAsyncDisposable
         var ptr2 = rows.Single(r => r[1] == "wowxptr");
         Assert.Equal(["PTR 2", "wowxptr", "-", "", "no history", ""], ptr2);
         Assert.NotEqual(rows[1][0], ptr2[0]);
-        Assert.Equal(["new, not reviewed", "wowz", "-", "", "2026-01-01 00:03", ""], rows[^1]);
-        Assert.Null(top.Visible[^1].Drill);
-        Assert.Contains("summary: wowz (not reviewed", top.Content.Note);
-        Assert.DoesNotContain("agent", top.Content.Note);
+        // D476: the summary's unreviewed product is a product row like the others, with no note about it.
+        Assert.Equal(["not reviewed", "wowz", "-", "", "no history", ""], rows[^1]);
+        Assert.NotNull(top.Visible[^1].Drill);
+        Assert.Equal("", top.Content.Note);
+        Assert.DoesNotContain(rows, r => r[1] == "agent");
 
         var product = await DrillAsync(0);
         Assert.Equal("builds > wow", navigator.Path);
@@ -550,12 +551,39 @@ public sealed class BrowseModelTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AnUnreviewedProductDrillsToItsBuildsLikeAReviewedOne()
+    {
+        Serve("wowz", "1.14.4.50753", A);
+        await ObserveServed(ObservationKind.Versions, "wowz");
+        ServeSummary("wow", "wowz");
+        await ObserveServed(ObservationKind.Summary, "");
+        var top = await GoAsync(":builds");
+        Assert.Equal(["not reviewed", "wowz", "1", "1.14.4.50753"], Cells(top)[^1][..4]);
+        var product = await DrillAsync(top.Visible.Count - 1);
+        Assert.Equal("builds > wowz", navigator.Path);
+        Assert.Equal("1.14.4.50753", Assert.Single(Cells(product))[0]);
+        Assert.StartsWith("wowz (not reviewed): 1 builds, last versions reply", product.Content!.Note);
+    }
+
+    [Fact]
+    public async Task AProductWithNoVersionsDocumentSaysSoRatherThanNoHistory()
+    {
+        // wowdev4 has only a cdn row in the summary (D476, WoW review); wowz has a versions row but nothing fetched yet.
+        stores.Source.AddReply("", "us", ObservationKind.Summary, Encoding.UTF8.GetBytes(
+            "Product!STRING:0|Seqn!DEC:4|Flags!STRING:0\n## seqn = 9\nwow|1|\nwowdev4|2|cdn\nwowz|3|\n"));
+        await ObserveServed(ObservationKind.Summary, "");
+        var rows = Cells(await GoAsync(":builds"));
+        Assert.Equal("no versions doc", rows.Single(r => r[1] == "wowdev4")[4]);
+        Assert.Equal("no history", rows.Single(r => r[1] == "wowz")[4]);
+    }
+
+    [Fact]
     public async Task BuildsWithNoSummarySaysRFetchesOne()
     {
         var top = await GoAsync(":builds");
         Assert.Equal(Products.Reviewed.Count, top.Visible.Count);
         Assert.All(Cells(top), r => Assert.Equal(("-", "no history"), (r[2], r[4])));
-        Assert.Equal("No summary recorded; r fetches one.", top.Content!.Note);
+        Assert.Equal("No summary recorded; r fetches it and the unreviewed products.", top.Content!.Note);
     }
 
     [Fact]
@@ -571,7 +599,8 @@ public sealed class BrowseModelTests : IAsyncDisposable
         await SettleTaskAsync();
         Assert.Null(navigator.Tasks.Running);
         Assert.StartsWith("refresh done at ", navigator.Tasks.Status);
-        Assert.EndsWith($": {Products.Ids.Count}/{Products.Ids.Count} products; new: wowz.", navigator.Tasks.Status);
+        // The summary first, then every reviewed product and wowz (D476).
+        Assert.EndsWith($": {Products.Ids.Count + 1}/{Products.Ids.Count + 1} products; 1 unreviewed.", navigator.Tasks.Status);
         Assert.Contains((StoreFolder, true), stores.Opened);
         Assert.Equal([true], stores.WriterCreate);
         Assert.Equal(2, await HistoryCount(HistoryKind.Versions));

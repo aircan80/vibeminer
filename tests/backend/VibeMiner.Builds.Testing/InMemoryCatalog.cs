@@ -66,7 +66,7 @@ public sealed class InMemoryCatalog(IObjectSource source, string sourceRegion = 
     private static void Validate(string product)
     {
         ArgumentNullException.ThrowIfNull(product);
-        if (!Products.IsKnown(product)) throw new ArgumentException($"'{product}' isn't a registered product.", nameof(product));
+        if (!Products.IsWow(product)) throw new ArgumentException($"'{product}' isn't a WoW product id.", nameof(product));
     }
 
     private async Task<BuildList> ListAsync(string product, CancellationToken cancellationToken)

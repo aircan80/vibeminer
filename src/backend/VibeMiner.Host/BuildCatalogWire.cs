@@ -12,7 +12,11 @@ namespace VibeMiner.Host;
 /// </summary>
 internal static partial class BuildCatalogWire
 {
-    public const int MaxBuilds = 100, MaxProblems = 20, MaxFailures = 64, MaxNewProducts = 64, MaxRegions = 64, MaxMessage = 512;
+    /// <summary>
+    /// <see cref="MaxFailures"/> holds every document a refresh can ask for (versions and cdns for 14 reviewed and 64 unreviewed
+    /// products, and the summary: 157), so none is ever dropped (D476).
+    /// </summary>
+    public const int MaxBuilds = 100, MaxProblems = 20, MaxFailures = 160, MaxNewProducts = 64, MaxRegions = 64, MaxMessage = 512, MaxWithoutVersions = 100;
     /// <summary>Builds stop being added once their JSON would pass this, across all products.</summary>
     public const int BuildsBudgetBytes = 750_000;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -33,29 +37,35 @@ internal static partial class BuildCatalogWire
     internal readonly record struct Sized(object Wire, int Bytes);
 
     /// <summary>One product before the reply is fitted to the frame.</summary>
-    internal sealed record ProductParts(ReviewedProduct Product, List<Sized> Builds, int BuildCount, DateTimeOffset? LastObservedAt,
+    internal sealed record ProductParts(ListedProduct Product, List<Sized> Builds, int BuildCount, DateTimeOffset? LastObservedAt,
         List<Sized> Problems, int ProblemCount);
 
     /// <summary>The list before it is fitted to the frame.</summary>
     internal sealed record CatalogParts(bool Writer, IReadOnlyList<ProductParts> Products, object? Summary);
 
-    /// <summary>The list: every reviewed product in registry order, then the newest stored summary.</summary>
-    internal static async Task<CatalogParts> CatalogAsync(IBuildCatalogHandle handle, bool writer, CancellationToken cancellationToken)
+    /// <summary>
+    /// The list: every listed product (<see cref="Products.Listed"/>: the reviewed ones in registry order, then the WoW products
+    /// <paramref name="unreviewed"/> names, or by default the newest stored summary does), then that summary.
+    /// </summary>
+    internal static async Task<CatalogParts> CatalogAsync(IBuildCatalogHandle handle, bool writer, CancellationToken cancellationToken,
+        IReadOnlyList<string>? unreviewed = null)
     {
+        var stored = await StoredSummary.NewestSummaryAsync(handle.Objects, cancellationToken).ConfigureAwait(false);
         var budget = BuildsBudgetBytes;
-        var products = new List<ProductParts>(Products.Reviewed.Count);
-        foreach (var product in Products.Reviewed)
+        var listed = Products.Listed(unreviewed ?? stored?.Read.NewProducts ?? []);
+        var products = new List<ProductParts>(listed.Count);
+        foreach (var product in listed)
         {
             var list = await handle.Catalog.ListBuildsAsync(product.Id, cancellationToken).ConfigureAwait(false);
             products.Add(Product(product, list, ref budget));
         }
-        var stored = await StoredSummary.NewestSummaryAsync(handle.Objects, cancellationToken).ConfigureAwait(false);
         return new(writer, products, stored is { Entry: var entry, Read: var read } ? new
         {
             observedAt = entry.ObservedAt.ToUniversalTime(),
             readable = read.Summary.State == ObjectState.Present
                 && !read.Problems.Any(p => p.Code is "SUMMARY_UNREADABLE" or "SUMMARY_COLUMNS_MISSING"),
             newProducts = NewProducts(read.NewProducts),
+            withoutVersions = read.WithoutVersions.Where(Products.IsWow).Take(MaxWithoutVersions).ToArray(),
         } : null);
     }
 
@@ -87,6 +97,7 @@ internal static partial class BuildCatalogWire
         {
             productId = p.Product.Id,
             label = p.Product.Label,
+            reviewed = p.Product.Reviewed,
             builds = empty ? [] : p.Builds.Select(b => b.Wire).ToArray(),
             buildCount = p.BuildCount,
             lastObservedAt = p.LastObservedAt?.ToUniversalTime(),
@@ -98,7 +109,7 @@ internal static partial class BuildCatalogWire
 
     private static int Size(object value) => JsonSerializer.SerializeToUtf8Bytes(value, Json).Length;
 
-    private static ProductParts Product(ReviewedProduct product, BuildList list, ref int budget)
+    private static ProductParts Product(ListedProduct product, BuildList list, ref int budget)
     {
         var builds = new List<Sized>();
         foreach (var build in list.Builds)
@@ -137,24 +148,29 @@ internal static partial class BuildCatalogWire
         };
     }
 
-    /// <summary>The refresh reply: the list after it, and every document that didn't answer (NotFound is an answer).</summary>
-    internal static object Refresh(CatalogParts catalog, DateTimeOffset refreshedAt, IReadOnlyList<CatalogRefresh> products, SummaryRefresh summary)
+    /// <summary>
+    /// The refresh reply: the list after it, how many products were <paramref name="asked"/>, and every document that didn't answer
+    /// (NotFound is an answer).
+    /// </summary>
+    internal static object Refresh(CatalogParts catalog, DateTimeOffset refreshedAt, IReadOnlyList<CatalogRefresh> products, SummaryRefresh summary,
+        int asked)
     {
+        // The summary first: it was asked first, and it decides which unreviewed products were asked.
         var failures = new List<object>();
+        var summaryFailure = Failure(null, "summary", summary.Summary);
+        if (summaryFailure is not null) failures.Add(summaryFailure);
         foreach (var product in products)
         {
             if (Failure(product.Product, "versions", product.Versions) is { } versions) failures.Add(versions);
             if (Failure(product.Product, "cdns", product.Cdns) is { } cdns) failures.Add(cdns);
         }
-        var summaryFailure = Failure(null, "summary", summary.Summary);
-        if (summaryFailure is not null) failures.Add(summaryFailure);
         var kept = failures.Take(MaxFailures).ToArray();
         var newProducts = summaryFailure is null ? NewProducts(summary.NewProducts) : [];
         object Reply(object? list) => new
         {
             catalog = list,
             refreshedAt = refreshedAt.ToUniversalTime(),
-            @checked = Products.Reviewed.Count,
+            @checked = asked,
             failures = kept,
             newProducts,
         };

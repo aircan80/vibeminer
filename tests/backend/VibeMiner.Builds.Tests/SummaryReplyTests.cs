@@ -19,6 +19,24 @@ public sealed class SummaryReplyTests
         Assert.Equal(["agent", "wow", "wowt"], read.Products);
     }
 
+    // D476 (WoW review): a product named only by flagged rows has no versions document.
+    [Fact]
+    public void AProductWithOnlyFlaggedRowsHasNoVersionsDocument()
+    {
+        var read = Read($"{Header}\n## seqn = 9\nwow|1|\nwow|2|cdn\nwowdev4|3|cdn\nwowe3|4|\nwowe3|5|cdn\nwowx|6|bgdl\nwowx|7|cdn\n");
+        Assert.Equal(["wow", "wowdev4", "wowe3", "wowx"], read.Products);
+        Assert.Equal(["wowdev4", "wowx"], read.WithoutVersions);
+        var refreshed = Summaries.Read(new VibeMiner.ObjectAccess.ObservationResult(VibeMiner.ObjectAccess.ObjectState.Present,
+            new(VibeMiner.ObjectAccess.ObservationKind.Summary, "", "us", new Uri("https://us.version.battle.net/v2/summary"), DateTimeOffset.UnixEpoch,
+                Encoding.UTF8.GetBytes($"{Header}\nwowdev4|3|cdn\nwow|1|\n")), Recorded: true));
+        Assert.Equal(["wowdev4"], refreshed.WithoutVersions);
+        // Without a Flags column the reply can't say, so no product is marked.
+        var unflagged = Read("Product!STRING:0|Seqn!DEC:4\nwow|1\nwowdev4|3\n");
+        Assert.True(unflagged.Readable);
+        Assert.Equal(["wow", "wowdev4"], unflagged.Products);
+        Assert.Empty(unflagged.WithoutVersions);
+    }
+
     [Fact]
     public void ABadRowIsAProblemAndTheOthersStillCount()
     {
@@ -53,7 +71,7 @@ public sealed class SummaryReplyTests
     [Fact]
     public void ReviewedProductsCarryTheRegistryNames()
     {
-        Assert.Equal(13, Products.Reviewed.Count);
+        Assert.Equal(14, Products.Reviewed.Count);
         Assert.Equal(Products.Reviewed.Select(p => p.Id), Products.Ids);
         Assert.Equal("Retail", Products.Label("wow"));
         Assert.Equal("Classic Era PTR", Products.Label("wow_classic_era_ptr"));
@@ -66,5 +84,55 @@ public sealed class SummaryReplyTests
         Assert.True(Products.LooksLikeWow("wow_classic_era_beta"));
         Assert.False(Products.LooksLikeWow("agent"));
         Assert.False(Products.LooksLikeWow("fenris"));
+    }
+
+    // D476: any WoW product id is served, in layer 1's grammar.
+    [Theory]
+    [InlineData("wow", true)]
+    [InlineData("wowdev2", true)]
+    [InlineData("wow_classic_era_beta", true)]
+    [InlineData("wow-x", true)]
+    [InlineData("agent", false)]
+    [InlineData("WOW", false)]
+    [InlineData("wow.dev", false)]
+    [InlineData("wow/../x", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsWowTakesLayerOnesGrammarWithAWowPrefix(string? product, bool wow) => Assert.Equal(wow, Products.IsWow(product));
+
+    [Fact]
+    public void IsWowBoundsTheIdAtLayerOnesSixtyFourBytes()
+    {
+        Assert.True(Products.IsWow("wow" + new string('a', 61)));
+        Assert.False(Products.IsWow("wow" + new string('a', 62)));
+        Assert.All(Products.Ids, id => Assert.True(Products.IsWow(id), id));
+    }
+
+    [Fact]
+    public void ListedPutsReviewedProductsFirstThenTheOthersInNaturalOrder()
+    {
+        var listed = Products.Listed(["wownev10", "wownev2", "wowdev", "wow", "wow_classic_era_beta", "agent", "WOWX", "wownev2", "wownev1"]);
+        Assert.Equal(Products.Ids, listed.Take(Products.Ids.Count).Select(p => p.Id));
+        Assert.All(listed.Take(Products.Ids.Count), p => Assert.True(p.Reviewed));
+        Assert.Equal(["wowdev", "wownev1", "wownev2", "wownev10"], listed.Skip(Products.Ids.Count).Select(p => p.Id));
+        Assert.All(listed.Skip(Products.Ids.Count), p => Assert.Equal((p.Id, false), (p.Label, p.Reviewed)));
+        Assert.Equal(Products.Ids.Count, Products.Listed([]).Count);
+        Assert.Equal(Products.MaxUnreviewed, Products.Listed(Enumerable.Range(0, 100).Select(i => $"wowx{i}")).Count - Products.Ids.Count);
+    }
+
+    [Fact]
+    public void NaturalOrderComparesDigitRunsByValueAndStaysTotal()
+    {
+        string[] ids = ["wowv10", "wowv", "wowv2", "wowv02", "wowe1", "wowdev", "wowv9"];
+        Assert.Equal(["wowdev", "wowe1", "wowv", "wowv2", "wowv02", "wowv9", "wowv10"], ids.Order(Products.NaturalOrder.Instance));
+        Assert.Equal(0, Products.NaturalOrder.Instance.Compare("wowv2", "wowv2"));
+        Assert.True(Products.NaturalOrder.Instance.Compare("wowv2", "wowv02") < 0);
+    }
+
+    [Fact]
+    public void NameIsTheLabelOrTheId()
+    {
+        Assert.Equal("Forever", Products.Name("wowf"));
+        Assert.Equal("wowdev", Products.Name("wowdev"));
     }
 }

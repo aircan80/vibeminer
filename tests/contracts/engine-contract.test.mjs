@@ -249,10 +249,15 @@ test('the build catalog list and refresh keep every reviewed product, bounded bu
   validate('BuildCatalog', catalog);
   validate('BuildCatalogRefresh', refresh);
   assert.equal(catalog.products.find(product => product.productId === 'wowxptr').label, 'PTR 2');
+  // D476: the reviewed products first, then the summary's new ones, each labelled by its id.
+  const unreviewed = catalog.products.filter(product => !product.reviewed);
+  assert.deepEqual(unreviewed.map(product => [product.productId, product.label]), [['wow_example_new', 'wow_example_new']]);
+  assert.ok(catalog.products.slice(-unreviewed.length).every(product => !product.reviewed));
+  assert.deepEqual(unreviewed.map(product => product.productId), catalog.summary.newProducts);
   assert.ok(catalog.products.some(product => product.builds.length === 0 && product.lastObservedAt === null), 'a product with no history');
   assert.deepEqual(refresh.failures.map(failure => [failure.state, failure.code]), [['unavailable', 'CDN_OFFLINE']]);
   validate('BuildCatalog', { ...catalog, access: 'readOnly', summary: null });
-  validate('BuildCatalog', { ...catalog, summary: { ...catalog.summary, readable: false, newProducts: [] } });
+  validate('BuildCatalog', { ...catalog, summary: { ...catalog.summary, readable: false, newProducts: [], withoutVersions: [] } });
   validate('BuildCatalogRefresh', { ...refresh, failures: [{ productId: null, document: 'summary', state: 'needsNetwork', code: null, message: null }], newProducts: [] });
   const invalid = (name, base, change) => { const value = structuredClone(base); change(value); assert.equal(validator(name)(value), false, change.toString()); };
   for (const change of [
@@ -261,6 +266,8 @@ test('the build catalog list and refresh keep every reviewed product, bounded bu
     value => { value.products[0].builds[0].extra = true; },
     value => { delete value.summary; },
     value => { delete value.products[0].buildCount; },
+    value => { delete value.products[0].reviewed; },
+    value => { value.products[0].reviewed = 'yes'; },
     value => { delete value.products[0].builds[0].current; },
     value => { value.products[0].builds = Array(101).fill(value.products[0].builds[0]); },
     value => { value.products[0].builds[0].buildConfig = 'A'.repeat(32); },
@@ -272,6 +279,9 @@ test('the build catalog list and refresh keep every reviewed product, bounded bu
     value => { value.access = 'shared'; },
     value => { value.access = null; },
     value => { value.summary.newProducts = Array(65).fill('wow_x'); },
+    value => { delete value.summary.withoutVersions; },
+    value => { value.summary.withoutVersions = Array(101).fill('wow_x'); },
+    value => { value.summary.withoutVersions = ['agent/x']; },
   ]) invalid('BuildCatalog', catalog, change);
   for (const change of [
     value => { value.extra = true; },
@@ -283,7 +293,7 @@ test('the build catalog list and refresh keep every reviewed product, bounded bu
     value => { value.failures[0].extra = true; },
     value => { delete value.failures[0].code; },
     value => { value.failures[0].message = 'x'.repeat(513); },
-    value => { value.failures = Array(65).fill(value.failures[0]); },
+    value => { value.failures = Array(161).fill(value.failures[0]); },
   ]) invalid('BuildCatalogRefresh', refresh, change);
   for (const method of ['catalog.list', 'catalog.refresh']) {
     const request = params => ({ protocolVersion: 1, id: method, method, params });
@@ -908,7 +918,9 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   assert.ok(!buildCatalog.error, JSON.stringify(buildCatalog.error));
   validate('BuildCatalog', buildCatalog.result);
   assert.equal(buildCatalog.result.access, 'writer');
-  assert.equal(buildCatalog.result.products.length, 13);
+  // No summary yet, so only the 14 reviewed products (D476).
+  assert.equal(buildCatalog.result.products.length, 14);
+  assert.ok(buildCatalog.result.products.every(product => product.reviewed));
   assert.equal(buildCatalog.result.summary, null);
   assert.ok(existsSync(path.join(data, 'cdn-store-v1')));
   assert.ok(existsSync(path.join(data, 'catalog-v1', 'catalog.sqlite3')));

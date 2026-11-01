@@ -37,12 +37,20 @@ public sealed record CatalogRefresh(string Product, ObservationResult Versions, 
 
 /// <summary>
 /// What a summary refresh observed (appended to the history log when it worked) and what it says.
-/// <see cref="NewProducts"/>: products the summary lists whose id starts with "wow" and that aren't reviewed, sorted. Their builds
-/// are never read; adding one stays a reviewed change (D017). <see cref="Listed"/> is every product the summary lists, sorted.
+/// <see cref="NewProducts"/>: the WoW products the summary lists (<see cref="Products.IsWow"/>) that aren't reviewed, sorted; the
+/// build list shows and refreshes them after the reviewed ones (D476). <see cref="Listed"/> is every product the summary lists, sorted.
 /// Both are empty when the observation failed or the reply couldn't be read (see <see cref="Problems"/>).
 /// </summary>
 public sealed record SummaryRefresh(ObservationResult Summary, IReadOnlyList<string> NewProducts, IReadOnlyList<string> Listed,
-    IReadOnlyList<CatalogProblem> Problems, string? Sequence);
+    IReadOnlyList<CatalogProblem> Problems, string? Sequence)
+{
+    /// <summary>
+    /// The listed products that have no versions document: every row naming them has a flag (<c>cdn</c>, <c>bgdl</c> ...), none is
+    /// the empty-flag versions row, so their versions request answers not found and nothing is recorded (D476). Sorted. Empty when
+    /// the reply has no Flags column, since then it can't say.
+    /// </summary>
+    public IReadOnlyList<string> WithoutVersions { get; init; } = [];
+}
 
 /// <summary>
 /// Layer 3's build catalog. The list comes only from the history log, through layer 2, so it works offline and survives
@@ -53,7 +61,7 @@ public interface ICatalog
 {
     /// <summary>
     /// The product's builds, older ones included. Picks up history entries the catalog hasn't read yet first. Never touches
-    /// the network. Throws <see cref="ArgumentException"/> for a product that isn't registered.
+    /// the network. Throws <see cref="ArgumentException"/> for an id <see cref="Products.IsWow"/> refuses.
     /// </summary>
     Task<BuildList> ListBuildsAsync(string product, CancellationToken cancellationToken);
 

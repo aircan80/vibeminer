@@ -34,6 +34,17 @@ public sealed class BuildCatalogHostTests
             $"{r.Region}|{r.Build}|{new string('d', 32)}|{K}|{r.Name.Split('.')[^1]}|{r.Name}|{P}\n")));
 
     /// <summary>Appends one us-host observation to the history log, then moves the clock a minute.</summary>
+    /// <summary>Records a summary that lists every reviewed product and <paramref name="count"/> unreviewed ones, wowx0 up.</summary>
+    private Task ObserveSummaryAsync(int count) => ObserveAsync("", ObservationKind.Summary, Encoding.UTF8.GetBytes(
+        "Product!STRING:0|Seqn!DEC:4|Flags!STRING:0\n## seqn = 1\n"
+        + string.Concat(Products.Ids.Concat(Enumerable.Range(0, count).Select(i => $"wowx{i}")).Select(p => $"{p}|1|\n"))));
+
+    private static async Task<JsonElement> ListAsync(Session session, string id)
+    {
+        await session.Send(id, "catalog.list", new { });
+        return (await session.Receive()).GetProperty("result");
+    }
+
     private async Task ObserveAsync(string product, ObservationKind kind, byte[] bytes)
     {
         source.AddReply(product, "us", kind, bytes);
@@ -44,11 +55,12 @@ public sealed class BuildCatalogHostTests
     private static JsonElement ProductOf(JsonElement catalog, string id) =>
         catalog.GetProperty("products").EnumerateArray().Single(p => p.GetProperty("productId").GetString() == id);
 
-    // The layer 3 list is a copy of the engine registry (D017, D475): same ids, same order, same labels except wowxptr's "PTR 2".
+    // The layer 3 list is a copy of the engine registry (D017, D475): same ids, same order, same labels except wowxptr's "PTR 2",
+    // and wow_classic_era_beta, which only layer 3 has (D476; the old registry goes with #158).
     [Fact]
     public void TheLayer3ProductListMatchesTheEngineRegistry()
     {
-        Assert.Equal(ProductRegistry.Products.Select(p => p.Id), Products.Reviewed.Select(p => p.Id));
+        Assert.Equal(ProductRegistry.Products.Select(p => p.Id), Products.Reviewed.Select(p => p.Id).Where(id => id != "wow_classic_era_beta"));
         foreach (var product in ProductRegistry.Products.Where(p => p.Id != "wowxptr"))
             Assert.Equal(product.Label, Products.Label(product.Id));
     }
@@ -141,14 +153,21 @@ public sealed class BuildCatalogHostTests
         await session.Send("list", "catalog.list", new { });
         var summary = (await session.Receive()).GetProperty("result").GetProperty("summary");
         Assert.True(summary.GetProperty("readable").GetBoolean());
-        Assert.Equal(["wow_classic_era_beta", "wowz"], summary.GetProperty("newProducts").EnumerateArray().Select(p => p.GetString()));
+        // wow_classic_era_beta is reviewed (D476); wowz isn't, so it is a product after the reviewed ones.
+        Assert.Equal(["wowz"], summary.GetProperty("newProducts").EnumerateArray().Select(p => p.GetString()));
+        // wow_classic_era_beta has only a cdn row: no versions document. agent isn't WoW, so it isn't named.
+        Assert.Equal(["wow_classic_era_beta"], summary.GetProperty("withoutVersions").EnumerateArray().Select(p => p.GetString()));
+        var listed = (await ListAsync(session, "listed")).GetProperty("products").EnumerateArray().Select(p => p.GetProperty("productId").GetString());
+        Assert.Equal(Products.Ids.Append("wowz"), listed);
 
         var unreadableAt = clock.Now;
         await ObserveAsync("", ObservationKind.Summary, "not a table\n"u8.ToArray());
-        await session.Send("again", "catalog.list", new { });
-        summary = (await session.Receive()).GetProperty("result").GetProperty("summary");
+        var again = await ListAsync(session, "again");
+        summary = again.GetProperty("summary");
         Assert.False(summary.GetProperty("readable").GetBoolean());
         Assert.Empty(summary.GetProperty("newProducts").EnumerateArray());
+        // An unreadable newest summary names no unreviewed product, so only the reviewed ones are listed.
+        Assert.Equal(Products.Ids, again.GetProperty("products").EnumerateArray().Select(p => p.GetProperty("productId").GetString()));
         Assert.Equal(unreadableAt, DateTimeOffset.Parse(summary.GetProperty("observedAt").GetString()!));
     }
 
@@ -176,7 +195,7 @@ public sealed class BuildCatalogHostTests
     public async Task ListStopsAddingBuildsAtTheBuildsBudget()
     {
         var at = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
-        // About 1 KB a build: a 128-char name and 64 regions. 13 products of 100 builds would be about 1.3 MB.
+        // About 1 KB a build: a 128-char name and 64 regions. 14 products of 100 builds would be about 1.4 MB.
         var catalog = new ListedCatalog(product => new BuildList(product,
             [.. Enumerable.Range(0, 100).Select(i => Synthetic(product, i, new string('9', 120) + "." + i.ToString("D7"), 64, at))], [], at));
         await using var service = new BuildCatalogService(new FakeStores(source, () => catalog));
@@ -184,7 +203,7 @@ public sealed class BuildCatalogHostTests
         await session.Send("list", "catalog.list", new { });
         var frame = await session.Receive();
         var products = frame.GetProperty("result").GetProperty("products").EnumerateArray().ToArray();
-        Assert.Equal(13, products.Length);
+        Assert.Equal(Products.Reviewed.Count, products.Length);
         Assert.All(products, p => Assert.Equal(100, p.GetProperty("buildCount").GetInt32()));
         Assert.Equal(100, products[0].GetProperty("builds").GetArrayLength());
         Assert.Equal(0, products[^1].GetProperty("builds").GetArrayLength());
@@ -208,7 +227,9 @@ public sealed class BuildCatalogHostTests
     private static void AssertCatalogShape(JsonElement catalog)
     {
         var products = catalog.GetProperty("products").EnumerateArray().ToArray();
-        Assert.Equal(Products.Reviewed.Count, products.Length);
+        Assert.InRange(products.Length, Products.Reviewed.Count, Products.Reviewed.Count + Products.MaxUnreviewed);
+        Assert.Equal(Products.Ids, products.Take(Products.Ids.Count).Select(p => p.GetProperty("productId").GetString()));
+        Assert.All(products.Skip(Products.Ids.Count), p => Assert.False(p.GetProperty("reviewed").GetBoolean()));
         foreach (var product in products)
         {
             Assert.InRange(product.GetProperty("builds").GetArrayLength(), 0, Math.Min(100, product.GetProperty("buildCount").GetInt32()));
@@ -224,6 +245,8 @@ public sealed class BuildCatalogHostTests
     [Fact]
     public async Task WorstCaseListFitsTheFrame()
     {
+        // D476: every reviewed product and the 64 unreviewed ones the cap allows.
+        await ObserveSummaryAsync(Products.MaxUnreviewed + 10);
         await using var service = new BuildCatalogService(new FakeStores(source, WorstCase));
         await using var session = await Session.Start(service);
         var id = new string('\'', 128);
@@ -236,11 +259,13 @@ public sealed class BuildCatalogHostTests
         var catalog = frame.GetProperty("result");
         AssertCatalogShape(catalog);
         var products = catalog.GetProperty("products").EnumerateArray().ToArray();
+        Assert.Equal(Products.Reviewed.Count + Products.MaxUnreviewed, products.Length);
         Assert.All(products, p => Assert.Equal(25, p.GetProperty("problemCount").GetInt32()));
-        // Builds go first, from the last products; the problems alone (about 0.8 MB) then fit, so every product keeps 20.
-        Assert.All(products, p => Assert.Equal(20, p.GetProperty("problems").GetArrayLength()));
-        Assert.Equal(0, products[^1].GetProperty("builds").GetArrayLength());
-        Assert.Equal(100, products[0].GetProperty("builds").GetArrayLength());
+        // Builds go first, from the last products, then problems the same way: 78 products of 20 such problems (about 4.8 MB)
+        // don't fit, so the first products keep theirs and the last ones lose them.
+        Assert.All(products, p => Assert.Equal(0, p.GetProperty("builds").GetArrayLength()));
+        Assert.Equal(20, products[0].GetProperty("problems").GetArrayLength());
+        Assert.Equal(0, products[^1].GetProperty("problems").GetArrayLength());
     }
 
     [Fact]
@@ -267,6 +292,7 @@ public sealed class BuildCatalogHostTests
     [Fact]
     public async Task WorstCaseRefreshFitsTheFrame()
     {
+        await ObserveSummaryAsync(Products.MaxUnreviewed);
         await using var service = new BuildCatalogService(new FakeStores(source, WorstCase));
         await using var session = await Session.Start(service);
         var id = new string('\'', 128);
@@ -278,7 +304,10 @@ public sealed class BuildCatalogHostTests
         var result = document.RootElement.GetProperty("result");
         // Versions and cdns for every product, and the summary: all of them, each with a 512-char message.
         var failures = result.GetProperty("failures").EnumerateArray().ToArray();
-        Assert.Equal(13 * 2 + 1, failures.Length);
+        // The summary fails here, so the products are the newest stored summary's: 78. Every failure is kept, the summary's first.
+        Assert.Equal(1 + (Products.Ids.Count + Products.MaxUnreviewed) * 2, failures.Length);
+        Assert.InRange(failures.Length, 0, BuildCatalogWire.MaxFailures);
+        Assert.Equal("summary", failures[0].GetProperty("document").GetString());
         Assert.All(failures, f => Assert.Equal(512, f.GetProperty("message").GetString()!.Length));
         Assert.Empty(result.GetProperty("newProducts").EnumerateArray());
         AssertCatalogShape(result.GetProperty("catalog"));
@@ -304,14 +333,15 @@ public sealed class BuildCatalogHostTests
             Assert.Equal(BuildCatalogService.ProgressStage, frame.GetProperty("stage").GetString());
             Assert.Equal("products", frame.GetProperty("unit").GetString());
             Assert.Equal(JsonValueKind.Null, frame.GetProperty("region").ValueKind);
-            Assert.Equal(Products.Reviewed.Count + 1, frame.GetProperty("total").GetInt32());
+            // D476: 0 of 1 before the summary, then the reviewed products, wowz and the summary.
+            Assert.Equal(completed.Count == 0 ? 1 : Products.Reviewed.Count + 2, frame.GetProperty("total").GetInt32());
             completed.Add(frame.GetProperty("completed").GetInt32()); sequences.Add(frame.GetProperty("sequence").GetInt64());
         }
-        Assert.Equal(Enumerable.Range(0, Products.Reviewed.Count + 2), completed);
-        Assert.Equal(Enumerable.Range(1, Products.Reviewed.Count + 2).Select(i => (long)i), sequences);
+        Assert.Equal(Enumerable.Range(0, Products.Reviewed.Count + 3), completed);
+        Assert.Equal(Enumerable.Range(1, Products.Reviewed.Count + 3).Select(i => (long)i), sequences);
 
         var result = terminal.GetProperty("result");
-        Assert.Equal(13, result.GetProperty("checked").GetInt32());
+        Assert.Equal(Products.Reviewed.Count + 1, result.GetProperty("checked").GetInt32());
         // wowt's versions are offline; every other unanswered document is NotFound, an answer.
         var failure = Assert.Single(result.GetProperty("failures").EnumerateArray());
         Assert.Equal("wowt", failure.GetProperty("productId").GetString());
@@ -328,7 +358,11 @@ public sealed class BuildCatalogHostTests
         // The offline product still serves its stored list.
         Assert.Equal("11.1.0.2000", ProductOf(catalog, "wowt").GetProperty("builds")[0].GetProperty("versionsName").GetString());
         Assert.Equal(["wowz"], catalog.GetProperty("summary").GetProperty("newProducts").EnumerateArray().Select(p => p.GetString()));
-        Assert.Equal(1 + 13 * 2 + 1, source.Observed.Count);
+        // wowz was asked like a reviewed product and comes last, labelled by its id.
+        var wowz = catalog.GetProperty("products").EnumerateArray().Last();
+        Assert.Equal(("wowz", "wowz", false), (wowz.GetProperty("productId").GetString(), wowz.GetProperty("label").GetString(), wowz.GetProperty("reviewed").GetBoolean()));
+        Assert.Equal(1 + 1 + (Products.Reviewed.Count + 1) * 2, source.Observed.Count);
+        Assert.Equal(ObservationKind.Summary, source.Observed.Skip(1).First().Kind);
     }
 
     [Fact]
@@ -339,6 +373,8 @@ public sealed class BuildCatalogHostTests
         await using var session = await Session.Start(service);
         await session.Send("refresh", "catalog.refresh", new { });
         Assert.Equal(0, (await session.Receive()).GetProperty("completed").GetInt32());
+        // The summary first (D476), then the products start.
+        Assert.Equal(1, (await session.Receive()).GetProperty("completed").GetInt32());
         await gated.ThreeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await Task.Delay(50);
         Assert.Equal(BuildCatalogService.MaxProductsInFlight, gated.Started);
@@ -409,7 +445,7 @@ public sealed class BuildCatalogHostTests
                 await session.Send("list", "catalog.list", new { });
                 var catalog = (await session.Receive()).GetProperty("result");
                 Assert.Equal("writer", catalog.GetProperty("access").GetString());
-                Assert.Equal(13, catalog.GetProperty("products").GetArrayLength());
+                Assert.Equal(Products.Reviewed.Count, catalog.GetProperty("products").GetArrayLength());
                 Assert.Equal(JsonValueKind.Null, catalog.GetProperty("summary").ValueKind);
             }
             Assert.True(Directory.Exists(Path.Combine(directory.Path, "cdn-store-v1")));

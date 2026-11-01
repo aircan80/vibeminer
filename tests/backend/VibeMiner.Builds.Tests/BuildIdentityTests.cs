@@ -47,10 +47,24 @@ public sealed class BuildIdentityTests
     [Fact]
     public void ProductsListsTheReviewedIds()
     {
-        Assert.Equal(13, Products.Ids.Count);
+        Assert.Equal(14, Products.Ids.Count);
         Assert.True(Products.IsKnown("wow_classic_titan"));
         Assert.False(Products.IsKnown("WOW"));
         Assert.False(Products.IsKnown(null));
+    }
+
+    // D476: an unreviewed WoW product is a build like any other; anything else is still refused.
+    [Fact]
+    public void AnUnreviewedWowProductMakesABuildRefAndAnIdentity()
+    {
+        var reference = new BuildRef("wowdev2", new string('A', 32), new string('b', 32), "us");
+        Assert.Equal(("wowdev2", new string('a', 32)), (reference.Product, reference.BuildConfig));
+        var identity = BuildIdentity.FromFields("wowdev2", new Dictionary<string, string> { ["BuildConfig"] = new('a', 32), ["VersionsName"] = "1.60.1.70707" });
+        Assert.Equal("wowdev2", identity.ProductId);
+        Assert.NotEqual(identity.Id, BuildIdentity.FromFields("wowf", new Dictionary<string, string> { ["BuildConfig"] = new('a', 32), ["VersionsName"] = "1.60.1.70707" }).Id);
+        Assert.Throws<ArgumentException>(() => new BuildRef("agent", new string('a', 32), new string('b', 32)));
+        Assert.Equal("INVALID_PRODUCT", Assert.Throws<BuildIdentityException>(() => BuildIdentity.FromFields("WOW",
+            new Dictionary<string, string> { ["BuildConfig"] = new('a', 32), ["VersionsName"] = "1" })).Code);
     }
 
     // #208: the 1.60 line is WoW: Forever, and wow_classic_titan is China's Titan Reforged (D475).

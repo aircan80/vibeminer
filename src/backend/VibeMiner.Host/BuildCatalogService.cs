@@ -1,4 +1,6 @@
 using VibeMiner.Builds;
+using VibeMiner.Composition;
+using VibeMiner.ObjectAccess;
 using VibeMiner.Domain;
 using VibeMiner.Objects;
 
@@ -33,10 +35,11 @@ public sealed class BuildCatalogService(IBuildCatalogStores stores, TimeProvider
     }
 
     /// <summary>
-    /// <c>catalog.refresh</c>: every reviewed product, <see cref="MaxProductsInFlight"/> at once, then the summary, then the list.
-    /// <paramref name="progress"/> gets (completed, total): once before any product starts, once per finished product and once
-    /// after the summary; total counts the summary as one. Cancel stops starting products, cancels the running ones and throws
-    /// once they retired; what they observed stays in the history log.
+    /// <c>catalog.refresh</c> (D476): the summary first, then every listed product (the reviewed ones, then the WoW products the
+    /// summary lists that aren't reviewed; when the summary fails, the newest stored one's), <see cref="MaxProductsInFlight"/> at
+    /// once, then the list. <paramref name="progress"/> gets (completed, total): (0, 1) before the summary, (1, 1 + products) after
+    /// it, then once per finished product. Cancel stops starting products, cancels the running ones and throws once they retired;
+    /// what they observed stays in the history log.
     /// </summary>
     public async Task<object> RefreshAsync(Func<int, int, Task> progress, CancellationToken cancellationToken)
     {
@@ -45,12 +48,16 @@ public sealed class BuildCatalogService(IBuildCatalogStores stores, TimeProvider
             ?? throw new DiscoveryException(ObjectStoreCodes.Busy, BusyMessage, true);
         return await UseAsync(async () =>
         {
-            var products = Products.Reviewed;
+            await progress(0, 1).ConfigureAwait(false);
+            var summary = await held.Catalog.RefreshSummaryAsync(cancellationToken).ConfigureAwait(false);
+            var unreviewed = summary.Summary.State == ObjectState.Present ? summary.NewProducts
+                : (await StoredSummary.NewestSummaryAsync(held.Objects, cancellationToken).ConfigureAwait(false))?.Read.NewProducts ?? [];
+            var products = Products.Listed(unreviewed);
             var total = products.Count + 1;
             var results = new CatalogRefresh?[products.Count];
-            var completed = 0;
+            var completed = 1;
             using var reporting = new SemaphoreSlim(1, 1);
-            await progress(0, total).ConfigureAwait(false);
+            await progress(completed, total).ConfigureAwait(false);
             try
             {
                 await Parallel.ForEachAsync(Enumerable.Range(0, products.Count),
@@ -64,12 +71,10 @@ public sealed class BuildCatalogService(IBuildCatalogStores stores, TimeProvider
                     }).ConfigureAwait(false);
             }
             // ForEachAsync reports cancellation even when the token was set after the last product finished.
-            catch (OperationCanceledException) when (Volatile.Read(ref completed) == products.Count) { }
-            var summary = await held.Catalog.RefreshSummaryAsync(cancellationToken).ConfigureAwait(false);
-            await progress(total, total).ConfigureAwait(false);
+            catch (OperationCanceledException) when (Volatile.Read(ref completed) == total) { }
             // Every observation is in the history log now; a late cancel doesn't hide it.
-            var catalog = await BuildCatalogWire.CatalogAsync(held, writer: true, CancellationToken.None).ConfigureAwait(false);
-            return BuildCatalogWire.Refresh(catalog, clock.GetUtcNow(), results.OfType<CatalogRefresh>().ToArray(), summary);
+            var catalog = await BuildCatalogWire.CatalogAsync(held, writer: true, CancellationToken.None, unreviewed).ConfigureAwait(false);
+            return BuildCatalogWire.Refresh(catalog, clock.GetUtcNow(), results.OfType<CatalogRefresh>().ToArray(), summary, products.Count);
         }).ConfigureAwait(false);
     }
 

@@ -1,20 +1,20 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MutableRefObject } from 'react';
 import './discovery.css';
 import './build-catalog.css';
-import type { BuildCatalog as Catalog } from '../../../../contracts/generated/discovery';
+import type { BuildCatalog as Catalog, CatalogProduct } from '../../../../contracts/generated/discovery';
 import type { DiscoveryBridge } from '../shared/bridge';
 import brand from '../../../../branding/vibeminer.svg';
 import { ActivityTrigger, useDownloadActivity } from './DownloadActivity';
 import { summaryLine } from './download-activity-state';
 import { SettingsButton, type SettingsOrigin } from './Settings';
 import { useTruncationTitles } from './status-titles';
-import { BUSY_TEXT, OPEN_REASON, SWITCHED_TEXT, checkedText, catalogEmpty, catalogKey, catalogRows, catalogTime, lastChecked, productLine, progressText, refreshNotice, regionText, summaryText, type RefreshNotice } from './build-catalog-view';
+import { BUSY_TEXT, OPEN_REASON, SWITCHED_TEXT, checkedText, catalogEmpty, catalogKey, catalogRows, catalogTime, lastChecked, othersLine, productLine, productRows, progressText, refreshNotice, regionText, splitProducts, summaryNote, type CatalogRow, type RefreshNotice } from './build-catalog-view';
 const origin: SettingsOrigin = { backLabel: 'Back to Discovery', returnsTo: 'Discovery', kept: 'Discovery kept as you left it' };
 /**
  * What the list keeps for the session while the old list is shown instead (#205): the list last read, the selection and
  * the last refresh outcome. App owns it, so switching back shows them again.
  */
-export type CatalogSession = { catalog: Catalog | null; selectedKey: string | null; notice: RefreshNotice | null; storeBusy: boolean; refreshError: string; message: string };
+export type CatalogSession = { catalog: Catalog | null; selectedKey: string | null; notice: RefreshNotice | null; storeBusy: boolean; refreshError: string; message: string; othersOpen?: boolean };
 /**
  * Stacked windows shorter than this many rem share one scroller. The old list switches at 25rem; this list also has product
  * headings and the summary line above its rows, so a stacked pane at 1280x800 with 200% text (26.7rem) would show no row.
@@ -22,8 +22,9 @@ export type CatalogSession = { catalog: Catalog | null; selectedKey: string | nu
 const SHARED_HEIGHT = 30;
 const optionId = (key: string) => `catalog-build-${key.replace(':', '-')}`;
 /**
- * Discovery's build list from the layer 3 catalog (#205, build-catalog-v1): every reviewed product with its stored builds,
- * Refresh through the version service, and an inspector. Opening a build on the new storage is not there yet, so Open is
+ * Discovery's build list from the layer 3 catalog (#205, build-catalog-v1): every reviewed product with its stored builds, then
+ * the WoW products the summary lists that aren't reviewed in their own list, collapsed until shown (D476), Refresh through the
+ * version service, and an inspector. Opening a build on the new storage is not there yet, so Open is
  * disabled with its reason; "Old build list" switches this session to the old Discovery list, which still opens builds.
  */
 export function BuildCatalog({ bridge, active, fixtureLabel, onOldList, focusSwitch = false, session }: { bridge: DiscoveryBridge; active: boolean; fixtureLabel?: string; onOldList: () => void; focusSwitch?: boolean; session?: MutableRefObject<CatalogSession | null> }) {
@@ -39,6 +40,7 @@ export function BuildCatalog({ bridge, active, fixtureLabel, onOldList, focusSwi
   const [storeBusy, setStoreBusy] = useState(kept?.storeBusy ?? false);
   const [refreshError, setRefreshError] = useState(kept?.refreshError ?? '');
   const [message, setMessage] = useState(kept?.message ?? 'Not refreshed this session.');
+  const [othersOpen, setOthersOpen] = useState(kept?.othersOpen ?? false);
   // Each read or refresh takes a new generation; a reply from an older one is dropped.
   const generation = useRef(0), activeId = useRef<string | null>(null), disposed = useRef(false);
   const switchButton = useRef<HTMLButtonElement>(null), refreshButton = useRef<HTMLButtonElement>(null);
@@ -101,20 +103,23 @@ export function BuildCatalog({ bridge, active, fixtureLabel, onOldList, focusSwi
     return () => window.removeEventListener('keydown', keys);
   }, [active]);
   // The session copy follows every change, so a switch to the old list keeps the latest state.
-  useEffect(() => { if (session && !disposed.current) session.current = { catalog, selectedKey, notice, storeBusy, refreshError, message: busy ? 'Not refreshed this session.' : message }; });
-  const rows = catalogRows(catalog);
-  const index = rows.findIndex(row => row.key === selectedKey);
-  const activeIndex = Math.max(0, index);
-  const selected = index >= 0 ? rows[index] : null;
+  useEffect(() => { if (session && !disposed.current) session.current = { catalog, selectedKey, notice, storeBusy, refreshError, message: busy ? 'Not refreshed this session.' : message, othersOpen }; });
+  // Two lists: the reviewed products, then the others (shown only when opened). Each has its own keys; the selection is one.
+  const { reviewed, others } = splitProducts(catalog);
+  const mainRows = productRows(reviewed), otherRows = othersOpen ? productRows(others) : [];
+  const rows = [...mainRows, ...otherRows];
+  const allRows = catalogRows(catalog), selected = allRows.find(row => row.key === selectedKey) ?? null;
   const empty = !!catalog && catalogEmpty(catalog);
   function select(key: string) { setSelectedKey(key); }
-  function listKey(event: KeyboardEvent<HTMLDivElement>) {
-    if (!rows.length) return;
-    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(rows[activeIndex].key); return; }
-    const target = { ArrowDown: index + 1, ArrowUp: Math.max(0, index - 1), Home: 0, End: rows.length - 1, PageDown: index + 10, PageUp: Math.max(0, index - 10) }[event.key];
+  const activeIn = (list: CatalogRow[]) => Math.max(0, list.findIndex(row => row.key === selectedKey));
+  function listKey(list: CatalogRow[], event: KeyboardEvent<HTMLDivElement>) {
+    if (!list.length) return;
+    const index = list.findIndex(row => row.key === selectedKey), activeIndex = Math.max(0, index);
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(list[activeIndex].key); return; }
+    const target = { ArrowDown: index + 1, ArrowUp: Math.max(0, index - 1), Home: 0, End: list.length - 1, PageDown: index + 10, PageUp: Math.max(0, index - 10) }[event.key];
     if (target === undefined) return;
     event.preventDefault();
-    const next = rows[Math.max(0, Math.min(rows.length - 1, target))];
+    const next = list[Math.max(0, Math.min(list.length - 1, target))];
     select(next.key);
     document.getElementById(optionId(next.key))?.scrollIntoView?.({ block: 'nearest' });
   }
@@ -125,7 +130,7 @@ export function BuildCatalog({ bridge, active, fixtureLabel, onOldList, focusSwi
     heading?.focus({ preventScroll: true });
   }
   function returnToList() {
-    const row = selectedKey ? document.getElementById(optionId(selectedKey)) : null, list = document.getElementById('builds');
+    const row = selectedKey ? document.getElementById(optionId(selectedKey)) : null, list = row?.closest<HTMLElement>('[role="listbox"]') ?? document.getElementById('builds');
     if (list) { (row ?? list).scrollIntoView({ block: 'nearest' }); list.focus({ preventScroll: true }); } else { const heading = document.getElementById('builds-heading'); heading?.scrollIntoView({ block: 'start' }); heading?.focus({ preventScroll: true }); }
   }
   const windowRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLElement>(null), statusRef = useRef<HTMLElement>(null);
@@ -160,16 +165,25 @@ export function BuildCatalog({ bridge, active, fixtureLabel, onOldList, focusSwi
   const checked = lastChecked(catalog);
   const summary = activity && activity.entry && !activity.expanded ? activity.summary : null;
   const showInspector = !!catalog && !empty;
-  const newProducts = !!catalog?.summary?.newProducts.length;
+  const note = catalog && !empty ? summaryNote(catalog.summary) : null;
   const notices = <>
     {listError && <div role="alert" className="dv-notice error"><div><strong>Build list unavailable</strong>{listError} {catalog ? 'The list last read is still shown.' : ''}</div>{!reading && !busy && <button className="dv-btn" onClick={() => void read()}>Read again</button>}</div>}
     {storeBusy && <div role="status" className="dv-notice"><div><strong>Build store in use</strong>{BUSY_TEXT} The stored list is shown.</div></div>}
     {refreshError && <div role="alert" className="dv-notice error"><div><strong>Refresh problem</strong>{refreshError}</div></div>}
     {notice?.kind === 'offline' && <div role="status" className="dv-notice error"><div><strong>Refresh unavailable</strong>{notice.text}</div></div>}
     {notice?.kind === 'partial' && <div role="status" className="dv-notice"><div><strong>Refresh incomplete</strong>{notice.text}<ul>{notice.items.map(item => <li key={item}>{item}</li>)}</ul></div></div>}
-    {catalog && !empty && <p className={`dv-catalog-summary${newProducts ? ' new' : ''}`}>{summaryText(catalog.summary)}</p>}
+    {note && <p className="dv-catalog-summary">{note}</p>}
   </>;
-  const hasNotices = !!(listError || storeBusy || refreshError || notice || catalog && !empty);
+  const hasNotices = !!(listError || storeBusy || refreshError || notice || note);
+  // One product's heading and its builds, in the list that holds them.
+  const productGroup = (product: CatalogProduct, list: CatalogRow[]) => <div role="group" key={product.productId} aria-labelledby={`catalog-group-${product.productId}`} className="dv-group">
+    <div className="dv-group-head" id={`catalog-group-${product.productId}`}>{product.reviewed ? <><strong>{product.label}</strong> <code>{product.productId}</code></> : <strong className="dv-raw-id">{product.productId}</strong>}<span className="dv-dim"> · {productLine(product, catalog?.summary?.withoutVersions)}{product.problemCount ? ` · ${product.problemCount === 1 ? '1 catalog problem' : `${product.problemCount} catalog problems`}` : ''}</span></div>
+    {product.builds.map(build => { const key = catalogKey(product.productId, build.id); return <div role="option" key={key} id={optionId(key)} data-build-id={build.id} data-product-id={product.productId} className={`dv-cols build-row${list.length && list[activeIn(list)].key === key ? ' active' : ''}${build.current ? ' current' : ''}`} aria-selected={selectedKey === key} onClick={() => select(key)}>
+      <span className="dv-version">{build.versionsName}{build.current ? <span className="dv-pill current">Current</span> : <span className="visually-hidden">, older</span>}<span className="visually-hidden">, {product.label}</span></span>
+      <span><span className="visually-hidden">Regions </span>{regionText(build.regions)}</span>
+      <span className="dv-dim"><span className="visually-hidden">Last seen </span>{catalogTime(build.lastSeenAt)}</span>
+    </div>; })}
+  </div>;
   const refreshLabel = busy ? stopping ? 'Stopping refresh…' : 'Stop refresh' : 'Refresh builds';
   return <div className={`dv-window dv-catalog${compact ? ' dv-compact' : ''}${compact && narrow ? ' dv-narrow' : ''}${shared ? ' dv-shared' : ''}`} ref={windowRef}>
     <header className="dv-toolbar" ref={toolbarRef}>
@@ -190,20 +204,21 @@ export function BuildCatalog({ bridge, active, fixtureLabel, onOldList, focusSwi
         </div>
         {notices}
         <div className={`dv-list${hasNotices ? '' : ' flush'}`} aria-busy={reading}>
-          {rows.length > 0 && catalog && <>
+          {allRows.length > 0 && catalog && <>
             <div className="dv-cols dv-thead" aria-hidden="true"><span>Version</span><span>Regions</span><span>Last seen</span></div>
-            <div role="listbox" id="builds" aria-label="Builds" tabIndex={0} aria-activedescendant={optionId(rows[activeIndex].key)} onKeyDown={listKey}>
-              {catalog.products.map(product => <div role="group" key={product.productId} aria-labelledby={`catalog-group-${product.productId}`} className="dv-group">
-                <div className="dv-group-head" id={`catalog-group-${product.productId}`}><strong>{product.label}</strong> <code>{product.productId}</code><span className="dv-dim"> · {productLine(product)}{product.problemCount ? ` · ${product.problemCount === 1 ? '1 catalog problem' : `${product.problemCount} catalog problems`}` : ''}</span></div>
-                {product.builds.map(build => { const key = catalogKey(product.productId, build.id); return <div role="option" key={key} id={optionId(key)} data-build-id={build.id} data-product-id={product.productId} className={`dv-cols build-row${rows[activeIndex].key === key ? ' active' : ''}${build.current ? ' current' : ''}`} aria-selected={selectedKey === key} onClick={() => select(key)}>
-                  <span className="dv-version">{build.versionsName}{build.current ? <span className="dv-pill current">Current</span> : <span className="visually-hidden">, older</span>}<span className="visually-hidden">, {product.label}</span></span>
-                  <span><span className="visually-hidden">Regions </span>{regionText(build.regions)}</span>
-                  <span className="dv-dim"><span className="visually-hidden">Last seen </span>{catalogTime(build.lastSeenAt)}</span>
-                </div>; })}
-              </div>)}
+            <div role="listbox" id="builds" aria-label="Builds" tabIndex={0} aria-activedescendant={mainRows.length ? optionId(mainRows[activeIn(mainRows)].key) : undefined} onKeyDown={event => listKey(mainRows, event)}>
+              {reviewed.map(product => productGroup(product, mainRows))}
             </div>
+            {others.length > 0 && <>
+              <button className="dv-others-toggle" id="builds-other-toggle" aria-expanded={othersOpen} aria-controls="builds-other" onClick={() => setOthersOpen(open => !open)}>
+                <span className="dv-chevron" aria-hidden="true">{othersOpen ? '▾' : '▸'}</span><strong>Other WoW products (not reviewed)</strong><span className="dv-dim"> · {othersLine(others)}{!othersOpen && selected && !selected.product.reviewed ? ` · selected build ${selected.build.versionsName} is in this list` : ''}</span>
+              </button>
+              {othersOpen && <div role="listbox" id="builds-other" aria-label="Other WoW products, not reviewed" tabIndex={0} aria-activedescendant={otherRows.length ? optionId(otherRows[activeIn(otherRows)].key) : undefined} onKeyDown={event => listKey(otherRows, event)}>
+                {others.map(product => productGroup(product, otherRows))}
+              </div>}
+            </>}
           </>}
-          {!rows.length && <div className="dv-empty"><div>{
+          {!allRows.length && <div className="dv-empty"><div>{
             !catalog ? reading ? <h2>Reading stored builds…</h2> : <><h2>Build list not read</h2><p>The stored build list couldn't be read. See the notice above.</p></>
             : busy ? <h2>Checking the version service…</h2>
             : empty ? <><h2>No builds stored yet</h2><p>Refresh asks the version service.</p></>
@@ -211,12 +226,12 @@ export function BuildCatalog({ bridge, active, fixtureLabel, onOldList, focusSwi
         </div>
       </section>
       {showInspector && <aside className="dv-inspector" id="inspector" aria-labelledby="inspector-heading" inert={!!activity?.expanded}>{selected ? <>
-        <div className="dv-insp-head"><div className="dv-label">Selected build</div><h2 id="inspector-heading" className="dv-selectable" tabIndex={-1}>{selected.build.versionsName}</h2><p className="inspector-product">World of Warcraft · {selected.product.label} · <code>{selected.product.productId}</code></p>{shared && <button className="dv-btn dv-return" onClick={returnToList}>Return to build list</button>}</div>
+        <div className="dv-insp-head"><div className="dv-label">Selected build</div><h2 id="inspector-heading" className="dv-selectable" tabIndex={-1}>{selected.build.versionsName}</h2><p className="inspector-product">World of Warcraft · {selected.product.reviewed ? <>{selected.product.label} · </> : null}<code>{selected.product.productId}</code>{selected.product.reviewed ? null : ' · not reviewed'}</p>{shared && <button className="dv-btn dv-return" onClick={returnToList}>Return to build list</button>}</div>
         <div className="dv-insp-body">
           <div className="dv-state"><strong>{selected.build.current ? 'Current' : 'Older build'}</strong>{selected.build.current ? 'Listed by the version service at the latest check.' : 'Not listed by the version service at the latest check.'}</div>
           <div className="dv-label">Identity</div>
           <dl><dt>Version</dt><dd className="dv-selectable">{selected.build.versionsName}</dd>
-            <dt>Product</dt><dd><code>{selected.product.productId}</code> · {selected.product.label}</dd>
+            <dt>Product</dt><dd><code>{selected.product.productId}</code> · {selected.product.reviewed ? selected.product.label : 'Not reviewed'}</dd>
             <dt>Build config</dt><dd className="mono dv-selectable">{selected.build.buildConfig}</dd>
             <dt>Identity</dt><dd className="mono dv-selectable">{selected.build.id}</dd></dl>
           <div className="dv-label">Observation</div>

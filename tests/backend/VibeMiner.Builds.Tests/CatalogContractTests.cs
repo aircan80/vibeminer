@@ -317,7 +317,7 @@ public abstract class CatalogContract
     }
 
     [Fact]
-    public async Task TheSummaryReportsUnreviewedWowProductsOnlyAndListsNoBuilds()
+    public async Task TheSummaryReportsUnreviewedWowProductsAndTheyListAndRefreshLikeReviewedOnes()
     {
         var catalog = await OpenAsync();
         Reply("wow", Both("1000", A, B, "11.0.0.1000"));
@@ -326,16 +326,26 @@ public abstract class CatalogContract
             "Product!STRING:0|Seqn!DEC:4|Flags!STRING:0\n## seqn = 42\nwow|1|\nwow|2|cdn\nwowz|3|\nagent|4|\nwow_classic_era_beta|5|cdn\nwowdev|6|\nwowt|7|\n"));
         var summary = await catalog.RefreshSummaryAsync(Ct);
         Assert.Equal((ObjectState.Present, true), (summary.Summary.State, summary.Summary.Recorded));
-        Assert.Equal(["wow_classic_era_beta", "wowdev", "wowz"], summary.NewProducts);
+        // wow_classic_era_beta is reviewed now (D476); agent isn't WoW.
+        Assert.Equal(["wowdev", "wowz"], summary.NewProducts);
         Assert.Equal(["agent", "wow", "wow_classic_era_beta", "wowdev", "wowt", "wowz"], summary.Listed);
         Assert.Equal("42", summary.Sequence);
         Assert.Empty(summary.Problems);
         var entry = Assert.Single(await inner.ReadHistoryAsync(new(Kind: HistoryKind.Summary), Ct));
         Assert.Equal(("", "us"), (entry.Product, entry.Region));
-        // The summary is in the log but never in a list, and an unreviewed product still can't be listed.
+        // The summary is in the log but never in a list. An unreviewed WoW product lists and refreshes like a reviewed one (D476).
         Assert.Single((await catalog.ListBuildsAsync("wow", Ct)).Builds);
         Assert.Equal("wowt|\n", Shape(await catalog.ListBuildsAsync("wowt", Ct)));
-        await Assert.ThrowsAsync<ArgumentException>(() => catalog.ListBuildsAsync("wowdev", Ct));
+        Assert.Empty((await catalog.ListBuildsAsync("wowdev", Ct)).Builds);
+        Reply("wowdev", Both("2000", C, D, "12.1.5.69594"));
+        var dev = await catalog.RefreshAsync("wowdev", Ct);
+        Assert.Equal(ObjectState.Present, dev.Versions.State);
+        var build = Assert.Single(dev.List.Builds);
+        Assert.Equal(("wowdev", "12.1.5.69594"), (build.Product, build.VersionsName));
+        Assert.Equal(build.Id, Assert.Single((await catalog.ListBuildsAsync("wowdev", Ct)).Builds).Id);
+        // Anything that isn't a WoW product id is still refused.
+        await Assert.ThrowsAsync<ArgumentException>(() => catalog.ListBuildsAsync("agent", Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => catalog.ListBuildsAsync("wow/../x", Ct));
     }
 
     [Fact]

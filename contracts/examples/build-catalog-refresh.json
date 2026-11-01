@@ -5,6 +5,7 @@
       {
         "productId": "wow",
         "label": "Retail",
+        "reviewed": true,
         "builds": [
           {
             "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -44,6 +45,7 @@
       {
         "productId": "wowt",
         "label": "PTR",
+        "reviewed": true,
         "builds": [
           {
             "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -70,6 +72,7 @@
       {
         "productId": "wowxptr",
         "label": "PTR 2",
+        "reviewed": true,
         "builds": [
           {
             "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
@@ -91,6 +94,7 @@
       {
         "productId": "wow_beta",
         "label": "Beta",
+        "reviewed": true,
         "builds": [],
         "buildCount": 0,
         "lastObservedAt": null,
@@ -100,6 +104,7 @@
       {
         "productId": "wow_classic",
         "label": "Classic Progression",
+        "reviewed": true,
         "builds": [],
         "buildCount": 0,
         "lastObservedAt": null,
@@ -109,6 +114,7 @@
       {
         "productId": "wow_classic_ptr",
         "label": "Classic Progression PTR",
+        "reviewed": true,
         "builds": [],
         "buildCount": 0,
         "lastObservedAt": null,
@@ -118,6 +124,7 @@
       {
         "productId": "wow_classic_era",
         "label": "Classic Era",
+        "reviewed": true,
         "builds": [
           {
             "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
@@ -140,6 +147,17 @@
       {
         "productId": "wow_classic_era_ptr",
         "label": "Classic Era PTR",
+        "reviewed": true,
+        "builds": [],
+        "buildCount": 0,
+        "lastObservedAt": null,
+        "problems": [],
+        "problemCount": 0
+      },
+      {
+        "productId": "wow_classic_era_beta",
+        "label": "Classic Era Beta",
+        "reviewed": true,
         "builds": [],
         "buildCount": 0,
         "lastObservedAt": null,
@@ -149,6 +167,7 @@
       {
         "productId": "wow_anniversary",
         "label": "Anniversary",
+        "reviewed": true,
         "builds": [],
         "buildCount": 0,
         "lastObservedAt": null,
@@ -158,6 +177,7 @@
       {
         "productId": "wow_classic_beta",
         "label": "Forever Beta",
+        "reviewed": true,
         "builds": [],
         "buildCount": 0,
         "lastObservedAt": null,
@@ -167,6 +187,7 @@
       {
         "productId": "wow_cn_beta",
         "label": "Forever Beta (China)",
+        "reviewed": true,
         "builds": [],
         "buildCount": 0,
         "lastObservedAt": null,
@@ -176,6 +197,7 @@
       {
         "productId": "wowf",
         "label": "Forever",
+        "reviewed": true,
         "builds": [],
         "buildCount": 0,
         "lastObservedAt": null,
@@ -185,9 +207,32 @@
       {
         "productId": "wow_classic_titan",
         "label": "Titan Reforged (China)",
+        "reviewed": true,
         "builds": [],
         "buildCount": 0,
         "lastObservedAt": null,
+        "problems": [],
+        "problemCount": 0
+      },
+      {
+        "productId": "wow_example_new",
+        "label": "wow_example_new",
+        "reviewed": false,
+        "builds": [
+          {
+            "id": "9999999999999999999999999999999999999999999999999999999999999999",
+            "versionsName": "1.99.0.90030",
+            "buildConfig": "77777777777777777777777777777777",
+            "current": true,
+            "regions": [
+              "us"
+            ],
+            "firstSeenAt": "2026-10-31T09:00:00Z",
+            "lastSeenAt": "2026-10-31T09:00:00Z"
+          }
+        ],
+        "buildCount": 1,
+        "lastObservedAt": "2026-10-31T09:00:00Z",
         "problems": [],
         "problemCount": 0
       }
@@ -197,11 +242,14 @@
       "readable": true,
       "newProducts": [
         "wow_example_new"
+      ],
+      "withoutVersions": [
+        "wow_classic_era_beta"
       ]
     }
   },
   "refreshedAt": "2026-10-31T09:00:05Z",
-  "checked": 13,
+  "checked": 15,
   "failures": [
     {
       "productId": "wow_classic_era",

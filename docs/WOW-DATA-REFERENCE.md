@@ -210,13 +210,14 @@ Product registry ([Discovery.cs](../src/backend/VibeMiner.Domain/Discovery.cs)):
 | `wow_classic_ptr` | Classic Progression PTR |
 | `wow_classic_era` | Classic Era |
 | `wow_classic_era_ptr` | Classic Era PTR |
+| `wow_classic_era_beta` | Classic Era Beta (layer 3 only; empty on 2026-11-01) |
 | `wow_anniversary` | Anniversary |
 | `wow_classic_beta` | Forever Beta |
 | `wow_cn_beta` | Forever Beta (China) |
 | `wowf` | Forever |
 | `wow_classic_titan` | Titan Reforged (China) |
 
-Friendly labels are community names, not Blizzard-authenticated. Keep raw IDs visible.
+Friendly labels are community names, not Blizzard-authenticated. Keep raw IDs visible. The layer 3 build list also lists every other WoW product the summary names, labelled by its id ([D476](DECISIONS.md)). On 2026-11-01 the summary listed 48 `wow` ids: the families `wowdev*`, `wowlivetest*`, `wowv*`, `wownev*` (mostly `cn` only), `wowe*` and `wowz` are internal or vendor branches, several with stale builds. `wowdev4`, `wowdev6`, `wowe2`, `wownev11` and `wow_classic_era_beta` appear in the summary only with a `cdn` flag: they have no versions document, so `/versions` answers 404 and nothing is recorded. `wowe3` has a versions document with no rows. The summary's flags tell the two apart (D476).
 
 The 1.60 line is WoW: Forever ([D475](DECISIONS.md)); older notes called it Classic Beta. Notes on `1.60.1.70450` don't record which product served it. On 2026-11-01 `wow_cn_beta` serves 70450 and `wow_classic_beta` serves 70532.
 

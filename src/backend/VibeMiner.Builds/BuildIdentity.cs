@@ -80,6 +80,6 @@ public sealed record BuildIdentity(string Id, string Canonical, string ProductId
 
     private static void CheckProduct(string product)
     {
-        if (!Products.IsKnown(product)) throw new BuildIdentityException("INVALID_PRODUCT", "Choose a product from the reviewed list.");
+        if (!Products.IsWow(product)) throw new BuildIdentityException("INVALID_PRODUCT", "A product is \"wow\" then up to 61 of a-z, 0-9, _ or -.");
     }
 }

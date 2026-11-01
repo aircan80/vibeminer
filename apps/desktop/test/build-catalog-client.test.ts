@@ -88,6 +88,6 @@ describe('build catalog replies', () => {
     await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
     expect(client.hasFailed).toBe(false);
     child.reply('refresh', refreshed());
-    await expect(work).resolves.toMatchObject({ checked: 13 });
+    await expect(work).resolves.toMatchObject({ checked: 15 });
   });
 });
