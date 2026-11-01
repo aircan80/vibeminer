@@ -52,12 +52,12 @@ Synthetic headerless objects, i9-13900K (32 threads), btrfs on LUKS on NVMe, pag
 | Index at 30M rows | 2,114 MiB, 73.9 B/row |
 | Has at 30M rows, present / absent key | p50 4.7 / 4.1 µs, p99 6.6 / 5.8 µs |
 | Load of 30M 17-byte objects (8 callers) | 1,238 s, 24,235 obj/s |
-| Scan of the 30M store | 806 s, identical rows (`ObjectStoreScaleTests`) |
+| Scan of the 30M store | 806 s, identical rows (`ObjectStoreScaleTests`), measured before D372's key checks |
 | The full index check (`integrity_check`, row checks, totals over every row), run by an open after an unclean shutdown or a scrub, 3M / 10M / 30M rows | 2.7 s / 7.6 s / 22.7 s, of which `integrity_check` 0.4 s / 1.2 s / about 3.6 s; the rest is the totals digest. An open after a clean close runs only the cheap check |
 | Has at 3M / 10M rows (present key), from the cached scale store | p50 4.4 / 4.6 µs, p99 5.7 / 5.9 µs |
 | A scale run on the cached store (`VIBEMINER_OBJECT_STORE_SCALE=3` / `10`), once built (58 s / 325 s) | 5 s / 11 s |
 | Reopen recovering 128 synced, uncommitted entries | 0.06 s |
-| Scan / Verify / open with the index deleted, 4 GiB in 48,896 objects | 4.2 s / 4.6 s / 4.2 s |
+| Scan / Verify / open with the index deleted, 4 GiB in 48,896 objects | 9.6 s / 4.5 s / 9.6 s (Scan and the rebuild run Put's key checks since D372; 4.2 s before) |
 
 Every object pays three hashes on Put (its key's MD5, SHA-256, CRC-32C), about 520 MiB/s on one core; one fsync is about 6.6 ms here. The scale checks are opt-in, not part of `npm test` ([TESTING](TESTING.md#object-store-scale-store)).
 

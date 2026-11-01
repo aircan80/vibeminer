@@ -96,7 +96,7 @@ static async Task Recovery(string dir)
         Console.WriteLine($"| clean reopen | {sw.Elapsed.TotalSeconds:F2} s | |");
         sw.Restart();
         var r = await s.ScanAsync();
-        Console.WriteLine($"| Scan (rebuild index, SHA-256 + blocks of every entry) | {sw.Elapsed.TotalSeconds:F2} s | {r.Entries} entries, {r.Live} live |");
+        Console.WriteLine($"| Scan (rebuild index, SHA-256, blocks and key check of every entry) | {sw.Elapsed.TotalSeconds:F2} s | {r.Entries} entries, {r.Live} live |");
         sw.Restart();
         var v = await s.VerifyAsync();
         Console.WriteLine($"| Verify (scrub every object) | {sw.Elapsed.TotalSeconds:F2} s | {v.Checked} checked, {v.CorruptCount} corrupt |");

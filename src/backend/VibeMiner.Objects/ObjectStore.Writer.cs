@@ -261,8 +261,9 @@ public sealed partial class ObjectStore
         var walker = new PackWalker(read, activeSeq, committedLength, length, Kind);
         var recovered = 0; var end = committedLength;
         var damaged = new List<string>();
-        // Keys whose first copy in the tail recovery refused. Scan doesn't run key checks, so a tombstone after the tail makes it
-        // agree: it removes the refused copy, and a sound later copy is appended again after it.
+        // Keys whose first copy in the tail recovery refused. A tombstone after the tail records the refusal in the pack, so a rebuild
+        // agrees whatever checks it runs (Scan runs them all since D372): it removes the refused copy, and a sound later copy is
+        // appended again after it.
         var refused = new List<ObjectKey>();
         void Refuse(ObjectKey key) { if (!Present(key) && !refused.Contains(key)) refused.Add(key); }
         while (true)

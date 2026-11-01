@@ -342,7 +342,7 @@ public sealed class ObjectStoreTests
             Assert.Equal(spoofed.Bytes.ToArray(), (await reopened.ReadAsync(spoofed.Key)).Bytes);
             Assert.True(NextSeq(dir) > seq + 9);
         }
-        // Scan, which doesn't run key checks, rebuilds exactly what recovery decided: the tombstones recovery added make it agree.
+        // Scan rebuilds exactly what recovery decided.
         var before = Rows(dir);
         await using (var store = await ObjectStore.OpenAsync(dir, Quick))
         {
@@ -351,6 +351,166 @@ public sealed class ObjectStoreTests
         }
         Assert.Equal(before, Rows(dir));
         await using (var store = await ObjectStore.OpenAsync(dir, Quick)) Assert.False(store.OpenReport.IndexRebuilt);
+    }
+
+    [Fact]
+    public async Task ScanChecksEveryKeyOfEntriesPastASealedPacksCommittedLength()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var options = Quick with { MaxPackBytes = 50_000 };
+        var a = Synthetic.Headerless(1, 30_000); var b = Synthetic.Headerless(2, 30_000);
+        await using (var store = await ObjectStore.OpenAsync(dir, options)) { await store.PutAsync([a]); await store.PutAsync([b]); }
+        var sealedPack = PackPath(dir, Row(dir, a.Key).pack);
+        Assert.NotEqual(Row(dir, a.Key).pack, Row(dir, b.Key).pack);
+        var seq = NextSeq(dir);
+        var good = Synthetic.Headerless(3, 1000);
+        var wrongKey = new ObjectKey(ObjectKeyType.Encoded, MD5.HashData([9]));
+        var otherSpace = Synthetic.Headerless(5, 700);
+        var bigConfig = new byte[(16 << 20) + 1];
+        var bigConfigKey = new ObjectKey(ObjectKeyType.Config, MD5.HashData(bigConfig));
+        Append(sealedPack, RawEntry(good.Key, good.Bytes.Span, seq));
+        Append(sealedPack, RawEntry(wrongKey, Synthetic.Headerless(4, 600).Bytes.Span, seq + 1));                     // fails its key check
+        Append(sealedPack, RawEntry(new ObjectKey(ObjectKeyType.Encoded, otherSpace.Key.KeyBytes(), 1), otherSpace.Bytes.Span, seq + 2));  // namespace 1
+        Append(sealedPack, RawEntry(bigConfigKey, bigConfig, seq + 3));                                                // over a config's limit
+        Append(sealedPack, RawEntry(b.Key, [], seq + 4, tombstone: true));                                             // a synced delete
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            Assert.Contains(store.OpenReport.Problems, p => p.Contains("past its committed length; left alone", StringComparison.Ordinal));
+            Assert.False(await store.HasAsync(good.Key));                                  // the writer leaves them alone
+            var report = await store.ScanAsync();
+            var problems = string.Join("; ", report.Problems);
+            Assert.Equal(3, report.Unverifiable);
+            Assert.Equal(0, report.Corrupt);
+            Assert.Equal(3, report.Problems.Count(p => p.Contains("fails its key check", StringComparison.Ordinal)));
+            Assert.Contains("bytes past its committed length replayed with every check", problems, StringComparison.Ordinal);
+            Assert.Equal(good.Bytes.ToArray(), (await store.ReadAsync(good.Key)).Bytes);  // sound and proven: indexed
+            Assert.False(await store.HasAsync(wrongKey));
+            Assert.False(await store.HasAsync(new ObjectKey(ObjectKeyType.Encoded, otherSpace.Key.KeyBytes(), 1)));
+            Assert.False(await store.HasAsync(bigConfigKey));
+            Assert.False(await store.HasAsync(b.Key));
+            Assert.True(await store.HasAsync(a.Key));
+        }
+        var rows = Rows(dir);
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            Assert.False(store.OpenReport.IndexRebuilt);
+            Assert.DoesNotContain(store.OpenReport.Problems, p => p.Contains("committed length", StringComparison.Ordinal));
+            // The refused entries now sit inside the committed length: a second Scan still leaves them out.
+            Assert.Equal(3, (await store.ScanAsync()).Unverifiable);
+        }
+        Assert.Equal(rows, Rows(dir));
+        // With no index there is no committed length to go by: the rebuild at open makes the same decisions.
+        foreach (var f in Directory.GetFiles(dir, "objects.sqlite3*")) File.Delete(f);
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            Assert.True(store.OpenReport.IndexRebuilt);
+            Assert.Contains(store.OpenReport.Problems, p => p.Contains("fails its key check", StringComparison.Ordinal));
+        }
+        Assert.Equal(rows, Rows(dir));
+    }
+
+    [Fact]
+    public async Task FullVerifyCountsARowPutWouldRefuseAsCorruptWhileQuickVerifyDoesNot()
+    {
+        // Rows a Scan before D372 could index: a namespace other than 0, a length over the type's limit. Their bytes are sound.
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var options = Quick with { MaxPackBytes = 50_000 };
+        var a = Synthetic.Headerless(1, 30_000); var b = Synthetic.Headerless(2, 30_000);
+        await using (var store = await ObjectStore.OpenAsync(dir, options)) { await store.PutAsync([a]); await store.PutAsync([b]); }
+        var pack = Row(dir, a.Key).pack;
+        var path = PackPath(dir, pack);
+        var seq = NextSeq(dir);
+        var o = Synthetic.Headerless(3, 700);
+        var otherSpace = new ObjectKey(ObjectKeyType.Encoded, o.Key.KeyBytes(), 1);
+        var bigConfig = new byte[(16 << 20) + 1];
+        var bigConfigKey = new ObjectKey(ObjectKeyType.Config, MD5.HashData(bigConfig));
+        var rows = new List<(ObjectKey key, long offset, long length, byte[] sha)>();
+        foreach (var (key, bytes, s) in new[] { (otherSpace, o.Bytes.ToArray(), seq), (bigConfigKey, bigConfig, seq + 1) })
+        {
+            rows.Add((key, new FileInfo(path).Length, bytes.Length, SHA256.HashData(bytes)));
+            Append(path, RawEntry(key, bytes, s));
+        }
+        using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(dir, "objects.sqlite3")};Pooling=False"))
+        {
+            c.Open();
+            foreach (var (key, offset, length, sha) in rows)
+            {
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "INSERT INTO objects(k, pack, offset, length, sha256) VALUES($k, $p, $o, $l, $s)";
+                cmd.Parameters.AddWithValue("$k", key.ToIndexKey()); cmd.Parameters.AddWithValue("$p", pack); cmd.Parameters.AddWithValue("$o", offset);
+                cmd.Parameters.AddWithValue("$l", length); cmd.Parameters.AddWithValue("$s", sha);
+                cmd.ExecuteNonQuery();
+            }
+        }
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            var quick = await store.VerifyAsync();
+            Assert.Equal(4, quick.Checked);
+            Assert.Equal(0, quick.CorruptCount);
+            var full = await store.VerifyAsync(full: true);
+            Assert.Equal(2, full.CorruptCount);
+            Assert.Equal(new[] { bigConfigKey, otherSpace }.Order(), full.Corrupt.Order());
+        }
+    }
+
+    [Fact]
+    public async Task ScanReplaysAPackTheIndexDoesNotListWithEveryCheck()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var a = Synthetic.Headerless(1, 1000);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick)) await store.PutAsync([a]);
+        var first = PackFiles(dir).Single();
+        var storeId = File.ReadAllBytes(first).AsSpan(16, 16).ToArray();
+        var unlisted = PackPath(dir, 9);
+        var header = new byte[PackFormat.PackHeaderBytes];
+        PackFormat.WritePackHeader(header, 9, storeId, 1_790_000_000_000, ObjectStoreKind.Cdn);
+        File.WriteAllBytes(unlisted, header);
+        var seq = NextSeq(dir);
+        var good = Synthetic.Headerless(2, 2000);
+        var wrongKey = new ObjectKey(ObjectKeyType.Encoded, MD5.HashData([8]));
+        Append(unlisted, RawEntry(wrongKey, Synthetic.Headerless(3, 600).Bytes.Span, seq));
+        Append(unlisted, RawEntry(good.Key, good.Bytes.Span, seq + 1));
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.Contains(store.OpenReport.Problems, p => p.Contains("pack 9 is not listed", StringComparison.Ordinal));
+            Assert.False(await store.HasAsync(good.Key));
+            var report = await store.ScanAsync();
+            Assert.Equal(2, report.Packs);
+            Assert.Equal(1, report.Unverifiable);
+            Assert.Contains(report.Problems, p => p.Contains("pack 9 had no row in the index; replayed with every check", StringComparison.Ordinal));
+            Assert.Equal(good.Bytes.ToArray(), (await store.ReadAsync(good.Key)).Bytes);
+            Assert.False(await store.HasAsync(wrongKey));
+            Assert.True(await store.HasAsync(a.Key));
+        }
+        var rows = Rows(dir);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+            Assert.DoesNotContain(store.OpenReport.Problems, p => p.Contains("not listed", StringComparison.Ordinal));  // Scan listed it
+        foreach (var f in Directory.GetFiles(dir, "objects.sqlite3*")) File.Delete(f);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick)) Assert.True(store.OpenReport.IndexRebuilt);
+        Assert.Equal(rows, Rows(dir));
+    }
+
+    [Fact]
+    public async Task RecoveryRefusesATailEntryPutWouldRefuseBeforeItsTypeCheck()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var a = Synthetic.Headerless(1, 1000);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick)) await store.PutAsync([a]);
+        var o = Synthetic.Headerless(2, 900);
+        var otherSpace = new ObjectKey(ObjectKeyType.Encoded, o.Key.KeyBytes(), 1);  // bytes match the key, but namespace 1 is refused by Put
+        Append(PackFiles(dir).Single(), RawEntry(otherSpace, o.Bytes.Span, NextSeq(dir)));
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.Contains(store.OpenReport.Problems, p => p.Contains("fails its key check (OBJECT_NAMESPACE_UNSUPPORTED)", StringComparison.Ordinal));
+            Assert.False(await store.HasAsync(otherSpace));
+        }
+        var rows = Rows(dir);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick)) await store.ScanAsync();
+        Assert.Equal(rows, Rows(dir));
     }
 
     [Fact]

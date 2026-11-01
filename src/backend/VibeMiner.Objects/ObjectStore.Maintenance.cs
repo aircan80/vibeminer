@@ -9,9 +9,9 @@ public sealed partial class ObjectStore
 
     /// <summary>
     /// Rebuilds the index from the packs alone (D126). Entries are replayed in store order (their sequence numbers) across every pack:
-    /// the first copy of a key wins, a tombstone removes it. Each entry's SHA-256 and block checksums are checked; one that fails is
-    /// left out and reported. It runs in one transaction on the live index, so every reader, in this process or another, sees the
-    /// old index until the new one is complete. last_read is kept.
+    /// the first copy of a key wins, a tombstone removes it. Each entry's SHA-256 and block checksums are checked, then the checks Put
+    /// makes (D372); one that fails is left out and reported. It runs in one transaction on the live index, so every reader, in this
+    /// process or another, sees the old index until the new one is complete. last_read is kept.
     /// </summary>
     public Task<ScanReport> ScanAsync(IProgress<ScanProgress>? progress = null, CancellationToken ct = default) =>
         MaintainAsync(() => ScanCoreAsync(progress, ct), ct);
@@ -28,8 +28,9 @@ public sealed partial class ObjectStore
             {
                 Exec(c, tx, "CREATE TEMP TABLE kept_reads(k BLOB PRIMARY KEY, last_read INTEGER) WITHOUT ROWID");
                 Exec(c, tx, "INSERT INTO temp.kept_reads SELECT k, last_read FROM objects WHERE last_read IS NOT NULL");
+                var listed = ListedPacks(c, tx);
                 Exec(c, tx, "DELETE FROM objects"); Exec(c, tx, "DELETE FROM history"); Exec(c, tx, "DELETE FROM packs");
-                (report, _) = await ReplayPacksAsync(c, tx, progress, ct);
+                (report, _) = await ReplayPacksAsync(c, tx, listed, progress, ct);
                 Exec(c, tx, "UPDATE objects SET last_read = (SELECT r.last_read FROM temp.kept_reads r WHERE r.k = objects.k) WHERE k IN (SELECT k FROM temp.kept_reads)");
                 Exec(c, tx, "DROP TABLE temp.kept_reads");
                 At(StorePoint.RebuildBuilt);
@@ -55,7 +56,7 @@ public sealed partial class ObjectStore
             ObjectIndex.Create(c, new byte[16], NowMs, 1, Kind);
             using (var tx = c.BeginTransaction())
             {
-                var (_, id) = await ReplayPacksAsync(c, tx, null, ct);
+                var (_, id) = await ReplayPacksAsync(c, tx, null, null, ct);
                 Exec(c, tx, "UPDATE store SET store_id = $id, row_check = vm_store_check($id, format, created_at, next_seq, object_count, object_digest, history_count, history_digest, clean_close) WHERE id = 1", ("$id", id ?? System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)));
                 tx.Commit();
             }
@@ -76,7 +77,27 @@ public sealed partial class ObjectStore
         At(StorePoint.RebuildSwapped);
     }
 
-    private async Task<(ScanReport report, byte[]? storeId)> ReplayPacksAsync(SqliteConnection c, SqliteTransaction tx, IProgress<ScanProgress>? progress, CancellationToken ct)
+    /// <summary>The live index's pack rows (number, committed length), only to report what a Scan replays beyond them; null if unreadable.</summary>
+    private static Dictionary<int, long>? ListedPacks(SqliteConnection c, SqliteTransaction tx)
+    {
+        try
+        {
+            var listed = new Dictionary<int, long>();
+            using var cmd = c.CreateCommand(); cmd.Transaction = tx; cmd.CommandText = "SELECT seq, committed_length FROM packs";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                if (r.GetValue(0) is long s && s is > 0 and <= int.MaxValue && r.GetValue(1) is long committed) listed[(int)s] = committed;
+            return listed;
+        }
+        catch (SqliteException) { return null; }
+    }
+
+    /// <summary>
+    /// Replays every readable pack. <paramref name="listed"/> (a Scan on a running store) only adds problems naming the packs it
+    /// didn't list and the bytes walked past a listed pack's committed length; every entry gets the same checks either way.
+    /// </summary>
+    private async Task<(ScanReport report, byte[]? storeId)> ReplayPacksAsync(SqliteConnection c, SqliteTransaction tx, Dictionary<int, long>? listed,
+        IProgress<ScanProgress>? progress, CancellationToken ct)
     {
         var found = new List<string>();
         var walkers = new List<(PackWalker walker, SafeFileHandle handle)>();
@@ -115,8 +136,11 @@ public sealed partial class ObjectStore
                 var (w, h) = item;
                 var e = w.Current; var at = w.CurrentOffset;
                 entries++; bytes += e.EntryBytes; maxSeq = Math.Max(maxSeq, e.Sequence);
-                var (check, reason) = await EntryIO.CheckPayloadAsync(h, at, e, keyType: false, null, ct);
-                if (check != PayloadCheck.Valid) { corrupt++; if (found.Count < 100) found.Add($"{e.Key} at {at} in pack {w.Pack}: {reason}; left out"); }
+                // The writer's checks, key type included: entries it never indexed (past a committed length, in a pack it doesn't
+                // list, anywhere when the index is gone) must not get in unproven. A refused one is left out like a corrupt one.
+                var (check, reason) = await EntryIO.CheckPayloadAsync(h, at, e, keyType: true, null, ct);
+                if (check == PayloadCheck.Corrupt) { corrupt++; if (found.Count < 100) found.Add($"{e.Key} at {at} in pack {w.Pack}: {reason}; left out"); }
+                else if (check == PayloadCheck.TypeFailed) { unverifiable++; if (found.Count < 100) found.Add($"{e.Key} at {at} in pack {w.Pack} fails its key check ({reason}); left out"); }
                 else if (e.Tombstone)
                 {
                     tombs++; tombBytes[w.Pack] = tombBytes.GetValueOrDefault(w.Pack) + PackFormat.EntryHeaderBytes;
@@ -141,6 +165,13 @@ public sealed partial class ObjectStore
                 if (entries % 65_536 == 0) progress?.Report(new(entries, bytes));
                 await Advance(w, h);
             }
+            if (listed is not null)
+                foreach (var (w, _) in walkers)
+                {
+                    var end = ends.GetValueOrDefault(w.Pack, PackFormat.PackHeaderBytes);
+                    if (!listed.TryGetValue(w.Pack, out var committed)) found.Add($"pack {w.Pack} had no row in the index; replayed with every check");
+                    else if (end > committed) found.Add($"pack {w.Pack}: {end - committed} bytes past its committed length replayed with every check");
+                }
             // Every pack sealed at the end of its last whole entry: the writer starts a fresh pack for the next append.
             foreach (var (w, _) in walkers)
                 Exec(c, tx, "INSERT INTO packs VALUES($s, $st, $c, 0, vm_pack_check($s, $st, $c))", ("$s", w.Pack), ("$st", (int)PackState.Sealed), ("$c", ends.GetValueOrDefault(w.Pack, PackFormat.PackHeaderBytes)));
@@ -215,7 +246,8 @@ public sealed partial class ObjectStore
     // ---------------------------------------------------------------- Verify
 
     /// <summary>
-    /// Scrubs every indexed object: header, SHA-256 and every block, plus the key type's own check when <paramref name="full"/>.
+    /// Scrubs every indexed object: header, SHA-256 and every block, plus Put's checks (namespace, length bound, key type) when
+    /// <paramref name="full"/>.
     /// Read-only stores can verify too. Reports at most 1,000 keys of each kind; the counts are exact.
     /// </summary>
     public async Task<VerifyReport> VerifyAsync(bool full = false, IProgress<ScanProgress>? progress = null, CancellationToken ct = default)

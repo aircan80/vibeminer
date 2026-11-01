@@ -39,17 +39,21 @@ internal static class EntryIO
     private const int Slice = 1 << 20;
 
     /// <summary>
-    /// Streams an entry's payload once: SHA-256 against the header, every block against its CRC-32C, and optionally the key type's
-    /// own check. <paramref name="sink"/> sees each verified-so-far slice (compaction copies through it).
+    /// Streams an entry's payload once: SHA-256 against the header, every block against its CRC-32C, and optionally the checks Put
+    /// makes (namespace, the type's length bound, then the key type's own check). <paramref name="sink"/> sees each verified-so-far
+    /// slice (compaction copies through it).
     /// </summary>
     public static async ValueTask<(PayloadCheck check, string? reason)> CheckPayloadAsync(SafeFileHandle h, long entryOffset, EntryHeader e,
         bool keyType, Func<ReadOnlyMemory<byte>, long, ValueTask>? sink, CancellationToken ct, Action<ObjectKey>? recordDocument = null)
     {
         var payloadAt = entryOffset + PackFormat.EntryHeaderBytes;
+        // The checks Put makes before the type's own (section 4, 1-3); the header read already held the key type to the store's kind.
+        // Decided after the bytes, so damaged bytes still read as Corrupt.
+        var refusal = keyType && !e.Tombstone ? ObjectFormats.Refusal(e.Key, e.Length, e.Key.Type == ObjectKeyType.Generated ? ObjectStoreKind.Generated : ObjectStoreKind.Cdn) : null;
         var table = new byte[PackFormat.TableBytes(e.Length)];
         if (await PackFiles.ReadFullyAsync(h, table, payloadAt + e.Length, ct) != table.Length) return (PayloadCheck.Corrupt, "truncated block table");
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        ObjectVerifier? verifier = keyType && !e.Tombstone ? ObjectVerifier.For(e.Key, e.Length) : null;  // a tombstone has no bytes to prove
+        ObjectVerifier? verifier = keyType && !e.Tombstone && refusal is null ? ObjectVerifier.For(e.Key, e.Length) : null;  // a tombstone has no bytes to prove
         var buffer = ArrayPool<byte>.Shared.Rent(Slice);
         try
         {
@@ -75,6 +79,7 @@ internal static class EntryIO
                 at += n;
             }
             if (!CryptographicOperations.FixedTimeEquals(sha.GetHashAndReset(), e.Sha256)) return (PayloadCheck.Corrupt, "SHA-256 mismatch");
+            if (refusal is not null) return (PayloadCheck.TypeFailed, refusal);
             if (verifier is not null)
             {
                 try { verifier.Complete(); }

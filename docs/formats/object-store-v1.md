@@ -379,9 +379,9 @@ An entry larger than the limit goes alone into a fresh pack.
 
 **Tail recovery** walks the active pack from `committed_length`, entry by entry:
 1. A newer header: `OBJECT_STORE_NEWER_FORMAT`. A torn header: stop.
-2. Check the entry in full: SHA-256, block table and its key type's check (section 4). A tombstone has no bytes, but its SHA-256 must still be that of zero bytes.
+2. Check the entry in full: SHA-256, block table, then Put's checks 1-3 and 6 of section 4 (namespace, the type's length bound and the key type's own check). A tombstone has no bytes, but its SHA-256 must still be that of zero bytes.
 3. If the header is sound but the bytes fail (SHA-256 or blocks), skip the entry and remember it. It doesn't count towards `next_seq`. When a later sound entry follows, the damaged ones stay in the pack, reported and not indexed.
-4. An entry that fails its key type's check, or a history record whose document isn't stored, is **refused**. It stays in the pack unindexed; after the walk it gets a tombstone (see "after the walk").
+4. An entry that fails those Put checks, or a history record whose document isn't stored, is **refused**. It stays in the pack unindexed; after the walk it gets a tombstone (see "after the walk").
 5. A tombstone:
    - if its key has a copy earlier in this tail, that copy is dropped;
    - otherwise, if the key has a committed row, the row is removed;
@@ -391,7 +391,7 @@ An entry larger than the limit goes alone into a fresh pack.
 
 After the walk:
 - **Cut.** The pack is cut after the last sound entry: one whose header reads valid, fits in the file, and whose SHA-256 and blocks pass. An entry refused in step 4 counts as sound. So a torn end goes, and so do damaged entries that no sound entry follows. The cut is `fsync`ed. `next_seq` becomes at least one more than the highest sequence number of a sound entry.
-- **Refused keys.** Each refused key gets a tombstone appended. If a sound later copy of that key was recovered, it is taken out of the batch and appended again after the tombstone: payload at most 64 MiB, origin kept. This way a Scan, which runs no key checks, rebuilds the same index.
+- **Refused keys.** Each refused key gets a tombstone appended. If a sound later copy of that key was recovered, it is taken out of the batch and appended again after the tombstone: payload at most 64 MiB, origin kept. This puts the refusal in the pack, so a rebuild agrees with recovery whatever checks it runs, including a history record whose document was missing, which Scan alone would keep (6.6).
 - **Commit.** The recovered rows commit as one batch (6.1).
 
 ### 6.4 Read
@@ -442,7 +442,7 @@ At open, the replay runs into a new file instead (6.3, step 5).
 **Replay:**
 1. Open every pack file with a valid header, listed in `packs` or not (all with one store id, else `OBJECT_STORE_FOREIGN_PACK`), and walk each from offset 64 to the file's length. `committed_length` isn't used, so whole entries past it in a sealed pack are replayed too.
 2. Merge the walks by `(sequence number, pack number)`, ascending.
-3. For each entry, check its SHA-256 and block table; no key type check. A tombstone's SHA-256 must be that of zero bytes. One that fails is left out and reported, but still counts for `next_seq` and for its pack's `committed_length`.
+3. For each entry, check its SHA-256 and block table, then the checks Put makes (section 4, 1-3 and 6: namespace 0, the type's length bound, the key type's own check), as tail recovery does. A tombstone's SHA-256 must be that of zero bytes; it has no key check. An entry that fails is left out and reported, corrupt when its SHA-256 or blocks fail, unverifiable when a Put check does. Either way it still counts for `next_seq` and for its pack's `committed_length`, and it doesn't stop a later copy of its key.
 4. A tombstone removes its key's row and history row, and counts 96 kept bytes for its pack.
 5. A key that already has a row is a duplicate, skipped.
 6. Anything else inserts its row. A history record also inserts its history row; one that doesn't parse is left out and reported.
@@ -458,17 +458,20 @@ Scan keeps the store row's `store_id` and `created_at`; a rebuild at open takes 
 - a pack file whose header isn't valid: skipped (it gets no row);
 - a torn entry header: the rest of that pack is unreachable;
 - an entry that fails step 3: left out. Only these stop being listed once the list holds 100 problems; they are always counted;
+- on a running store, each pack the old index didn't list, and each listed pack walked past its `committed_length`, with the bytes beyond it. These are informational: the replay is the same either way;
 - a history record that doesn't parse: left out, counted as unverifiable;
 - the number of history rows whose document has no `objects` row. These rows stay.
 
 Its counts: packs walked, entries, live rows, duplicates, tombstones, corrupt and unverifiable entries.
 
-Afterwards the next Put opens a new pack. Scan rebuilds the index the writer kept: the same object and history rows, apart from `last_read`. That holds while every whole entry sits within a listed pack's `committed_length`. Entries the writer never indexed (past `committed_length` in a sealed pack, or in an unlisted pack) are indexed by Scan without a key type check.
+Afterwards the next Put opens a new pack. Scan rebuilds the index the writer kept: the same object and history rows, apart from `last_read`. That holds while every whole entry sits within a listed pack's `committed_length`.
+
+**Entries the writer never indexed.** Whole entries past `committed_length` in a sealed pack, and every entry in a pack with no row, were never committed by this index. Sealed packs only get such bytes by damage or an index from another time (a lost or replaced `objects.sqlite3`), and a pack gets no row only the same way: a writer lists a pack before it appends to it. Scan treats them like a tail at open: synced entries that pass every check Put makes are indexed, tombstones apply, and the rest is left out and reported. It never relies on `committed_length` or on the old pack list to decide, because a rebuild at open has neither, and because Scan itself then sets `committed_length` past whatever it left out, so trusting it would let a refused entry in on the next Scan. A history record whose document no copy holds is still kept and counted as dangling (above), where tail recovery refuses it.
 
 ### 6.7 Verify (full)
 
 1. Page through `objects` by key, 1,024 rows at a time. Each page must move past the cursor; a key not above the previous one is `OBJECT_STORE_INDEX_UNREADABLE`.
-2. Within a page, by pack and offset, check each row as a read would: header against the row, every block CRC and the SHA-256, plus the key type's check when `full`.
+2. Within a page, by pack and offset, check each row as a read would: header against the row, every block CRC and the SHA-256, plus the checks Put makes (namespace, length bound, key type) when `full`. A row whose bytes are sound but that Put would refuse (a namespace other than 0 or a length over its type's limit, which a Scan before D372 could index) is Corrupt only under `full`.
 3. A failure counts only if the row still points where it did (compaction may have moved it).
 4. Report the counts of checked, Corrupt and Lost objects, with at most 1,000 keys of each.
 
