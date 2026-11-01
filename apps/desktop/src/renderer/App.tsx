@@ -35,6 +35,7 @@ import brand from '../../../../branding/vibeminer.svg';
 import { SettingsButton, SettingsProvider, SettingsView, type SettingsOrigin } from './Settings';
 import { AvailabilityRow, useAvailabilityCheck } from './BuildAvailability';
 import { useTruncationTitles } from './status-titles';
+import { BuildCatalog, type CatalogSession } from './BuildCatalog';
 const stamp = (value: string | null) => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Not checked yet';
 const regions = (values: string[]) => values.length ? values.map(x => x.toUpperCase()).join(', ') : 'None recorded';
 const short = (value: string) => `${value.slice(0, 10)}…${value.slice(-4)}`;
@@ -168,6 +169,15 @@ export function App({ bridge = window.discovery, resume = null, captureResume }:
   const downloadNudge=retention.jobs.map(job=>`${retentionKey(job.target)}:${job.mode}:${job.paused}:${job.state}`).join('|');
   const activityContext=workspace?`${workspace.build.productId}:${workspace.build.id}:${workspace.sourceReference.region}:${workspace.sourceReference.generation}`:'discovery';
   const [problem, setProblem] = useState('');
+  // build-catalog-v1 (#205): the layer 3 build list replaces the old one in the Discovery slot. "Old build list" switches
+  // back for this session only; without the capability the old list shows as before.
+  const catalogCapable = retention.features.includes('build-catalog-v1') && !!bridge.catalogList && !!bridge.catalogRefresh;
+  const capabilitiesPending = retention.capability === 'checking' && !!bridge.catalogList;
+  const [buildList, setBuildList] = useState<'new' | 'old'>('new');
+  const switchedList = useRef(false);
+  // The new list's state for this session, kept while the old list is shown.
+  const catalogSession = useRef<CatalogSession | null>(null);
+  const showList = (list: 'new' | 'old') => { switchedList.current = true; setBuildList(list); };
   // Discovery's latest projection of the open build; the Home header compares it with the CDN configuration the build was opened with.
   const [catalogOpenBuild, setCatalogOpenBuild] = useState<Build | null>(null);
   // Settings replaces the window content. The screen it was opened from stays mounted but hidden and inert,
@@ -217,8 +227,10 @@ export function App({ bridge = window.discovery, resume = null, captureResume }:
   }).catch(() => { if (!disposed) setProblem('The local engine is unavailable. Restart VibeMiner to reconnect.'); }); return () => { disposed = true; }; }, [bridge]);
   return <SettingsProvider value={settingsApi}><DownloadActivity tasks={tasks} contextKey={activityContext} onInfoAction={(info,action)=>{if(action==='refreshStatus'&&info.key===activityContext&&info.target&&workspace?.download&&info.target.ledgerId===workspace.download.ledgerId&&matches(info.target))retention.refresh(info.target);}} onAction={(key,action)=>{if(action==='view'&&settingsState.current){returning.current=null;setSettings(null);}/* View research leaves Settings for the task's screen. */taskActions.get(key)?.get(action)?.();}}>
     <div className="discovery-screen" data-app-view="" hidden={flow.view !== 'discovery' || !!settings} inert={flow.view !== 'discovery' || !!settings}><a className="skip" href="#builds">Skip to builds</a>
-      <DiscoveryWorkspace active={flow.view === 'discovery' && !settings} products={products} bridge={bridge} acknowledgedBuild={flow.operation?.result?.build} acknowledgedRegion={flow.operation?.result?.sourceReference.region} onAcknowledgedBuild={setCatalogOpenBuild} summariesEnabled={retention.features.includes('download-summary-v1')} availabilityEnabled={retention.features.includes('build-availability-v1')} downloadNudge={downloadNudge} opening={flow.operation} onShowOpening={() => flow.showActive()} onCancelOpening={() => { void flow.cancel(); }} onOpen={(build, region) => { void flow.open(build, region, products.find(p => p.id === build.productId)?.label || build.productId); }}
-        fixtureLabel={bridge.fixtureLabel ?? undefined} problem={problem}/>
+      {capabilitiesPending ? <div className="dv-window"><main className="dv-body no-inspector" id="discovery"><div className="dv-empty"><div><h2>Reading stored builds…</h2></div></div></main></div>
+      : catalogCapable && buildList === 'new' ? <BuildCatalog bridge={bridge} active={flow.view === 'discovery' && !settings} fixtureLabel={bridge.fixtureLabel ?? undefined} onOldList={() => showList('old')} focusSwitch={switchedList.current} session={catalogSession}/>
+      : <DiscoveryWorkspace onNewList={catalogCapable ? () => showList('new') : undefined} focusSwitch={switchedList.current} active={flow.view === 'discovery' && !settings} products={products} bridge={bridge} acknowledgedBuild={flow.operation?.result?.build} acknowledgedRegion={flow.operation?.result?.sourceReference.region} onAcknowledgedBuild={setCatalogOpenBuild} summariesEnabled={retention.features.includes('download-summary-v1')} availabilityEnabled={retention.features.includes('build-availability-v1')} downloadNudge={downloadNudge} opening={flow.operation} onShowOpening={() => flow.showActive()} onCancelOpening={() => { void flow.cancel(); }} onOpen={(build, region) => { void flow.open(build, region, products.find(p => p.id === build.productId)?.label || build.productId); }}
+        fixtureLabel={bridge.fixtureLabel ?? undefined} problem={problem}/>}
     </div>
     <div className="app-view" data-app-view="" hidden={flow.view === 'discovery' || !!settings} inert={flow.view === 'discovery' || !!settings}>
     {flow.view === 'preparation' && flow.operation && <PreparationView tableActivity={null} operation={flow.operation} notice={flow.notice} fixtureLabel={bridge.fixtureLabel} onBack={flow.detach} onCancel={() => { void flow.cancel(); }} onRetry={() => { const op = flow.operation!; void flow.open(op.build, op.sourceRegion, op.label); }} onEnter={flow.enterVerified}/>}
@@ -298,7 +310,7 @@ export function checkLine(summary: CheckSummary, refreshed: boolean): string | n
   const count = summary.checked.length === summary.total ? `${summary.total}` : `${summary.checked.length} of ${summary.total}`;
   return [`Checked ${count} products`, ...(summary.failed.length ? [`${productNames(summary.failed)} could not be checked`] : []), ...(summary.notChecked.length ? [`${productNames(summary.notChecked)} not checked`] : [])].join(' · ');
 }
-function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabel, problem, summariesEnabled, availabilityEnabled = false, downloadNudge, opening, onShowOpening, onCancelOpening, onOpen, acknowledgedBuild, acknowledgedRegion, onAcknowledgedBuild }: { active: boolean; products: Product[]; bridge: DiscoveryBridge; fixtureLabel?: string; problem: string; summariesEnabled: boolean; availabilityEnabled?: boolean; downloadNudge: string; opening: Opening | null; onShowOpening: () => void; onCancelOpening: () => void; acknowledgedBuild?: Build; acknowledgedRegion?: string; onOpen: (build: Build, sourceRegion: string) => void; onAcknowledgedBuild?: (build: Build) => void }) {
+function DiscoveryWorkspace({ onNewList, focusSwitch = false, active: visibleView, products, bridge, fixtureLabel, problem, summariesEnabled, availabilityEnabled = false, downloadNudge, opening, onShowOpening, onCancelOpening, onOpen, acknowledgedBuild, acknowledgedRegion, onAcknowledgedBuild }: { onNewList?: () => void; focusSwitch?: boolean; active: boolean; products: Product[]; bridge: DiscoveryBridge; fixtureLabel?: string; problem: string; summariesEnabled: boolean; availabilityEnabled?: boolean; downloadNudge: string; opening: Opening | null; onShowOpening: () => void; onCancelOpening: () => void; acknowledgedBuild?: Build; acknowledgedRegion?: string; onOpen: (build: Build, sourceRegion: string) => void; onAcknowledgedBuild?: (build: Build) => void }) {
   const [page, setPage] = useState<DiscoveryCatalogPage | null>(null);
   const { summaries, error: summaryProblem, readAt: summariesReadAt } = useDownloadSummaries(bridge, page?.builds ?? [], visibleView, summariesEnabled, downloadNudge);
   const summaryOf = (build: Build) => summaries.get(summaryKey(build.productId, build.id));
@@ -341,6 +353,9 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
   const lastSelection = useRef<Build | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const refreshButton = useRef<HTMLButtonElement>(null);
+  const newListButton = useRef<HTMLButtonElement>(null);
+  // Back from the new build list this session: focus goes to the control that switches again.
+  useEffect(() => { if (focusSwitch) newListButton.current?.focus(); }, []);
   const activity_ = useDownloadActivity();
   const latestFilter = useRef(filter); latestFilter.current = filter;
   const latestProduct = useRef(productFilter); latestProduct.current = productFilter;
@@ -597,6 +612,7 @@ function DiscoveryWorkspace({ active: visibleView, products, bridge, fixtureLabe
       <div className="dv-brand"><img src={brand} alt="VibeMiner"/><span className="dv-word" aria-hidden="true">Vibe<span>Miner</span></span></div>
       {fixtureLabel && <span className="dv-fixture"><strong>{fixtureLabel}</strong><span> · Synthetic identities and receipts.</span></span>}
       <div className="dv-spacer"/>
+      {onNewList && <button ref={newListButton} className="dv-btn" onClick={onNewList}>New build list</button>}
       <ActivityTrigger compact/>
       <SettingsButton className="dv-btn" origin={discoveryOrigin}/>
     </header>

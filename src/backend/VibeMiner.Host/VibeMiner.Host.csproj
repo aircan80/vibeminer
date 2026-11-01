@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup><ItemGroup>
   <ProjectReference Include="../VibeMiner.Application/VibeMiner.Application.csproj" />
   <ProjectReference Include="../VibeMiner.Infrastructure/VibeMiner.Infrastructure.csproj" />
+  <!-- The build list from layer 3 (#205): the shared layer 7 composition and the catalog it opens. -->
+  <ProjectReference Include="../VibeMiner.Composition/VibeMiner.Composition.csproj" />
+  <ProjectReference Include="../VibeMiner.Builds/VibeMiner.Builds.csproj" />
 </ItemGroup></Project>

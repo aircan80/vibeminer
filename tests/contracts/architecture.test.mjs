@@ -8,7 +8,9 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 test('production project dependencies preserve pure engine boundaries and the original parser policy', async () => {
   const allowed = {
     Domain: [], Application: ['Domain'], 'Protocols.Tact': ['Domain'],
-    'Formats.Wow': ['Protocols.Tact'], Infrastructure: ['Application', 'Protocols.Tact', 'Formats.Wow'], Host: ['Application', 'Infrastructure'],
+    'Formats.Wow': ['Protocols.Tact'], Infrastructure: ['Application', 'Protocols.Tact', 'Formats.Wow'],
+    // Composition and Builds: the desktop's build list from layer 3 (#205).
+    Host: ['Application', 'Infrastructure', 'Composition', 'Builds'],
     // Layer 1 (D121) stands alone: no catalog, builds, protocol parsers or features.
     Objects: [],
     // Layer 1 CDN and version-service clients (D121): keys, bytes and HTTP only.
@@ -27,7 +29,10 @@ test('production project dependencies preserve pure engine boundaries and the or
     Formats: ['Files', 'ObjectAccess', 'Generated'],
     // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
     // Generated: the browse session opens the profile's generated store once, for layer 4's listfile names index (#186) and tables.
-    Cli: ['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats'],
+    // Composition is the layer 7 composition shared with the desktop Host (#205).
+    Cli: ['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Composition'],
+    // Layer 7 composition shared by vm and the desktop Host (#205): data-folder paths, the writer's layer 2 over layers 1-3.
+    Composition: ['Objects', 'Cdn', 'ObjectAccess', 'Builds'],
   };
   for (const [project, dependencies] of Object.entries(allowed)) {
     const source = await readFile(path.join(root, `src/backend/VibeMiner.${project}/VibeMiner.${project}.csproj`), 'utf8');
@@ -47,9 +52,9 @@ test('backend projects reference only their own code layer or lower ones', async
   const production = {
     Domain: 0, 'Protocols.Tact': 0, 'Formats.Wow': 0,
     Objects: 1, Cdn: 1, Generated: 1, ObjectAccess: 2, Builds: 3, Files: 4, Formats: 5,
-    Application: 3, Infrastructure: 3, Host: 7, Cli: 7,
+    Application: 3, Infrastructure: 3, Host: 7, Cli: 7, Composition: 7,
   };
-  const layerProjects = new Set(['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Cli']);
+  const layerProjects = new Set(['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Cli', 'Composition']);
   const legacy = new Set(Object.keys(production).filter(name => !layerProjects.has(name)));
   const fakes = { 'Cdn.Testing': 1, 'Generated.Testing': 1, 'Objects.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Formats.Testing': 5, 'Objects.CrashWriter': 1 };
   const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Files.Tests': 4, 'Formats.Tests': 5, 'Cli.Tests': 7 };
@@ -90,9 +95,10 @@ test('backend projects reference only their own code layer or lower ones', async
   // The comparison exemption stays narrow: exactly the two readers it diffs, nothing else.
   assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Formats.Comparison/VibeMiner.Formats.Comparison.csproj')).sort(), ['Formats', 'Formats.Wow'],
     'Formats.Comparison references only the layer 5 and legacy DB2 readers');
-  // The other two exemptions are pinned the same way. Backend.Tests covers the legacy code only.
-  assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Backend.Tests/VibeMiner.Backend.Tests.csproj')).sort(), ['Host', 'Infrastructure'],
-    'Backend.Tests references only the legacy Host and Infrastructure');
+  // The other two exemptions are pinned the same way. Backend.Tests covers the legacy code and the Host; the layer 2 and 3 fakes are
+  // for the Host's build catalog (#205).
+  assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Backend.Tests/VibeMiner.Backend.Tests.csproj')).sort(), ['Builds.Testing', 'Host', 'Infrastructure', 'ObjectAccess.Testing'],
+    'Backend.Tests references only the Host, Infrastructure and the layer 2 and 3 fakes');
   // Storage.IntegrationTests drives real layers 1-5 (D137, #195) against the fakes, never a legacy project or the CLI.
   assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Storage.IntegrationTests/VibeMiner.Storage.IntegrationTests.csproj')).sort(),
     ['Cdn.Testing', 'Files.Testing', 'Formats', 'Generated.Testing', 'ObjectAccess', 'ObjectAccess.Testing', 'Objects.CrashWriter', 'Objects.Testing'],

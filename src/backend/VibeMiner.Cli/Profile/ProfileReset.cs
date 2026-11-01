@@ -1,3 +1,4 @@
+using VibeMiner.Composition;
 using VibeMiner.Objects;
 
 namespace VibeMiner.Cli.Profile;
@@ -53,7 +54,7 @@ internal sealed class ProfileReset
 
     public static IReadOnlyList<ResetTarget> DefaultTargets { get; } =
     [
-        new(RealStores.CatalogFolder, ResetTargetKind.Folder),
+        new(DataFolderPaths.CatalogFolder, ResetTargetKind.Folder),
         new(GeneratedFolder, ResetTargetKind.Folder),
         new(SettingsFile, ResetTargetKind.File),
         new(SettingsTemporaryFile, ResetTargetKind.File),

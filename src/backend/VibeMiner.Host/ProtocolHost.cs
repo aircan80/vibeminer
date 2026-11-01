@@ -16,7 +16,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
     SettingsService? settings = null,
     DownloadSummaryService? downloadSummaries = null, TableReferenceTextService? referenceText = null, TableFollowService? follow = null,
     PreparedDataService? preparedData = null, ICommunityListfileControl? listfile = null,
-    BuildAvailabilityService? availability = null)
+    BuildAvailabilityService? availability = null, BuildCatalogService? buildCatalog = null)
 {
     public const int MaxFrameBytes = 1024 * 1024;
     public const int MaxClassificationFrameBytes = 512 * 1024;
@@ -175,6 +175,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     if (preparedData is not null) capabilities.Add("prepared-data-v1");
                     if (service.HasCommunityBuilds) capabilities.Add("community-builds-v1");
                     if (availability is not null) capabilities.Add("build-availability-v1");
+                    if (buildCatalog is not null) capabilities.Add("build-catalog-v1");
                     if (downloadSummaries is not null) capabilities.Add("download-summary-v1");
                     if (downloads is not null) capabilities.Add("download-check-v1");
                     if (items is not null) { capabilities.Add("items-v1"); capabilities.Add("item-facts-v1"); }
@@ -224,6 +225,20 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
                     result = await service.RefreshAllAsync(progress => WriteAsync(output, new { protocolVersion = 1, type = "progress", requestId = id,
                         sequence = Interlocked.Increment(ref refreshSequence), stage = "Checking official metadata", region = (string?)null,
                         completed = progress.Completed, total = progress.Total, unit = "products" }), request.Cancellation.Token);
+                    break;
+                case "catalog.list":
+                    RequireOnly(parameters);
+                    if (buildCatalog is null) throw new DiscoveryException("UNKNOWN_METHOD", "The requested operation is not available.");
+                    result = await buildCatalog.ListAsync(request.Cancellation.Token);
+                    break;
+                case "catalog.refresh":
+                    RequireOnly(parameters);
+                    if (buildCatalog is null) throw new DiscoveryException("UNKNOWN_METHOD", "The requested operation is not available.");
+                    long catalogSequence = 0;
+                    // The service reports one product at a time, so sequence order matches the completed count.
+                    result = await buildCatalog.RefreshAsync((completed, total) => WriteAsync(output, new { protocolVersion = 1, type = "progress", requestId = id,
+                        sequence = Interlocked.Increment(ref catalogSequence), stage = BuildCatalogService.ProgressStage, region = (string?)null,
+                        completed, total, unit = "products" }), request.Cancellation.Token);
                     break;
                 case "tables.catalog":
                     RequireOnly(parameters, "productId", "buildIdentity", "sourceRegion", "query", "limit", "after");
@@ -745,7 +760,7 @@ public sealed class ProtocolHost(DiscoveryService service, WorkspaceService? wor
             await ReplyAsync(output, id, result, maximumBytes, frameKind);
             pendingGeometryLease = null; // Opaque ownership transfers only after actual terminal Flush.
         }
-        catch (OperationCanceledException) { await TryErrorAsync(output, id, "CANCELED", method == "workspace.open" ? "Opening canceled." : method == "discovery.refreshAll" ? "Discovery canceled. Products checked before stopping keep their new results." : method == "tables.prepare" ? "Table loading canceled." : method == "download.check" ? "Check stopped. Nothing new was recorded; an earlier check stays as it was." : method == "builds.availability.check" ? "Availability check stopped. Nothing new was saved; an earlier check stays as it was." : "Operation canceled.", true, maximumBytes, frameKind); }
+        catch (OperationCanceledException) { await TryErrorAsync(output, id, "CANCELED", method == "workspace.open" ? "Opening canceled." : method == "discovery.refreshAll" ? "Discovery canceled. Products checked before stopping keep their new results." : method == "catalog.refresh" ? "Refresh stopped. Products checked before stopping keep their new results." : method == "tables.prepare" ? "Table loading canceled." : method == "download.check" ? "Check stopped. Nothing new was recorded; an earlier check stays as it was." : method == "builds.availability.check" ? "Availability check stopped. Nothing new was saved; an earlier check stays as it was." : "Operation canceled.", true, maximumBytes, frameKind); }
         catch (DiscoveryException ex) { await TryErrorAsync(output, id, ex.Code, ex.Message, ex.Retryable, maximumBytes, frameKind, ex.Definition); }
         catch (Exception ex)
         {

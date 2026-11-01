@@ -1,0 +1,201 @@
+{
+  "access": "writer",
+  "products": [
+    {
+      "productId": "wow",
+      "label": "Retail",
+      "builds": [
+        {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "versionsName": "11.9.0.90002",
+          "buildConfig": "11111111111111111111111111111111",
+          "current": true,
+          "regions": [
+            "us",
+            "eu",
+            "kr",
+            "tw"
+          ],
+          "firstSeenAt": "2026-10-28T16:00:00Z",
+          "lastSeenAt": "2026-10-31T09:00:00Z"
+        },
+        {
+          "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "versionsName": "11.9.0.90001",
+          "buildConfig": "22222222222222222222222222222222",
+          "current": false,
+          "regions": [
+            "us",
+            "eu",
+            "kr",
+            "tw",
+            "cn"
+          ],
+          "firstSeenAt": "2026-10-20T16:00:00Z",
+          "lastSeenAt": "2026-10-28T15:00:00Z"
+        }
+      ],
+      "buildCount": 2,
+      "lastObservedAt": "2026-10-31T09:00:00Z",
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wowt",
+      "label": "PTR",
+      "builds": [
+        {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "versionsName": "11.9.5.90010",
+          "buildConfig": "33333333333333333333333333333333",
+          "current": true,
+          "regions": [
+            "us"
+          ],
+          "firstSeenAt": "2026-10-30T18:00:00Z",
+          "lastSeenAt": "2026-10-31T09:00:00Z"
+        }
+      ],
+      "buildCount": 1,
+      "lastObservedAt": "2026-10-31T09:00:00Z",
+      "problems": [
+        {
+          "code": "VERSIONS_ROW_INVALID",
+          "message": "A versions row can't be read (INVALID_IDENTITY)."
+        }
+      ],
+      "problemCount": 1
+    },
+    {
+      "productId": "wowxptr",
+      "label": "PTR 2",
+      "builds": [
+        {
+          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "versionsName": "11.9.5.90011",
+          "buildConfig": "44444444444444444444444444444444",
+          "current": true,
+          "regions": [
+            "us"
+          ],
+          "firstSeenAt": "2026-10-31T09:00:00Z",
+          "lastSeenAt": "2026-10-31T09:00:00Z"
+        }
+      ],
+      "buildCount": 1,
+      "lastObservedAt": "2026-10-31T09:00:00Z",
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wow_beta",
+      "label": "Beta",
+      "builds": [],
+      "buildCount": 0,
+      "lastObservedAt": null,
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wow_classic",
+      "label": "Classic Progression",
+      "builds": [],
+      "buildCount": 0,
+      "lastObservedAt": null,
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wow_classic_ptr",
+      "label": "Classic Progression PTR",
+      "builds": [],
+      "buildCount": 0,
+      "lastObservedAt": null,
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wow_classic_era",
+      "label": "Classic Era",
+      "builds": [
+        {
+          "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "versionsName": "1.9.9.90020",
+          "buildConfig": "55555555555555555555555555555555",
+          "current": false,
+          "regions": [
+            "us",
+            "eu"
+          ],
+          "firstSeenAt": "2026-09-01T12:00:00Z",
+          "lastSeenAt": "2026-10-15T12:00:00Z"
+        }
+      ],
+      "buildCount": 1,
+      "lastObservedAt": "2026-10-31T09:00:00Z",
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wow_classic_era_ptr",
+      "label": "Classic Era PTR",
+      "builds": [],
+      "buildCount": 0,
+      "lastObservedAt": null,
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wow_anniversary",
+      "label": "Anniversary",
+      "builds": [],
+      "buildCount": 0,
+      "lastObservedAt": null,
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wow_classic_beta",
+      "label": "Classic Beta",
+      "builds": [],
+      "buildCount": 0,
+      "lastObservedAt": null,
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wow_cn_beta",
+      "label": "Edition unconfirmed",
+      "builds": [],
+      "buildCount": 0,
+      "lastObservedAt": null,
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wowf",
+      "label": "Edition unconfirmed",
+      "builds": [],
+      "buildCount": 0,
+      "lastObservedAt": null,
+      "problems": [],
+      "problemCount": 0
+    },
+    {
+      "productId": "wow_classic_titan",
+      "label": "Edition unconfirmed",
+      "builds": [],
+      "buildCount": 0,
+      "lastObservedAt": null,
+      "problems": [],
+      "problemCount": 0
+    }
+  ],
+  "summary": {
+    "observedAt": "2026-10-31T09:00:00Z",
+    "readable": true,
+    "newProducts": [
+      "wow_example_new"
+    ]
+  }
+}

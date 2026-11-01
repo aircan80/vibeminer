@@ -1,5 +1,6 @@
 using System.Globalization;
 using VibeMiner.Builds;
+using VibeMiner.Composition;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 
@@ -36,7 +37,7 @@ internal sealed class BuildsView : BrowseView
                     list.LastObservedAt is { } at ? BrowseSession.Time(at) : "no history", list.Problems.Count == 0 ? "" : $"{list.Problems.Count:N0}"],
                     () => new ProductBuildsView(product)));
             }
-            var summary = await NewestSummaryAsync(store.Objects, ct).ConfigureAwait(false);
+            var summary = await StoredSummary.NewestSummaryAsync(store.Objects, ct).ConfigureAwait(false);
             string? summaryNote = null;
             if (summary is { Entry: var entry, Read: var read })
             {
@@ -56,25 +57,6 @@ internal sealed class BuildsView : BrowseView
     }
 
     private static readonly string[] Columns = ["Product", "Id", "Builds", "Current", "Last (UTC)", "Problems"];
-
-    /// <summary>The newest summary in the history log and what it says, read from the store; null when none was recorded.</summary>
-    public static async Task<(HistoryEntry Entry, SummaryRefresh Read)?> NewestSummaryAsync(IObjectSource objects, CancellationToken ct)
-    {
-        HistoryEntry? newest = null, after = null;
-        while (true)
-        {
-            var page = await objects.ReadHistoryAsync(new HistoryQuery(Kind: HistoryKind.Summary, After: after, Limit: HistoryView.Page), ct).ConfigureAwait(false);
-            foreach (var e in page) if (newest is null || e.ObservedAt >= newest.ObservedAt) newest = e;
-            if (page.Count < HistoryView.Page) break;
-            after = page[^1];
-        }
-        if (newest is null) return null;
-        var got = await objects.GetKeyAsync(new ObjectRequest(newest.Document), cdn: null, FetchPriority.Interactive, ct).ConfigureAwait(false);
-        var observed = got.IsPresent && got.Bytes is { } bytes
-            ? new ObservationResult(ObjectState.Present, new Observation(ObservationKind.Summary, "", newest.Region, new Uri(newest.Url), newest.ObservedAt, bytes), Recorded: true)
-            : new ObservationResult(got.State, Code: got.Code, Message: got.Message);
-        return (newest, Summaries.Read(observed));
-    }
 
     /// <summary>
     /// <c>r</c>: versions and cdns for every reviewed product, then the summary, as <c>vm builds refresh</c> does. Takes the writer

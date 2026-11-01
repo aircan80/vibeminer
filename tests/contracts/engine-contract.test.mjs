@@ -242,6 +242,57 @@ test('the schema request method enum lists exactly the bridge RequestMethod unio
   assert.deepEqual(schemaMethods.filter(method => !bridgeMethods.includes(method)), [], 'schema methods missing from the bridge RequestMethod');
 });
 
+// build-catalog-v1 (#205): the layer 3 build list and its refresh.
+test('the build catalog list and refresh keep every reviewed product, bounded builds and closed failure states', async () => {
+  const catalog = JSON.parse(await readFile(path.join(root, 'contracts/examples/build-catalog.json'), 'utf8'));
+  const refresh = JSON.parse(await readFile(path.join(root, 'contracts/examples/build-catalog-refresh.json'), 'utf8'));
+  validate('BuildCatalog', catalog);
+  validate('BuildCatalogRefresh', refresh);
+  assert.equal(catalog.products.find(product => product.productId === 'wowxptr').label, 'PTR 2');
+  assert.ok(catalog.products.some(product => product.builds.length === 0 && product.lastObservedAt === null), 'a product with no history');
+  assert.deepEqual(refresh.failures.map(failure => [failure.state, failure.code]), [['unavailable', 'CDN_OFFLINE']]);
+  validate('BuildCatalog', { ...catalog, access: 'readOnly', summary: null });
+  validate('BuildCatalog', { ...catalog, summary: { ...catalog.summary, readable: false, newProducts: [] } });
+  validate('BuildCatalogRefresh', { ...refresh, failures: [{ productId: null, document: 'summary', state: 'needsNetwork', code: null, message: null }], newProducts: [] });
+  const invalid = (name, base, change) => { const value = structuredClone(base); change(value); assert.equal(validator(name)(value), false, change.toString()); };
+  for (const change of [
+    value => { value.extra = true; },
+    value => { value.products[0].extra = true; },
+    value => { value.products[0].builds[0].extra = true; },
+    value => { delete value.summary; },
+    value => { delete value.products[0].buildCount; },
+    value => { delete value.products[0].builds[0].current; },
+    value => { value.products[0].builds = Array(101).fill(value.products[0].builds[0]); },
+    value => { value.products[0].builds[0].buildConfig = 'A'.repeat(32); },
+    value => { value.products[0].builds[0].buildConfig = '1'.repeat(31); },
+    value => { value.products[0].builds[0].regions = Array(65).fill('us'); },
+    value => { value.products[0].builds[0].firstSeenAt = 'yesterday'; },
+    value => { value.products[0].problems = Array(21).fill({ code: 'VERSIONS_ROW_INVALID', message: 'x' }); },
+    value => { value.products[0].problems = [{ code: 'lower_case', message: 'x' }]; },
+    value => { value.access = 'shared'; },
+    value => { value.access = null; },
+    value => { value.summary.newProducts = Array(65).fill('wow_x'); },
+  ]) invalid('BuildCatalog', catalog, change);
+  for (const change of [
+    value => { value.extra = true; },
+    value => { delete value.checked; },
+    value => { value.catalog.access = 'unknown'; },
+    value => { value.failures[0].document = 'install'; },
+    value => { value.failures[0].state = 'notFound'; },
+    value => { value.failures[0].state = 'present'; },
+    value => { value.failures[0].extra = true; },
+    value => { delete value.failures[0].code; },
+    value => { value.failures[0].message = 'x'.repeat(513); },
+    value => { value.failures = Array(65).fill(value.failures[0]); },
+  ]) invalid('BuildCatalogRefresh', refresh, change);
+  for (const method of ['catalog.list', 'catalog.refresh']) {
+    const request = params => ({ protocolVersion: 1, id: method, method, params });
+    validate('EngineRequest', request({}));
+    for (const params of [{ productId: 'wow' }, { limit: 50 }, { cursor: 'x' }])
+      assert.equal(validator('EngineRequest')(request(params)), false, `${method} ${JSON.stringify(params)}`);
+  }
+});
+
 test('inventory.files and inventory.file requests validate their bounded params', () => {
   const scope = { productId: 'wow', buildIdentity: 'a'.repeat(64), sourceRegion: 'us', generation: '1', limit: 50 };
   const request = (method, params) => ({ protocolVersion: 1, id: 'files', method, params });
@@ -851,6 +902,16 @@ test('real C# host agrees with the wire schema and restores a fresh catalog with
   validate('HelloResult', hello.result);
   assert.ok(hello.result.capabilities.includes('retention-v1'));
   assert.ok(hello.result.capabilities.includes('download-summary-v1'));
+  // #205: the layer 3 build list over the data folder's stores, created on first use. catalog.refresh would reach the network.
+  assert.ok(hello.result.capabilities.includes('build-catalog-v1'));
+  const buildCatalog = await request('catalog.list');
+  assert.ok(!buildCatalog.error, JSON.stringify(buildCatalog.error));
+  validate('BuildCatalog', buildCatalog.result);
+  assert.equal(buildCatalog.result.access, 'writer');
+  assert.equal(buildCatalog.result.products.length, 13);
+  assert.equal(buildCatalog.result.summary, null);
+  assert.ok(existsSync(path.join(data, 'cdn-store-v1')));
+  assert.ok(existsSync(path.join(data, 'catalog-v1', 'catalog.sqlite3')));
   const summaries = await request('download.summaries', { builds: [{ productId: 'wow', buildIdentity: 'a'.repeat(64) }] });
   assert.ok(!summaries.error, JSON.stringify(summaries.error));
   validate('DownloadSummaries', summaries.result);

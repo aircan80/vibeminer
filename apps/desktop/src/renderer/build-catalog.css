@@ -1,0 +1,26 @@
+/* The layer 3 build list (#205): discovery.css with three columns, Version | Regions | Last seen, grouped by product. */
+.discovery-screen .dv-catalog .dv-cols{grid-template-columns:minmax(18.5rch,1.3fr) minmax(7rem,1fr) minmax(max(8.4rem,18rch),1fr)}
+.discovery-screen .dv-catalog.dv-compact .dv-cols{grid-template-columns:minmax(18.5rch,1.3fr) minmax(5.133333rem,1fr) minmax(max(5.6rem,14rch),1.1fr)}
+.discovery-screen .dv-catalog.dv-compact .dv-cols>:nth-child(3){display:block}
+.discovery-screen .dv-catalog.dv-narrow .dv-cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.discovery-screen .dv-catalog.dv-narrow .dv-cols>:nth-child(3){grid-column:1 / -1}
+.discovery-screen .dv-catalog .dv-cols>*{min-width:0}
+.discovery-screen .dv-catalog [role="option"]>span{overflow-wrap:anywhere}
+/* One heading per product, in registry order, above its builds. Products without builds keep their heading and say why. */
+.discovery-screen .dv-group-head{padding:.42rem .8rem .28rem;background:var(--bg);border-bottom:1px solid var(--dv-line-soft);font-size:var(--dv-m);white-space:normal;overflow-wrap:anywhere}
+.discovery-screen .dv-group-head code{font-size:var(--dv-s);color:var(--dv-muted)}
+.discovery-screen .dv-catalog-summary{flex:none;margin:.56rem .8rem 0;font-size:var(--dv-m);color:var(--dv-muted);overflow-wrap:anywhere}
+.discovery-screen .dv-catalog-summary.new{padding:.513rem .7rem;border-radius:6px;border:1px solid var(--dv-gold-line);background:var(--dv-gold-bg);color:var(--dv-gold-ink)}
+.discovery-screen .dv-catalog-problems{margin:0;padding-left:1.027rem;font-size:var(--dv-m);overflow-wrap:anywhere}
+.discovery-screen .dv-catalog-problems code{font-size:var(--dv-s)}
+/* Stacked (#205 review): the list gets the larger share and the notes above it take less room, so a stacked pane shows
+   several rows. The inspector's Open build sits beside its reason instead of above it. */
+.discovery-screen .dv-catalog.dv-compact .dv-body{grid-template-rows:minmax(8rem,1.6fr) minmax(min-content,1fr)}
+.discovery-screen .dv-catalog.dv-compact .dv-catalog-summary{margin-top:.28rem}
+.discovery-screen .dv-catalog.dv-compact .dv-catalog-summary.new{padding:.187rem .513rem}
+.discovery-screen .dv-catalog.dv-compact .dv-list{margin-top:.28rem}
+.discovery-screen .dv-catalog.dv-compact .dv-group-head{padding:.187rem .8rem .14rem}
+.discovery-screen .dv-catalog.dv-compact .dv-insp-foot .primary{flex:0 0 auto}
+.discovery-screen .dv-catalog.dv-compact .dv-insp-foot .dv-reason{flex:1 1 12rem}
+/* The pane head has no filters before Refresh, so Refresh and the jump sit together at its end. */
+.discovery-screen .dv-catalog.dv-shared .dv-jump{margin-left:0}

@@ -398,6 +398,8 @@ export interface DiscoveryContract {
   buildAvailabilityParams?: BuildAvailabilityParams;
   buildAvailability?: BuildAvailability;
   communityBuildsStatus?: CommunityBuildsStatus;
+  buildCatalog?: BuildCatalog;
+  buildCatalogRefresh?: BuildCatalogRefresh;
 }
 export interface Product {
   id: string;
@@ -640,6 +642,8 @@ export interface EngineRequest1 {
     | 'discovery.refresh'
     | 'discovery.readAll'
     | 'discovery.refreshAll'
+    | 'catalog.list'
+    | 'catalog.refresh'
     | 'workspace.open'
     | 'request.cancel'
     | 'shutdown'
@@ -4509,4 +4513,332 @@ export interface BuildAvailabilityParams {
   productId: string;
   buildIdentity: string;
   archives: boolean;
+}
+/**
+ * catalog.list: every reviewed product in registry order with its builds, and the newest stored summary (build-catalog-v1).
+ */
+export interface BuildCatalog {
+  /**
+   * readOnly: another process holds the object store writer lock; the list was read read-only and catalog.refresh answers OBJECT_STORE_BUSY.
+   */
+  access: 'writer' | 'readOnly';
+  /**
+   * @maxItems 100
+   */
+  products: CatalogProduct[];
+  summary: CatalogSummary | null;
+}
+export interface CatalogProduct {
+  productId: string;
+  label: string;
+  /**
+   * Newest first sighting first; at most 100, cut short by the frame budget.
+   *
+   * @maxItems 100
+   */
+  builds: CatalogBuild[];
+  /**
+   * Every build the catalog has for the product, at least builds.length.
+   */
+  buildCount: number;
+  /**
+   * Newest versions reply for the product; null when it has no versions history.
+   */
+  lastObservedAt: SettingsTimestamp | null;
+  /**
+   * The first problems, at most 20.
+   *
+   * @maxItems 20
+   */
+  problems:
+    | []
+    | [CatalogProblem]
+    | [CatalogProblem, CatalogProblem]
+    | [CatalogProblem, CatalogProblem, CatalogProblem]
+    | [CatalogProblem, CatalogProblem, CatalogProblem, CatalogProblem]
+    | [CatalogProblem, CatalogProblem, CatalogProblem, CatalogProblem, CatalogProblem]
+    | [CatalogProblem, CatalogProblem, CatalogProblem, CatalogProblem, CatalogProblem, CatalogProblem]
+    | [CatalogProblem, CatalogProblem, CatalogProblem, CatalogProblem, CatalogProblem, CatalogProblem, CatalogProblem]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ]
+    | [
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem,
+        CatalogProblem
+      ];
+  problemCount: number;
+}
+/**
+ * One build of one product from the layer 3 catalog (build-catalog-v1).
+ */
+export interface CatalogBuild {
+  /**
+   * Build identity v2.
+   */
+  id: string;
+  versionsName: string;
+  buildConfig: string;
+  current: boolean;
+  /**
+   * Distinct region names in first-listed order; for a current build only the regions whose listing is current.
+   *
+   * @maxItems 64
+   */
+  regions: string[];
+  firstSeenAt: SettingsTimestamp;
+  lastSeenAt: SettingsTimestamp;
+}
+export interface CatalogProblem {
+  code: string;
+  message: string;
+}
+/**
+ * The newest stored summary document.
+ */
+export interface CatalogSummary {
+  observedAt: SettingsTimestamp;
+  /**
+   * False when the summary cannot be read; new products are then unknown.
+   */
+  readable: boolean;
+  /**
+   * WoW product ids the summary lists that are not reviewed, sorted.
+   *
+   * @maxItems 64
+   */
+  newProducts: string[];
+}
+/**
+ * catalog.refresh: the list after asking the version service for every reviewed product and the summary.
+ */
+export interface BuildCatalogRefresh {
+  catalog: BuildCatalog;
+  refreshedAt: SettingsTimestamp;
+  checked: number;
+  /**
+   * Empty when everything answered; notFound is an answer.
+   *
+   * @maxItems 64
+   */
+  failures: CatalogRefreshFailure[];
+  /**
+   * What this refresh's summary says is new; empty when the summary failed.
+   *
+   * @maxItems 64
+   */
+  newProducts: string[];
+}
+/**
+ * One document a refresh could not get: a layer 2 state other than present or notFound.
+ */
+export interface CatalogRefreshFailure {
+  /**
+   * Null for the summary.
+   */
+  productId: string | null;
+  document: 'versions' | 'cdns' | 'summary';
+  state: 'unavailable' | 'refused' | 'storeFailed' | 'unsupported' | 'needsNetwork';
+  code: string | null;
+  message: string | null;
 }

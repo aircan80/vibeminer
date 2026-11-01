@@ -51,6 +51,17 @@ The HTML files can contain older alternatives. Only the views above guide the ap
 - Keep the exact selection through async work. Stale results can't navigate to another context.
 - Show readiness separately from activity and transfer progress.
 
+## Layer 3 build list
+
+With `build-catalog-v1` the Discovery slot shows the build list from the layer 3 catalog ([#205](https://github.com/aircan80/vibeminer/issues/205), [D432](../DECISIONS.md)). It keeps the desktop-discovery window (toolbar, listbox, pinned-action inspector, status bar, tokens) and departs from it here:
+
+- **Product groups, no Product column.** Rows sit under one heading per reviewed product in registry order, and a product with no builds keeps its heading ("No history yet"), so every product is accounted for. The layer 3 list is per product, as `vm browse` shows it.
+- **Three columns: Version, Regions, Last seen.** The catalog has no Downloaded or In VibeMiner facts for the new storage yet, and the build number is part of the version. First seen, build config and identity are in the inspector.
+- **No Product filter, no search, no All / Prepared / Current.** Nothing on the new storage is prepared yet, and Current is shown on each row; the list is short enough to read whole.
+- **Open build is disabled** with its reason, "Opening on the new storage comes next. The Old build list still opens builds." **Old build list** in the toolbar switches to the old list for the session, and **New build list** switches back.
+- **New-product line.** The newest stored summary's verdict sits above the list, worded as `vm browse` words it.
+- **Shared scroller from 30rem.** A stacked window shorter than 30rem (25rem in the old list) shares one scroller, with **View selected build** and **Return to build list**: the product headings and the summary line would otherwise leave no row in the stacked pane at 1280×800 with 200% text.
+
 ## Preparation and overview
 
 - Use the dedicated preparation screen for real configuration/DL acquisition, verification and download-size preparation. The [size-first flow](../SIZE-AND-DEMAND-ARCHITECTURE.md) means Home doesn't wait for full research-catalog indexing.

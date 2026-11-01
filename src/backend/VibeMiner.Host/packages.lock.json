@@ -53,6 +53,25 @@
           "VibeMiner.Domain": "[1.0.0, )"
         }
       },
+      "vibeminer.builds": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Data.Sqlite": "[10.0.13, )",
+          "VibeMiner.ObjectAccess": "[1.0.0, )"
+        }
+      },
+      "vibeminer.cdn": {
+        "type": "Project"
+      },
+      "vibeminer.composition": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Builds": "[1.0.0, )",
+          "VibeMiner.Cdn": "[1.0.0, )",
+          "VibeMiner.ObjectAccess": "[1.0.0, )",
+          "VibeMiner.Objects": "[1.0.0, )"
+        }
+      },
       "vibeminer.domain": {
         "type": "Project"
       },
@@ -69,6 +88,19 @@
           "VibeMiner.Application": "[1.0.0, )",
           "VibeMiner.Formats.Wow": "[1.0.0, )",
           "VibeMiner.Protocols.Tact": "[1.0.0, )"
+        }
+      },
+      "vibeminer.objectaccess": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Cdn": "[1.0.0, )",
+          "VibeMiner.Objects": "[1.0.0, )"
+        }
+      },
+      "vibeminer.objects": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Data.Sqlite": "[10.0.13, )"
         }
       },
       "vibeminer.protocols.tact": {

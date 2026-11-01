@@ -3,6 +3,9 @@
   <AssemblyMetadata Include="VibeMinerRepositoryRoot" Value="$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..'))" />
   <ProjectReference Include="../../../src/backend/VibeMiner.Infrastructure/VibeMiner.Infrastructure.csproj" />
   <ProjectReference Include="../../../src/backend/VibeMiner.Host/VibeMiner.Host.csproj" />
+  <!-- The layer 2 and 3 fakes for the Host's build catalog (#205). -->
+  <ProjectReference Include="../VibeMiner.ObjectAccess.Testing/VibeMiner.ObjectAccess.Testing.csproj" />
+  <ProjectReference Include="../VibeMiner.Builds.Testing/VibeMiner.Builds.Testing.csproj" />
   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
   <PackageReference Include="xunit" Version="2.9.3" />
   <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1"><PrivateAssets>all</PrivateAssets></PackageReference>

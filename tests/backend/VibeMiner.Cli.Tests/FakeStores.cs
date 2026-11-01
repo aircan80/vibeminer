@@ -1,5 +1,6 @@
 using VibeMiner.Builds;
 using VibeMiner.Builds.Testing;
+using VibeMiner.Composition;
 using VibeMiner.ObjectAccess;
 using VibeMiner.ObjectAccess.Testing;
 using VibeMiner.Objects;
@@ -42,7 +43,7 @@ internal sealed class FakeStores : IStoreOpener
     /// <summary>How many fresh catalogs handles have created.</summary>
     public int CatalogsCreated { get; private set; }
     public const string CatalogMarkerName = "fake-catalog";
-    public string? CatalogMarker => CatalogDataFolder is { } data ? Path.Combine(data, RealStores.CatalogFolder, CatalogMarkerName) : null;
+    public string? CatalogMarker => CatalogDataFolder is { } data ? Path.Combine(data, DataFolderPaths.CatalogFolder, CatalogMarkerName) : null;
     private InMemoryCatalog? shared;
 
     private InMemoryCatalog CreateCatalog(IObjectSource objects)

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using VibeMiner.Cli.Profile;
+using VibeMiner.Composition;
 using VibeMiner.Objects;
 using Xunit;
 
@@ -36,8 +37,8 @@ public sealed class ProfileResetTests : IDisposable
         Write(At(ObjectStore.DefaultFolderName, "index", "store.idx"), 300);
         Write(At(ObjectStore.DefaultFolderName, "packs", "00", "pack-0001"), 5000);
         Write(At(ObjectStore.DefaultFolderName, "lock"), 0);
-        Write(At(RealStores.CatalogFolder, RealStores.CatalogFile), 4096);
-        Write(At(RealStores.CatalogFolder, RealStores.CatalogFile + "-wal"), 1000);
+        Write(At(DataFolderPaths.CatalogFolder, DataFolderPaths.CatalogFile), 4096);
+        Write(At(DataFolderPaths.CatalogFolder, DataFolderPaths.CatalogFile + "-wal"), 1000);
         Write(At(ProfileReset.GeneratedFolder, "tables", "t.bin"), 700);
         Write(At(ProfileReset.SettingsFile), 50);
         Write(At(ProfileReset.SettingsTemporaryFile), 20);
@@ -59,12 +60,12 @@ public sealed class ProfileResetTests : IDisposable
 
         Assert.Equal(before, Hashes(At(ObjectStore.DefaultFolderName)));
         Assert.Equal([ObjectStore.DefaultFolderName], report.Kept);
-        Assert.False(Directory.Exists(At(RealStores.CatalogFolder)));
+        Assert.False(Directory.Exists(At(DataFolderPaths.CatalogFolder)));
         Assert.False(Directory.Exists(At(ProfileReset.GeneratedFolder)));
         Assert.False(File.Exists(At(ProfileReset.SettingsFile)));
         Assert.False(File.Exists(At(ProfileReset.SettingsTemporaryFile)));
         Assert.All(report.Targets, t => Assert.Equal(ResetState.Wiped, t.State));
-        Assert.Equal(5096, Result(report, RealStores.CatalogFolder).BytesFreed);
+        Assert.Equal(5096, Result(report, DataFolderPaths.CatalogFolder).BytesFreed);
         Assert.Equal(700, Result(report, ProfileReset.GeneratedFolder).BytesFreed);
         Assert.Equal(50, Result(report, ProfileReset.SettingsFile).BytesFreed);
         Assert.Equal(20, Result(report, ProfileReset.SettingsTemporaryFile).BytesFreed);
@@ -92,14 +93,14 @@ public sealed class ProfileResetTests : IDisposable
         Func<CancellationToken, Task> Stop(string name) => async ct =>
         {
             await Task.Yield();
-            Assert.True(File.Exists(At(RealStores.CatalogFolder, RealStores.CatalogFile)));
+            Assert.True(File.Exists(At(DataFolderPaths.CatalogFolder, DataFolderPaths.CatalogFile)));
             seen.Add(name);
         };
 
         await new ProfileReset(Data).ResetAsync([Stop("download-all"), Stop("downloaded"), Stop("scrub")], default);
 
         Assert.Equal(["download-all", "downloaded", "scrub"], seen);
-        Assert.False(Directory.Exists(At(RealStores.CatalogFolder)));
+        Assert.False(Directory.Exists(At(DataFolderPaths.CatalogFolder)));
     }
 
     [Fact]
@@ -113,7 +114,7 @@ public sealed class ProfileResetTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => new ProfileReset(Data).ResetAsync([boom, later], default));
 
         Assert.False(ran);
-        Assert.True(File.Exists(At(RealStores.CatalogFolder, RealStores.CatalogFile)));
+        Assert.True(File.Exists(At(DataFolderPaths.CatalogFolder, DataFolderPaths.CatalogFile)));
         Assert.True(File.Exists(At(ProfileReset.GeneratedFolder, "tables", "t.bin")));
         Assert.True(File.Exists(At(ProfileReset.SettingsFile)));
         Assert.True(File.Exists(At(ProfileReset.SettingsTemporaryFile)));
@@ -126,7 +127,7 @@ public sealed class ProfileResetTests : IDisposable
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new ProfileReset(Data).ResetAsync(NoStops, cts.Token));
-        Assert.True(File.Exists(At(RealStores.CatalogFolder, RealStores.CatalogFile)));
+        Assert.True(File.Exists(At(DataFolderPaths.CatalogFolder, DataFolderPaths.CatalogFile)));
         Assert.True(File.Exists(At(ProfileReset.SettingsFile)));
     }
 
@@ -137,7 +138,7 @@ public sealed class ProfileResetTests : IDisposable
         using var cts = new CancellationTokenSource();
         Func<CancellationToken, Task> stop = _ => cts.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new ProfileReset(Data).ResetAsync([stop], cts.Token));
-        Assert.True(File.Exists(At(RealStores.CatalogFolder, RealStores.CatalogFile)));
+        Assert.True(File.Exists(At(DataFolderPaths.CatalogFolder, DataFolderPaths.CatalogFile)));
     }
 
     [Fact]
@@ -148,14 +149,14 @@ public sealed class ProfileResetTests : IDisposable
         var reset = new ProfileReset(Data)
         {
             // Cancel while the first target is about to be wiped: it still finishes, nothing after it starts.
-            BeforeTarget = t => t.Name == RealStores.CatalogFolder ? cts.CancelAsync() : Task.CompletedTask,
+            BeforeTarget = t => t.Name == DataFolderPaths.CatalogFolder ? cts.CancelAsync() : Task.CompletedTask,
         };
 
         var report = await reset.ResetAsync(NoStops, cts.Token);
 
         Assert.True(report.Cancelled);
-        Assert.Equal(ResetState.Wiped, Result(report, RealStores.CatalogFolder).State);
-        Assert.False(Directory.Exists(At(RealStores.CatalogFolder)));
+        Assert.Equal(ResetState.Wiped, Result(report, DataFolderPaths.CatalogFolder).State);
+        Assert.False(Directory.Exists(At(DataFolderPaths.CatalogFolder)));
         foreach (var name in new[] { ProfileReset.GeneratedFolder, ProfileReset.SettingsFile, ProfileReset.SettingsTemporaryFile })
             Assert.Equal(ResetState.Skipped, Result(report, name).State);
         Assert.True(File.Exists(At(ProfileReset.GeneratedFolder, "tables", "t.bin")));
@@ -166,20 +167,20 @@ public sealed class ProfileResetTests : IDisposable
     [Fact]
     public async Task AnEntryOfTheWrongKindFailsAndIsKept()
     {
-        Write(At(RealStores.CatalogFolder), 11);                        // a file where a folder is expected
+        Write(At(DataFolderPaths.CatalogFolder), 11);                        // a file where a folder is expected
         Write(At(ProfileReset.SettingsFile, "inside"), 12);             // a folder where a file is expected
         Write(At(ProfileReset.SettingsFile + ProfileReset.ResetMarker + "x", "y"), 1); // not a folder target's leftover
 
         var report = await new ProfileReset(Data).ResetAsync(NoStops, default);
 
-        foreach (var name in new[] { RealStores.CatalogFolder, ProfileReset.SettingsFile })
+        foreach (var name in new[] { DataFolderPaths.CatalogFolder, ProfileReset.SettingsFile })
         {
             var result = Result(report, name);
             Assert.Equal(ResetState.Failed, result.State);
             Assert.Equal(ProfileReset.KindMismatch, result.ErrorType);
             Assert.Contains("nothing was deleted", result.ErrorMessage);
         }
-        Assert.True(File.Exists(At(RealStores.CatalogFolder)));
+        Assert.True(File.Exists(At(DataFolderPaths.CatalogFolder)));
         Assert.True(File.Exists(At(ProfileReset.SettingsFile, "inside")));
         Assert.True(File.Exists(At(ProfileReset.SettingsFile + ProfileReset.ResetMarker + "x", "y")));
         Assert.Empty(report.Leftovers);
@@ -190,7 +191,7 @@ public sealed class ProfileResetTests : IDisposable
     public async Task AFolderThatCantBeMeasuredIsStillDeletedWithUnknownBytes()
     {
         Write(At(ProfileReset.GeneratedFolder, "a"), 5);
-        Write(At(RealStores.CatalogFolder, RealStores.CatalogFile), 6);
+        Write(At(DataFolderPaths.CatalogFolder, DataFolderPaths.CatalogFile), 6);
         var reset = new ProfileReset(Data)
         {
             Measurer = d => d.Name.StartsWith(ProfileReset.GeneratedFolder, StringComparison.Ordinal)
@@ -203,7 +204,7 @@ public sealed class ProfileResetTests : IDisposable
         Assert.Equal(ResetState.Wiped, result.State);
         Assert.Null(result.BytesFreed);
         Assert.False(Directory.Exists(At(ProfileReset.GeneratedFolder)));
-        Assert.Equal(6, Result(report, RealStores.CatalogFolder).BytesFreed);
+        Assert.Equal(6, Result(report, DataFolderPaths.CatalogFolder).BytesFreed);
         Assert.True(report.BytesUnknown);
         Assert.False(report.Failed);
     }
@@ -211,7 +212,7 @@ public sealed class ProfileResetTests : IDisposable
     [Fact]
     public async Task LeftoverResetFoldersAreDeletedToo()
     {
-        Write(At(RealStores.CatalogFolder + ProfileReset.ResetMarker + "abc", RealStores.CatalogFile + "-wal"), 123);
+        Write(At(DataFolderPaths.CatalogFolder + ProfileReset.ResetMarker + "abc", DataFolderPaths.CatalogFile + "-wal"), 123);
         Write(At(ProfileReset.GeneratedFolder + ProfileReset.ResetMarker + "def", "x"), 7);
 
         var report = await new ProfileReset(Data).ResetAsync(NoStops, default);
@@ -230,9 +231,9 @@ public sealed class ProfileResetTests : IDisposable
         Write(Path.Combine(Outside, "dir", "deep.bin"), 99);
         var outsideFile = Path.Combine(Outside, "settings.json");
         Write(outsideFile, 10);
-        Directory.CreateDirectory(At(RealStores.CatalogFolder));
-        File.CreateSymbolicLink(At(RealStores.CatalogFolder, "escape"), Outside);
-        File.CreateSymbolicLink(At(RealStores.CatalogFolder, "escape-file"), keep);
+        Directory.CreateDirectory(At(DataFolderPaths.CatalogFolder));
+        File.CreateSymbolicLink(At(DataFolderPaths.CatalogFolder, "escape"), Outside);
+        File.CreateSymbolicLink(At(DataFolderPaths.CatalogFolder, "escape-file"), keep);
         Directory.CreateSymbolicLink(At(ProfileReset.GeneratedFolder), Outside);
         File.CreateSymbolicLink(At(ProfileReset.SettingsFile), outsideFile);
 
@@ -242,7 +243,7 @@ public sealed class ProfileResetTests : IDisposable
         Assert.True(File.Exists(Path.Combine(Outside, "dir", "deep.bin")));
         Assert.True(File.Exists(outsideFile));
         Assert.All(report.Targets.Take(3), t => Assert.Equal(ResetState.Wiped, t.State));
-        Assert.Equal(0, Result(report, RealStores.CatalogFolder).BytesFreed);
+        Assert.Equal(0, Result(report, DataFolderPaths.CatalogFolder).BytesFreed);
         Assert.Equal(0, Result(report, ProfileReset.GeneratedFolder).BytesFreed);
         Assert.Empty(Directory.EnumerateFileSystemEntries(Data));
     }
@@ -252,7 +253,7 @@ public sealed class ProfileResetTests : IDisposable
     {
         Write(At(ProfileReset.SettingsFile), 5);
         var report = await new ProfileReset(Data).ResetAsync(NoStops, default);
-        Assert.Equal(ResetState.Absent, Result(report, RealStores.CatalogFolder).State);
+        Assert.Equal(ResetState.Absent, Result(report, DataFolderPaths.CatalogFolder).State);
         Assert.Equal(ResetState.Absent, Result(report, ProfileReset.GeneratedFolder).State);
         Assert.Equal(ResetState.Absent, Result(report, ProfileReset.SettingsTemporaryFile).State);
         Assert.Equal(ResetState.Wiped, Result(report, ProfileReset.SettingsFile).State);

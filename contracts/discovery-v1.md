@@ -26,6 +26,7 @@ Exactly one success/error reply completes a request. Progress includes a positiv
 | `discovery.refresh` | `{ productId }` | `DiscoveryPage` with default first All page after current attempt |
 | `discovery.readAll` | `{ productId?, filter?: "all" \| "local" \| "advertised", limit?: number, cursor?: string }` | `DiscoveryCatalogPage` across every registered product; `productId` narrows it to one; local only |
 | `discovery.refreshAll` | `{}` | `DiscoveryCatalogPage`: first All page across every product after checking every product ([D062](../docs/DECISIONS.md)) |
+| `catalog.list`, `catalog.refresh` | `{}` | `BuildCatalog` / `BuildCatalogRefresh` from the layer 3 catalog, capability `build-catalog-v1` ([build-catalog-v1](build-catalog-v1.md)) |
 | `builds.availability.check` | `{ productId, buildIdentity, archives: boolean }` | `BuildAvailability`: one staged check of a saved build on Blizzard's CDN ([below](#community-builds-and-availability)) |
 | `request.cancel` | `{ requestId }` | `{ requested: boolean }` |
 | `shutdown` | `{}` | `{ stopping: true }`; retire work and exit |

@@ -13,6 +13,13 @@ test('real Electron and C# open fresh discovery without an implicit remote check
   const session = await launch();
   try {
     await expect(session.page.getByRole('heading', { name: 'Builds', exact: true })).toBeVisible();
+    // The Host composes the layer 3 catalog (#205): a fresh profile shows the new list empty, with no implicit refresh.
+    await expect(session.page.getByRole('heading', { name: 'No builds stored yet' })).toBeVisible();
+    await expect(session.page.locator('.dv-statusbar')).toContainText('Not checked yet');
+    await expect(session.page.locator('.dv-statusbar')).toContainText('Not refreshed this session.');
+    // The old list, a session switch away, stays as it was.
+    await session.page.getByRole('button', { name: 'Old build list' }).click();
+    await expect(session.page.getByRole('button', { name: 'New build list' })).toBeFocused();
     await expect(session.page.locator('.download-activity-trigger, .dv-chip')).toHaveCount(0);
     await expect(session.page.locator('.download-activity-floating')).toHaveCount(0);
     expect(await session.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMenuBarVisible())).toBe(false);

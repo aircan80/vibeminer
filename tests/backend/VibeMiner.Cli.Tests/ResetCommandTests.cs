@@ -7,6 +7,7 @@ using VibeMiner.Builds.Testing;
 using VibeMiner.Cdn;
 using VibeMiner.Cli.Browse;
 using VibeMiner.Cli.Profile;
+using VibeMiner.Composition;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 using Xunit;
@@ -19,7 +20,7 @@ public sealed class ResetCommandTests : IDisposable
     private readonly string root = Path.Combine(Path.GetTempPath(), "vibeminer-cli-reset-" + Guid.NewGuid().ToString("N"));
     private string Data => Path.Combine(root, "data");
     private string StoreFolder => Path.Combine(Data, ObjectStore.DefaultFolderName);
-    private string CatalogFile => Path.Combine(Data, RealStores.CatalogFolder, RealStores.CatalogFile);
+    private string CatalogFile => Path.Combine(Data, DataFolderPaths.CatalogFolder, DataFolderPaths.CatalogFile);
 
     private readonly FakeStores stores = new();
     private readonly StringWriter output = new(), error = new(), json = new();
@@ -71,7 +72,7 @@ public sealed class ResetCommandTests : IDisposable
     private Dictionary<string, string> StoreFiles() => Directory.EnumerateFiles(StoreFolder, "*", SearchOption.AllDirectories)
         .ToDictionary(f => Path.GetRelativePath(StoreFolder, f), f => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(f))));
 
-    private bool AnyTargetLeft() => Directory.Exists(At(RealStores.CatalogFolder)) || Directory.Exists(At(ProfileReset.GeneratedFolder)) || File.Exists(At(ProfileReset.SettingsFile));
+    private bool AnyTargetLeft() => Directory.Exists(At(DataFolderPaths.CatalogFolder)) || Directory.Exists(At(ProfileReset.GeneratedFolder)) || File.Exists(At(ProfileReset.SettingsFile));
 
     [Fact]
     public async Task WithoutYesItSaysWhatItWouldWipeAndChangesNothing()
@@ -175,11 +176,11 @@ public sealed class ResetCommandTests : IDisposable
     public async Task ATargetThatCantBeWipedFailsTheResetAndTheOthersStillGo()
     {
         // A file where the catalog folder should be is refused, never deleted.
-        Write(At(RealStores.CatalogFolder), 7);
+        Write(At(DataFolderPaths.CatalogFolder), 7);
         Write(At(ProfileReset.SettingsFile), 50);
         Assert.Equal(VmCommands.Failed, await Run("reset", "--yes"));
         Assert.Contains(Rows(), r => r[0] == "catalog-v1/" && r[1].StartsWith($"failed: {ProfileReset.KindMismatch}: ", StringComparison.Ordinal));
-        Assert.True(File.Exists(At(RealStores.CatalogFolder)));
+        Assert.True(File.Exists(At(DataFolderPaths.CatalogFolder)));
         Assert.False(File.Exists(At(ProfileReset.SettingsFile)));
         Assert.Equal(0, stores.Open);
     }
@@ -189,7 +190,7 @@ public sealed class ResetCommandTests : IDisposable
     {
         FillProfile();
         // A folder an interrupted reset left behind goes too.
-        Write(At(RealStores.CatalogFolder + ProfileReset.ResetMarker + "0123", "catalog.sqlite3"), 20);
+        Write(At(DataFolderPaths.CatalogFolder + ProfileReset.ResetMarker + "0123", "catalog.sqlite3"), 20);
         Assert.Equal(VmCommands.Ok, await Run("--json", "reset", "--yes"));
         Assert.Equal("", output.ToString());
         var doc = JsonOut();
@@ -205,7 +206,7 @@ public sealed class ResetCommandTests : IDisposable
         Assert.Equal(2, doc.GetProperty("notTouched").GetArrayLength());
         Assert.Equal(4096 + 1000 + 50 + 20, doc.GetProperty("bytesFreed").GetInt64());
         Assert.False(doc.GetProperty("cancelled").GetBoolean());
-        Assert.False(Directory.Exists(At(RealStores.CatalogFolder + ProfileReset.ResetMarker + "0123")));
+        Assert.False(Directory.Exists(At(DataFolderPaths.CatalogFolder + ProfileReset.ResetMarker + "0123")));
     }
 
     private const string VersionsHeader = "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|KeyRing!HEX:16|BuildId!DEC:4|VersionsName!String:0|ProductConfig!HEX:16";

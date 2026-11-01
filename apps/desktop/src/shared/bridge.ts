@@ -16,7 +16,7 @@ import type { SettingsSnapshot, SettingsSetParams, StorageMeasurement, PreparedD
 import type { RetentionTarget, RetentionSnapshot, RetentionList, DownloadSummaries, DownloadSummariesParams, DownloadChanges, DownloadChangesParams, DownloadCheckParams, DownloadCheckResult } from '../../../../contracts/generated/discovery';
 import type { TableDataParams, TableRowsParams } from './table-data';
 import type { TableReferenceTextPage, TableFollowPage } from '../../../../contracts/generated/discovery';
-import type { BuildAvailability, BuildAvailabilityParams } from '../../../../contracts/generated/discovery';
+import type { BuildAvailability, BuildAvailabilityParams, BuildCatalog, BuildCatalogRefresh } from '../../../../contracts/generated/discovery';
 import type { TableFollowParams } from './table-follow';
 import type { Product, DiscoveryPage, DiscoveryCatalogPage, EngineProgress, WorkspaceSnapshot, InventoryPage, DownloadPage, TableCatalogPage, TableDefinitionSnapshot, TableDataSnapshot, TableDataReadiness, TableDataPage, InventoryFilesPage, InventoryFileDetail } from '../../../../contracts/generated/discovery';
 import type { TablesCatalogParams, TableDefinitionParams } from './tables';
@@ -28,7 +28,7 @@ export type ReadParams = { productId: string; filter?: DiscoveryFilter; limit?: 
 /** Cross-product read. Without productId it reads every registered product. */
 export type ReadAllParams = { productId?: string; filter?: DiscoveryFilter; limit?: number; cursor?: string };
 export type OpenParams = { productId: string; buildIdentity: string; sourceRegion: string };
-export type RequestMethod = 'builds.availability.check' | 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'workspace.open' | 'inventory.read' | 'inventory.files' | 'inventory.file' | 'inventory.catalog' | 'inventory.catalogs' | 'inventory.catalog.set' | 'download.read' | 'download.summaries' | 'download.changes' | 'download.check' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'tables.referenceText' | 'tables.follow' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'settings.read' | 'settings.set' | 'settings.listfile.read' | 'settings.listfile.check' | 'settings.storage.measure' | 'settings.storage.builds' | 'settings.storage.free' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.facts' | 'items.labels' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'creatures.display.facts' | 'creatures.labels' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
+export type RequestMethod = 'builds.availability.check' | 'creatures.geometry.read' | 'creatures.geometry.prepare' | 'creatures.geometry.open' | 'creatures.geometry.close' | 'hello' | 'products.list' | 'discovery.read' | 'discovery.refresh' | 'discovery.readAll' | 'discovery.refreshAll' | 'catalog.list' | 'catalog.refresh' | 'workspace.open' | 'inventory.read' | 'inventory.files' | 'inventory.file' | 'inventory.catalog' | 'inventory.catalogs' | 'inventory.catalog.set' | 'download.read' | 'download.summaries' | 'download.changes' | 'download.check' | 'tables.catalog' | 'tables.definition' | 'tables.prepare' | 'tables.data' | 'tables.rows' | 'tables.referenceText' | 'tables.follow' | 'request.cancel' | 'shutdown' | 'retention.read' | 'retention.list' | 'retention.set' | 'settings.read' | 'settings.set' | 'settings.listfile.read' | 'settings.listfile.check' | 'settings.storage.measure' | 'settings.storage.builds' | 'settings.storage.free' | 'items.data' | 'items.prepare' | 'items.page' | 'items.inspect' | 'items.facts' | 'items.labels' | 'items.icons' | 'items.icon.open' | 'items.icon.close' | 'items.classifications' | 'creatures.data' | 'creatures.prepare' | 'creatures.page' | 'creatures.inspect' | 'creatures.display.read' | 'creatures.display.prepare' | 'creatures.display.facts' | 'creatures.labels' | 'items.effects.data' | 'items.effects.prepare' | 'items.effects.page' | 'items.effects.details' | 'items.effects.details.prepare' | 'items.effects.names' | 'items.effects.names.prepare';
 /** An engine failure; definition (D101) says which table no definition could read and how the Settings switch read. */
 export type BridgeReply<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; retryable: boolean; definition?: TableDefinitionProblem } };
 export interface DiscoveryBridge {
@@ -109,6 +109,10 @@ export interface DiscoveryBridge {
   read(params: ReadParams): Promise<BridgeReply<DiscoveryPage>>;
   refresh(productId: string, requestId: string): Promise<BridgeReply<DiscoveryPage>>;
   readAll(params: ReadAllParams): Promise<BridgeReply<DiscoveryCatalogPage>>;
+  /** build-catalog-v1 (#205): the stored layer 3 build list. Local only. */
+  catalogList?(): Promise<BridgeReply<BuildCatalog>>;
+  /** build-catalog-v1: asks the version service for every reviewed product; progress for requestId, cancel it with cancel(requestId). */
+  catalogRefresh?(requestId: string): Promise<BridgeReply<BuildCatalogRefresh>>;
   /** Checks every registered product in one cancellable request. */
   refreshAll(requestId: string): Promise<BridgeReply<DiscoveryCatalogPage>>;
   open(params: OpenParams, requestId: string): Promise<BridgeReply<WorkspaceSnapshot>>;

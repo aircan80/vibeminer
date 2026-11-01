@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
+  <!-- Layer 7 composition shared by vm and the desktop Host (#205): data-folder paths, the writer's layer 2 and the newest summary. -->
+  <ProjectReference Include="../VibeMiner.Objects/VibeMiner.Objects.csproj" />
+  <ProjectReference Include="../VibeMiner.Cdn/VibeMiner.Cdn.csproj" />
+  <ProjectReference Include="../VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
+  <ProjectReference Include="../VibeMiner.Builds/VibeMiner.Builds.csproj" />
+</ItemGroup></Project>

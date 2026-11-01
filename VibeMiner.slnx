@@ -13,6 +13,7 @@
     <Project Path="src/backend/VibeMiner.Builds/VibeMiner.Builds.csproj" />
     <Project Path="src/backend/VibeMiner.Files/VibeMiner.Files.csproj" />
     <Project Path="src/backend/VibeMiner.Formats/VibeMiner.Formats.csproj" />
+    <Project Path="src/backend/VibeMiner.Composition/VibeMiner.Composition.csproj" />
     <Project Path="src/backend/VibeMiner.Cli/VibeMiner.Cli.csproj" />
   </Folder>
   <Folder Name="/Tests/">

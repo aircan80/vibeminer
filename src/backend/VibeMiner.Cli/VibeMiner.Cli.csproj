@@ -4,6 +4,8 @@
   <ProjectReference Include="../VibeMiner.Cdn/VibeMiner.Cdn.csproj" />
   <ProjectReference Include="../VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
   <ProjectReference Include="../VibeMiner.Builds/VibeMiner.Builds.csproj" />
+  <!-- The data-folder paths and the writer's layer 2, shared with the desktop Host (#205). -->
+  <ProjectReference Include="../VibeMiner.Composition/VibeMiner.Composition.csproj" />
   <!-- Layer 4 files for the browse Files views (#175): one read-only file system per session. -->
   <ProjectReference Include="../VibeMiner.Files/VibeMiner.Files.csproj" />
   <ProjectReference Include="../VibeMiner.Formats/VibeMiner.Formats.csproj" />

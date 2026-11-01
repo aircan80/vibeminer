@@ -1,4 +1,5 @@
 using VibeMiner.Builds;
+using VibeMiner.Composition;
 using VibeMiner.Objects;
 
 namespace VibeMiner.Cli.Profile;
@@ -45,7 +46,7 @@ internal static class StorageSizes
         ArgumentNullException.ThrowIfNull(stores);
         ArgumentNullException.ThrowIfNull(builds);
         ArgumentNullException.ThrowIfNull(figures);
-        var store = await ObjectStoreAsync(Path.Combine(dataFolder, ObjectStore.DefaultFolderName), stores, ct).ConfigureAwait(false);
+        var store = await ObjectStoreAsync(DataFolderPaths.ObjectStoreFolder(dataFolder), stores, ct).ConfigureAwait(false);
         var generated = await GeneratedAsync(dataFolder, ct).ConfigureAwait(false);
         var downloaded = await DownloadedAsync(builds, figures, ct).ConfigureAwait(false);
         return new(dataFolder, store, generated, downloaded);

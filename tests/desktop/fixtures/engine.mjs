@@ -56,6 +56,46 @@ const effectsMode=()=>control('effects-scenario.json')?.scenario??'ready';
 const itemsEnabled=process.env.VIBEMINER_FIXTURE_ITEMS==='1', itemsAdmissions=new Map();
 const referenceTextEnabled=process.env.VIBEMINER_FIXTURE_REFERENCE_TEXT==='1';
 const followEnabled=process.env.VIBEMINER_FIXTURE_FOLLOW==='1';
+// #205: VIBEMINER_FIXTURE_BUILD_CATALOG advertises build-catalog-v1. 1 serves catalog.list from contracts/examples/build-catalog.json,
+// readOnly answers it with access readOnly (vm browse holds the store), empty starts with nothing stored. The control file
+// build-catalog-refresh.json {"outcome": ...} picks what catalog.refresh does: ok (default; a new wow build and a newer
+// summary, every product answered), partial (the example's one failure), offline (every product unavailable), busy
+// (OBJECT_STORE_BUSY; the default with readOnly) or slow (two products finish, then it waits for release-catalog-refresh or a
+// cancel: CANCELED). Progress is the Host's: 0, one per product, then the total once the summary is in.
+const buildCatalogMode=process.env.VIBEMINER_FIXTURE_BUILD_CATALOG??null;
+const catalogExample=JSON.parse(readFileSync(path.join(root,'contracts/examples/build-catalog.json'),'utf8'));
+const catalogRefreshExample=JSON.parse(readFileSync(path.join(root,'contracts/examples/build-catalog-refresh.json'),'utf8'));
+let storedCatalog=buildCatalogMode==='empty'?{...structuredClone(catalogExample),products:catalogExample.products.map(p=>({...p,builds:[],buildCount:0,lastObservedAt:null,problems:[],problemCount:0})),summary:null}:structuredClone(catalogExample);
+const catalogListed=()=>({...structuredClone(storedCatalog),access:buildCatalogMode==='readOnly'&&!control('build-catalog-writer.json')?'readOnly':'writer'});
+const CATALOG_REFRESHED_AT='2026-11-01T10:00:00+00:00';
+function refreshedCatalog(){
+  const next=structuredClone(catalogRefreshExample.catalog),wow=next.products.find(p=>p.productId==='wow');
+  for(const b of wow.builds)b.current=false;
+  wow.builds.unshift({id:'f'.repeat(64),versionsName:'11.9.1.90100',buildConfig:'66666666666666666666666666666666',current:true,regions:['us','eu'],firstSeenAt:CATALOG_REFRESHED_AT,lastSeenAt:CATALOG_REFRESHED_AT});
+  wow.buildCount=wow.builds.length;
+  for(const p of next.products)if(p.lastObservedAt||p.buildCount)p.lastObservedAt=CATALOG_REFRESHED_AT;
+  next.summary={observedAt:CATALOG_REFRESHED_AT,readable:true,newProducts:['wow_example_new','wow_example_two']};
+  return next;
+}
+async function catalogRefresh(id){
+  const outcome=control('build-catalog-refresh.json')?.outcome??(buildCatalogMode==='readOnly'?'busy':'ok');
+  if(outcome==='busy')return fail(id,'OBJECT_STORE_BUSY','Another VibeMiner process, such as vm browse, is writing the build store. Close it, then refresh.');
+  const products=storedCatalog.products.map(p=>p.productId),total=products.length+1;
+  const controller=new AbortController();active.set(id,controller);
+  let sequence=1;const progress=completed=>send({type:'progress',requestId:id,stage:'Checking the version service',sequence:sequence++,region:null,completed,total,unit:'products'});
+  try{
+    progress(0);
+    if(outcome==='slow'){progress(1);progress(2);writeFileSync(path.join(directory,'waiting-catalog-refresh'),id);await waitForRelease('release-catalog-refresh',controller.signal);}
+    for(let i=1;i<=products.length;i++){await new Promise(r=>setTimeout(r,15));if(controller.signal.aborted)throw new Error('canceled');progress(i);}
+    // The summary counts as the last of the total, as the Host reports it.
+    await new Promise(r=>setTimeout(r,15));if(controller.signal.aborted)throw new Error('canceled');progress(total);
+  }catch{return fail(id,'CANCELED','Refresh stopped. Products checked before stopping keep their new results.');}
+  finally{active.delete(id);}
+  if(outcome==='offline')return reply(id,{catalog:{...structuredClone(storedCatalog),access:'writer'},refreshedAt:CATALOG_REFRESHED_AT,checked:products.length,newProducts:[],
+    failures:[...products.map(productId=>({productId,document:'versions',state:'unavailable',code:'CDN_OFFLINE',message:'No version service host could be reached.'})),{productId:null,document:'summary',state:'unavailable',code:'CDN_OFFLINE',message:'No version service host could be reached.'}]});
+  storedCatalog=refreshedCatalog();
+  reply(id,{catalog:{...structuredClone(storedCatalog),access:'writer'},refreshedAt:CATALOG_REFRESHED_AT,checked:products.length,newProducts:[...storedCatalog.summary.newProducts],failures:outcome==='partial'?structuredClone(catalogRefreshExample.failures):[]});
+}
 // The authored generic rows every prepared fixture table returns (tables.rows default branch).
 function genericRows(snapshot){const all=Array.from({length:60},(_,index)=>({id:String(index),isCopy:false,copySourceId:null,values:snapshot.columns.map((column,i)=>column.interpretation?'3011920367':column.isId?String(index):column.family==='string'?`Authored clear value ${index}`:column.family==='float'?'1.25':String(index+i+1))}));if(snapshot.textIssueCount==='1'){const columnIndex=snapshot.columns.findIndex(column=>column.family==='string'&&!column.isId);all[7].values[columnIndex]='';all[7].textIssues=[{columnIndex,code:'DB2_TEXT_ENCODING_INVALID',rawBytesHex:existsSync(path.join(directory,'table-long-text-issue'))?'ff'.repeat(65535):'c328'}];}return all;}
 const retentionEnabled=process.env.VIBEMINER_FIXTURE_RETENTION==='1';
@@ -250,7 +290,7 @@ async function dispatch(request) {
     send({ id, result: { authoredInvalidReply: true } });
     return;
   }
-  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', ...(listfileEnabled ? ['community-listfile-v1'] : []), 'download-summary-v1', 'download-check-v1', ...(communityEnabled ? ['community-builds-v1', 'build-availability-v1'] : []), 'inventory-files-v1',...(fileCatalogEnabled?['file-catalog-v1']:[]),...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1',...(process.env.VIBEMINER_FIXTURE_FACTS==='0'?[]:['item-facts-v1'])]:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1',...(process.env.VIBEMINER_FIXTURE_CREATURE_FACTS==='0'?[]:['creature-display-facts-v1'])]:[]),...(geometryEnabled?['creature-source-geometry-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[])] });
+  if (method === 'hello') return reply(id, { protocolVersion: 1, engineVersion: 'authored-fixture', capabilities: ['discovery.read', 'discovery.refresh', 'discovery-all-products-v1', 'settings-v1', ...(listfileEnabled ? ['community-listfile-v1'] : []), 'download-summary-v1', 'download-check-v1', ...(communityEnabled ? ['community-builds-v1', 'build-availability-v1'] : []), 'inventory-files-v1',...(fileCatalogEnabled?['file-catalog-v1']:[]),...(retentionEnabled?['retention-v1']:[]),...(itemsEnabled?['items-v1',...(process.env.VIBEMINER_FIXTURE_FACTS==='0'?[]:['item-facts-v1'])]:[]),...(effectsEnabled?process.env.VIBEMINER_FIXTURE_EFFECTS==='split'?['item-effects-links-v1']:['item-effects-links-v1','item-effects-inputs-v1','item-effect-spell-names-v1']:[]),...(creaturesEnabled?['creatures-v1']:[]),...(displayEnabled?['creature-display-metadata-v1',...(process.env.VIBEMINER_FIXTURE_CREATURE_FACTS==='0'?[]:['creature-display-facts-v1'])]:[]),...(geometryEnabled?['creature-source-geometry-v1']:[]),...(iconsEnabled?['item-icons-v1']:[]),...(labelsEnabled?['item-classifications-v1']:[]),...(subclassEnabled?['item-subclass-labels-v1']:[]),...(referenceTextEnabled?['tables-reference-text-v1']:[]),...(followEnabled?['tables-follow-v1']:[]),...(buildCatalogMode?['build-catalog-v1']:[])] });
   if(geometryEnabled&&method==='creatures.geometry.close'){geometryLeases.delete(params.leaseId);return reply(id,{closed:true});}
   if(creaturesEnabled&&method==='creatures.labels'){if(!displayEnabled||process.env.VIBEMINER_FIXTURE_CREATURE_FACTS==='0')return fail(id,'CREATURE_DISPLAY_UNAVAILABLE','Selected Creature display metadata is unavailable.');return reply(id,JSON.parse(readFileSync(path.join(root,'contracts/examples/creature-labels.json'),'utf8')));}
   if(creaturesEnabled&&method.startsWith('creatures.')){
@@ -741,6 +781,11 @@ async function dispatch(request) {
       fail(id, 'CANCELED', 'Configuration preparation canceled.');
     } finally { stepWatcher.close(); active.delete(id); }
     return;
+  }
+  if (buildCatalogMode && (method === 'catalog.list' || method === 'catalog.refresh')) {
+    if (Object.keys(params ?? {}).length) return fail(id, 'INVALID_REQUEST', 'The build list takes no parameters.', false);
+    if (method === 'catalog.list') return reply(id, catalogListed());
+    return catalogRefresh(id);
   }
   if (method === 'discovery.refreshAll') {
     // Both authored products are checked at once, like the bounded engine; each waits for its own release file.

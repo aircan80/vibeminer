@@ -3,6 +3,7 @@ using System.Text.Json;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 using VibeMiner.Builds;
+using VibeMiner.Composition;
 using VibeMiner.Formats.Tables;
 using VibeMiner.Cli.Browse;
 using VibeMiner.Cli.Profile;
@@ -114,7 +115,7 @@ internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpene
             var resolved = await DataFolders.ResolveAsync(environment, data, ct).ConfigureAwait(false);
             if (resolved is DataFolderProblem problem) return await Fail("DATA_FOLDER_SETTING_INVALID", $"{problem.Problem} ({problem.File}). {problem.Remedy}");
             folder = (DataFolder)resolved;
-            return await command(Path.Combine(folder.Path, ObjectStore.DefaultFolderName), ct).ConfigureAwait(false);
+            return await command(DataFolderPaths.ObjectStoreFolder(folder.Path), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { await Fail("CANCELED", "Canceled."); return Canceled; }
         catch (ObjectStoreException e) { return await Fail(e.Code, Explain(e)); }

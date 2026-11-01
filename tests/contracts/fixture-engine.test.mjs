@@ -12,9 +12,9 @@ import path from 'node:path';
 const engine = fileURLToPath(new URL('../desktop/fixtures/engine.mjs', import.meta.url));
 const DEADLINE_MS = 30_000;
 
-async function withEngine(run) {
+async function withEngine(run, env = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'vibeminer-fixture-engine-'));
-  const child = spawn(process.execPath, [engine, '--data-dir', path.join(directory, 'catalog')], { env: { ...process.env, VIBEMINER_FIXTURE_CONTROL_DIR: directory }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [engine, '--data-dir', path.join(directory, 'catalog')], { env: { ...process.env, VIBEMINER_FIXTURE_CONTROL_DIR: directory, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   const exited = new Promise(resolve => child.on('exit', code => resolve(code)));
   const pending = new Map();
   createInterface({ input: child.stdout }).on('line', line => { const message = JSON.parse(line); pending.get(message.id)?.(message); pending.delete(message.id); });
@@ -89,4 +89,37 @@ test('the request log reads a live engine log with a half-written last line', as
     await appendFile(path.join(directory, 'requests.ndjson'), 'ings.read"}\nnot json\n');
     await assert.rejects(readRequests(directory), /ndjson line 3 is not JSON/);
   });
+});
+
+// #205: the authored build catalog the Electron build-catalog spec drives. Its replies must pass the schema the desktop checks.
+const { default: Ajv } = await import('ajv');
+const { readFile } = await import('node:fs/promises');
+const schema = JSON.parse(await readFile(new URL('../../contracts/discovery.schema.json', import.meta.url), 'utf8'));
+const ajv = new Ajv({ strict: false }); ajv.addSchema(schema);
+const valid = (name, value) => { const check = ajv.getSchema(`${schema.$id}#/definitions/${name}`); assert.ok(check(value), JSON.stringify(check.errors)); };
+
+test('the authored build catalog answers each refresh outcome in the contract shapes', async () => {
+  await withEngine(async ({ directory, request }) => {
+    assert.ok((await request('hello')).result.capabilities.includes('build-catalog-v1'));
+    const listed = (await request('catalog.list')).result;
+    valid('BuildCatalog', listed);
+    assert.equal(listed.access, 'writer');
+    assert.equal((await request('catalog.list', { productId: 'wow' })).error.code, 'INVALID_REQUEST');
+    for (const outcome of ['offline', 'partial', 'ok']) {
+      await writeFile(path.join(directory, 'build-catalog-refresh.json'), JSON.stringify({ outcome }));
+      const reply = (await request('catalog.refresh')).result;
+      valid('BuildCatalogRefresh', reply);
+      if (outcome === 'offline') assert.ok(reply.failures.every(f => f.state === 'unavailable'));
+      if (outcome === 'ok') assert.deepEqual(reply.failures, []);
+    }
+    valid('BuildCatalog', (await request('catalog.list')).result);
+    await writeFile(path.join(directory, 'build-catalog-refresh.json'), JSON.stringify({ outcome: 'busy' }));
+    assert.equal((await request('catalog.refresh')).error.code, 'OBJECT_STORE_BUSY');
+  }, { VIBEMINER_FIXTURE_BUILD_CATALOG: '1' });
+  for (const mode of ['empty', 'readOnly']) await withEngine(async ({ request }) => {
+    const listed = (await request('catalog.list')).result;
+    valid('BuildCatalog', listed);
+    if (mode === 'empty') assert.ok(listed.products.every(p => p.buildCount === 0) && listed.summary === null);
+    else { assert.equal(listed.access, 'readOnly'); assert.equal((await request('catalog.refresh')).error.code, 'OBJECT_STORE_BUSY'); }
+  }, { VIBEMINER_FIXTURE_BUILD_CATALOG: mode });
 });

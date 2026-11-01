@@ -80,6 +80,9 @@ try
     // The ROOT and install memberships Files lists are prepared after Open, in the background (D071).
     await using var fileCatalogs = new FileCatalogWorker(catalog, objects, client, acquisition, resources, metadataPasses);
     var retention = new RetentionService(catalog, retentionDriver);
+    // The build list from layer 3 (#205): the writer lock on the data folder's object store is taken on the first catalog request.
+    // Disposed after the protocol host stops (declared later, so it closes before everything above).
+    await using var buildCatalog = new BuildCatalogService(new DataFolderBuildCatalogStores(dataDirectory));
     try
     {
         await retention.RestoreAsync();
@@ -89,7 +92,7 @@ try
             creatureGeometry: creatureGeometry, geometryLeases: geometryLeases, settings: settings,
             downloadSummaries: new DownloadSummaryService(catalog),
             referenceText: new TableReferenceTextService(tableStore), follow: new TableFollowService(tableStore),
-            preparedData: new PreparedDataService(catalog), listfile: listfile, availability: availability);
+            preparedData: new PreparedDataService(catalog), listfile: listfile, availability: availability, buildCatalog: buildCatalog);
         await host.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
     }
     finally { await retention.ShutdownAsync(); }

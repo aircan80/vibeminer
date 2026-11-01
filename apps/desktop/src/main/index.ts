@@ -18,6 +18,7 @@ import { validRetentionTarget, validRetentionSet } from '../shared/retention';
 import { validSettingsSet, validEmpty, validPreparedDataFree } from '../shared/settings';
 import { validTableData, validTableRows } from '../shared/table-data';
 import { validTableFollow } from '../shared/table-follow';
+import { validCatalogParams } from '../shared/build-catalog';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, protocol, session, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -172,6 +173,8 @@ function registerBridge(): void {
       else if (method === 'discovery.read') { if (!validRead(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery query.'); }
       else if (method === 'discovery.readAll') { if (!validReadAll(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery query.'); }
       else if (method === 'discovery.refreshAll') { if (!params || typeof params !== 'object' || Object.keys(params).length || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery request.'); }
+      else if (method === 'catalog.list') { if (!validCatalogParams(params)) throw new EngineFailure('INVALID_REQUEST', 'The build list takes no parameters.'); }
+      else if (method === 'catalog.refresh') { if (!validCatalogParams(params) || !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Invalid build list refresh.'); }
       else if (method === 'discovery.refresh') { if (!validProduct((params as { productId?: unknown })?.productId) || !validRequestId(requestId) || Object.keys(params as object).length !== 1) throw new EngineFailure('INVALID_REQUEST', 'Invalid discovery request.'); }
       else if (method === 'tables.prepare' || method === 'tables.data') { if (!validTableData(params) || method === 'tables.prepare' && !validRequestId(requestId)) throw new EngineFailure('INVALID_REQUEST', 'Choose one exact table and research locale enUS.'); }
       else if (method === 'tables.rows' || method === 'tables.referenceText') { if (!validTableRows(params)) throw new EngineFailure('INVALID_REQUEST', 'Invalid bounded table record query.'); }

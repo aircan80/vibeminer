@@ -30,7 +30,7 @@ public sealed class ResetRebuildIntegrationTests : IAsyncLifetime
 {
     private static readonly CancellationToken None = CancellationToken.None;
     private const string Product = "wow";
-    // The CLI's folder names (RealStores.CatalogFolder, ProfileReset.DefaultTargets); this project can't reference the CLI.
+    // The data-folder names (Composition's DataFolderPaths.CatalogFolder, the CLI's ProfileReset.DefaultTargets); this project can't reference either.
     private const string CatalogFolder = "catalog-v1", CatalogFile = "catalog.sqlite3";
     private static readonly ObjectStoreOptions Quick = new() { CommitDelay = TimeSpan.FromMilliseconds(5) };
 

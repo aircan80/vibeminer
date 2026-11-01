@@ -420,6 +420,12 @@
     },
     "communityBuildsStatus": {
       "$ref": "#/definitions/CommunityBuildsStatus"
+    },
+    "buildCatalog": {
+      "$ref": "#/definitions/BuildCatalog"
+    },
+    "buildCatalogRefresh": {
+      "$ref": "#/definitions/BuildCatalogRefresh"
     }
   },
   "required": [
@@ -1174,6 +1180,8 @@
             "discovery.refresh",
             "discovery.readAll",
             "discovery.refreshAll",
+            "catalog.list",
+            "catalog.refresh",
             "workspace.open",
             "request.cancel",
             "shutdown",
@@ -1805,6 +1813,38 @@
             "properties": {
               "params": {
                 "$ref": "#/definitions/BuildAvailabilityParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "catalog.list"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/SettingsEmptyParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "catalog.refresh"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/definitions/SettingsEmptyParams"
               }
             }
           }
@@ -21675,6 +21715,315 @@
         "nextCheckAfter",
         "buildCount",
         "problem"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogBuild": {
+      "title": "CatalogBuild",
+      "description": "One build of one product from the layer 3 catalog (build-catalog-v1).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Build identity v2.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "versionsName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "buildConfig": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "current": {
+          "type": "boolean"
+        },
+        "regions": {
+          "description": "Distinct region names in first-listed order; for a current build only the regions whose listing is current.",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          }
+        },
+        "firstSeenAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        },
+        "lastSeenAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        }
+      },
+      "required": [
+        "id",
+        "versionsName",
+        "buildConfig",
+        "current",
+        "regions",
+        "firstSeenAt",
+        "lastSeenAt"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogProblem": {
+      "title": "CatalogProblem",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{1,64}$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogProduct": {
+      "title": "CatalogProduct",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "builds": {
+          "description": "Newest first sighting first; at most 100, cut short by the frame budget.",
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/CatalogBuild"
+          }
+        },
+        "buildCount": {
+          "description": "Every build the catalog has for the product, at least builds.length.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastObservedAt": {
+          "description": "Newest versions reply for the product; null when it has no versions history.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SettingsTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "problems": {
+          "description": "The first problems, at most 20.",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/definitions/CatalogProblem"
+          }
+        },
+        "problemCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "productId",
+        "label",
+        "builds",
+        "buildCount",
+        "lastObservedAt",
+        "problems",
+        "problemCount"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogSummary": {
+      "title": "CatalogSummary",
+      "description": "The newest stored summary document.",
+      "type": "object",
+      "properties": {
+        "observedAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        },
+        "readable": {
+          "description": "False when the summary cannot be read; new products are then unknown.",
+          "type": "boolean"
+        },
+        "newProducts": {
+          "description": "WoW product ids the summary lists that are not reviewed, sorted.",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "required": [
+        "observedAt",
+        "readable",
+        "newProducts"
+      ],
+      "additionalProperties": false
+    },
+    "BuildCatalog": {
+      "title": "BuildCatalog",
+      "description": "catalog.list: every reviewed product in registry order with its builds, and the newest stored summary (build-catalog-v1).",
+      "type": "object",
+      "properties": {
+        "access": {
+          "description": "readOnly: another process holds the object store writer lock; the list was read read-only and catalog.refresh answers OBJECT_STORE_BUSY.",
+          "enum": [
+            "writer",
+            "readOnly"
+          ]
+        },
+        "products": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/CatalogProduct"
+          }
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CatalogSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "access",
+        "products",
+        "summary"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogRefreshFailure": {
+      "title": "CatalogRefreshFailure",
+      "description": "One document a refresh could not get: a layer 2 state other than present or notFound.",
+      "type": "object",
+      "properties": {
+        "productId": {
+          "description": "Null for the summary.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "document": {
+          "enum": [
+            "versions",
+            "cdns",
+            "summary"
+          ]
+        },
+        "state": {
+          "enum": [
+            "unavailable",
+            "refused",
+            "storeFailed",
+            "unsupported",
+            "needsNetwork"
+          ]
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z0-9_]{1,64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "productId",
+        "document",
+        "state",
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "BuildCatalogRefresh": {
+      "title": "BuildCatalogRefresh",
+      "description": "catalog.refresh: the list after asking the version service for every reviewed product and the summary.",
+      "type": "object",
+      "properties": {
+        "catalog": {
+          "$ref": "#/definitions/BuildCatalog"
+        },
+        "refreshedAt": {
+          "$ref": "#/definitions/SettingsTimestamp"
+        },
+        "checked": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "failures": {
+          "description": "Empty when everything answered; notFound is an answer.",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/definitions/CatalogRefreshFailure"
+          }
+        },
+        "newProducts": {
+          "description": "What this refresh's summary says is new; empty when the summary failed.",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "required": [
+        "catalog",
+        "refreshedAt",
+        "checked",
+        "failures",
+        "newProducts"
       ],
       "additionalProperties": false
     }

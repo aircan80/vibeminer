@@ -1,5 +1,5 @@
 using VibeMiner.Builds;
-using VibeMiner.Cdn;
+using VibeMiner.Composition;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 
@@ -39,8 +39,6 @@ internal interface IStoreOpener
 /// <summary>The CLI's composition root for the store: layer 1 opened here, everything read above it goes through layer 2.</summary>
 internal sealed class RealStores : IStoreOpener
 {
-    public const string CatalogFolder = "catalog-v1", CatalogFile = "catalog.sqlite3";
-
     public async Task<IStoreHandle> OpenReadOnlyAsync(string folder, CancellationToken ct)
     {
         var store = await ObjectStore.OpenReadOnlyAsync(folder, ct: ct).ConfigureAwait(false);
@@ -62,7 +60,7 @@ internal sealed class RealStores : IStoreOpener
 
     /// <summary>The catalog store in the data folder that holds the object store folder.</summary>
     private static string CatalogPath(string storeFolder) =>
-        Path.Combine(Path.GetDirectoryName(Path.GetFullPath(storeFolder))!, CatalogFolder, CatalogFile);
+        DataFolderPaths.CatalogPath(Path.GetDirectoryName(Path.GetFullPath(storeFolder))!);
 
     private abstract class Handle(string catalogPath) : IStoreHandle
     {
@@ -90,37 +88,18 @@ internal sealed class RealStores : IStoreOpener
         protected override ValueTask CloseStoreAsync() => store.DisposeAsync();
     }
 
-    /// <summary>
-    /// The writer's layer 2 is the real <see cref="ObjectSource"/>: the store, then the official CDN and version service, and the
-    /// wow-listfile's GitHub releases (D105) for <c>N</c> in <c>vm browse</c>. Layer 4 asks for the listfile only while the
-    /// names switch is on; the listfile client has its own handler and connection budget.
-    /// </summary>
-    private sealed class WriterHandle : Handle
+    /// <summary>The writer's layer 2 is <see cref="WriterObjectSource"/>, which owns its HTTP clients.</summary>
+    private sealed class WriterHandle(ObjectStore store, string catalogPath) : Handle(catalogPath)
     {
-        private readonly ObjectStore store;
-        // Layer 1's handler: no redirects or decompression, bounded connections. The clients set their own timeouts.
-        private readonly HttpClient http = new(CdnClient.CreateHandler(4)) { Timeout = Timeout.InfiniteTimeSpan };
-        private readonly WowListfileConnections listfileConnections = new();
-        private readonly HttpClient listfileHttp;
-
-        public WriterHandle(ObjectStore store, string catalogPath) : base(catalogPath)
-        {
-            this.store = store;
-            // The listfile client sets its own budgets; HttpClient's timeout would cut a part short.
-            listfileHttp = new(WowListfileClient.CreateHandler(listfileConnections)) { Timeout = Timeout.InfiniteTimeSpan };
-            Objects = new ObjectSource(store, store, store, null, new CdnClient(http),
-                [new VersionServiceObservations(new VersionClient(http)),
-                 new WowListfileObservations(new WowListfileClient(listfileHttp, connections: listfileConnections))], ObjectVerification.Default);
-        }
+        private readonly WriterObjectSource source = new(store);
 
         public override bool Writer => true;
-        public override IObjectSource Objects { get; }
+        public override IObjectSource Objects => source.Objects;
         public override ValueTask<StoreStats> StatsAsync(CancellationToken ct) => store.StatsAsync(ct);
         public override Task<ScrubReport> ScrubAsync(IProgress<ScanProgress>? progress, CancellationToken ct) => ((IObjectStoreMaintenance)store).ScrubAsync(false, progress, ct);
         protected override async ValueTask CloseStoreAsync()
         {
-            http.Dispose();
-            listfileHttp.Dispose();
+            source.Dispose();
             await store.DisposeAsync().ConfigureAwait(false);
         }
     }
