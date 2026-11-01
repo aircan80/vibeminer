@@ -1,6 +1,7 @@
+using VibeMiner.Cdn;
 using Xunit;
 
-namespace VibeMiner.Cdn.Tests;
+namespace VibeMiner.Primitives.Tests.Cdn;
 
 public sealed class RangePlannerTests
 {

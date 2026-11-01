@@ -1,9 +1,10 @@
+using VibeMiner.Cdn;
 using System.Net;
 using System.Net.Http.Headers;
 using VibeMiner.Cdn.Testing;
 using Xunit;
 
-namespace VibeMiner.Cdn.Tests;
+namespace VibeMiner.Primitives.Tests.Cdn;
 
 /// <summary>D105: the layer 1 wow-listfile client against a local fake GitHub with authored bytes. No network.</summary>
 public sealed class WowListfileClientTests

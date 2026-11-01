@@ -1,8 +1,9 @@
+using VibeMiner.Cdn;
 using System.Net;
 using VibeMiner.Cdn.Testing;
 using Xunit;
 
-namespace VibeMiner.Cdn.Tests;
+namespace VibeMiner.Primitives.Tests.Cdn;
 
 /// <summary>D081 / D113 / #124: the layer 1 WoWDBDefs client against a local fake GitHub. No network.</summary>
 public sealed class WoWDBDefsClientTests

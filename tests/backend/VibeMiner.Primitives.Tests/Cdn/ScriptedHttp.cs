@@ -1,8 +1,9 @@
+using VibeMiner.Cdn;
 using VibeMiner.Cdn.Testing;
 using System.Net;
 using System.Net.Http.Headers;
 
-namespace VibeMiner.Cdn.Tests;
+namespace VibeMiner.Primitives.Tests.Cdn;
 
 /// <summary>An <see cref="HttpMessageHandler"/> that answers from a script and logs every request. No network.</summary>
 internal sealed class ScriptedHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> answer) : HttpMessageHandler

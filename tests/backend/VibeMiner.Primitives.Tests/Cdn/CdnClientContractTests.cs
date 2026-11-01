@@ -1,8 +1,9 @@
+using VibeMiner.Cdn;
 using System.Security.Cryptography;
 using VibeMiner.Cdn.Testing;
 using Xunit;
 
-namespace VibeMiner.Cdn.Tests;
+namespace VibeMiner.Primitives.Tests.Cdn;
 
 /// <summary>
 /// One behaviour suite for every <see cref="ICdnClient"/>: the real client over the fake CDN's HTTP front end, and the scripted

@@ -90,4 +90,11 @@ test('backend projects reference only their own code layer or lower ones', async
   // The comparison exemption stays narrow: exactly the two readers it diffs, nothing else.
   assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Formats.Comparison/VibeMiner.Formats.Comparison.csproj')).sort(), ['Formats', 'Formats.Wow'],
     'Formats.Comparison references only the layer 5 and legacy DB2 readers');
+  // The other two exemptions are pinned the same way. Backend.Tests covers the legacy code only.
+  assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Backend.Tests/VibeMiner.Backend.Tests.csproj')).sort(), ['Host', 'Infrastructure'],
+    'Backend.Tests references only the legacy Host and Infrastructure');
+  // Storage.IntegrationTests drives real layers 1-5 (D137, #195) against the fakes, never a legacy project or the CLI.
+  assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Storage.IntegrationTests/VibeMiner.Storage.IntegrationTests.csproj')).sort(),
+    ['Cdn.Testing', 'Files.Testing', 'Formats', 'Generated.Testing', 'ObjectAccess', 'ObjectAccess.Testing', 'Objects.CrashWriter'],
+    'Storage.IntegrationTests references only layers 1-5 and their fakes');
 });

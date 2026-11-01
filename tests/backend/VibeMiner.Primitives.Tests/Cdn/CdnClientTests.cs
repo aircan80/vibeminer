@@ -1,10 +1,11 @@
+using VibeMiner.Cdn;
 using VibeMiner.Cdn.Testing;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using Xunit;
 
-namespace VibeMiner.Cdn.Tests;
+namespace VibeMiner.Primitives.Tests.Cdn;
 
 public sealed class CdnClientTests
 {
