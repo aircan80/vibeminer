@@ -27,6 +27,8 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
     private readonly ObjectStoreOptions options;
     private readonly bool readOnly;
     private bool immutableIndex;  // a read-only store on read-only media (6.10)
+    /// <summary>How the last open or scrub full check measured the objects table (tests).</summary>
+    internal IndexMeasure? LastIndexMeasure { get; private set; }
     private readonly PackReaders packReaders;
     private readonly ConcurrentDictionary<(int, long), byte> verified = new();
     private readonly ConcurrentDictionary<ObjectKey, byte> touches = new();
@@ -99,7 +101,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
             if (problem is null && !clean && store.immutableIndex)
                 throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index is on read-only media but wasn't cleanly closed. Its writer opens and closes it to settle it.");
             var fullCheck = problem is null && !clean;
-            if (fullCheck) (indexStore, problem, _, _) = ObjectIndex.Validate(store.indexPath, full: true, ct, () => store.At(StorePoint.IndexMeasuring), store.immutableIndex);
+            if (fullCheck) (indexStore, problem, _, _) = ObjectIndex.Validate(store.indexPath, full: true, ct, () => store.At(StorePoint.IndexMeasuring), store.immutableIndex, measured: m => store.LastIndexMeasure = m);
             if (problem is not null) throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, $"The object index can't be used: {problem}. Its writer rebuilds it.");
             if (packStore is not null && !packStore.AsSpan().SequenceEqual(indexStore))
                 throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index names another store than its packs. Its writer rebuilds it.");

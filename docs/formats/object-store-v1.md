@@ -588,7 +588,7 @@ A read-only store runs the same check and Verify and reports a failing index wit
 3. Measure `history` on the check's connection, and compare both against the store row read in step 1.
 4. If the snapshot can't be taken or a slice can't open it, measure everything on the check's connection inside its transaction instead: slower, still exact. Never compare a mixed view.
 
-Commits made meanwhile are in neither side, so the check always concludes; nothing is retried and the writer is never held to measure. The cost: while the transaction is open, checkpoints can't backfill past it, so the WAL grows by the commits made during the measure. An immutable index (6.10) has no WAL and no writer; its slices read the file as it is.
+Commits made meanwhile are in neither side, so the check always concludes; nothing is retried and the writer is never held to measure. The cost: while the transaction is open, checkpoints can't backfill past it, so the WAL grows by the commits made during the measure. An immutable index (6.10) has no WAL and no writer; its slices read the file as it is. So does a check run with the writer lock held (a writer's open, the confirm before a rebuild): nothing can commit, and `sqlite3_snapshot_get` fails anyway on a WAL with no frames since the `-shm` was built, as before a writer's first commit.
 
 **Which damage is found when.** Pack bytes are checked by every read (block CRCs), so damage done while the app was closed never returns bad bytes. Index damage after a clean close is found by the cheap check when it hits the store or pack rows. Rows dropped, added, altered or out of order are found:
 - by the next scrub or explicit full check;

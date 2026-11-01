@@ -10,6 +10,9 @@ internal sealed record IndexRow(int Pack, long Offset, long Length, byte[] Sha25
 
 internal enum PackState { Active = 0, Sealed = 1, Compacting = 2, Retired = 3 }
 
+/// <summary>How the full check measured the objects table: slices on one shared snapshot, the pinned connection alone, or slices with no pin (nothing can commit).</summary>
+internal enum IndexMeasure { Shared, Serial, Unpinned }
+
 /// <summary>Row counts and digests of the objects and history tables, kept in the CRC-checked store row.</summary>
 internal readonly record struct StoreTotals(long Objects, long ObjectDigest, long History, long HistoryDigest);
 
@@ -321,28 +324,32 @@ internal static class ObjectIndex
     }
 
     /// <summary>
-    /// The totals measure of the full check and the store row totals it is compared with, all in one snapshot: a deferred read
+    /// The totals measure of the full check and the store row totals it is compared with, all in one snapshot. <paramref name="exclusive"/>:
+    /// the caller holds the writer lock, so nothing commits and the slices read the file as it is (snapshot_get also fails on a WAL
+    /// with no frames since the -shm was built, as at a writer's open before its first commit): a deferred read
     /// transaction on <paramref name="c"/> reads the store row, and the slice connections open that same snapshot (sqlite3_snapshot),
     /// so commits made meanwhile are in none of them. If the snapshot can't be taken or opened, everything is measured on
     /// <paramref name="c"/> inside its transaction instead: slower, still exact. An immutable index has no writer and no WAL, so
     /// its slices read the file as it is. Totals are null when the pinned store row fails its row check.
     /// </summary>
-    private static (long count, long digest, (long count, long digest) history, StoreTotals? totals) MeasurePinned(
-        SqliteConnection c, string path, CancellationToken ct, Action? measuring, bool immutable, bool snapshots)
+    private static (long count, long digest, (long count, long digest) history, StoreTotals? totals, IndexMeasure path) MeasurePinned(
+        SqliteConnection c, string path, CancellationToken ct, Action? measuring, bool immutable, bool snapshots, bool exclusive)
     {
         using var tx = c.BeginTransaction(deferred: true);
         var totals = StoreRowTotals(c, tx);  // the first read: the transaction's snapshot is fixed here
-        if (totals is null) return (0, 0, (0, 0), null);
+        if (totals is null) return (0, 0, (0, 0), null, IndexMeasure.Serial);
         SQLitePCL.sqlite3_snapshot? snapshot = null;
         try
         {
-            if (!immutable && snapshots && SQLitePCL.raw.sqlite3_snapshot_get(c.Handle, "main", out var taken) == SQLitePCL.raw.SQLITE_OK) snapshot = taken;
+            var unpinned = immutable || exclusive;
+            if (!unpinned && snapshots && SQLitePCL.raw.sqlite3_snapshot_get(c.Handle, "main", out var taken) == SQLitePCL.raw.SQLITE_OK) snapshot = taken;
             measuring?.Invoke();
-            var objects = immutable ? MeasureObjectsParallel(c, tx, path, null, ct, immutable)
+            var objects = unpinned ? MeasureObjectsParallel(c, tx, path, null, ct, immutable)
                 : snapshot is not null ? MeasureObjectsParallel(c, tx, path, snapshot, ct, immutable) : null;
+            var used = unpinned ? IndexMeasure.Unpinned : objects is null ? IndexMeasure.Serial : IndexMeasure.Shared;
             objects ??= MeasureObjectRange(c, tx, [], null);
             var history = MeasureHistory(c, tx);
-            return (objects.Value.count, objects.Value.digest, history, totals);
+            return (objects.Value.count, objects.Value.digest, history, totals, used);
         }
         finally { snapshot?.Dispose(); }
     }
@@ -367,9 +374,11 @@ internal static class ObjectIndex
     /// connections open that same snapshot, so a commit made meanwhile is in neither side; if the snapshot can't be shared, the
     /// pinned connection measures alone. <c>settled</c> is therefore always true; it is kept for callers. <paramref name="measuring"/>
     /// runs after the pin and before the measure (tests). <paramref name="snapshots"/> false skips the shared snapshot, so the
-    /// fallback runs (tests). Cancellation interrupts SQLite's statements on every connection.
+    /// fallback runs (tests). <paramref name="exclusive"/>: the caller holds the writer lock, so the slices need no shared snapshot.
+    /// <paramref name="measured"/> is told which measure ran (tests). Cancellation interrupts SQLite's statements on every connection.
     /// </remarks>
-    public static (byte[]? storeId, string? problem, bool clean, bool settled) Validate(string path, bool full, CancellationToken ct = default, Action? measuring = null, bool immutable = false, bool snapshots = true)
+    public static (byte[]? storeId, string? problem, bool clean, bool settled) Validate(string path, bool full, CancellationToken ct = default, Action? measuring = null, bool immutable = false, bool snapshots = true,
+        bool exclusive = false, Action<IndexMeasure>? measured = null)
     {
         try
         {
@@ -430,7 +439,8 @@ internal static class ObjectIndex
             if (!full) return (id, null, clean, true);
             // Rows lost, added or altered in a structurally sound file: only the totals over the rows themselves can tell.
             ct.ThrowIfCancellationRequested();
-            var (count, digest, history, totals) = MeasurePinned(c, path, ct, measuring, immutable, snapshots);
+            var (count, digest, history, totals, used) = MeasurePinned(c, path, ct, measuring, immutable, snapshots, exclusive);
+            measured?.Invoke(used);
             if (totals is not { } pinned) return (null, "the index's store row is damaged", false, true);
             if (TotalsMismatch("object", count, digest, pinned.Objects, pinned.ObjectDigest) is { } objects)
                 return (null, objects, false, true);

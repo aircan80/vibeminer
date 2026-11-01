@@ -136,6 +136,7 @@ public sealed class ObjectStoreIndexDamageTests
         await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir, Quick with { Fault = Commit }))
         {
             Assert.Equal(1, commits);
+            Assert.Equal(IndexMeasure.Shared, reader.LastIndexMeasure);  // the slices really shared the snapshot, no serial fallback
             Volatile.Write(ref commits, 0);
             var scrub = await reader.ScrubAsync();
             Assert.Null(scrub.IndexProblem);
@@ -145,6 +146,7 @@ public sealed class ObjectStoreIndexDamageTests
             var restless = await reader.ScrubAsync();
             Assert.Equal((null, true), (restless.IndexProblem, restless.IndexChecked));
             Assert.Equal(1, commits);
+            Assert.Equal(IndexMeasure.Shared, reader.LastIndexMeasure);
             Volatile.Write(ref always, false);
         }
         // The writer's own scrub measures on readers, so a Put from inside the measure completes: writes aren't held up.
@@ -157,6 +159,7 @@ public sealed class ObjectStoreIndexDamageTests
         var busy = await writer.ScrubAsync();
         Assert.Equal((null, false, true), (busy.IndexProblem, busy.IndexRebuilt, busy.IndexChecked));
         Assert.Equal(1, commits);
+        Assert.Equal(IndexMeasure.Shared, writer.LastIndexMeasure);
     }
 
     [Fact]
@@ -186,12 +189,14 @@ public sealed class ObjectStoreIndexDamageTests
             Assert.Contains("object rows but its totals record", scrub.IndexProblem);
             Assert.True(scrub.IndexChecked);
             Assert.Equal(1, commits);
+            Assert.Equal(IndexMeasure.Shared, reader.LastIndexMeasure);
         }
         Volatile.Write(ref commits, 0);
         var mine = await writer.ScrubAsync();
         Assert.Contains("object rows but its totals record", mine.IndexProblem);
         Assert.True(mine.IndexRebuilt);
         Assert.Equal(1, commits);
+        Assert.Equal(IndexMeasure.Shared, writer.LastIndexMeasure);
         Assert.Null((await writer.ScrubAsync()).IndexProblem);  // the rebuild holds
     }
 
@@ -207,11 +212,15 @@ public sealed class ObjectStoreIndexDamageTests
         await writer.PutAsync(HistoryRecordFormat.Objects(Synthetic.Observation(1)));
         var index = Path.Combine(dir, "objects.sqlite3");
         void Commit() => Assert.Equal(PutOutcome.Stored, Assert.Single(writer.PutAsync([Synthetic.Headerless(Interlocked.Increment(ref seed), 3000)], commitNow: true).GetAwaiter().GetResult()).Outcome);
-        var sound = ObjectIndex.Validate(index, full: true, measuring: Commit, snapshots: false);
+        IndexMeasure? used = null;
+        var sound = ObjectIndex.Validate(index, full: true, measuring: Commit, snapshots: false, measured: m => used = m);
+        Assert.Equal(IndexMeasure.Serial, used);
         Assert.Equal((null, true), (sound.problem, sound.settled));
         Assert.NotNull(sound.storeId);
         DamageIndex(dir, "UPDATE objects SET sha256 = zeroblob(32) WHERE k = (SELECT min(k) FROM objects)");
-        var damaged = ObjectIndex.Validate(index, full: true, measuring: Commit, snapshots: false);
+        used = null;
+        var damaged = ObjectIndex.Validate(index, full: true, measuring: Commit, snapshots: false, measured: m => used = m);
+        Assert.Equal(IndexMeasure.Serial, used);
         Assert.Contains("object rows don't match the digest in its totals", damaged.problem);
     }
 
@@ -293,6 +302,8 @@ public sealed class ObjectStoreIndexDamageTests
         await using (var store = await ObjectStore.OpenAsync(dir, Quick))
         {
             Assert.True(store.OpenReport.FullIndexCheck);
+            // The writer lock is held and the WAL has no frames yet (snapshot_get fails there): the plain parallel measure, not serial.
+            Assert.Equal(IndexMeasure.Unpinned, store.LastIndexMeasure);
             Assert.False(store.OpenReport.IndexRebuilt);
             Assert.True(await store.HasAsync(Synthetic.Headerless(2).Key));
         }

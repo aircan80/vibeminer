@@ -216,13 +216,13 @@ public sealed partial class ObjectStore
     {
         EnsureWriter();
         // Measure on reader connections in one pinned snapshot, so writes go on meanwhile and none of them passes for damage.
-        var (_, problem, _, _) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring)), ct);
+        var (_, problem, _, _) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring), measured: m => LastIndexMeasure = m), ct);
         var rebuilt = false;
         if (problem is not null)
             (problem, rebuilt) = await MaintainAsync(async () =>
             {
                 // Confirmed with the writer held before anything is rebuilt.
-                var (_, confirmed, _, _) = ObjectIndex.Validate(indexPath, full: true, ct);
+                var (_, confirmed, _, _) = ObjectIndex.Validate(indexPath, full: true, ct, exclusive: true);
                 if (confirmed is null) return (confirmed, false);
                 problems.Add($"{confirmed}; rebuilt from the packs");
                 await ScanCoreAsync(null, ct);
@@ -234,7 +234,7 @@ public sealed partial class ObjectStore
     /// <summary>Read-only stores: the same full index check, reported without a rebuild (only the writer can rebuild).</summary>
     internal async Task<ScrubReport> ScrubReadOnlyAsync(bool full, IProgress<ScanProgress>? progress, CancellationToken ct)
     {
-        var (_, problem, _, settled) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring), immutableIndex), ct);
+        var (_, problem, _, settled) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring), immutableIndex, measured: m => LastIndexMeasure = m), ct);
         VerifyReport verify;
         try { verify = await VerifyAsync(full, progress, ct); }
         catch (ObjectStoreException e) when (problem is not null && e.Code == ObjectStoreCodes.IndexUnreadable) { verify = new(0, 0, 0, 0, [], []); }
