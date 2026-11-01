@@ -45,8 +45,8 @@ public sealed record DeleteResult(ObjectKey Key, DeleteOutcome Outcome, string? 
 public sealed record OpenReport(int RecoveredEntries, long TruncatedBytes, bool IndexRebuilt, IReadOnlyList<string> Problems, bool FullIndexCheck = false);
 /// <summary>
 /// A scrub: the full index check (<see cref="IndexProblem"/> is null when it held; <see cref="IndexRebuilt"/> when the writer rebuilt
-/// it) and Verify. <see cref="IndexChecked"/> is false only for a read-only store whose writer kept committing through every attempt:
-/// no stable view, so nothing was concluded.
+/// it) and Verify. <see cref="IndexChecked"/> is always true now that the check measures one pinned snapshot (#201); it is kept
+/// for callers that still read it.
 /// </summary>
 public sealed record ScrubReport(string? IndexProblem, bool IndexRebuilt, VerifyReport Verify, bool IndexChecked = true);
 public sealed record ScanReport(int Packs, long Entries, long Live, long Duplicates, long Tombstones, long Corrupt, long Unverifiable, IReadOnlyList<string> Problems);

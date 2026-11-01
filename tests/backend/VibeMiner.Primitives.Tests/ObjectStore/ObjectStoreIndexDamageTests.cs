@@ -140,10 +140,11 @@ public sealed class ObjectStoreIndexDamageTests
             var scrub = await reader.ScrubAsync();
             Assert.Null(scrub.IndexProblem);
             Assert.True(scrub.IndexChecked);
-            Volatile.Write(ref always, true);  // a writer that never stops: no stable view, so nothing is concluded
+            Volatile.Write(ref always, true);  // a commit during every measure: the pinned snapshot still concludes it, in one pass (#201)
+            Volatile.Write(ref commits, 0);
             var restless = await reader.ScrubAsync();
-            Assert.Null(restless.IndexProblem);
-            Assert.False(restless.IndexChecked);
+            Assert.Equal((null, true), (restless.IndexProblem, restless.IndexChecked));
+            Assert.Equal(1, commits);
             Volatile.Write(ref always, false);
         }
         // The writer's own scrub measures on readers, so a Put from inside the measure completes: writes aren't held up.
@@ -151,9 +152,105 @@ public sealed class ObjectStoreIndexDamageTests
         var mine = await writer.ScrubAsync();
         Assert.Equal((null, false), (mine.IndexProblem, mine.IndexRebuilt));
         Assert.Equal(1, commits);
-        Volatile.Write(ref always, true);  // never settles on readers: one pass with the writer held concludes it
-        var held = await writer.ScrubAsync();
-        Assert.Equal((null, false, true), (held.IndexProblem, held.IndexRebuilt, held.IndexChecked));
+        Volatile.Write(ref always, true);  // #201: no pass with the writer held any more, however often it commits
+        Volatile.Write(ref commits, 0);
+        var busy = await writer.ScrubAsync();
+        Assert.Equal((null, false, true), (busy.IndexProblem, busy.IndexRebuilt, busy.IndexChecked));
+        Assert.Equal(1, commits);
+    }
+
+    [Fact]
+    public async Task AFullCheckWhileTheWriterCommitsStillFindsRealDamage()
+    {
+        // #201: under steady commits the old check never settled, so damage went unreported by a read-only scrub.
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var seed = 2000;
+        ObjectStore? writer = null;
+        var commits = 0;
+        void Commit(StorePoint p)
+        {
+            if (p != StorePoint.IndexMeasuring || writer is null) return;
+            var o = Synthetic.Headerless(Interlocked.Increment(ref seed), 3000);
+            Assert.Equal(PutOutcome.Stored, Assert.Single(writer.PutAsync([o], commitNow: true).GetAwaiter().GetResult()).Outcome);
+            Interlocked.Increment(ref commits);
+        }
+        writer = await ObjectStore.OpenAsync(dir, Quick with { Fault = Commit });
+        await using var w = writer;
+        await writer.PutAsync(Fill());
+        await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir, Quick with { Fault = Commit }))
+        {
+            DamageIndex(dir, "DELETE FROM objects WHERE k = (SELECT min(k) FROM objects)");
+            Volatile.Write(ref commits, 0);
+            var scrub = await reader.ScrubAsync();
+            Assert.Contains("object rows but its totals record", scrub.IndexProblem);
+            Assert.True(scrub.IndexChecked);
+            Assert.Equal(1, commits);
+        }
+        Volatile.Write(ref commits, 0);
+        var mine = await writer.ScrubAsync();
+        Assert.Contains("object rows but its totals record", mine.IndexProblem);
+        Assert.True(mine.IndexRebuilt);
+        Assert.Equal(1, commits);
+        Assert.Null((await writer.ScrubAsync()).IndexProblem);  // the rebuild holds
+    }
+
+    [Fact]
+    public async Task TheSerialFallbackOnThePinnedConnectionIsExactWhileTheWriterCommits()
+    {
+        // #201: when the snapshot can't be shared, everything is measured inside the pinned transaction instead.
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var seed = 3000;
+        await using var writer = await ObjectStore.OpenAsync(dir, Quick);
+        await writer.PutAsync(Fill());
+        await writer.PutAsync(HistoryRecordFormat.Objects(Synthetic.Observation(1)));
+        var index = Path.Combine(dir, "objects.sqlite3");
+        void Commit() => Assert.Equal(PutOutcome.Stored, Assert.Single(writer.PutAsync([Synthetic.Headerless(Interlocked.Increment(ref seed), 3000)], commitNow: true).GetAwaiter().GetResult()).Outcome);
+        var sound = ObjectIndex.Validate(index, full: true, measuring: Commit, snapshots: false);
+        Assert.Equal((null, true), (sound.problem, sound.settled));
+        Assert.NotNull(sound.storeId);
+        DamageIndex(dir, "UPDATE objects SET sha256 = zeroblob(32) WHERE k = (SELECT min(k) FROM objects)");
+        var damaged = ObjectIndex.Validate(index, full: true, measuring: Commit, snapshots: false);
+        Assert.Contains("object rows don't match the digest in its totals", damaged.problem);
+    }
+
+    [Fact]
+    public async Task TheBundledSqliteSharesAReadSnapshotBetweenConnections()
+    {
+        // The full check relies on this (#201): a second connection opens the first one's snapshot and misses later commits.
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        await using var writer = await ObjectStore.OpenAsync(dir, Quick);
+        await writer.PutAsync(Fill());
+        var index = Path.Combine(dir, "objects.sqlite3");
+        using var pinned = ObjectIndex.Open(index, readOnly: true);
+        using var tx = pinned.BeginTransaction(deferred: true);
+        var before = Count(pinned, tx);
+        Assert.Equal(SQLitePCL.raw.SQLITE_OK, SQLitePCL.raw.sqlite3_snapshot_get(pinned.Handle, "main", out var snapshot));
+        using (snapshot)
+        {
+            await writer.PutAsync([Synthetic.Headerless(4000, 3000)], commitNow: true);
+            using var other = ObjectIndex.Open(index, readOnly: true);
+            Assert.Equal(before + 1, Count(other, null));  // the commit is there for a fresh read
+            using var otherTx = other.BeginTransaction(deferred: true);
+            Assert.Equal(SQLitePCL.raw.SQLITE_OK, SQLitePCL.raw.sqlite3_snapshot_open(other.Handle, "main", snapshot));
+            Assert.Equal(before, Count(other, otherTx));
+        }
+
+        static long Count(Microsoft.Data.Sqlite.SqliteConnection c, Microsoft.Data.Sqlite.SqliteTransaction? tx)
+        {
+            using var cmd = c.CreateCommand(); cmd.Transaction = tx; cmd.CommandText = "SELECT count(*) FROM objects";
+            return (long)cmd.ExecuteScalar()!;
+        }
+    }
+
+    private static void DamageIndex(string dir, string sql)
+    {
+        using var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(dir, "objects.sqlite3")};Pooling=False");
+        c.Open();
+        using var cmd = c.CreateCommand(); cmd.CommandText = sql;
+        Assert.Equal(1, cmd.ExecuteNonQuery());
     }
 
     [Fact]

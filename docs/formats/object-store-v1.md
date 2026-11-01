@@ -359,7 +359,7 @@ An entry larger than the limit goes alone into a fresh pack.
 
    When the cheap check passes but `clean_close` is 0 (the last writer didn't close cleanly), the open also runs the **full check**. The index is then also unusable when:
    - `PRAGMA integrity_check` isn't `ok`. This also finds rows out of key order; `quick_check` does not.
-   - recounting the `objects` rows and recomputing their digest (5.3) disagrees with the store row, or the same for `history`.
+   - recounting the `objects` rows and recomputing their digest (5.3) disagrees with the store row, or the same for `history`. Both sides are read in one snapshot, so the check is exact while a writer commits (6.13, "Measuring a live index").
 
    The full check costs about 0.8 s per million rows here, the cheap one milliseconds. A writer can also run the full check on request (Scrub, 6.13).
 5. **Unusable index, or none** (`user_version` below 1, or missing):
@@ -574,14 +574,21 @@ A writer that stopped on an error, or a process that is killed, never sets the m
 ### 6.13 Scrub
 
 The full check on request, for a scheduler above layer 1 to run in the background; this layer doesn't schedule it.
-1. Run the full check of 6.3 step 4 on reader connections, while writes go on. Read the store row's `next_seq`, totals and `row_check` before and after measuring the rows, and trust the comparison only when the two agree (`next_seq` only grows, so nothing was committed in between). Try up to three times.
-2. If commits kept landing through every try, run one pass as a writer request instead, where nothing can commit; writes wait for that pass.
-3. If the check fails, confirm it as a writer request, then rebuild the index in place as Scan does (6.6) and report the problem.
-4. Then run Verify (6.7) over every object.
+1. Run the full check of 6.3 step 4 on reader connections, while writes go on (see "Measuring a live index" below).
+2. If the check fails, confirm it as a writer request, then rebuild the index in place as Scan does (6.6) and report the problem.
+3. Then run Verify (6.7) over every object.
 
 The scrub honours cancellation: it interrupts SQLite's running statements.
 
-A read-only store runs the same check and Verify and reports a failing index without rebuilding it. If its writer kept committing through every try, it reports that it couldn't check (no stable view), not damage. A read-only open that runs the full check treats that case the same way and keeps the cheap check's verdict.
+A read-only store runs the same check and Verify and reports a failing index without rebuilding it.
+
+**Measuring a live index.** A writer may commit while the full check runs, so the totals and the rows must come from one snapshot:
+1. Begin a read transaction on the check's connection and read the store row in it. That fixes the snapshot.
+2. Take it with `sqlite3_snapshot_get`. Each parallel slice connection reads once (so its pager has opened the WAL), begins a read transaction and opens the same snapshot with `sqlite3_snapshot_open`, then measures its key range.
+3. Measure `history` on the check's connection, and compare both against the store row read in step 1.
+4. If the snapshot can't be taken or a slice can't open it, measure everything on the check's connection inside its transaction instead: slower, still exact. Never compare a mixed view.
+
+Commits made meanwhile are in neither side, so the check always concludes; nothing is retried and the writer is never held to measure. The cost: while the transaction is open, checkpoints can't backfill past it, so the WAL grows by the commits made during the measure. An immutable index (6.10) has no WAL and no writer; its slices read the file as it is.
 
 **Which damage is found when.** Pack bytes are checked by every read (block CRCs), so damage done while the app was closed never returns bad bytes. Index damage after a clean close is found by the cheap check when it hits the store or pack rows. Rows dropped, added, altered or out of order are found:
 - by the next scrub or explicit full check;

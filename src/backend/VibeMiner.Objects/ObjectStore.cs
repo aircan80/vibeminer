@@ -94,7 +94,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
             if (damagedVersion) throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, $"The object index can't be used: its schema version reads {version}. Its writer rebuilds it.");
             var (indexStore, problem, clean, _) = ObjectIndex.Validate(store.indexPath, full: false, ct, immutable: store.immutableIndex);
             // Unset also while its writer runs (it clears the marker at open): a reader can't tell that from a crash, so it checks fully.
-            // A writer that kept committing leaves it unsettled, which is no evidence of damage: the cheap check stands.
+            // A writer committing meanwhile is no evidence of damage: the full check measures one pinned snapshot.
             // Immutable ignores the -wal: only a cleanly closed index, whose writer checkpointed everything into the main file, is read that way.
             if (problem is null && !clean && store.immutableIndex)
                 throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index is on read-only media but wasn't cleanly closed. Its writer opens and closes it to settle it.");

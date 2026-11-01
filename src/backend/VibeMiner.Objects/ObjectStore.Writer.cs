@@ -91,7 +91,7 @@ public sealed partial class ObjectStore
         if (!unreadable && version == ObjectIndex.SchemaVersion)
         {
             var (indexStore, problem, clean, _) = ObjectIndex.Validate(indexPath, full: false, ct);
-            // The lock is held, so nothing else commits: the full check always settles here.
+            // The lock is held, so nothing else commits while the full check measures.
             if (problem is null && !clean) { fullCheck = true; (indexStore, problem, _, _) = ObjectIndex.Validate(indexPath, full: true, ct); }
             if (problem is not null) { unreadable = true; problems.Add($"{problem}; rebuilt from the packs"); }
             else if (packStore is not null && !packStore.AsSpan().SequenceEqual(indexStore)) { unreadable = true; problems.Add("the index names another store than its packs; rebuilt from the packs"); }

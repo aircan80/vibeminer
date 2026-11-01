@@ -242,35 +242,49 @@ internal static class ObjectIndex
         return new(r.GetInt64(0), r.IsDBNull(1) ? 0 : r.GetInt64(1), r.GetInt64(2), r.IsDBNull(3) ? 0 : r.GetInt64(3));
     }
 
-    /// <summary>
-    /// As <see cref="Measure"/> for the objects table, split by key range over parallel read-only connections: at 30M rows one
-    /// connection takes about 8.6 s here, so open-time checking spreads it over the CPUs.
-    /// </summary>
-    private static (long count, long digest) MeasureHistory(SqliteConnection c)
+    private static (long count, long digest) MeasureHistory(SqliteConnection c, SqliteTransaction? tx)
     {
-        using var cmd = c.CreateCommand();
+        using var cmd = c.CreateCommand(); cmd.Transaction = tx;
         cmd.CommandText = "SELECT count(*), vm_history_digest(record, observed_at, product, region, kind, document, url) FROM history";
         using var r = cmd.ExecuteReader(); r.Read();
         return (r.GetInt64(0), r.IsDBNull(1) ? 0 : r.GetInt64(1));
     }
 
-    private readonly record struct StoreStamp(long NextSeq, StoreTotals Totals, long RowCheck);
-
-    private static StoreStamp Stamp(SqliteConnection c)
+    private static (long count, long digest) MeasureObjectRange(SqliteConnection c, SqliteTransaction? tx, byte[] from, byte[]? to)
     {
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT next_seq, object_count, object_digest, history_count, history_digest, row_check FROM store WHERE id = 1";
-        using var r = cmd.ExecuteReader();
-        if (!r.Read()) throw new InvalidOperationException("The store row is gone.");
-        return new(r.GetInt64(0), new(r.GetInt64(1), r.GetInt64(2), r.GetInt64(3), r.GetInt64(4)), r.GetInt64(5));
+        using var cmd = c.CreateCommand(); cmd.Transaction = tx;
+        cmd.CommandText = "SELECT count(*), vm_object_digest(k, pack, offset, length, sha256) FROM objects WHERE k >= $a" + (to is null ? "" : " AND k < $b");
+        cmd.Parameters.AddWithValue("$a", from);
+        if (to is not null) cmd.Parameters.AddWithValue("$b", to);
+        using var r = cmd.ExecuteReader(); r.Read();
+        return (r.GetInt64(0), r.IsDBNull(1) ? 0 : r.GetInt64(1));
     }
 
-    private static (long count, long digest) MeasureObjectsParallel(string path, CancellationToken ct, bool immutable)
+    /// <summary>The store row's totals, or null when it is missing or fails its row check.</summary>
+    private static StoreTotals? StoreRowTotals(SqliteConnection c, SqliteTransaction? tx)
+    {
+        using var cmd = c.CreateCommand(); cmd.Transaction = tx;
+        cmd.CommandText = "SELECT store_id, format, created_at, next_seq, object_count, object_digest, history_count, history_digest, clean_close, row_check FROM store WHERE id = 1";
+        using var r = cmd.ExecuteReader();
+        if (!r.Read() || r.GetValue(0) is not byte[] { Length: 16 } sid || r.GetValue(1) is not long format || r.GetValue(2) is not long created ||
+            r.GetValue(3) is not long next || r.GetValue(4) is not long oc || r.GetValue(5) is not long od || r.GetValue(6) is not long hc ||
+            r.GetValue(7) is not long hd || r.GetValue(8) is not long cc || r.GetValue(9) is not long check ||
+            check != StoreCheck(sid, format, created, next, new(oc, od, hc, hd), cc)) return null;
+        return new(oc, od, hc, hd);
+    }
+
+    /// <summary>
+    /// The objects table's count and digest, split by key range over parallel read-only connections: at 30M rows one connection
+    /// takes about 8.6 s here, so the full check spreads it over the CPUs. With <paramref name="snapshot"/> every slice connection
+    /// opens that snapshot, so all of them read exactly what <paramref name="c"/> reads; null (immutable: nothing changes) reads
+    /// the file as it is. Returns null when a slice can't open the snapshot: the caller then measures on <paramref name="c"/>.
+    /// </summary>
+    private static (long count, long digest)? MeasureObjectsParallel(SqliteConnection c, SqliteTransaction? tx, string path, SQLitePCL.sqlite3_snapshot? snapshot, CancellationToken ct, bool immutable)
     {
         byte[]? lo, hi;
-        using (var c = Open(path, readOnly: true, immutable))
         using (var cmd = c.CreateCommand())
         {
+            cmd.Transaction = tx;
             cmd.CommandText = "SELECT min(k), max(k) FROM objects";
             using var r = cmd.ExecuteReader(); r.Read();
             lo = r.GetValue(0) as byte[]; hi = r.GetValue(1) as byte[];
@@ -282,18 +296,55 @@ internal static class ObjectIndex
         var bounds = Enumerable.Range(0, slices + 1).Select(i => i == slices ? (byte[]?)null : BoundOf(a + (z - a) * (UInt128)i / (UInt128)slices)).ToArray();
         static byte[] BoundOf(UInt128 v) { var b = new byte[8]; System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(b, (ulong)v); return b; }
         var parts = new (long count, long digest)[slices];
+        var unpinned = 0;
         Parallel.For(0, slices, new ParallelOptions { MaxDegreeOfParallelism = slices, CancellationToken = ct }, i =>
         {
-            using var c = Open(path, readOnly: true, immutable);
-            using var interrupt = ct.Register(() => SQLitePCL.raw.sqlite3_interrupt(c.Handle));
-            using var cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT count(*), vm_object_digest(k, pack, offset, length, sha256) FROM objects WHERE k >= $a" + (bounds[i + 1] is null ? "" : " AND k < $b");
-            cmd.Parameters.AddWithValue("$a", i == 0 ? Array.Empty<byte>() : bounds[i]!);
-            if (bounds[i + 1] is { } b) cmd.Parameters.AddWithValue("$b", b);
-            using var r = cmd.ExecuteReader(); r.Read();
-            parts[i] = (r.GetInt64(0), r.IsDBNull(1) ? 0 : r.GetInt64(1));
+            using var s = Open(path, readOnly: true, immutable);
+            using var interrupt = ct.Register(() => SQLitePCL.raw.sqlite3_interrupt(s.Handle));
+            SqliteTransaction? pinned = null;
+            try
+            {
+                if (snapshot is not null)
+                {
+                    // snapshot_open needs a pager that has opened the WAL: on a never-read connection it fails.
+                    using (var warm = s.CreateCommand()) { warm.CommandText = "SELECT count(*) FROM sqlite_master"; warm.ExecuteScalar(); }
+                    pinned = s.BeginTransaction(deferred: true);
+                    if (Volatile.Read(ref unpinned) != 0 || SQLitePCL.raw.sqlite3_snapshot_open(s.Handle, "main", snapshot) != SQLitePCL.raw.SQLITE_OK)
+                    { Volatile.Write(ref unpinned, 1); return; }
+                }
+                parts[i] = MeasureObjectRange(s, pinned, i == 0 ? [] : bounds[i]!, bounds[i + 1]);
+            }
+            finally { pinned?.Dispose(); }
         });
+        if (unpinned != 0) return null;
         return (parts.Sum(p => p.count), parts.Aggregate(0L, (x, p) => x ^ p.digest));
+    }
+
+    /// <summary>
+    /// The totals measure of the full check and the store row totals it is compared with, all in one snapshot: a deferred read
+    /// transaction on <paramref name="c"/> reads the store row, and the slice connections open that same snapshot (sqlite3_snapshot),
+    /// so commits made meanwhile are in none of them. If the snapshot can't be taken or opened, everything is measured on
+    /// <paramref name="c"/> inside its transaction instead: slower, still exact. An immutable index has no writer and no WAL, so
+    /// its slices read the file as it is. Totals are null when the pinned store row fails its row check.
+    /// </summary>
+    private static (long count, long digest, (long count, long digest) history, StoreTotals? totals) MeasurePinned(
+        SqliteConnection c, string path, CancellationToken ct, Action? measuring, bool immutable, bool snapshots)
+    {
+        using var tx = c.BeginTransaction(deferred: true);
+        var totals = StoreRowTotals(c, tx);  // the first read: the transaction's snapshot is fixed here
+        if (totals is null) return (0, 0, (0, 0), null);
+        SQLitePCL.sqlite3_snapshot? snapshot = null;
+        try
+        {
+            if (!immutable && snapshots && SQLitePCL.raw.sqlite3_snapshot_get(c.Handle, "main", out var taken) == SQLitePCL.raw.SQLITE_OK) snapshot = taken;
+            measuring?.Invoke();
+            var objects = immutable ? MeasureObjectsParallel(c, tx, path, null, ct, immutable)
+                : snapshot is not null ? MeasureObjectsParallel(c, tx, path, snapshot, ct, immutable) : null;
+            objects ??= MeasureObjectRange(c, tx, [], null);
+            var history = MeasureHistory(c, tx);
+            return (objects.Value.count, objects.Value.digest, history, totals);
+        }
+        finally { snapshot?.Dispose(); }
     }
 
     private static readonly (string table, string[] columns)[] Expected =
@@ -312,13 +363,13 @@ internal static class ObjectIndex
     /// null or a problem; it never throws for a damaged file.
     /// </summary>
     /// <remarks>
-    /// On a live store the totals and the rows are read in different snapshots (the measure runs on several connections), so the
-    /// full check stamps the store row (next_seq, which only grows, the totals and its row check) before and after measuring, and
-    /// trusts the comparison only when the two stamps agree; nothing was committed in between. It tries three times; a store that
-    /// kept committing comes back <c>settled = false</c> with no problem, never as damaged. <paramref name="measuring"/> runs between
-    /// the first stamp and the measure (tests). Cancellation interrupts SQLite's statements.
+    /// On a live store the totals are compared in one snapshot (#201): a read transaction pins the store row, and the parallel slice
+    /// connections open that same snapshot, so a commit made meanwhile is in neither side; if the snapshot can't be shared, the
+    /// pinned connection measures alone. <c>settled</c> is therefore always true; it is kept for callers. <paramref name="measuring"/>
+    /// runs after the pin and before the measure (tests). <paramref name="snapshots"/> false skips the shared snapshot, so the
+    /// fallback runs (tests). Cancellation interrupts SQLite's statements on every connection.
     /// </remarks>
-    public static (byte[]? storeId, string? problem, bool clean, bool settled) Validate(string path, bool full, CancellationToken ct = default, Action? measuring = null, bool immutable = false)
+    public static (byte[]? storeId, string? problem, bool clean, bool settled) Validate(string path, bool full, CancellationToken ct = default, Action? measuring = null, bool immutable = false, bool snapshots = true)
     {
         try
         {
@@ -342,7 +393,6 @@ internal static class ObjectIndex
                 if (!names.SequenceEqual(columns)) return (null, $"the index's {table} table doesn't have the expected columns", false, true);
             }
             byte[]? id = null;
-            StoreTotals recorded = default;
             var clean = false;
             using (var cmd = c.CreateCommand())
             {
@@ -358,7 +408,7 @@ internal static class ObjectIndex
                         r.GetValue(9) is not long cc || cc is not (0 or 1) ||
                         r.GetValue(10) is not long check || check != StoreCheck(sid, format, created, next, new(oc, od, hc, hd), cc))
                         return (null, "the index's store row is damaged", false, true);
-                    id = sid; recorded = new(oc, od, hc, hd); clean = cc == 1;
+                    id = sid; clean = cc == 1;
                 }
                 if (rows != 1) return (null, "the index doesn't have exactly one store row", false, true);
             }
@@ -379,21 +429,14 @@ internal static class ObjectIndex
             }
             if (!full) return (id, null, clean, true);
             // Rows lost, added or altered in a structurally sound file: only the totals over the rows themselves can tell.
-            for (var attempt = 0; attempt < 3; attempt++)
-            {
-                ct.ThrowIfCancellationRequested();
-                var before = Stamp(c);
-                measuring?.Invoke();
-                var (count, digest) = MeasureObjectsParallel(path, ct, immutable);
-                var history = MeasureHistory(c);
-                if (Stamp(c) != before) continue;  // a writer committed meanwhile: the comparison would mix two snapshots
-                if (TotalsMismatch("object", count, digest, before.Totals.Objects, before.Totals.ObjectDigest) is { } objects)
-                    return (null, objects, false, true);
-                if (TotalsMismatch("history", history.count, history.digest, before.Totals.History, before.Totals.HistoryDigest) is { } rows)
-                    return (null, rows, false, true);
-                return (id, null, clean, true);
-            }
-            return (id, null, clean, false);
+            ct.ThrowIfCancellationRequested();
+            var (count, digest, history, totals) = MeasurePinned(c, path, ct, measuring, immutable, snapshots);
+            if (totals is not { } pinned) return (null, "the index's store row is damaged", false, true);
+            if (TotalsMismatch("object", count, digest, pinned.Objects, pinned.ObjectDigest) is { } objects)
+                return (null, objects, false, true);
+            if (TotalsMismatch("history", history.count, history.digest, pinned.History, pinned.HistoryDigest) is { } historyProblem)
+                return (null, historyProblem, false, true);
+            return (id, null, clean, true);
         }
         catch (Exception e) when (ct.IsCancellationRequested && e is SqliteException or AggregateException)
         {

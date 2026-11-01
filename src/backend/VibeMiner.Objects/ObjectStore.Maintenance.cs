@@ -215,10 +215,8 @@ public sealed partial class ObjectStore
     public async Task<ScrubReport> ScrubAsync(bool full = false, IProgress<ScanProgress>? progress = null, CancellationToken ct = default)
     {
         EnsureWriter();
-        // Measure on reader connections, so writes go on meanwhile; the stamps keep commits from passing for damage.
-        var (_, problem, _, settled) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring)), ct);
-        // A store that kept committing: one pass with the writer held, where nothing can commit (writes wait for it).
-        if (!settled) (_, problem, _, _) = await MaintainAsync(() => Task.FromResult(ObjectIndex.Validate(indexPath, full: true, ct)), ct);
+        // Measure on reader connections in one pinned snapshot, so writes go on meanwhile and none of them passes for damage.
+        var (_, problem, _, _) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring)), ct);
         var rebuilt = false;
         if (problem is not null)
             (problem, rebuilt) = await MaintainAsync(async () =>
