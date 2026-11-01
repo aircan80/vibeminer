@@ -206,6 +206,50 @@ public sealed class ObjectStoreFailureTests
         foreach (var o in objects.Skip(8)) Assert.Equal(o.Bytes.ToArray(), (await store.ReadAsync(o.Key)).Bytes);
     }
 
+    [Fact]
+    public async Task AFailedCompactionTargetsNumberIsReusedAfterReopenAndServesOnlyTheNewPack()
+    {
+        // D373: pack numbers aren't persisted, so a failed target above every other pack is handed out again by the next session.
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        using var cancel = new CancellationTokenSource();
+        var armed = 0;
+        var options = Quick with { MaxPackBytes = 400_000, Fault = p => { if (p == StorePoint.CompactTargetListed && Volatile.Read(ref armed) == 1) cancel.Cancel(); } };
+        var dead = Synthetic.Headerless(1, 300_000); var keep = Synthetic.Headerless(2, 1000); var other = Synthetic.Headerless(3, 300_000);
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            await store.PutAsync([dead]); await store.PutAsync([keep]); await store.PutAsync([other]);  // 1 sealed (dead, keep), 2 active
+            await store.DeleteAsync([dead.Key]);
+        }
+        Assert.Equal(1, Row(dir, keep.Key).pack);
+        // A read-only store held open across both sessions, with pack 1's handle cached and its entry hashed.
+        await using var reader = await ObjectStore.OpenReadOnlyAsync(dir);
+        Assert.Equal(keep.Bytes.ToArray(), (await reader.ReadAsync(keep.Key)).Bytes);
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            Volatile.Write(ref armed, 1);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => store.CompactAsync(new CompactOptions(0.01, 10), cancel.Token));
+            Assert.False(File.Exists(PackPath(dir, 3)));
+            Assert.Equal(0, PackRows(dir, 2));
+        }
+        await using (var store = await ObjectStore.OpenAsync(dir, options with { Fault = null }))
+        {
+            Assert.Empty(store.OpenReport.Problems);
+            Assert.Equal(1, (await store.CompactAsync(new CompactOptions(0.01, 10))).PacksCompacted);
+            Assert.Equal(3, Row(dir, keep.Key).pack);                              // the failed target's number, taken again
+            Assert.Equal(new[] { PackPath(dir, 2), PackPath(dir, 3) }, PackFiles(dir));
+            Assert.Equal(keep.Bytes.ToArray(), (await store.ReadAsync(keep.Key)).Bytes);
+            Assert.Equal(ReadState.Absent, (await store.ReadAsync(dead.Key)).State);
+            Assert.Equal(0, (await store.VerifyAsync(full: true)).CorruptCount);
+        }
+        // The long-lived reader follows the switch into the new pack 3; nothing it cached from before points there.
+        Assert.Equal(keep.Bytes.ToArray(), (await reader.ReadAsync(keep.Key)).Bytes);
+        Assert.Equal(other.Bytes.ToArray(), (await reader.ReadAsync(other.Key)).Bytes);
+        Assert.Equal(ReadState.Absent, (await reader.ReadAsync(dead.Key)).State);
+        var verify = await reader.VerifyAsync(full: true);
+        Assert.Equal((2, 0, 0), (verify.Checked, verify.CorruptCount, verify.LostCount));
+    }
+
     private static long PackRows(string dir, int state)
     {
         using var c = new SqliteConnection($"Data Source={Path.Combine(dir, "objects.sqlite3")};Mode=ReadOnly;Pooling=False");
