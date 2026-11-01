@@ -19,6 +19,7 @@ internal sealed class Observations
     public async Task<(Observation? Observation, ObservationResult? Failed)> FetchAsync(ObservationRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Problem() is { } problem) return (null, Invalid(problem));
         if (!byKind.TryGetValue(request.Kind, out var source))
             return (null, new(ObjectState.Refused, Code: "OBSERVATION_SOURCE_MISSING", Message: $"No source serves {request.Kind}."));
         try { return (await source.FetchAsync(request, cancellationToken).ConfigureAwait(false), null); }
@@ -28,6 +29,8 @@ internal sealed class Observations
             return (null, new(r.State, Code: r.Code, Message: r.Message, ObservedAt: r.ObservedAt));
         }
     }
+
+    private static ObservationResult Invalid(string message) => new(ObjectState.Refused, Code: "OBSERVATION_REQUEST_INVALID", Message: message);
 }
 
 /// <summary>Counts present keys with a few index lookups at once (the store has a pool of read connections).</summary>

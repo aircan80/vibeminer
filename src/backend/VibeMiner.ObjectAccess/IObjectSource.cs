@@ -50,19 +50,47 @@ public sealed record ObjectResult(ObjectKey Key, ObjectState State, ServedFrom? 
 }
 
 /// <summary>
-/// A kind of dated build observation. The numbers are the history log's record kinds. The wago.tools build list (#96) adds a
+/// A kind of dated observation. The numbers are the history log's record kinds. The wago.tools build list (#96) adds a
 /// kind here, a history kind in layer 1 and an <see cref="IObservationSource"/>; nothing else changes. <see cref="Summary"/> is
-/// the version service's list of every product; it has no product.
+/// the version service's list of every product; it has no product. <see cref="Definition"/> is one WoWDBDefs table definition
+/// (D081), served by <see cref="WoWDBDefsObservations"/>.
 /// </summary>
-public enum ObservationKind { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4 }
+public enum ObservationKind { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4, Definition = 5 }
 
-/// <summary>One observation to make. <see cref="Product"/> is "" for <see cref="ObservationKind.Summary"/>.</summary>
-public sealed record ObservationRequest(ObservationKind Kind, string Product, string Region);
+/// <summary>
+/// One observation to make. <see cref="Product"/> is "" for <see cref="ObservationKind.Summary"/>. A
+/// <see cref="ObservationKind.Definition"/> request is <see cref="Product"/> = the table id (8 lower hex, the manifest's table
+/// hash), <see cref="Region"/> = <see cref="DefinitionRegion"/> and <see cref="Name"/> = the exact table name. Only a definition
+/// request has a <see cref="Name"/>. A request that breaks these rules is Refused with <c>OBSERVATION_REQUEST_INVALID</c>.
+/// </summary>
+public sealed record ObservationRequest(ObservationKind Kind, string Product, string Region, string? Name = null)
+{
+    /// <summary>The region every definition observation is recorded under.</summary>
+    public const string DefinitionRegion = "wowdbdefs";
+
+    /// <summary>Why this request's shape is refused, or null. Product and region rules of the other kinds are their client's.</summary>
+    public string? Problem()
+    {
+        if (Kind != ObservationKind.Definition)
+            return Name is null ? null : $"Only a definition request has a name, not {Kind}.";
+        if (Product is not { Length: 8 } || Product.Any(c => c is not ((>= '0' and <= '9') or (>= 'a' and <= 'f'))))
+            return "A definition request's product is the table id, 8 lower hex digits.";
+        if (Region != DefinitionRegion) return $"A definition request's region is \"{DefinitionRegion}\".";
+        if (Name is not { Length: > 0 and <= 128 } || Name.Any(c => c is not ((>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '_' or '-')))
+            return "A definition request names its table: 1-128 of [A-Za-z0-9_-].";
+        return null;
+    }
+}
 
 /// <summary>One raw reply, exactly as served, with the URL and time it was observed.</summary>
 public sealed record Observation(ObservationKind Kind, string Product, string Region, Uri Url, DateTimeOffset ObservedAt, byte[] Bytes);
 
-/// <summary>An outside source of dated build observations, behind a layer 1 client. Throws <see cref="CdnException"/> on failure.</summary>
+/// <summary>
+/// An outside source of dated observations, behind a layer 1 client. Throws <see cref="CdnException"/> on failure and
+/// <see cref="ArgumentException"/> for a request it refuses. Layer 2 refuses a request whose shape fails
+/// <see cref="ObservationRequest.Problem"/> (Refused, <c>OBSERVATION_REQUEST_INVALID</c>) before any source runs; any other
+/// argument error propagates.
+/// </summary>
 public interface IObservationSource
 {
     IReadOnlyCollection<ObservationKind> Kinds { get; }
@@ -78,6 +106,38 @@ public sealed class VersionServiceObservations(IVersionClient client) : IObserva
         ArgumentNullException.ThrowIfNull(request);
         var reply = await client.FetchAsync(request.Product, request.Region, (VersionDocumentKind)(int)request.Kind, cancellationToken).ConfigureAwait(false);
         return new(request.Kind, reply.Product, reply.Region, reply.Url, reply.ObservedAt, reply.Bytes);
+    }
+}
+
+/// <summary>
+/// WoWDBDefs table definitions (D081): serves only <see cref="ObservationKind.Definition"/>. The observation's URL is the raw
+/// file at the commit it came from, and its time the reply's. A request of the wrong shape is refused before the client is asked.
+/// </summary>
+public sealed class WoWDBDefsObservations(IWoWDBDefsClient client) : IObservationSource
+{
+    public IReadOnlyCollection<ObservationKind> Kinds { get; } = [ObservationKind.Definition];
+
+    /// <summary>The raw definition URL at a commit, as the client builds it.</summary>
+    public static string DefinitionUrl(string revision, string tableName) => WoWDBDefsClient.DefinitionUrl(revision, tableName);
+
+    /// <summary>The 40-hex commit an exact raw definition URL for <paramref name="tableName"/> names, or null for any other URL.</summary>
+    public static string? DefinitionRevision(string url, string tableName)
+    {
+        ArgumentNullException.ThrowIfNull(url);
+        ArgumentNullException.ThrowIfNull(tableName);
+        var prefix = $"https://{WoWDBDefsClient.RawHost}/{WoWDBDefsClient.Repository}/";
+        if (!url.StartsWith(prefix, StringComparison.Ordinal) || url.Length != prefix.Length + 40 + $"/definitions/{tableName}.dbd".Length) return null;
+        var revision = url.Substring(prefix.Length, 40);
+        if (!revision.All(ch => ch is >= '0' and <= '9' or >= 'a' and <= 'f')) return null;
+        return url == WoWDBDefsClient.DefinitionUrl(revision, tableName) ? revision : null;
+    }
+    public async Task<Observation> FetchAsync(ObservationRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Kind != ObservationKind.Definition) throw new ArgumentException($"WoWDBDefs serves only definitions, not {request.Kind}.", nameof(request));
+        if (request.Problem() is { } problem) throw new ArgumentException(problem, nameof(request));
+        var reply = await client.FetchAsync(request.Name!, cancellationToken).ConfigureAwait(false);
+        return new(ObservationKind.Definition, request.Product, request.Region, reply.Url, reply.ObservedAt, reply.Bytes);
     }
 }
 

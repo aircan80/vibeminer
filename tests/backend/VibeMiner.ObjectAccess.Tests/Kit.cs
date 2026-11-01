@@ -24,8 +24,9 @@ internal sealed class Scenario
 
     private ObjectSource? source;
     public ObjectSource Source => source ??= new ObjectSource(Store, Store, Store, Shared, new ScriptedCdnClient(Cdn),
-        [new VersionServiceObservations(new VersionClient(new HttpClient(Versions)))], ObjectVerification.Default, Options);
+        [new VersionServiceObservations(new VersionClient(new HttpClient(Versions))), new WoWDBDefsObservations(Definitions)], ObjectVerification.Default, Options);
     public VersionHandler Versions { get; } = new();
+    public DefinitionClient Definitions { get; } = new();
 
     public static CdnKey KeyOf(ObjectKey key) => new(key.KeyBytes());
 
@@ -65,6 +66,28 @@ internal sealed class Scenario
             var content = new ByteArrayContent("Region!STRING:0|BuildConfig!HEX:16\n## seqn = 1\nus|00000000000000000000000000000001\n"u8.ToArray());
             content.Headers.ContentType = new("text/plain");
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = content, RequestMessage = request });
+        }
+    }
+
+    /// <summary>A WoWDBDefs client with scripted replies and failures per table name; it counts the fetches it was asked for.</summary>
+    internal sealed class DefinitionClient : IWoWDBDefsClient
+    {
+        private readonly Dictionary<string, (string Revision, byte[] Bytes)> replies = [];
+        private readonly Dictionary<string, CdnFailure> failures = [];
+        public DateTimeOffset At { get; set; } = new(2026, 11, 1, 12, 0, 0, TimeSpan.Zero);
+        public List<string> Fetched { get; } = [];
+        public DefinitionClient Add(string tableName, string revision, byte[] bytes) { replies[tableName] = (revision, bytes); return this; }
+        public DefinitionClient Fail(string tableName, CdnFailure failure) { failures[tableName] = failure; return this; }
+
+        public Task<WoWDBDefsReply> FetchAsync(string tableName, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (Fetched) Fetched.Add(tableName);
+            if (replies.TryGetValue(tableName, out var r))
+                return Task.FromResult(new WoWDBDefsReply(tableName, r.Revision, new Uri(WoWDBDefsClient.DefinitionUrl(r.Revision, tableName)), At, r.Bytes));
+            var failure = failures.GetValueOrDefault(tableName, CdnFailure.NotFound);
+            var url = WoWDBDefsClient.CommitsUrl(tableName);
+            throw new CdnException([new CdnAttempt(url.Host, url, failure, null, At, $"Scripted {failure} for {tableName}.")]);
         }
     }
 }

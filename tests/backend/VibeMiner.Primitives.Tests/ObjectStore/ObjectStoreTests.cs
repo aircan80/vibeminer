@@ -652,13 +652,41 @@ public sealed class ObjectStoreTests
         // Only a summary has no product, and a summary never has one.
         Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "")));
         Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", HistoryKind.Summary)));
-        Assert.Throws<ArgumentOutOfRangeException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", (HistoryKind)5)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", (HistoryKind)6)));
+    }
+
+    [Fact]
+    public async Task ADefinitionKeepsItsTableIdRegionAndCommitUrlAndSurvivesARebuildFromThePacks()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        const string url = "https://raw.githubusercontent.com/wowdev/WoWDBDefs/1111111111111111111111111111111111111111/definitions/Item.dbd";
+        var definition = Synthetic.Observation(1, "50238ec2", "wowdbdefs", HistoryKind.Definition) with { Url = url };
+        var objects = HistoryRecordFormat.Objects(definition);
+        Assert.True(HistoryRecordFormat.TryParse(objects[1].Bytes.Span, out var parsed));
+        Assert.Equal((HistoryKind.Definition, "50238ec2", "wowdbdefs", url, definition.ObservedAt.ToUnixTimeMilliseconds(), objects[0].Key),
+            (parsed.Kind, parsed.Product, parsed.Region, parsed.Url, parsed.ObservedMs, parsed.Document));
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            await store.AppendHistoryAsync(definition);
+            await store.AppendHistoryAsync(Synthetic.Observation(2));
+        }
+        foreach (var f in Directory.GetFiles(dir, "objects.sqlite3*")) File.Delete(f);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.True(store.OpenReport.IndexRebuilt);
+            var entry = Assert.Single(await store.ReadHistoryAsync(new HistoryQuery(Kind: HistoryKind.Definition)));
+            Assert.Equal(("50238ec2", "wowdbdefs", url, definition.ObservedAt), (entry.Product, entry.Region, entry.Url, entry.ObservedAt));
+            Assert.Equal(definition.Reply.ToArray(), (await store.ReadAsync(entry.Document)).Bytes);
+        }
+        // A definition always names its table.
+        Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "", "wowdbdefs", HistoryKind.Definition)));
     }
 
     [Theory]
     [InlineData(1, 0)]   // versions with no product
     [InlineData(4, 3)]   // a summary with a product
-    [InlineData(5, 3)]   // a kind past summary
+    [InlineData(6, 3)]   // a kind past definition
     [InlineData(0, 3)]
     public void TheRecordGrammarTiesAnEmptyProductToTheSummary(byte kind, int productLength)
     {

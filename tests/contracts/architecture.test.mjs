@@ -19,8 +19,9 @@ test('production project dependencies preserve pure engine boundaries and the or
     Builds: ['ObjectAccess'],
     // Layer 4 files (D160): a file system per build and locale over layers 3 and 2, never layer 1.
     Files: ['Builds', 'ObjectAccess'],
-    // Layer 5 formats: reads through layer 4 only (#177).
-    Formats: ['Files'],
+    // Layer 5 formats: reads files through layer 4 (#177). ObjectAccess is for the table definitions only: fetched
+    // definitions are layer 2 observations and history (D180).
+    Formats: ['Files', 'ObjectAccess'],
     // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
     Cli: ['Objects', 'Cdn', 'ObjectAccess', 'Builds'],
   };

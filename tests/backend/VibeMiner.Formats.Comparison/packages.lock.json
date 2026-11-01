@@ -155,7 +155,8 @@
       "vibeminer.formats": {
         "type": "Project",
         "dependencies": {
-          "VibeMiner.Files": "[1.0.0, )"
+          "VibeMiner.Files": "[1.0.0, )",
+          "VibeMiner.ObjectAccess": "[1.0.0, )"
         }
       },
       "vibeminer.formats.wow": {

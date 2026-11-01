@@ -5,12 +5,13 @@ using System.Text;
 namespace VibeMiner.Objects;
 
 /// <summary>
-/// The version-service endpoint a reply came from: versions, cdns, bgdl (background-download versions), or the summary of
-/// every product. A summary entry's product is "".
+/// What a reply is: a version-service document (versions, cdns, bgdl (background-download versions), or the summary of
+/// every product), or a WoWDBDefs table definition. A summary entry's product is "". A definition entry's product is the
+/// table id (8 lower hex), its region "wowdbdefs", and its URL the raw file at the commit it came from.
 /// </summary>
-public enum HistoryKind : byte { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4 }
+public enum HistoryKind : byte { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4, Definition = 5 }
 
-/// <summary>One raw version-service reply as it was received: what was asked, where, when, and the exact bytes.</summary>
+/// <summary>One raw version-service or WoWDBDefs reply as it was received: what was asked, where, when, and the exact bytes.</summary>
 public sealed record HistoryObservation(HistoryKind Kind, string Product, string Region, DateTimeOffset ObservedAt, string Url, ReadOnlyMemory<byte> Reply);
 
 /// <summary>A history log entry. The reply bytes are the <see cref="Document"/> object; Read it to get them.</summary>
@@ -63,7 +64,7 @@ public static class HistoryRecordFormat
     internal static bool TryParse(ReadOnlySpan<byte> b, out Parsed parsed)
     {
         parsed = default;
-        if (b.Length < 28 + 1 + 1 + 1 + 2 || b[0] != 1 || b[1] is < (byte)HistoryKind.Versions or > (byte)HistoryKind.Summary || b[2] != 0 || b[3] != 0) return false;
+        if (b.Length < 28 + 1 + 1 + 1 + 2 || b[0] != 1 || b[1] is < (byte)HistoryKind.Versions or > (byte)HistoryKind.Definition || b[2] != 0 || b[3] != 0) return false;
         var kind = (HistoryKind)b[1];
         var at = 28;
         int pl = b[at++]; if (pl > 64 || at + pl > b.Length) return false;

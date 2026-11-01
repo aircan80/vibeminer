@@ -6,7 +6,8 @@ namespace VibeMiner.ObjectAccess.Testing;
 
 /// <summary>
 /// The standard <see cref="IObjectSource"/> test double for layer 3 and up: serves synthetic objects from memory, with
-/// scripted 404s, outages and refusals, and counts what was asked. The shared contract tests run it beside the real source.
+/// scripted 404s, outages and refusals, version and definition replies with their real URLs, scripted observation failures,
+/// and counts what was asked. The shared contract tests run it beside the real source.
 /// </summary>
 public sealed class InMemoryObjectSource : IObjectSource
 {
@@ -15,6 +16,9 @@ public sealed class InMemoryObjectSource : IObjectSource
     private readonly Dictionary<ObjectKey, ObjectResult> scripted = [];
     private readonly List<(ObjectKey Key, FetchPriority Priority)> asked = [];
     private readonly Dictionary<(string, string, ObservationKind), byte[]> replies = [];
+    private readonly Dictionary<string, (string Name, string Revision, byte[] Bytes)> definitions = [];
+    private readonly Dictionary<(string, string, ObservationKind), ObservationResult> failures = [];
+    private readonly List<ObservationRequest> observed = [];
     private readonly HashSet<ObjectKey> stored = [];
     private readonly List<HistoryEntry> history = [];
 
@@ -27,12 +31,38 @@ public sealed class InMemoryObjectSource : IObjectSource
         Script(new(key, ObjectState.NotFound, Code: "CDN_NOT_FOUND", ObservedAt: Time.GetUtcNow()));
     public InMemoryObjectSource Unavailable(ObjectKey key, string code = "CDN_OFFLINE") => Script(new(key, ObjectState.Unavailable, Code: code));
     public InMemoryObjectSource Refuse(ObjectKey key, string code) => Script(new(key, ObjectState.Refused, Code: code));
-    public InMemoryObjectSource AddReply(string product, string region, ObservationKind kind, byte[] bytes) { lock (gate) replies[(product, region, kind)] = bytes; return this; }
+    public InMemoryObjectSource AddReply(string product, string region, ObservationKind kind, byte[] bytes)
+    {
+        lock (gate) { replies[(product, region, kind)] = bytes; failures.Remove((product, region, kind)); }
+        return this;
+    }
+    /// <summary>
+    /// Serves a WoWDBDefs definition for <paramref name="tableId"/> (8 lower hex) as fetched at <paramref name="revision"/>: its URL
+    /// is <see cref="WoWDBDefsObservations.DefinitionUrl"/>. A request naming another table gets a 404, as GitHub would answer.
+    /// </summary>
+    public InMemoryObjectSource AddDefinition(string tableId, string tableName, string revision, byte[] bytes)
+    {
+        lock (gate) { definitions[tableId] = (tableName, revision, bytes); failures.Remove((tableId, ObservationRequest.DefinitionRegion, ObservationKind.Definition)); }
+        return this;
+    }
+    /// <summary>
+    /// Every observation of (product, region, kind) fails with this state and code until a reply is added again. NotFound and
+    /// Unavailable are dated now, like the real source's.
+    /// </summary>
+    public InMemoryObjectSource FailObservation(string product, string region, ObservationKind kind, ObjectState state, string code, string? message = null)
+    {
+        if (state == ObjectState.Present) throw new ArgumentException("A scripted failure isn't present.", nameof(state));
+        lock (gate) failures[(product, region, kind)] = new(state, Code: code, Message: message,
+            ObservedAt: state is ObjectState.NotFound or ObjectState.Unavailable ? Time.GetUtcNow() : null);
+        return this;
+    }
     /// <summary>Marks an object as already in the profile's store (it counts as present and its history is listed).</summary>
     public InMemoryObjectSource AddStored(ObjectKey key, byte[] bytes) { lock (gate) { objects[key] = bytes; stored.Add(key); } return this; }
     private InMemoryObjectSource Script(ObjectResult result) { lock (gate) scripted[result.Key] = result; return this; }
 
     public IReadOnlyList<(ObjectKey Key, FetchPriority Priority)> Asked { get { lock (gate) return asked.ToArray(); } }
+    /// <summary>Every <see cref="ObserveAsync"/> call made, in order, refused and failed ones included.</summary>
+    public IReadOnlyList<ObservationRequest> Observed { get { lock (gate) return observed.ToArray(); } }
 
     private async Task<ObjectResult> AnswerAsync(ObjectRequest request, CdnContext? cdn, FetchPriority priority, bool withBytes, CancellationToken token)
     {
@@ -88,13 +118,26 @@ public sealed class InMemoryObjectSource : IObjectSource
 
     public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
         lock (gate)
         {
-            if (!replies.TryGetValue((request.Product, request.Region, request.Kind), out var bytes))
-                return Task.FromResult(new ObservationResult(ObjectState.NotFound, Code: "CDN_NOT_FOUND", ObservedAt: Time.GetUtcNow()));
-            var url = request.Kind <= ObservationKind.Summary ? VersionClient.UrlFor(request.Product, request.Region, (VersionDocumentKind)(int)request.Kind)
-                : new Uri("https://example.invalid/");
+            observed.Add(request);
+            if (request.Problem() is { } problem) return Task.FromResult(Invalid(problem));
+            if (failures.TryGetValue((request.Product, request.Region, request.Kind), out var failure)) return Task.FromResult(failure);
+            Uri url;
+            byte[] bytes;
+            if (request.Kind == ObservationKind.Definition)
+            {
+                if (!definitions.TryGetValue(request.Product, out var d) || d.Name != request.Name) return Task.FromResult(NotObserved());
+                (url, bytes) = (new Uri(WoWDBDefsObservations.DefinitionUrl(d.Revision, d.Name)), d.Bytes);
+            }
+            else
+            {
+                if (!replies.TryGetValue((request.Product, request.Region, request.Kind), out var reply)) return Task.FromResult(NotObserved());
+                url = VersionClient.UrlFor(request.Product, request.Region, (VersionDocumentKind)(int)request.Kind);
+                bytes = reply;
+            }
             var observation = new Observation(request.Kind, request.Product, request.Region, url, Time.GetUtcNow(), bytes);
             var put = HistoryRecordFormat.Objects(new HistoryObservation((HistoryKind)(byte)request.Kind, request.Product, request.Region,
                 observation.ObservedAt, url.AbsoluteUri, bytes));
@@ -103,6 +146,9 @@ public sealed class InMemoryObjectSource : IObjectSource
             return Task.FromResult(new ObservationResult(ObjectState.Present, observation, true));
         }
     }
+
+    private ObservationResult NotObserved() => new(ObjectState.NotFound, Code: "CDN_NOT_FOUND", ObservedAt: Time.GetUtcNow());
+    private static ObservationResult Invalid(string message) => new(ObjectState.Refused, Code: "OBSERVATION_REQUEST_INVALID", Message: message);
 
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
     {

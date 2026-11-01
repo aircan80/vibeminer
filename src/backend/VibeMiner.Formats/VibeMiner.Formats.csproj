@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
-  <!-- Layer 5 formats (#177): the DB2 and DBD readers. Reads through layer 4 only; until layer 4 reads land (#172) the DB2 reader takes bytes through its own range seam. -->
+  <!-- Layer 5 formats (#177, #178): the DB2 and DBD readers, and WoWDBDefs table definitions in Definitions/. Reads files through layer 4 only; until layer 4 reads land (#172) the DB2 reader takes bytes through its own range seam. Only the definitions use layer 2, for fetched definitions in the history log (D180). -->
   <ProjectReference Include="../VibeMiner.Files/VibeMiner.Files.csproj" />
+  <ProjectReference Include="../VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
   <InternalsVisibleTo Include="VibeMiner.Formats.Tests" />
   <InternalsVisibleTo Include="VibeMiner.Formats.Comparison" />
+  <!-- The pinned WoWDBDefs files (D120), embedded by link from their one place in the tree; BundledDefinitions opens them by this name. -->
+  <EmbeddedResource Include="../VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/**/*" Link="Definitions/Bundled/WoWDBDefs/%(RecursiveDir)%(Filename)%(Extension)"
+    LogicalName="VibeMiner.Formats.Definitions.Bundled.WoWDBDefs.$([System.String]::Copy('%(RecursiveDir)').Replace('\', '.').Replace('/', '.'))%(Filename)%(Extension)" />
 </ItemGroup></Project>

@@ -13,6 +13,8 @@ namespace VibeMiner.ObjectAccess.Tests;
 public abstract class ObjectSourceContract
 {
     protected static readonly CdnContext Context = new(Scenario.Route);
+    protected const string TableId = "0123abcd", TableName = "Map", Revision = "1111111111111111111111111111111111111111";
+    protected static readonly byte[] MapDbd = "COLUMNS\nint ID\n\nBUILD 11.0.0.1\n$id$ID<32>\n"u8.ToArray();
     /// <summary>Makes the objects available (on the CDN for the real source) and returns the source.</summary>
     protected abstract IObjectSource Arrange(IReadOnlyList<PutObject> available);
     private static readonly CancellationToken None = CancellationToken.None;
@@ -109,6 +111,49 @@ public abstract class ObjectSourceContract
     }
 
     [Fact]
+    public async Task ADefinitionIsObservedWithItsRawUrlAndReadBack()
+    {
+        var source = Arrange([]);
+        var r = await source.ObserveAsync(new(ObservationKind.Definition, TableId, "wowdbdefs", TableName), None);
+        Assert.Equal((ObjectState.Present, true), (r.State, r.Recorded));
+        Assert.Equal(WoWDBDefsClient.DefinitionUrl(Revision, TableName), r.Observation!.Url.AbsoluteUri);
+        Assert.Equal(MapDbd, r.Observation.Bytes);
+        var entry = Assert.Single(await source.ReadHistoryAsync(new(Product: TableId, Kind: HistoryKind.Definition), None));
+        Assert.Equal((TableId, "wowdbdefs", r.Observation.Url.AbsoluteUri, r.Observation.ObservedAt), (entry.Product, entry.Region, entry.Url, entry.ObservedAt));
+        var document = await source.GetKeyAsync(new(entry.Document), null, FetchPriority.Interactive, None);
+        Assert.Equal(MapDbd, document.Bytes);
+        Assert.Empty(await source.ReadHistoryAsync(new(Kind: HistoryKind.Versions), None));
+    }
+
+    [Fact]
+    public async Task AFailedDefinitionIsADatedResultAndNothingIsRecorded()
+    {
+        var source = Arrange([]);
+        var r = await source.ObserveAsync(new(ObservationKind.Definition, "fedcba98", "wowdbdefs", "Missing"), None);
+        Assert.Equal((ObjectState.NotFound, "CDN_NOT_FOUND", false), (r.State, r.Code, r.Recorded));
+        Assert.True(r.ObservedAt.HasValue);
+        Assert.Null(r.Observation);
+        Assert.Empty(await source.ReadHistoryAsync(new(Kind: HistoryKind.Definition), None));
+    }
+
+    [Theory]
+    [InlineData(ObservationKind.Definition, "0123ABCD", "wowdbdefs", "Map")]
+    [InlineData(ObservationKind.Definition, "0123abc", "wowdbdefs", "Map")]
+    [InlineData(ObservationKind.Definition, "0123abcd", "us", "Map")]
+    [InlineData(ObservationKind.Definition, "0123abcd", "wowdbdefs", null)]
+    [InlineData(ObservationKind.Definition, "0123abcd", "wowdbdefs", "")]
+    [InlineData(ObservationKind.Definition, "0123abcd", "wowdbdefs", "../Map")]
+    [InlineData(ObservationKind.Versions, "wow", "us", "Map")]
+    public async Task ARequestOfTheWrongShapeIsRefused(ObservationKind kind, string product, string region, string? name)
+    {
+        var source = Arrange([]);
+        var r = await source.ObserveAsync(new(kind, product, region, name), None);
+        Assert.Equal((ObjectState.Refused, "OBSERVATION_REQUEST_INVALID", false), (r.State, r.Code, r.Recorded));
+        Assert.NotNull(r.Message);
+        Assert.Empty(await source.ReadHistoryAsync(new(), None));
+    }
+
+    [Fact]
     public async Task OnlyStoredKeysCountAsPresent()
     {
         var a = Synthetic.Config(1); var b = Synthetic.Config(2); var c = Synthetic.Config(3);
@@ -138,6 +183,7 @@ public sealed class RealObjectSourceContractTests : ObjectSourceContract
     {
         var s = new Scenario();
         foreach (var o in available) s.Serve(o);
+        s.Definitions.Add(TableName, Revision, MapDbd);
         return s.Source;
     }
 }
@@ -150,6 +196,7 @@ public sealed class InMemoryObjectSourceContractTests : ObjectSourceContract
         foreach (var o in available) fake.Add(o.Key, o.Bytes.ToArray());
         fake.AddReply("wow", "us", ObservationKind.Versions, "Region!STRING:0\nus\n"u8.ToArray());
         fake.AddReply("", "us", ObservationKind.Summary, "Product!STRING:0|Seqn!DEC:4|Flags!STRING:0\nwow|1|\n"u8.ToArray());
+        fake.AddDefinition(TableId, TableName, Revision, MapDbd);
         return fake;
     }
 }
