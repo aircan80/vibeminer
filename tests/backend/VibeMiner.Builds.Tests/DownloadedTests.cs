@@ -555,12 +555,28 @@ public sealed class DownloadedTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task OnlyAnOpenedBuildHasALedger()
+    public async Task OnlyABuildWithALedgerIsMeasured()
     {
-        var b = new SyntheticBuild();
-        var fake = (await new InMemoryBuilds().Add(b.Ref, b.ToFake()).OpenAsync(b.Ref, Ct)).Opened!;
         await using var figures = new DownloadedFigures(inner, inner);
-        await Assert.ThrowsAsync<ArgumentException>(() => figures.GetAsync(fake, Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => figures.GetAsync(new NoLedgerBuild(new SyntheticBuild().Ref), Ct));
+
+        // The layer 3 fake has one: every distinct variant EKey with its encoded size.
+        var b = new SyntheticBuild();
+        var variants = b.ToFake().Files.SelectMany(f => f.Variants).Where(v => v.EKey is not null).DistinctBy(v => v.EKey).ToArray();
+        Assert.NotEmpty(variants);
+        var fake = (await new InMemoryBuilds().Add(b.Ref, b.ToFake()).OpenAsync(b.Ref, Ct)).Opened!;
+        var figure = await figures.GetAsync(fake, Ct);
+        Assert.Equal(variants.Length, figure.TotalObjects);
+        Assert.Equal(variants.Sum(v => v.EncodedSize ?? 0), figure.TotalBytes);
+    }
+
+    private sealed record NoLedgerBuild(BuildRef Build) : IBuild
+    {
+        public CdnContext? Cdn => null;
+        public BuildMetadata Metadata => throw new NotSupportedException();
+        public FileResolution Resolve(uint fileDataId) => throw new NotSupportedException();
+        public FileResolution Resolve(string path) => throw new NotSupportedException();
+        public IEnumerable<uint> FileDataIds(string locale, uint fromId = 0) => throw new NotSupportedException();
     }
 
     private sealed class LedgerBuild(BuildRef build, ObjectLedger ledger) : IBuild, ILedgerSource

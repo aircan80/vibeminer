@@ -279,6 +279,8 @@ internal sealed class OpenedBuild(BuildRef build, BuildMetadata metadata, CdnCon
     /// <summary>The build's object ledger, built from ENCODING on first use.</summary>
     public ObjectLedger Ledger => ledger.Value;
 
+    public bool TryLocate(CdnKey eKey, out ArchiveLocation location, out int archive) => locations.TryFind(eKey, out location, out archive);
+
     public FileResolution Resolve(string path)
     {
         ArgumentNullException.ThrowIfNull(path);

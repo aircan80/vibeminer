@@ -29,6 +29,8 @@ internal sealed class FakeStores : IStoreOpener
     public int Open { get; private set; }
     /// <summary>When set, every open waits on this after it is recorded and before it fails or succeeds; the flag is true for a writer open.</summary>
     public Func<bool, CancellationToken, Task>? BeforeOpen { get; set; }
+    /// <summary>Called as a handle is disposed, before it counts as closed; the flag is true for the writer.</summary>
+    public Action<bool>? Disposing { get; set; }
 
     public Task<IStoreHandle> OpenReadOnlyAsync(string folder, CancellationToken ct) => OpenAsync(folder, false, ReadOnlyFailure, ct);
     /// <summary>A writer open asked to create a store gets past a missing one, as the real store does.</summary>
@@ -62,7 +64,7 @@ internal sealed class FakeStores : IStoreOpener
             if (owner.BeforeScrub is { } wait) await wait(ct);
             return owner.Scrub;
         }
-        public ValueTask DisposeAsync() { owner.Open--; return ValueTask.CompletedTask; }
+        public ValueTask DisposeAsync() { owner.Disposing?.Invoke(writer); owner.Open--; return ValueTask.CompletedTask; }
     }
 }
 

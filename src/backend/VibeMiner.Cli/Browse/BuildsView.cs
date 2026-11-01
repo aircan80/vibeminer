@@ -143,11 +143,14 @@ internal sealed class ProductBuildsView(ReviewedProduct product) : BrowseView
     }
 }
 
-/// <summary>One build: its identity fields exactly, then each region listing. <c>d</c> measures what of it is stored.</summary>
+/// <summary>
+/// One build: its identity fields exactly, then each region listing. <c>d</c> measures what of it is stored; <c>a</c> downloads
+/// all of it as the store's writer.
+/// </summary>
 internal sealed class BuildView(CatalogBuild build) : BrowseView
 {
     public override string Title => build.VersionsName;
-    public override IReadOnlyList<ViewAction> Actions => [Downloaded];
+    public override IReadOnlyList<ViewAction> Actions => [Downloaded, DownloadAll];
 
     /// <summary>
     /// <c>d</c>: opens the build read-only from the store (its ENCODING, ROOT and every archive index, so not on every load) and
@@ -157,16 +160,97 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
 
     private async Task<string> DownloadedAsync(BrowseSession session, IProgress<string> progress, CancellationToken ct)
     {
-        var region = build.Regions.FirstOrDefault(g => g.Current) ?? build.Regions.FirstOrDefault();
-        if (region is null) return "downloaded: no region lists a cdn config for this build, so it can't be opened.";
+        if (Region is not { } region) return "downloaded: no region lists a cdn config for this build, so it can't be opened.";
         await using var store = await session.OpenReadAsync(ct).ConfigureAwait(false);
         progress.Report($"opening {build.VersionsName} ({region.Region}) from the store: ENCODING, ROOT, indexes; x cancels");
-        var opened = await new BuildOpener(store.Objects).OpenAsync(new BuildRef(build.Product, build.BuildConfig, region.CdnConfig, region.Region), ct)
+        var opened = await session.Builds(store.Objects).OpenAsync(new BuildRef(build.Product, build.BuildConfig, region.CdnConfig, region.Region), ct)
             .ConfigureAwait(false);
         if (opened is not { State: BuildOpenState.Open, Opened: { } open }) return NotOpened(opened);
         progress.Report($"counting stored objects of {build.VersionsName}; x cancels");
         await using var figures = new DownloadedFigures(store.Objects);
         return Measured(await figures.GetAsync(open, ct).ConfigureAwait(false), region.Region);
+    }
+
+    /// <summary>The region <c>d</c> and <c>a</c> open the build in: a current one, else the first listed.</summary>
+    private BuildRegion? Region => build.Regions.FirstOrDefault(g => g.Current) ?? build.Regions.FirstOrDefault();
+
+    /// <summary>
+    /// <c>a</c>: Download all, as the store's writer. Opens the build over the writer's source (fetching metadata it lacks), then
+    /// runs one layer 3 job and waits for its end. Cancel turns the job off and waits for it, so nothing runs once the lock goes.
+    /// </summary>
+    private ViewAction DownloadAll => new('a', "download all: fetch every object of the build (writes: takes the writer lock)", "download all", DownloadAllAsync);
+
+    /// <summary>Fits an 80-column status line: the lock is taken, by whom, and that nothing was fetched.</summary>
+    internal const string DownloadAllBusy = "download all: store busy (is VibeMiner running?); nothing fetched.";
+
+    private async Task<string> DownloadAllAsync(BrowseSession session, IProgress<string> progress, CancellationToken ct)
+    {
+        if (Region is not { } region) return "download all: no region lists a cdn config for this build, so it can't be opened.";
+        IStoreHandle store;
+        progress.Report("taking the writer lock");
+        try { store = await session.OpenWriterAsync(ct).ConfigureAwait(false); }
+        catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.Busy) { return DownloadAllBusy; }
+        await using (store)
+        {
+            progress.Report($"opening {build.VersionsName} ({region.Region}): ENCODING, ROOT, indexes; x cancels");
+            var opened = await session.Builds(store.Objects).OpenAsync(new BuildRef(build.Product, build.BuildConfig, region.CdnConfig, region.Region), ct)
+                .ConfigureAwait(false);
+            if (opened is not { State: BuildOpenState.Open, Opened: { } open }) return NotOpenedForDownload(opened);
+            var folder = session.StoreFolder;
+            var freeSpace = session.FreeSpace;
+            // Disposed before the store: it stops and awaits any job still running.
+            await using var jobs = new DownloadAllJobs(store.Objects, _ => ValueTask.FromResult(freeSpace(folder)));
+            var job = jobs.Start(open, new Forward(p => progress.Report(DownloadAllProgressLine(p))));
+            DownloadAllResult result;
+            try { result = await job.Completion.WaitAsync(ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                result = await jobs.StopAsync(open.Build).ConfigureAwait(false) ?? await job.Completion.ConfigureAwait(false);
+            }
+            return DownloadAllLine(result, region.Region);
+        }
+    }
+
+    /// <summary>
+    /// A running job's progress, after the task's <c>download all: </c> prefix, e.g.
+    /// <c>41.2% of 175.1 GiB, 1,204,331 of 2,900,112 objects; x cancels</c>.
+    /// </summary>
+    internal static string DownloadAllProgressLine(DownloadAllProgress p) => p.Stage == DownloadAllStage.Scanning
+        ? string.Create(CultureInfo.InvariantCulture, $"checking what is stored: {p.StoredObjects:N0} of {p.TotalObjects:N0} found; x cancels")
+        : string.Create(CultureInfo.InvariantCulture,
+            $"{Share(p.StoredBytes, p.TotalBytes) * 100:0.0}% of {VmCommands.Size(p.TotalBytes)}, {p.StoredObjects:N0} of {p.TotalObjects:N0} objects; x cancels");
+
+    /// <summary>The one status line a Download all run ends with, per outcome.</summary>
+    internal static string DownloadAllLine(DownloadAllResult r, string region)
+    {
+        var f = r.Final;
+        var code = r.Code ?? "no code";
+        return r.Outcome switch
+        {
+            DownloadAllOutcome.Completed => string.Create(CultureInfo.InvariantCulture,
+                $"download all: done, {f.StoredObjects:N0} objects, {VmCommands.Size(f.StoredBytes)} stored ({region})"),
+            DownloadAllOutcome.Incomplete => string.Create(CultureInfo.InvariantCulture,
+                $"download all: incomplete, {r.NotFound:N0} not found, {r.Unavailable:N0} unavailable, {r.Refused:N0} refused."),
+            DownloadAllOutcome.Canceled => string.Create(CultureInfo.InvariantCulture,
+                $"download all: canceled at {Share(f.StoredBytes, f.TotalBytes) * 100:0.0}% of {VmCommands.Size(f.TotalBytes)}; stored objects are kept."),
+            DownloadAllOutcome.DiskFull => $"download all: free space short or disk full ({code}).",
+            DownloadAllOutcome.StoreFailed => $"download all: the store failed ({code}).",
+            DownloadAllOutcome.NeedsNetwork => $"download all: no network or CDN route ({code}).",
+            _ => $"download all: failed ({code}).",
+        };
+    }
+
+    /// <summary>An open over the writer that isn't Open. With the writer, NeedsNetwork means no network or no CDN route.</summary>
+    internal static string NotOpenedForDownload(BuildOpenResult r) => r.State == BuildOpenState.NeedsNetwork
+        ? $"download all: no network or CDN route for the {r.Part}; nothing fetched."
+        : $"download all: can't open: {r.State} at {r.Part} ({r.Code ?? "no code"}).";
+
+    private static double Share(long part, long total) => total <= 0 ? 0 : (double)part / total;
+
+    /// <summary>Forwards the job's progress on its own thread; the task's progress posts it to the UI thread.</summary>
+    private sealed class Forward(Action<DownloadAllProgress> report) : IProgress<DownloadAllProgress>
+    {
+        public void Report(DownloadAllProgress value) => report(value);
     }
 
     /// <summary>The status line for a measured build, e.g. <c>downloaded: 41.2% of 175.1 GiB, 1,204,331 of 2,900,112 objects (us)</c>.</summary>
@@ -189,6 +273,7 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
             new(["Current", build.Current ? "yes" : "no"]),
             new(["First seen", $"{BrowseSession.Time(build.FirstSeen)} UTC"]), new(["Last seen", $"{BrowseSession.Time(build.LastSeen)} UTC"]),
             new(["Downloaded", "d measures (opens the build read-only)"]),
+            new(["Download all", "a fetches every object (takes the writer lock)"]),
         };
         rows.AddRange(build.Fields.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => new BrowseRow([$"field {f.Key}", f.Value])));
         rows.AddRange(build.Regions.Select(g => new BrowseRow([$"region {g.Region}",

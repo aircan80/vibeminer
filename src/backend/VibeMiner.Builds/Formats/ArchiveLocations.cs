@@ -81,12 +81,16 @@ internal sealed class ArchiveLocations
     }
 
     /// <summary>The archive range holding <paramref name="eKey"/>, chosen by the D133 rule.</summary>
-    public bool TryFind(CdnKey eKey, out ArchiveLocation location)
+    public bool TryFind(CdnKey eKey, out ArchiveLocation location) => TryFind(eKey, out location, out _);
+
+    /// <summary>As <see cref="TryFind(CdnKey, out ArchiveLocation)"/>, with the archive's position in CDN config order (-1 when not found).</summary>
+    public bool TryFind(CdnKey eKey, out ArchiveLocation location, out int archive)
     {
         var i = Search(rows.AsSpan(), eKey);
-        if (i < 0) { location = default; return false; }
+        if (i < 0) { location = default; archive = -1; return false; }
         var row = rows[i];
         location = new(archives[row.Archive], row.Offset, row.Size);
+        archive = row.Archive;
         return true;
     }
 

@@ -1,5 +1,7 @@
 using System.Text;
 using VibeMiner.Builds;
+using VibeMiner.Builds.Testing;
+using VibeMiner.Cdn;
 using VibeMiner.Cli.Browse;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
@@ -15,12 +17,14 @@ public sealed class BrowseModelTests : IAsyncDisposable
 
     private readonly FakeStores stores = new();
     private readonly ManualTime time = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    private readonly BrowseSession session;
     private readonly Navigator navigator;
 
     public BrowseModelTests()
     {
         stores.Source.Time = time;
-        navigator = new Navigator(ViewRegistry.Default(), new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), StoreFolder), a => a());
+        session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), StoreFolder);
+        navigator = new Navigator(ViewRegistry.Default(), session, a => a());
     }
 
     public async ValueTask DisposeAsync() => await navigator.DisposeAsync().AsTask().WaitAsync(Guard);
@@ -342,6 +346,186 @@ public sealed class BrowseModelTests : IAsyncDisposable
             BuildView.NotOpened(new(build, BuildOpenState.NeedsNetwork, null, BuildPart.Encoding, "OBJECT_ACCESS_NEEDS_NETWORK", "x", null)));
         Assert.Equal("downloaded: can't open: Corrupt at Root (BLTE_CHECKSUM).",
             BuildView.NotOpened(new(build, BuildOpenState.Corrupt, null, BuildPart.Root, "BLTE_CHECKSUM", "x", null)));
+    }
+
+    [Fact]
+    public async Task DownloadAllWithNoCdnRouteTakesTheWriterLockSaysSoAndLetsItGo()
+    {
+        var detail = await RetailBuildAsync();
+        Assert.Contains(["Download all", "a fetches every object (takes the writer lock)"], Cells(detail));
+
+        Assert.True(navigator.TryAction('a'));
+        await SettleTaskAsync();
+        // Only the versions reply is stored: no cdns, so the writer's open has no route to fetch the build config.
+        Assert.Equal("download all: no network or CDN route for the BuildConfig; nothing fetched.", navigator.Tasks.Status);
+        Assert.True(navigator.Tasks.Status.Length <= 80);
+        Assert.Contains((StoreFolder, true), stores.Opened);
+        Assert.Equal([true], stores.WriterCreate);
+        Assert.Equal(0, stores.Open);
+        Assert.IsType<BuildView>(navigator.Current.View);
+    }
+
+    [Fact]
+    public async Task DownloadAllWhileTheAppHoldsTheWriterLockSaysSoAndFetchesNothing()
+    {
+        await RetailBuildAsync();
+        var opened = stores.Opened.Count;
+        stores.WriterFailure = ObjectStoreCodes.Busy;
+        Assert.True(navigator.TryAction('a'));
+        await SettleTaskAsync();
+        Assert.Equal(BuildView.DownloadAllBusy, navigator.Tasks.Status);
+        Assert.True(BuildView.DownloadAllBusy.Length <= 80);
+        Assert.Null(navigator.Tasks.Running);
+        // Only the refused writer open: nothing was read or fetched through a store.
+        Assert.Equal([(StoreFolder, true)], stores.Opened.Skip(opened));
+        Assert.Equal(0, stores.Open);
+        Assert.Null(navigator.Current.Error);
+    }
+
+    [Fact]
+    public async Task CancelingDownloadAllEndsWithCanceledAndReleasesTheLock()
+    {
+        await RetailBuildAsync();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        stores.BeforeOpen = async (writer, ct) =>
+        {
+            if (!writer) return;
+            started.TrySetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+        };
+        Assert.True(navigator.TryAction('a'));
+        await started.Task.WaitAsync(Guard);
+        Assert.Equal("download all", navigator.Tasks.Running);
+
+        Assert.True(navigator.Tasks.Cancel());
+        await SettleTaskAsync();
+        Assert.Equal("download all canceled.", navigator.Tasks.Status);
+        Assert.Null(navigator.Tasks.Running);
+        Assert.Equal(0, stores.Open);
+    }
+
+    /// <summary>
+    /// The Retail build opens over the writer as a fake with two objects (4 and 6 bytes) the CDN serves and the store lacks, and
+    /// the volume has room. Returns their keys.
+    /// </summary>
+    private async Task<ObjectKey[]> OpenableRetailBuildAsync()
+    {
+        await RetailBuildAsync();
+        var builds = new InMemoryBuilds();
+        session.Builds = _ => builds;
+        session.FreeSpace = _ => 1L << 40;
+        var files = new List<FakeFile>();
+        var keys = new List<ObjectKey>();
+        foreach (var (id, size) in new[] { (1u, 4), (2u, 6) })
+        {
+            var eKey = new byte[16]; eKey[0] = (byte)id;
+            var cKey = new byte[16]; cKey[0] = (byte)(0x80 + id);
+            files.Add(new(id, null, [new FileVariant(0x2, 0, new CdnKey(cKey), size, new CdnKey(eKey), size, null)]));
+            var key = new ObjectKey(ObjectKeyType.Encoded, eKey);
+            stores.Source.Add(key, new byte[size]);
+            keys.Add(key);
+        }
+        var metadata = new BuildMetadata("12.0.1.60000", default, default, default, 0, files.Count, ["enUS"]);
+        var fake = new FakeBuild(metadata, files, new CdnContext(new CdnRoute(["us.cdn.blizzard.com"], "tpr/wow")));
+        // The view opens the build in the first current region its catalog lists.
+        builds.Add(new BuildRef("wow", A, B, "eu"), fake);
+        return keys.ToArray();
+    }
+
+    /// <summary>The object requests asked so far, without the catalog's history reads.</summary>
+    private List<(ObjectKey Key, FetchPriority Priority)> Fetched() => stores.Source.Asked.Where(a => a.Key.Type == ObjectKeyType.Encoded).ToList();
+
+    [Fact]
+    public async Task DownloadAllFetchesEveryObjectAndSaysDone()
+    {
+        var keys = await OpenableRetailBuildAsync();
+        Assert.True(navigator.TryAction('a'));
+        await SettleTaskAsync();
+        Assert.Equal("download all: done, 2 objects, 10 B stored (eu)", navigator.Tasks.Status);
+        Assert.Equal(keys, Fetched().Select(a => a.Key));
+        Assert.All(Fetched(), a => Assert.Equal(FetchPriority.Background, a.Priority));
+        Assert.True((await stores.Source.HasKeysAsync(keys, default)).All(h => h));
+        Assert.Equal(0, stores.Open);
+    }
+
+    [Fact]
+    public async Task CancelingARunningDownloadAllStopsTheJobBeforeTheWriterLockGoes()
+    {
+        await OpenableRetailBuildAsync();
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var inFlight = 0;
+        (int InFlight, int Asked)? atRelease = null;
+        stores.Source.BeforeAnswer = async (key, ct) =>
+        {
+            if (key.Type != ObjectKeyType.Encoded) return;
+            Interlocked.Increment(ref inFlight);
+            try
+            {
+                held.TrySetResult();
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+            finally { Interlocked.Decrement(ref inFlight); }
+        };
+        stores.Disposing = writer => { if (writer) atRelease = (Volatile.Read(ref inFlight), Fetched().Count); };
+        Assert.True(navigator.TryAction('a'));
+        // The job's first background answer is held: the job is fetching under the writer lock.
+        await held.Task.WaitAsync(Guard);
+        Assert.Equal("download all", navigator.Tasks.Running);
+        Assert.Equal(1, stores.Open);
+
+        Assert.True(navigator.Tasks.Cancel());
+        await SettleTaskAsync();
+        // When the writer handle went, no answer was in flight and the job had asked for nothing more; it asks nothing after.
+        Assert.Equal((0, 1), atRelease);
+        Assert.Single(Fetched());
+        Assert.Equal("download all: canceled at 0.0% of 10 B; stored objects are kept.", navigator.Tasks.Status);
+        Assert.Null(navigator.Tasks.Running);
+        Assert.Equal(0, stores.Open);
+    }
+
+    [Fact]
+    public void DownloadAllLinesFitTheStatusAndNameTheOutcome()
+    {
+        var build = new BuildRef("wow", A, B, "us");
+        const long Total = 188_000_000_000;
+        var fetching = new DownloadAllProgress(build, DownloadAllStage.Fetching, 1_204_331, 2_900_112, 77_500_000_000, Total, 0, 0);
+        var scanning = fetching with { Stage = DownloadAllStage.Scanning };
+        var done = fetching with { StoredObjects = 2_900_112, StoredBytes = Total };
+        DownloadAllResult Result(DownloadAllOutcome outcome, DownloadAllProgress final, string? code = null, long notFound = 0, long unavailable = 0, long refused = 0) =>
+            new(build, outcome, final, notFound, unavailable, refused, code, "x");
+
+        // The task prefixes progress with its name.
+        Assert.Equal("download all: 41.2% of 175.1 GiB, 1,204,331 of 2,900,112 objects; x cancels", "download all: " + BuildView.DownloadAllProgressLine(fetching));
+        Assert.Equal("download all: checking what is stored: 1,204,331 of 2,900,112 found; x cancels", "download all: " + BuildView.DownloadAllProgressLine(scanning));
+        Assert.Equal("0.0% of 0 B, 0 of 0 objects; x cancels",
+            BuildView.DownloadAllProgressLine(new(build, DownloadAllStage.Fetching, 0, 0, 0, 0, 0, 0)));
+
+        string[] lines =
+        [
+            BuildView.DownloadAllLine(Result(DownloadAllOutcome.Completed, done), "us"),
+            BuildView.DownloadAllLine(Result(DownloadAllOutcome.Incomplete, fetching, "CDN_NOT_FOUND", 12_345, 678, 9), "us"),
+            BuildView.DownloadAllLine(Result(DownloadAllOutcome.Canceled, fetching), "us"),
+            BuildView.DownloadAllLine(Result(DownloadAllOutcome.DiskFull, fetching, "DOWNLOAD_ALL_NOT_ENOUGH_SPACE"), "us"),
+            BuildView.DownloadAllLine(Result(DownloadAllOutcome.StoreFailed, fetching, "DOWNLOAD_ALL_FREE_SPACE_UNKNOWN"), "us"),
+            BuildView.DownloadAllLine(Result(DownloadAllOutcome.NeedsNetwork, fetching, "OBJECT_ACCESS_NO_CDN_CONTEXT"), "us"),
+            BuildView.DownloadAllLine(Result(DownloadAllOutcome.Failed, fetching, "DOWNLOAD_ALL_FAILED"), "us"),
+        ];
+        Assert.Equal(
+        [
+            "download all: done, 2,900,112 objects, 175.1 GiB stored (us)",
+            "download all: incomplete, 12,345 not found, 678 unavailable, 9 refused.",
+            "download all: canceled at 41.2% of 175.1 GiB; stored objects are kept.",
+            "download all: free space short or disk full (DOWNLOAD_ALL_NOT_ENOUGH_SPACE).",
+            "download all: the store failed (DOWNLOAD_ALL_FREE_SPACE_UNKNOWN).",
+            "download all: no network or CDN route (OBJECT_ACCESS_NO_CDN_CONTEXT).",
+            "download all: failed (DOWNLOAD_ALL_FAILED).",
+        ], lines);
+        Assert.All(lines, l => Assert.True(l.Length <= 80, l));
+        Assert.Equal("download all: failed (no code).", BuildView.DownloadAllLine(Result(DownloadAllOutcome.Failed, fetching), "us"));
+
+        Assert.Equal("download all: can't open: Corrupt at Root (BLTE_CHECKSUM).",
+            BuildView.NotOpenedForDownload(new(build, BuildOpenState.Corrupt, null, BuildPart.Root, "BLTE_CHECKSUM", "x", null)));
+        Assert.True(BuildView.NotOpenedForDownload(new(build, BuildOpenState.NeedsNetwork, null, BuildPart.ArchiveIndex, "x", "x", null)).Length <= 80);
     }
 
     [Fact]

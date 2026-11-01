@@ -37,6 +37,16 @@ public sealed record DownloadedOptions
 internal interface ILedgerSource
 {
     ObjectLedger Ledger { get; }
+
+    /// <summary>
+    /// The archive range holding <paramref name="eKey"/> (the D133 choice) and that archive's position in the CDN config's
+    /// archive list (<see cref="CdnContext.Archives"/>). False when no archive lists it (file-index or loose).
+    /// </summary>
+    bool TryLocate(CdnKey eKey, out ArchiveLocation location, out int archive)
+    {
+        location = default; archive = -1;
+        return false;
+    }
 }
 
 /// <summary>

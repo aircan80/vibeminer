@@ -1,4 +1,5 @@
 using VibeMiner.Builds.Formats;
+using VibeMiner.Cdn;
 using VibeMiner.ObjectAccess;
 
 namespace VibeMiner.Builds.Testing;
@@ -12,7 +13,8 @@ public sealed record FakeBuild(BuildMetadata Metadata, IReadOnlyList<FakeFile> F
 /// <summary>
 /// The standard <see cref="IBuilds"/> test double for layer 4 and up: no layer 2, no files. Builds are added or scripted to
 /// fail; anything else answers NeedsNetwork on the build config, as the real opener does offline. Reuse, shared opens and
-/// cancellation follow the same rules as <see cref="BuildOpener"/>.
+/// cancellation follow the same rules as <see cref="BuildOpener"/>. An opened build has an object ledger, so layer 3's Downloaded
+/// figure and Download all run on it: every distinct variant EKey with its encoded size, located by the variant's archive range.
 /// </summary>
 public sealed class InMemoryBuilds : IBuilds
 {
@@ -65,8 +67,13 @@ public sealed class InMemoryBuilds : IBuilds
             "Not stored, and this source is local only.", null);
     }
 
-    private sealed class Opened(BuildRef build, FakeBuild fake) : IBuild
+    private sealed class Opened(BuildRef build, FakeBuild fake) : IBuild, ILedgerSource
     {
+        // One row per distinct EKey, ascending as a ledger requires; the first variant listing a key gives its size and range.
+        private readonly FileVariant[] rows = fake.Files.SelectMany(f => f.Variants).Where(v => v.EKey is not null)
+            .DistinctBy(v => v.EKey!.Value).OrderBy(v => v.EKey!.Value).ToArray();
+        private ObjectLedger? ledger;
+
         private readonly Dictionary<uint, FakeFile> byId = fake.Files.ToDictionary(f => f.FileDataId);
         private readonly Dictionary<ulong, uint> byName = fake.Files.Where(f => f.Path is not null)
             .GroupBy(f => RootNameHash.Of(f.Path!)).ToDictionary(g => g.Key, g => g.Min(f => f.FileDataId));
@@ -75,6 +82,20 @@ public sealed class InMemoryBuilds : IBuilds
         public BuildRef Build { get; } = build;
         public BuildMetadata Metadata { get; } = fake.Metadata;
         public CdnContext? Cdn { get; } = fake.Cdn;
+
+        public ObjectLedger Ledger => ledger ??= new(rows.Select(v => v.EKey!.Value).ToArray(), rows.Select(v => v.EncodedSize ?? 0).ToArray());
+
+        /// <summary>The variant's archive range, when it has one and the CDN context lists that archive.</summary>
+        public bool TryLocate(CdnKey eKey, out ArchiveLocation location, out int archive)
+        {
+            location = default; archive = -1;
+            var at = Ledger.IndexOf(eKey);
+            if (at < 0 || rows[at].Location is not { } found || Cdn?.Archives is not { } archives) return false;
+            for (var i = 0; i < archives.Count && archive < 0; i++) if (archives[i] == found.Archive) archive = i;
+            if (archive < 0) return false;
+            location = found;
+            return true;
+        }
 
         public FileResolution Resolve(uint fileDataId)
         {
