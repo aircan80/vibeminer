@@ -3,6 +3,7 @@ using System.Text.Json;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 using VibeMiner.Builds;
+using VibeMiner.Cli.Browse;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 
@@ -12,8 +13,10 @@ namespace VibeMiner.Cli;
 /// The <c>vm</c> commands (#170, D150). Read-only unless a command says it writes. Text goes through Spectre.Console (D151): tables,
 /// a progress bar on stderr and red error panels, plain when NO_COLOR is set or output is redirected. <c>--json</c> writes one plain
 /// JSON document to <c>json</c> instead. Exit codes: 0 done, 1 failed (including a scrub that found damage), 2 bad usage, 130 canceled.
+/// <c>browse</c> hands the session to <c>browse</c>, the full-screen browser (#182), which is null when there's no terminal.
 /// </summary>
-internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores, IAnsiConsole output, IAnsiConsole error, TextWriter jsonOutput)
+internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores, IAnsiConsole output, IAnsiConsole error, TextWriter jsonOutput,
+    Func<BrowseSession, CancellationToken, Task<int>>? browse = null)
 {
     public const int Ok = 0, Failed = 1, Usage = 2, Canceled = 130;
     private const int HistoryPage = 1000, ListedDamage = 20;
@@ -23,6 +26,8 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
     public const string UsageText = """
         Usage: vm [--data <dir>] [--json] <command>
 
+          browse                  full-screen browser: :store, :history, :builds; ? lists the keys (read-only; r in :builds
+                                  refreshes under the writer lock)
           store info              packs, objects and bytes in the object store (read-only)
           store scrub             full index check and verify of every object (writes: takes the writer lock)
           history list [product]  the dated version-service observations, oldest first (read-only)
@@ -64,6 +69,7 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
 
         Func<string, CancellationToken, Task<int>>? command = words switch
         {
+            ["browse"] => Browse,
             ["store", "info"] => Info,
             ["store", "scrub"] => Scrub,
             ["history", "list"] => (folder, token) => History(folder, null, token),
@@ -89,6 +95,13 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
         catch (ObjectStoreException e) { return await Fail(e.Code, Explain(e)); }
         // Anything else (a file system or SQLite error, a bad path) is still one named failure with exit code 1, never a stack trace.
         catch (Exception e) when (e is not OperationCanceledException) { return await Fail("CLI_FAILED", $"{e.GetType().Name}: {e.Message}"); }
+    }
+
+    private async Task<int> Browse(string storeFolder, CancellationToken ct)
+    {
+        if (json) return UsageError("browse is interactive; --json doesn't apply to it.");
+        if (browse is null) return await Fail("BROWSE_NEEDS_TERMINAL", "vm browse needs a terminal on stdin and stdout. For scripts, use the other commands.");
+        return await browse(new BrowseSession(stores, folder, storeFolder), ct).ConfigureAwait(false);
     }
 
     private async Task<int> Info(string storeFolder, CancellationToken ct)

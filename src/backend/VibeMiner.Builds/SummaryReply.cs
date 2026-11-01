@@ -41,10 +41,11 @@ internal static partial class SummaryReply
 }
 
 /// <summary>
-/// Turns a summary observation into a <see cref="SummaryRefresh"/>; <see cref="Catalog"/> and the fake share it. A reply that
-/// arrived but couldn't be recorded is still read: the result's state says it isn't in the history log.
+/// Turns a summary observation into a <see cref="SummaryRefresh"/>; <see cref="Catalog"/>, the fake and <c>vm browse</c> (for the
+/// newest stored summary) share it. A reply that arrived but couldn't be recorded is still read: the result's state says it isn't in
+/// the history log.
 /// </summary>
-internal static class Summaries
+public static class Summaries
 {
     public static SummaryRefresh Read(ObservationResult observed)
     {

@@ -27,8 +27,8 @@ test('production project dependencies preserve pure engine boundaries and the or
     const references = [...source.matchAll(/<ProjectReference\s+Include="([^"]+)"/g)].map(match => path.basename(match[1].replaceAll('\\', '/'), '.csproj').replace('VibeMiner.', '')).sort();
     assert.deepEqual(references, [...dependencies].sort(), `${project} references only its declared architecture dependencies`);
     const packages = [...source.matchAll(/<PackageReference\s+Include="([^"]+)"/g)].map(match => match[1]);
-    // Spectre.Console is terminal output for the developer CLI only (D151).
-    const expected = project === 'Infrastructure' || project === 'Objects' || project === 'Builds' ? ['Microsoft.Data.Sqlite'] : project === 'Cli' ? ['Spectre.Console'] : [];
+    // Spectre.Console (D151) and Terminal.Gui (D165) are terminal output for the developer CLI only.
+    const expected = project === 'Infrastructure' || project === 'Objects' || project === 'Builds' ? ['Microsoft.Data.Sqlite'] : project === 'Cli' ? ['Spectre.Console', 'Terminal.Gui'] : [];
     assert.deepEqual(packages, expected, `${project} does not acquire a game parsing/download dependency`);
   }
 });

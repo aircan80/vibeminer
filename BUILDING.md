@@ -40,6 +40,12 @@ node tools/dotnet.mjs run --project src/backend/VibeMiner.Cli -- store info
 
 Commands: `store info`, `store scrub` (takes the writer lock), `history list [product]`, `builds refresh [product]` (fetches from the official version service; takes the writer lock) and `builds list [product]` (read-only, except that the first use for a product fetches it under the writer lock).
 
+`vm browse` ([D165](docs/DECISIONS.md)) is the full-screen browser over the same store, in the style of k9s: `:store`, `:history` and `:builds` switch views, `/` filters, Enter opens a row, Esc goes back, `?` lists the keys and `q` quits. It reads only; `r` in `:builds` refreshes in the background under the writer lock, and `x` cancels it. It needs a terminal (80x24 is enough; no mouse):
+
+```bash
+node tools/dotnet.mjs run --project src/backend/VibeMiner.Cli -- browse
+```
+
 ## Verification
 
 ```bash

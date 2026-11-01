@@ -5,15 +5,15 @@ public sealed record ReviewedProduct(string Id, string Label);
 
 /// <summary>
 /// The reviewed WoW product ids, in display order, with their friendly names: the engine's product registry
-/// (<c>VibeMiner.Domain.ProductRegistry</c>), copied because layer 3 doesn't reference the engine. Adding a product is a
-/// reviewed change to both (D017).
+/// (<c>VibeMiner.Domain.ProductRegistry</c>), copied because layer 3 doesn't reference the engine, except that wowxptr reads "PTR 2"
+/// here so the two PTRs can be told apart (D165). Adding a product is a reviewed change to both (D017).
 /// </summary>
 public static class Products
 {
     public static readonly IReadOnlyList<ReviewedProduct> Reviewed = Array.AsReadOnly(new ReviewedProduct[] {
         new("wow", "Retail"),
         new("wowt", "PTR"),
-        new("wowxptr", "PTR"),
+        new("wowxptr", "PTR 2"),
         new("wow_beta", "Beta"),
         new("wow_classic", "Classic Progression"),
         new("wow_classic_ptr", "Classic Progression PTR"),

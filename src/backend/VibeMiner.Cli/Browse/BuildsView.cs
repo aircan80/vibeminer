@@ -1,0 +1,164 @@
+using VibeMiner.Builds;
+using VibeMiner.ObjectAccess;
+using VibeMiner.Objects;
+
+namespace VibeMiner.Cli.Browse;
+
+/// <summary>
+/// <c>:builds</c>: one row per reviewed product from layer 3's catalog (read-only: the history log only), then the WoW products the
+/// newest stored summary lists that aren't reviewed. Enter lists a product's builds. <c>r</c> refreshes as the store's writer.
+/// </summary>
+internal sealed class BuildsView : BrowseView
+{
+    public override string Title => "builds";
+    public override IReadOnlyList<ViewAction> Actions => [Refresh];
+
+    public override async Task<ViewContent> LoadAsync(BrowseSession session, CancellationToken ct)
+    {
+        IStoreHandle store;
+        try { store = await session.OpenReadAsync(ct).ConfigureAwait(false); }
+        catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.Missing)
+        {
+            return new(Columns, [], $"No object store at {session.StoreFolder} yet. r fetches builds; that takes the writer lock and creates it.");
+        }
+        await using (store)
+        {
+            var catalog = await store.CatalogAsync(ct).ConfigureAwait(false);
+            var rows = new List<BrowseRow>();
+            var problems = 0;
+            foreach (var product in Products.Reviewed)
+            {
+                var list = await catalog.ListBuildsAsync(product.Id, ct).ConfigureAwait(false);
+                problems += list.Problems.Count;
+                var current = string.Join(' ', list.Builds.Where(b => b.Current).Select(b => b.VersionsName).Distinct());
+                rows.Add(new([product.Label, product.Id, list.LastObservedAt is null ? "-" : $"{list.Builds.Count:N0}", current,
+                    list.LastObservedAt is { } at ? BrowseSession.Time(at) : "no history", list.Problems.Count == 0 ? "" : $"{list.Problems.Count:N0}"],
+                    () => new ProductBuildsView(product)));
+            }
+            var summary = await NewestSummaryAsync(store.Objects, ct).ConfigureAwait(false);
+            string? summaryNote = null;
+            if (summary is { Entry: var entry, Read: var read })
+            {
+                foreach (var id in read.NewProducts) rows.Add(new(["new, not reviewed", id, "-", "", BrowseSession.Time(entry.ObservedAt), ""]));
+                summaryNote = read.NewProducts.Count > 0
+                    ? $"New in the {BrowseSession.Time(entry.ObservedAt)} summary: {string.Join(", ", read.NewProducts)} (not reviewed; adding one is D017)."
+                    : read.Problems.Any(p => p.Code is "SUMMARY_UNREADABLE" or "SUMMARY_COLUMNS_MISSING") ? $"The summary of {BrowseSession.Time(entry.ObservedAt)} UTC can't be read, so new products are unknown."
+                    : $"Summary of {BrowseSession.Time(entry.ObservedAt)} UTC: no new WoW products.";
+            }
+            var note = string.Join(' ', new[]
+            {
+                summaryNote ?? "No summary recorded; r fetches one.",
+                problems > 0 ? $"{problems:N0} catalog problem(s); Enter on a product lists them." : null,
+            }.Where(s => s is not null));
+            return new(Columns, rows, note);
+        }
+    }
+
+    private static readonly string[] Columns = ["Product", "Id", "Builds", "Current", "Last (UTC)", "Problems"];
+
+    /// <summary>The newest summary in the history log and what it says, read from the store; null when none was recorded.</summary>
+    public static async Task<(HistoryEntry Entry, SummaryRefresh Read)?> NewestSummaryAsync(IObjectSource objects, CancellationToken ct)
+    {
+        HistoryEntry? newest = null, after = null;
+        while (true)
+        {
+            var page = await objects.ReadHistoryAsync(new HistoryQuery(Kind: HistoryKind.Summary, After: after, Limit: HistoryView.Page), ct).ConfigureAwait(false);
+            foreach (var e in page) if (newest is null || e.ObservedAt >= newest.ObservedAt) newest = e;
+            if (page.Count < HistoryView.Page) break;
+            after = page[^1];
+        }
+        if (newest is null) return null;
+        var got = await objects.GetKeyAsync(new ObjectRequest(newest.Document), cdn: null, FetchPriority.Interactive, ct).ConfigureAwait(false);
+        var observed = got.IsPresent && got.Bytes is { } bytes
+            ? new ObservationResult(ObjectState.Present, new Observation(ObservationKind.Summary, "", newest.Region, new Uri(newest.Url), newest.ObservedAt, bytes), Recorded: true)
+            : new ObservationResult(got.State, Code: got.Code, Message: got.Message);
+        return (newest, Summaries.Read(observed));
+    }
+
+    /// <summary>
+    /// <c>r</c>: versions and cdns for every reviewed product, then the summary, as <c>vm builds refresh</c> does. Takes the writer
+    /// lock (creating a missing store) for the run and lets it go at the end; when the app holds it, says so and changes nothing.
+    /// </summary>
+    public static readonly ViewAction Refresh = new('r', "refresh: fetch versions, cdns and the summary (writes: takes the writer lock)", "refresh", RefreshAsync);
+
+    /// <summary>Fits an 80-column status line: the lock is taken, by whom, that nothing changed and what to do.</summary>
+    public const string BusyMessage = "refresh: store busy (is VibeMiner running?); nothing fetched. Close it, press r.";
+
+    private static async Task<string> RefreshAsync(BrowseSession session, IProgress<string> progress, CancellationToken ct)
+    {
+        IStoreHandle store;
+        progress.Report("taking the writer lock");
+        try { store = await session.OpenWriterAsync(ct).ConfigureAwait(false); }
+        catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.Busy) { return BusyMessage; }
+        await using (store)
+        {
+            var catalog = await store.CatalogAsync(ct).ConfigureAwait(false);
+            var failed = new List<string>();
+            var ids = Products.Ids;
+            for (var i = 0; i < ids.Count; i++)
+            {
+                progress.Report($"versions and cdns for {ids[i]} ({i + 1}/{ids.Count}); x cancels");
+                var r = await catalog.RefreshAsync(ids[i], ct).ConfigureAwait(false);
+                if (Failed(r.Versions) || Failed(r.Cdns))
+                {
+                    var bad = Failed(r.Versions) ? r.Versions : r.Cdns;
+                    failed.Add($"{ids[i]} ({bad.Code ?? bad.State.ToString()})");
+                }
+            }
+            progress.Report("the product summary");
+            var summary = await catalog.RefreshSummaryAsync(ct).ConfigureAwait(false);
+            var said = Failed(summary.Summary) ? $"summary failed ({summary.Summary.Code ?? summary.Summary.State.ToString()})"
+                : summary.Summary.Observation is null ? "no summary served"
+                : summary.NewProducts.Count == 0 ? "no new products" : $"new: {string.Join(", ", summary.NewProducts)}";
+            return $"refresh done at {DateTimeOffset.UtcNow:HH:mm} UTC: {ids.Count - failed.Count}/{ids.Count} products"
+                + (failed.Count == 0 ? "" : $", failed {string.Join(", ", failed)}") + $"; {said}.";
+        }
+    }
+
+    /// <summary>A failure other than "the service has no such document", as <c>vm builds</c> counts them.</summary>
+    private static bool Failed(ObservationResult r) => r.State is not (ObjectState.Present or ObjectState.NotFound);
+}
+
+/// <summary>One product's builds, newest first sighting first, with its catalog problems in the note. Enter shows a build.</summary>
+internal sealed class ProductBuildsView(ReviewedProduct product) : BrowseView
+{
+    public override string Title => product.Id;
+    public override IReadOnlyList<ViewAction> Actions => [BuildsView.Refresh];
+
+    public override async Task<ViewContent> LoadAsync(BrowseSession session, CancellationToken ct)
+    {
+        await using var store = await session.OpenReadAsync(ct).ConfigureAwait(false);
+        var catalog = await store.CatalogAsync(ct).ConfigureAwait(false);
+        var list = await catalog.ListBuildsAsync(product.Id, ct).ConfigureAwait(false);
+        var rows = list.Builds.Select(b => new BrowseRow(
+            [b.VersionsName, b.Current ? "yes" : "", string.Join(' ', b.Regions.Where(g => !b.Current || g.Current).Select(g => g.Region).Distinct()),
+             BrowseSession.Time(b.FirstSeen), BrowseSession.Time(b.LastSeen), b.BuildConfig],
+            () => new BuildView(b))).ToList();
+        var note = list.LastObservedAt is null ? $"{product.Label}: no versions history. r fetches it (writes)."
+            : $"{product.Label}: {list.Builds.Count:N0} builds, last versions reply {BrowseSession.Time(list.LastObservedAt.Value)} UTC.";
+        if (list.Problems.Count > 0)
+            note += $" {list.Problems.Count:N0} problem(s): {string.Join("; ", list.Problems.Take(3).Select(p => $"{p.Code}: {p.Message}"))}";
+        return new(["Version", "Current", "Regions", "First (UTC)", "Last (UTC)", "Build config"], rows, note);
+    }
+}
+
+/// <summary>One build: its identity fields exactly, then each region listing.</summary>
+internal sealed class BuildView(CatalogBuild build) : BrowseView
+{
+    public override string Title => build.VersionsName;
+
+    public override Task<ViewContent> LoadAsync(BrowseSession session, CancellationToken ct)
+    {
+        var rows = new List<BrowseRow>
+        {
+            new(["Product", build.Product]), new(["Identity", build.Id]), new(["Version", build.VersionsName]),
+            new(["Build config", build.BuildConfig]), new(["Product config", build.ProductConfig ?? "(none)"]),
+            new(["Current", build.Current ? "yes" : "no"]),
+            new(["First seen", $"{BrowseSession.Time(build.FirstSeen)} UTC"]), new(["Last seen", $"{BrowseSession.Time(build.LastSeen)} UTC"]),
+        };
+        rows.AddRange(build.Fields.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => new BrowseRow([$"field {f.Key}", f.Value])));
+        rows.AddRange(build.Regions.Select(g => new BrowseRow([$"region {g.Region}",
+            $"cdn {g.CdnConfig}{(g.Current ? ", current" : "")}, {BrowseSession.Time(g.FirstSeen)} to {BrowseSession.Time(g.LastSeen)}, record {g.LastRecord.KeyHex}"])));
+        return Task.FromResult(new ViewContent(["Field", "Value"], rows, "Locales come from the build's own manifests, which a later view reads."));
+    }
+}

@@ -57,6 +57,9 @@ public sealed class SummaryReplyTests
         Assert.Equal(Products.Reviewed.Select(p => p.Id), Products.Ids);
         Assert.Equal("Retail", Products.Label("wow"));
         Assert.Equal("Classic Era PTR", Products.Label("wow_classic_era_ptr"));
+        // The two PTRs read differently (D165).
+        Assert.Equal("PTR", Products.Label("wowt"));
+        Assert.Equal("PTR 2", Products.Label("wowxptr"));
         Assert.All(Products.Reviewed, p => Assert.False(string.IsNullOrWhiteSpace(p.Label)));
         Assert.Throws<ArgumentException>(() => Products.Label("wowdev"));
         Assert.True(Products.LooksLikeWow("wowdev"));

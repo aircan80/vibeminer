@@ -21,26 +21,31 @@ internal sealed class FakeStores : IStoreOpener
     public Exception? LaterHistoryPageThrows { get; set; }
     /// <summary>When set, every observation gives this instead of asking the in-memory source (an offline version service).</summary>
     public ObservationResult? ObservationFails { get; set; }
+    /// <summary>When set, an observation it answers (non-null) gives that; the rest go to the in-memory source.</summary>
+    public Func<ObservationRequest, ObservationResult?>? ObservationScript { get; set; }
     public List<(string Folder, bool Writer)> Opened { get; } = [];
     /// <summary>Whether each writer open was allowed to create a missing store.</summary>
     public List<bool> WriterCreate { get; } = [];
     public int Open { get; private set; }
+    /// <summary>When set, every open waits on this after it is recorded and before it fails or succeeds; the flag is true for a writer open.</summary>
+    public Func<bool, CancellationToken, Task>? BeforeOpen { get; set; }
 
-    public Task<IStoreHandle> OpenReadOnlyAsync(string folder, CancellationToken ct) => OpenAsync(folder, false, ReadOnlyFailure);
+    public Task<IStoreHandle> OpenReadOnlyAsync(string folder, CancellationToken ct) => OpenAsync(folder, false, ReadOnlyFailure, ct);
     /// <summary>A writer open asked to create a store gets past a missing one, as the real store does.</summary>
     public Task<IStoreHandle> OpenWriterAsync(string folder, bool create, CancellationToken ct)
     {
         WriterCreate.Add(create);
-        return OpenAsync(folder, true, WriterFailure ?? (create && ReadOnlyFailure == ObjectStoreCodes.Missing ? null : ReadOnlyFailure));
+        return OpenAsync(folder, true, WriterFailure ?? (create && ReadOnlyFailure == ObjectStoreCodes.Missing ? null : ReadOnlyFailure), ct);
     }
 
-    private Task<IStoreHandle> OpenAsync(string folder, bool writer, string? failure)
+    private async Task<IStoreHandle> OpenAsync(string folder, bool writer, string? failure, CancellationToken ct)
     {
         Opened.Add((folder, writer));
+        if (BeforeOpen is { } wait) await wait(writer, ct);
         if (OpenThrows is not null) throw OpenThrows;
         if (failure is not null) throw new ObjectStoreException(failure, failure == ObjectStoreCodes.Missing ? $"No object store at {folder}." : "Scripted failure.");
         Open++;
-        return Task.FromResult<IStoreHandle>(new Handle(this, writer));
+        return new Handle(this, writer);
     }
 
     private sealed class Handle(FakeStores owner, bool writer) : IStoreHandle
@@ -48,7 +53,8 @@ internal sealed class FakeStores : IStoreOpener
         public bool Writer => writer;
         private InMemoryCatalog? catalog;
         public IObjectSource Objects => owner.LaterHistoryPageThrows is { } failure ? new FailingHistory(owner.Source, failure)
-            : owner.ObservationFails is { } offline ? new FailingObservations(owner.Source, offline) : owner.Source;
+            : owner.ObservationFails is { } offline ? new FailingObservations(owner.Source, offline)
+            : owner.ObservationScript is { } script ? new ScriptedObservations(owner.Source, script) : owner.Source;
         public Task<ICatalog> CatalogAsync(CancellationToken ct) => Task.FromResult<ICatalog>(catalog ??= new InMemoryCatalog(Objects));
         public ValueTask<StoreStats> StatsAsync(CancellationToken ct) => ValueTask.FromResult(owner.Stats);
         public async Task<ScrubReport> ScrubAsync(IProgress<ScanProgress>? progress, CancellationToken ct)
@@ -86,6 +92,21 @@ internal sealed class FailingObservations(IObjectSource inner, ObservationResult
     public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken ct) => Task.FromResult(result);
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.CountPresentAsync(keys, ct);
     public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.HasKeysAsync(keys, ct);
+    public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken ct) => inner.ReadHistoryAsync(query, ct);
+}
+
+/// <summary>Passes everything to the in-memory source, except the observations the script answers.</summary>
+internal sealed class ScriptedObservations(IObjectSource inner, Func<ObservationRequest, ObservationResult?> script) : IObjectSource
+{
+    public Task<ObjectResult> GetKeyAsync(ObjectRequest request, CdnContext? cdn, FetchPriority priority, CancellationToken ct) => inner.GetKeyAsync(request, cdn, priority, ct);
+    public Task<IReadOnlyList<ObjectResult>> GetKeysAsync(IReadOnlyList<ObjectRequest> requests, CdnContext? cdn, FetchPriority priority, IProgress<ObjectProgress>? progress, CancellationToken ct) =>
+        inner.GetKeysAsync(requests, cdn, priority, progress, ct);
+    public Task<ObjectResult> GetRangeAsync(ObjectRequest request, long offset, Memory<byte> destination, CdnContext? cdn, FetchPriority priority, CancellationToken ct) =>
+        inner.GetRangeAsync(request, offset, destination, cdn, priority, ct);
+    public Task<ObservationResult> ObserveAsync(ObservationRequest request, CancellationToken ct) =>
+        script(request) is { } result ? Task.FromResult(result) : inner.ObserveAsync(request, ct);
+    public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.HasKeysAsync(keys, ct);
+    public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct) => inner.CountPresentAsync(keys, ct);
     public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken ct) => inner.ReadHistoryAsync(query, ct);
 }
 
