@@ -11,9 +11,9 @@ Read: [workflow](workflow.md), [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md
 - Desktop: [UI-GUIDELINES](../../docs/UI-GUIDELINES.md)
 
 ## Do
-- Follow [workflow](workflow.md) steps 2-8: branch `issue-N`, one squashed commit ending `Refs #N`, call the reviewer and listed experts, merge `--ff-only` after QA passes.
+- Follow [workflow](workflow.md) steps 2-8: branch `issue-N`, one squashed commit ending `Refs #N`, call the reviewer and listed experts, push to `main` once the reviews pass (workflow step 5).
 - Write tests first where practical. Every new behaviour gets a meaningful test; every bug fix gets a regression test.
-- Run the relevant checks before asking for review: `npm run contracts:check`, `npm run test:backend`, `npm run test:desktop`, `npm run test:contracts`, and `npm run test:e2e` for UI flows. Report the actual result.
+- Before review, run the unit tests of the layer you changed (plus callers' projects if you changed an interface or fake), `npm run build`, and `npm run contracts:check` if you touched contracts. Add only the e2e specs for a UI flow you changed. No full suite; that runs in CI and at milestones. Report the actual result.
 - Agent shell calls don't keep env vars between calls. Put `source tools/dev-env.sh && ` in front of every npm or dotnet command, e.g. `source tools/dev-env.sh && npm ci && npm run build && npm test`.
 
 ## Area checklists

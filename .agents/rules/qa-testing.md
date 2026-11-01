@@ -19,7 +19,7 @@ Read: [workflow](workflow.md), [docs/TESTING.md](../../docs/TESTING.md).
 
 ## Test
 - Each acceptance criterion, plus the checks listed in [TESTING.md](../../docs/TESTING.md).
-- In the clean worktree at the exact sha: `npm ci`, `npm run build`, `npm test` and `npm run test:e2e`. This run is the gate; any failure is a fail. A recheck after a clean rebase can use the lighter run in [workflow](workflow.md) step 7. GitHub CI only runs after the push to `main`.
+- QA runs on the merged sha on `main`, after the push. Run `npm run build` and only the tests and harnesses the acceptance criteria need; CI on `main` runs everything else. The full gate (`npm ci`, `npm run build`, `npm test`, `npm run test:e2e`) is for milestones only, see [workflow](workflow.md) step 8.
 - Check whichever of these apply:
   - cancel mid-download and mid-parse
   - reopen offline
@@ -34,9 +34,8 @@ Read: [workflow](workflow.md), [docs/TESTING.md](../../docs/TESTING.md).
 - At each milestone: build a package (`npm run package:desktop`), run `npm run smoke:package`, and launch it on every claimed OS.
 
 ## Output
-- Fail: one issue comment with steps, expected and actual. Flip the issue to `in-progress`.
-- Pass: `QA pass at <sha>.`
-- Close: after the commit is on `origin/main`, tick the criteria and review lines, comment `Passed: <sha>.`, remove the status label, close.
+- Finding: one issue comment with steps, expected and actual. Flip the issue to `in-progress` for the follow-up fix; a non-blocker can go in a follow-up issue instead.
+- Close: when the criteria hold and CI on that sha is green, tick the criteria and review lines, comment `Passed: <sha>.`, remove the status label, close.
 
 ## Don't
 - Fix code.

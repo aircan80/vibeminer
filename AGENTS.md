@@ -49,8 +49,8 @@ QA, the reviewer and the three experts must not review work written in the same 
 - A bug found while its feature issue is open goes in a comment on that issue, which flips back to `in-progress`. Only bugs in closed features or existing code get their own `bug` issue.
 - Always pass `--title` and `--body` to `gh issue create`.
 - Commit identity: `aircan80 <329744803+aircan80@users.noreply.github.com>`. Don't change git config.
-- Merging and pushing a QA-passed commit to `main` needs no further OK. Releases and repo settings need the owner's explicit OK. Never force-push.
-- No candidate pushes. QA's local run on the exact sha is the gate; GitHub CI runs on `main` after each push, and a failing run there becomes a `bug` issue right away. See [workflow](.agents/rules/workflow.md).
+- Pushing a reviewed commit to `main` needs no further OK. Releases and repo settings need the owner's explicit OK. Never force-push.
+- Merge once the reviews pass and the changed layer's unit tests are green. CI on `main` runs everything after each push, and a failing run there becomes a `bug` issue right away. QA checks the issue on `main` in parallel and closes it. Full local test runs are for milestones. See [workflow](.agents/rules/workflow.md).
 
 ## Engineering rules
 Area details load automatically in Claude Code. Other tools should read them before editing:

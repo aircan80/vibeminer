@@ -15,20 +15,15 @@ How an issue moves from idea to closed. Read this before touching issues, branch
 3. When done, the developer squashes the branch to one commit on top of current `main`. The message ends with `Refs #N` (never `Closes`/`Fixes`).
    - The commit stays local. Nothing is pushed for CI. Never force-push anything.
 4. The developer calls **reviewer** and each listed expert. Each one posts one verdict comment on the issue against `git diff main...issue-N`. Fix blockers on the same branch, re-squash, and re-request only the reviewer who raised them.
-5. All verdicts pass → the developer flips the issue to `ready-for-qa`.
-6. **qa-testing** tests that exact commit in its own clean worktree.
-   - QA runs `npm ci`, `npm run build`, `npm test` and `npm run test:e2e` there. That run is the gate; any failure is a fail.
-   - Fail: comment the bug on the issue and flip it to `in-progress`.
-   - Pass: comment `QA pass at <sha>`.
-   - An unticked review line with no passing verdict comment is a fail.
-7. The developer runs `git merge --ff-only issue-N`.
-   - If `main` moved, rebase the single commit and flip back to `ready-for-qa`. QA retests.
+5. All verdicts pass → the developer rebases onto `main`, runs `npm run build` and the unit tests of the layer it changed (see [TESTING.md](../../docs/TESTING.md#layer-scoped-unit-tests)), and pushes: `git push origin <sha>:refs/heads/main`, then `git merge --ff-only`. No owner OK and no full gate needed. Flip the issue to `ready-for-qa`.
    - If conflict fixes changed code, the reviewer reviews again first.
-   - Clean-rebase recheck: when the rebase had no conflicts, `git range-diff` shows the patch unchanged, and the commits `main` gained share no files with it, QA runs `npm run build`, `npm run contracts:check`, only the unit suites for the parts the commit touches (`npm run test:backend` for `src/` and backend tests, `npm run test:desktop` for `apps/desktop/`, `npm run test:contracts` for `contracts/`, `tools/` and desktop fixtures) and only the e2e specs the commit touches or that cover the areas both sides changed. A full gate is needed after any conflict or overlap. CI on `main` still runs everything.
-   - Reinstall only when needed: in a worktree whose `node_modules` came from `npm ci` on the same `package-lock.json`, skip `npm ci`. Check with `git diff --quiet <installed sha> HEAD -- package-lock.json`. Run it again whenever the lockfile differs or the install is in doubt. A first QA gate on an issue always starts with `npm ci`.
-   - Batch merges: when several issues have passed QA, stack them in merge order and run one recheck on the top commit instead of one per rebase. Then push the whole stack.
-8. Push to `main` once QA passes; no owner OK needed. CI (`.github/workflows/ci.yml`) then runs on Linux as a clean-machine safety net. Windows and macOS are parked and get tested again when they're un-parked.
-9. Once the commit is on `origin/main`, QA ticks the acceptance criteria and review lines, posts one line ("Passed: <sha>."), removes the status label and closes the issue. Only QA closes issues.
+   - Several passed issues can go in one push, stacked in merge order.
+6. CI (`.github/workflows/ci.yml`) runs everything on Linux after each push. That's the full run per change. Windows and macOS are parked.
+7. **qa-testing** checks the issue on `main`, in parallel with further work.
+   - It tests the acceptance criteria and the applicable checks in [qa-testing](qa-testing.md), running only the tests and harnesses those need. No full `npm test`/e2e gate.
+   - Findings go in a comment and get small follow-up fixes. Revert only if serious. A non-blocking finding can go in a follow-up issue.
+   - When the criteria hold and CI is green, QA ticks the criteria and review lines, posts one line ("Passed: <sha>."), removes the status label and closes the issue. Only QA closes issues.
+8. **Full gate** (`npm ci`, `npm run build`, `npm test`, `npm run test:e2e`) runs only at milestones (end of a phase or before a release) and when the owner asks. Heavy harnesses (scale, kill loops, bit flips) rerun only when their layer changes.
 
 ## Bugs
 - A failing CI run on `main`: new `bug` issue right away, naming the run and sha.
