@@ -16,7 +16,7 @@ Permanent docs for the Electron + C# VibeMiner. Work in progress lives in GitHub
 
 | Document | Purpose |
 | --- | --- |
-| [Architecture](ARCHITECTURE.md) | Process ownership, dependency boundaries, Electron boundary |
+| [Architecture](ARCHITECTURE.md) | Code layers, backend projects, process ownership, Electron boundary |
 | [Engine contracts](../contracts/README.md) | Versioned engine protocol, schemas and message rules |
 | [Async work and jobs](ASYNC-AND-JOBS.md) | Resource budgets, lock order, cancellation, progress, priority scenarios |
 | [Storage](STORAGE.md) | SQLite catalog, object store, provenance, readiness and durability |
