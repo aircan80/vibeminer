@@ -4,8 +4,11 @@ using System.Text;
 
 namespace VibeMiner.Objects;
 
-/// <summary>The version-service endpoint a reply came from: versions, cdns, or bgdl (background-download versions).</summary>
-public enum HistoryKind : byte { Versions = 1, Cdns = 2, Bgdl = 3 }
+/// <summary>
+/// The version-service endpoint a reply came from: versions, cdns, bgdl (background-download versions), or the summary of
+/// every product. A summary entry's product is "".
+/// </summary>
+public enum HistoryKind : byte { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4 }
 
 /// <summary>One raw version-service reply as it was received: what was asked, where, when, and the exact bytes.</summary>
 public sealed record HistoryObservation(HistoryKind Kind, string Product, string Region, DateTimeOffset ObservedAt, string Url, ReadOnlyMemory<byte> Reply);
@@ -18,7 +21,7 @@ public sealed record HistoryQuery(string? Product = null, string? Region = null,
 
 /// <summary>
 /// History record format 1 (little-endian): u8 version 1 | u8 kind | u16 reserved 0 | i64 observed unix ms | document key (16)
-/// | u8 product length + ASCII [a-z0-9_-] (1..64) | u8 region length + ASCII [a-z0-9] (1..16) | u16 URL length + UTF-8 (0..1024).
+/// | u8 product length + ASCII [a-z0-9_-] (1..64; 0 exactly for a summary) | u8 region length + ASCII [a-z0-9] (1..16) | u16 URL length + UTF-8 (0..1024).
 /// Exact end. The record's key is its MD5, so the same observation stored twice is one entry.
 /// </summary>
 public static class HistoryRecordFormat
@@ -41,7 +44,7 @@ public static class HistoryRecordFormat
     internal static byte[] Encode(HistoryKind kind, long observedMs, ObjectKey document, string product, string region, string url)
     {
         if (!Enum.IsDefined(kind)) throw new ArgumentOutOfRangeException(nameof(kind));
-        if (!ValidProduct(product)) throw new ArgumentException("A product is 1-64 of [a-z0-9_-].", nameof(product));
+        if (!ValidProduct(kind, product)) throw new ArgumentException(kind == HistoryKind.Summary ? "A summary has no product." : "A product is 1-64 of [a-z0-9_-].", nameof(product));
         if (!ValidRegion(region)) throw new ArgumentException("A region is 1-16 of [a-z0-9].", nameof(region));
         var u = Encoding.UTF8.GetBytes(url ?? "");
         if (u.Length > 1024) throw new ArgumentException("A URL is at most 1024 UTF-8 bytes.", nameof(url));
@@ -60,11 +63,12 @@ public static class HistoryRecordFormat
     internal static bool TryParse(ReadOnlySpan<byte> b, out Parsed parsed)
     {
         parsed = default;
-        if (b.Length < 28 + 1 + 1 + 1 + 1 + 2 || b[0] != 1 || b[1] is not ((byte)HistoryKind.Versions or (byte)HistoryKind.Cdns or (byte)HistoryKind.Bgdl) || b[2] != 0 || b[3] != 0) return false;
+        if (b.Length < 28 + 1 + 1 + 1 + 2 || b[0] != 1 || b[1] is < (byte)HistoryKind.Versions or > (byte)HistoryKind.Summary || b[2] != 0 || b[3] != 0) return false;
+        var kind = (HistoryKind)b[1];
         var at = 28;
-        int pl = b[at++]; if (pl == 0 || pl > 64 || at + pl > b.Length) return false;
+        int pl = b[at++]; if (pl > 64 || at + pl > b.Length) return false;
         var product = Encoding.ASCII.GetString(b.Slice(at, pl)); at += pl;
-        if (!ValidProduct(product) || at >= b.Length) return false;
+        if (!ValidProduct(kind, product) || at >= b.Length) return false;
         int rl = b[at++]; if (rl == 0 || rl > 16 || at + rl > b.Length) return false;
         var region = Encoding.ASCII.GetString(b.Slice(at, rl)); at += rl;
         if (!ValidRegion(region) || at + 2 > b.Length) return false;
@@ -72,10 +76,11 @@ public static class HistoryRecordFormat
         if (ul > 1024 || at + ul != b.Length) return false;
         string url;
         try { url = new UTF8Encoding(false, true).GetString(b.Slice(at, ul)); } catch (DecoderFallbackException) { return false; }
-        parsed = new((HistoryKind)b[1], BinaryPrimitives.ReadInt64LittleEndian(b[4..]), new ObjectKey(ObjectKeyType.HistoryDocument, b.Slice(12, 16)), product, region, url);
+        parsed = new(kind, BinaryPrimitives.ReadInt64LittleEndian(b[4..]), new ObjectKey(ObjectKeyType.HistoryDocument, b.Slice(12, 16)), product, region, url);
         return true;
     }
 
-    private static bool ValidProduct(string? s) => s is { Length: >= 1 and <= 64 } && s.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-');
+    /// <summary>A summary has no product (""); every other kind has a 1-64 character one.</summary>
+    private static bool ValidProduct(HistoryKind kind, string? s) => kind == HistoryKind.Summary ? s == "" : s is { Length: >= 1 and <= 64 } && s.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-');
     private static bool ValidRegion(string? s) => s is { Length: >= 1 and <= 16 } && s.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9'));
 }

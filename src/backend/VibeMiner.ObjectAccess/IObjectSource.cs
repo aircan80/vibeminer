@@ -51,10 +51,12 @@ public sealed record ObjectResult(ObjectKey Key, ObjectState State, ServedFrom? 
 
 /// <summary>
 /// A kind of dated build observation. The numbers are the history log's record kinds. The wago.tools build list (#96) adds a
-/// kind here, a history kind in layer 1 and an <see cref="IObservationSource"/>; nothing else changes.
+/// kind here, a history kind in layer 1 and an <see cref="IObservationSource"/>; nothing else changes. <see cref="Summary"/> is
+/// the version service's list of every product; it has no product.
 /// </summary>
-public enum ObservationKind { Versions = 1, Cdns = 2, Bgdl = 3 }
+public enum ObservationKind { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4 }
 
+/// <summary>One observation to make. <see cref="Product"/> is "" for <see cref="ObservationKind.Summary"/>.</summary>
 public sealed record ObservationRequest(ObservationKind Kind, string Product, string Region);
 
 /// <summary>One raw reply, exactly as served, with the URL and time it was observed.</summary>
@@ -67,10 +69,10 @@ public interface IObservationSource
     Task<Observation> FetchAsync(ObservationRequest request, CancellationToken cancellationToken);
 }
 
-/// <summary>The version service: versions, cdns and bgdl.</summary>
+/// <summary>The version service: versions, cdns, bgdl and the summary.</summary>
 public sealed class VersionServiceObservations(IVersionClient client) : IObservationSource
 {
-    public IReadOnlyCollection<ObservationKind> Kinds { get; } = [ObservationKind.Versions, ObservationKind.Cdns, ObservationKind.Bgdl];
+    public IReadOnlyCollection<ObservationKind> Kinds { get; } = [ObservationKind.Versions, ObservationKind.Cdns, ObservationKind.Bgdl, ObservationKind.Summary];
     public async Task<Observation> FetchAsync(ObservationRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);

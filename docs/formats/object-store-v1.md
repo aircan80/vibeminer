@@ -197,18 +197,18 @@ Types outside 1-6 are refused (`OBJECT_KEY_TYPE_UNSUPPORTED`). Adding a type lat
 | Offset | Size | Type | Field |
 | --- | --- | --- | --- |
 | 0 | 1 | u8 | Version, 1 |
-| 1 | 1 | u8 | Kind: 1 versions, 2 cdns, 3 bgdl |
+| 1 | 1 | u8 | Kind: 1 versions, 2 cdns, 3 bgdl, 4 summary |
 | 2 | 2 | u16 LE | Reserved, 0 |
 | 4 | 8 | i64 LE | Observed at, Unix ms |
 | 12 | 16 | bytes | Document key (the MD5 of the reply bytes) |
-| 28 | 1 | u8 | Product length p, 1-64 |
+| 28 | 1 | u8 | Product length p: 0 for a summary, else 1-64 |
 | 29 | p | ASCII | Product, characters `a-z 0-9 _ -` |
 | 29+p | 1 | u8 | Region length r, 1-16 |
 | 30+p | r | ASCII | Region, characters `a-z 0-9` |
 | 30+p+r | 2 | u16 LE | URL length u, 0-1024 |
 | 32+p+r | u | UTF-8 | Request URL, strict UTF-8 |
 
-The record must end exactly after the URL. The shortest is 34 bytes and the longest 1,136.
+The record must end exactly after the URL. The shortest is 33 bytes (a summary) and the longest 1,136. A summary (`/v2/summary`) lists every product, so it has none; any other kind with an empty product, or a summary with one, fails the grammar. Kind 4 was added before the format's first release (D152).
 
 `u` counts bytes, not characters. **Strict UTF-8** means well-formed UTF-8 as Unicode defines it: no overlong forms, no surrogates (U+D800-U+DFFF), nothing above U+10FFFF, no truncated sequence. Anything well-formed is accepted, including NUL, other control characters and a leading BOM (EF BB BF), which is kept as U+FEFF, not stripped. The URL is never checked as a URL. The reference writer encodes a URL string with unpaired surrogates as U+FFFD instead of refusing it.
 

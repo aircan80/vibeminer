@@ -630,6 +630,52 @@ public sealed class ObjectStoreTests
     }
 
     [Fact]
+    public async Task ASummaryHasNoProductAndSurvivesARebuildFromThePacks()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var summary = Synthetic.Observation(1, "", "us", HistoryKind.Summary) with { Url = "https://us.version.battle.net/v2/summary" };
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            await store.AppendHistoryAsync(summary);
+            await store.AppendHistoryAsync(Synthetic.Observation(2));
+        }
+        foreach (var f in Directory.GetFiles(dir, "objects.sqlite3*")) File.Delete(f);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.True(store.OpenReport.IndexRebuilt);
+            var entry = Assert.Single(await store.ReadHistoryAsync(new HistoryQuery(Kind: HistoryKind.Summary)));
+            Assert.Equal(("", "us", summary.Url), (entry.Product, entry.Region, entry.Url));
+            Assert.Single(await store.ReadHistoryAsync(new HistoryQuery(Product: "")));
+            Assert.Equal(2, (await store.ReadHistoryAsync(new HistoryQuery())).Count);
+        }
+        // Only a summary has no product, and a summary never has one.
+        Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "")));
+        Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", HistoryKind.Summary)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", (HistoryKind)5)));
+    }
+
+    [Theory]
+    [InlineData(1, 0)]   // versions with no product
+    [InlineData(4, 3)]   // a summary with a product
+    [InlineData(5, 3)]   // a kind past summary
+    [InlineData(0, 3)]
+    public void TheRecordGrammarTiesAnEmptyProductToTheSummary(byte kind, int productLength)
+    {
+        var product = new string('w', productLength);
+        var region = "us"u8.ToArray();
+        var b = new byte[28 + 1 + productLength + 1 + region.Length + 2];
+        b[0] = 1; b[1] = kind; b[28] = (byte)productLength;
+        System.Text.Encoding.ASCII.GetBytes(product, b.AsSpan(29));
+        b[29 + productLength] = (byte)region.Length; region.CopyTo(b, 30 + productLength);
+        Assert.False(HistoryRecordFormat.TryParse(b, out _));
+        // The same bytes with the matching kind parse.
+        b[1] = productLength == 0 ? (byte)4 : (byte)1;
+        Assert.True(HistoryRecordFormat.TryParse(b, out var parsed));
+        Assert.Equal(product, parsed.Product);
+    }
+
+    [Fact]
     public async Task ScanAndRebuildFindNoDanglingHistoryWhenEveryDocumentIsStored()
     {
         using var t = new TempDirectory();

@@ -81,7 +81,7 @@ C# owns source discovery, acquisition, exact build contexts, parsing, job schedu
 | `VibeMiner.Cdn` | 1 (planned, #154) | CDN client (`ICdnClient`), version-service client (`IVersionClient`) and the pure range planner ([STORAGE](STORAGE.md#layer-1-cdn-and-version-service-clients)) | None |
 | `VibeMiner.ObjectAccess` | 2 (planned, #154) | `IObjectSource` and its real, CDN-only and local-only implementations; streams, hosts and dated observations (`IObservationSource`) ([STORAGE](STORAGE.md#layer-2-object-access)) | Objects, Cdn |
 | `VibeMiner.Builds` | 3 (planned, #164) | `ICatalog` and the SQLite catalog store: the build list from versions entries in the history log ([STORAGE](STORAGE.md#layer-3-the-build-catalog)); its own table reader and identity v2 port (byte-identical Ids), like layer 1's `VersionTable` | ObjectAccess |
-| `VibeMiner.Cli` | 7 (#170) | `vm`, the developer CLI: its own composition root over the layer projects, read-only unless a command writes, text or `--json` ([D150](DECISIONS.md), [D151](DECISIONS.md)) | Objects, ObjectAccess |
+| `VibeMiner.Cli` | 7 (#170) | `vm`, the developer CLI: its own composition root over the layer projects, read-only unless a command writes, text or `--json` ([D150](DECISIONS.md), [D151](DECISIONS.md), [D152](DECISIONS.md)) | Objects, Cdn, ObjectAccess, Builds |
 | `VibeMiner.Domain` | shared | Identities, invariants, provenance, readiness and capability values | None |
 | `VibeMiner.Protocols.Tact` | shared, pure | Original bounded configuration, BLTE, EN, IN, DL, DS and locator parsing | Domain |
 | `VibeMiner.Formats.Wow` | shared, pure | Original WoW ROOT, DB2, schema interpretation and staged asset decoding | Protocols.Tact |

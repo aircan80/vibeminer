@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using VibeMiner.Builds;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 using Spectre.Console;
@@ -185,6 +186,9 @@ public sealed class CommandTests
     [InlineData("history", "list", "wow", "extra")]
     [InlineData("--frobnicate", "store", "info")]
     [InlineData("store", "info", "--data")]
+    [InlineData("builds", "list", "wowdev")]
+    [InlineData("builds", "refresh", "diablo3")]
+    [InlineData("builds", "list", "wow", "extra")]
     public async Task BadUsageExitsWithTwoAndOpensNothing(params string[] args)
     {
         Assert.Equal(VmCommands.Usage, await Run(args));
@@ -212,5 +216,162 @@ public sealed class CommandTests
         Assert.Equal(VmCommands.Canceled, await run.WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.Equal(0, stores.Open);
         Assert.Contains("CANCELED", error.ToString());
+    }
+
+    private const string VersionsHeader = "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|KeyRing!HEX:16|BuildId!DEC:4|VersionsName!String:0|ProductConfig!HEX:16";
+    private static readonly string A = new('a', 32), B = new('b', 32), C = new('c', 32);
+    private static readonly byte[] CdnsReply = "Name!STRING:0|Path!STRING:0|Hosts!STRING:0\nus|tpr/wow|cdn.example.invalid\n"u8.ToArray();
+
+    /// <summary>The us version service answers for <paramref name="product"/> with one build in us and eu.</summary>
+    private void Serve(string product, string name, string build)
+    {
+        var versions = Encoding.UTF8.GetBytes($"{VersionsHeader}\n## seqn = 1\nus|{build}|{B}|{C}|{name.Split('.')[^1]}|{name}|{C}\neu|{build}|{B}|{C}|{name.Split('.')[^1]}|{name}|{C}\n");
+        stores.Source.AddReply(product, "us", ObservationKind.Versions, versions).AddReply(product, "us", ObservationKind.Cdns, CdnsReply);
+    }
+
+    private void ServeSummary(params string[] products) => stores.Source.AddReply("", "us", ObservationKind.Summary, Encoding.UTF8.GetBytes(
+        "Product!STRING:0|Seqn!DEC:4|Flags!STRING:0\n## seqn = 9\n" + string.Concat(products.Select(p => $"{p}|1|\n{p}|2|cdn\n"))));
+
+    private async Task<int> HistoryCount(HistoryKind? kind = null) => (await stores.Source.ReadHistoryAsync(new HistoryQuery(Kind: kind), default)).Count;
+
+    [Fact]
+    public async Task RefreshFetchesEveryReviewedProductAndTheSummaryAsTheWriter()
+    {
+        Serve("wow", "12.0.1.60000", A);
+        Serve("wowt", "12.0.5.61000", B);
+        ServeSummary("wow", "wowt", "wowdev", "wow_classic_era_beta", "agent");
+        Assert.Equal(VmCommands.Ok, await Run("builds", "refresh"));
+        Assert.Equal([(StoreFolder, true)], stores.Opened);
+        Assert.Equal([true], stores.WriterCreate);
+        Assert.Equal(0, stores.Open);
+        Assert.Contains("as the store's writer", error.ToString());
+        var text = output.ToString();
+        Assert.Contains("Retail (wow)", text);
+        Assert.Contains("PTR (wowt)", text);
+        Assert.Contains(Rows(output), r => r is ["12.0.1.60000", "yes", "eu us", _, _, var config] && config == A);
+        // Every reviewed product is shown, grouped under its name; one the service doesn't answer for says so.
+        Assert.All(Products.Reviewed, p => Assert.Contains($"{p.Label} ({p.Id})", text));
+        var beta = text[text.IndexOf("Beta (wow_beta)", StringComparison.Ordinal)..];
+        Assert.StartsWith("not available (CDN_NOT_FOUND)", beta[(beta.IndexOf('\n') + 1)..]);
+        Assert.Contains("New product found: wow_classic_era_beta, wowdev.", text);
+        Assert.DoesNotContain("agent", text);
+        Assert.DoesNotContain("(wowdev)", text);
+        Assert.Equal(1, await HistoryCount(HistoryKind.Summary));
+        Assert.Equal(2, await HistoryCount(HistoryKind.Versions));
+    }
+
+    [Fact]
+    public async Task RefreshAsJsonNamesEachProductAndTheNewOnes()
+    {
+        Serve("wow", "12.0.1.60000", A);
+        ServeSummary("wow", "wowz");
+        Assert.Equal(VmCommands.Ok, await Run("--json", "builds", "refresh", "wow"));
+        var doc = JsonOut();
+        Assert.True(doc.GetProperty("ok").GetBoolean());
+        Assert.True(doc.GetProperty("store").GetProperty("writer").GetBoolean());
+        Assert.Equal(["wow"], doc.GetProperty("fetched").EnumerateArray().Select(e => e.GetString()));
+        var wow = Assert.Single(doc.GetProperty("products").EnumerateArray());
+        Assert.Equal(("wow", "Retail", true), (wow.GetProperty("id").GetString(), wow.GetProperty("label").GetString(), wow.GetProperty("available").GetBoolean()));
+        Assert.Equal("present", wow.GetProperty("versions").GetProperty("state").GetString());
+        var build = Assert.Single(wow.GetProperty("builds").EnumerateArray());
+        Assert.Equal(("12.0.1.60000", A), (build.GetProperty("versionsName").GetString(), build.GetProperty("buildConfig").GetString()));
+        Assert.Equal(["eu", "us"], build.GetProperty("regions").EnumerateArray().Select(r => r.GetProperty("region").GetString()));
+        var summary = doc.GetProperty("summary");
+        Assert.Equal(["wowz"], summary.GetProperty("newProducts").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(2, summary.GetProperty("listed").GetInt32());
+        Assert.Equal("https://us.version.battle.net/v2/summary", summary.GetProperty("observation").GetProperty("url").GetString());
+        Assert.Equal("", output.ToString());
+    }
+
+    [Fact]
+    public async Task ListFetchesOnFirstUseAsTheWriterThenReadsOnly()
+    {
+        Serve("wow", "12.0.1.60000", A);
+        ServeSummary("wow");
+        Assert.Equal(VmCommands.Ok, await Run("builds", "list", "wow"));
+        Assert.Equal([(StoreFolder, false), (StoreFolder, true)], stores.Opened);
+        Assert.Contains("No history for wow: fetching it from the version service", error.ToString());
+        Assert.Contains("takes the writer lock", error.ToString());
+        Assert.Contains("Retail (wow)", output.ToString());
+        Assert.Contains("12.0.1.60000", output.ToString());
+        var recorded = await HistoryCount();
+
+        stores.Opened.Clear(); output.GetStringBuilder().Clear(); error.GetStringBuilder().Clear();
+        Assert.Equal(VmCommands.Ok, await Run("builds", "list", "wow"));
+        Assert.Equal([(StoreFolder, false)], stores.Opened);
+        Assert.Equal(recorded, await HistoryCount());
+        Assert.Equal("", error.ToString());
+        Assert.Contains("12.0.1.60000", output.ToString());
+        Assert.DoesNotContain("Product summary", output.ToString());
+        Assert.Equal(0, stores.Open);
+    }
+
+    [Fact]
+    public async Task ListWithNoArgumentFetchesOnlyTheProductsWithNoHistory()
+    {
+        Serve("wow", "12.0.1.60000", A);
+        Serve("wowt", "12.0.5.61000", B);
+        await stores.Source.ObserveAsync(new(ObservationKind.Versions, "wow", "us"), default);
+        Assert.Equal(VmCommands.Ok, await Run("--json", "builds", "list"));
+        var doc = JsonOut();
+        var fetched = doc.GetProperty("fetched").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Equal(Products.Ids.Where(id => id != "wow"), fetched);
+        var products = doc.GetProperty("products").EnumerateArray().ToList();
+        Assert.Equal(Products.Ids, products.Select(p => p.GetProperty("id").GetString()));
+        Assert.Equal(JsonValueKind.Null, products[0].GetProperty("versions").ValueKind);
+        Assert.False(products[3].GetProperty("available").GetBoolean());
+        // The summary wasn't served: not available, which is an answer, not a failure.
+        Assert.Equal("CDN_NOT_FOUND", doc.GetProperty("summary").GetProperty("observation").GetProperty("code").GetString());
+        Assert.True(doc.GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ListOnAMissingStoreCreatesItForTheFirstFetch()
+    {
+        stores.ReadOnlyFailure = ObjectStoreCodes.Missing;
+        Serve("wow", "12.0.1.60000", A);
+        Assert.Equal(VmCommands.Ok, await Run("builds", "list", "wow"));
+        Assert.Equal([(StoreFolder, false), (StoreFolder, true)], stores.Opened);
+        Assert.Equal([true], stores.WriterCreate);
+        Assert.Contains("12.0.1.60000", output.ToString());
+    }
+
+    [Fact]
+    public async Task ABusyStoreIsAClearErrorForBothCommands()
+    {
+        stores.WriterFailure = ObjectStoreCodes.Busy;
+        Assert.Equal(VmCommands.Failed, await Run("builds", "list", "wow"));
+        Assert.Contains("OBJECT_STORE_BUSY", error.ToString());
+        Assert.Contains("is VibeMiner running?", error.ToString());
+        Assert.Contains("has no history for wow and needs the writer lock", error.ToString());
+        Assert.Equal(VmCommands.Failed, await Run("--json", "builds", "refresh"));
+        Assert.Equal(ObjectStoreCodes.Busy, JsonOut().GetProperty("code").GetString());
+        Assert.Equal(0, await HistoryCount());
+        Assert.Equal(0, stores.Open);
+    }
+
+    [Fact]
+    public async Task AnOfflineRefreshFailsButStillListsWhatTheHistoryHas()
+    {
+        Serve("wow", "12.0.1.60000", A);
+        await stores.Source.ObserveAsync(new(ObservationKind.Versions, "wow", "us"), default);
+        stores.ObservationFails = new(ObjectState.Unavailable, Code: "CDN_OFFLINE", Message: "The version service could not be reached.");
+        Assert.Equal(VmCommands.Failed, await Run("builds", "refresh", "wow"));
+        var text = output.ToString();
+        Assert.Contains("not available (CDN_OFFLINE: The version service could not be reached.)", text);
+        Assert.Contains("12.0.1.60000", text);
+        Assert.Contains("(builds from earlier observations)", text);
+        Assert.Contains("Product summary", text);
+    }
+
+    [Fact]
+    public async Task AnUnreadableSummaryNeverClaimsNoNewProducts()
+    {
+        Serve("wow", "12.0.1.60000", A);
+        stores.Source.AddReply("", "us", ObservationKind.Summary, "not a table\n"u8.ToArray());
+        Assert.Equal(VmCommands.Ok, await Run("builds", "refresh", "wow"));
+        Assert.Contains("new products are unknown", output.ToString());
+        Assert.Contains("SUMMARY_UNREADABLE", output.ToString());
+        Assert.DoesNotContain("No new WoW products", output.ToString());
     }
 }

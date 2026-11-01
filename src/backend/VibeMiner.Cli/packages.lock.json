@@ -53,6 +53,13 @@
           "SQLitePCLRaw.core": "2.1.13"
         }
       },
+      "vibeminer.builds": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Data.Sqlite": "[10.0.13, )",
+          "VibeMiner.ObjectAccess": "[1.0.0, )"
+        }
+      },
       "vibeminer.cdn": {
         "type": "Project"
       },

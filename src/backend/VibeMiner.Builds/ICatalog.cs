@@ -36,6 +36,15 @@ public sealed record BuildList(string Product, IReadOnlyList<CatalogBuild> Build
 public sealed record CatalogRefresh(string Product, ObservationResult Versions, ObservationResult Cdns, BuildList List);
 
 /// <summary>
+/// What a summary refresh observed (appended to the history log when it worked) and what it says.
+/// <see cref="NewProducts"/>: products the summary lists whose id starts with "wow" and that aren't reviewed, sorted. Their builds
+/// are never read; adding one stays a reviewed change (D017). <see cref="Listed"/> is every product the summary lists, sorted.
+/// Both are empty when the observation failed or the reply couldn't be read (see <see cref="Problems"/>).
+/// </summary>
+public sealed record SummaryRefresh(ObservationResult Summary, IReadOnlyList<string> NewProducts, IReadOnlyList<string> Listed,
+    IReadOnlyList<CatalogProblem> Problems, string? Sequence);
+
+/// <summary>
 /// Layer 3's build catalog. The list comes only from the history log, through layer 2, so it works offline and survives
 /// losing the catalog store. Implementations: <see cref="Catalog"/> (SQLite catalog store) and the in-memory fake in
 /// <c>VibeMiner.Builds.Testing</c>; one contract suite runs against both.
@@ -53,4 +62,10 @@ public interface ICatalog
     /// history log), then lists. A failed observation is reported in the result and the list is still served.
     /// </summary>
     Task<CatalogRefresh> RefreshAsync(string product, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Asks the version service for its summary of every product (through layer 2, which appends the reply to the history log)
+    /// and reports the WoW products that aren't reviewed. A failed observation is reported in the result.
+    /// </summary>
+    Task<SummaryRefresh> RefreshSummaryAsync(CancellationToken cancellationToken);
 }

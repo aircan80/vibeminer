@@ -93,7 +93,7 @@ public sealed class InMemoryObjectSource : IObjectSource
         {
             if (!replies.TryGetValue((request.Product, request.Region, request.Kind), out var bytes))
                 return Task.FromResult(new ObservationResult(ObjectState.NotFound, Code: "CDN_NOT_FOUND", ObservedAt: Time.GetUtcNow()));
-            var url = request.Kind <= ObservationKind.Bgdl ? VersionClient.UrlFor(request.Product, request.Region, (VersionDocumentKind)(int)request.Kind)
+            var url = request.Kind <= ObservationKind.Summary ? VersionClient.UrlFor(request.Product, request.Region, (VersionDocumentKind)(int)request.Kind)
                 : new Uri("https://example.invalid/");
             var observation = new Observation(request.Kind, request.Product, request.Region, url, Time.GetUtcNow(), bytes);
             var put = HistoryRecordFormat.Objects(new HistoryObservation((HistoryKind)(byte)request.Kind, request.Product, request.Region,

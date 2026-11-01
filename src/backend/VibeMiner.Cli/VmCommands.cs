@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text.Json;
 using Spectre.Console;
 using Spectre.Console.Rendering;
+using VibeMiner.Builds;
+using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
 
 namespace VibeMiner.Cli;
@@ -24,6 +26,11 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
           store info              packs, objects and bytes in the object store (read-only)
           store scrub             full index check and verify of every object (writes: takes the writer lock)
           history list [product]  the dated version-service observations, oldest first (read-only)
+          builds list [product]   the builds of every reviewed product, or one, from the history log (read-only; the first
+                                  use for a product fetches it, which writes and takes the writer lock)
+          builds refresh [product]
+                                  fetch versions and cdns for every reviewed product, or one, and the product summary,
+                                  then list (writes: takes the writer lock)
 
           --data <dir>   data folder; otherwise VIBEMINER_DATA_DIR, the folder chosen in Settings, then the default
           --json         one JSON document on stdout instead of text
@@ -61,9 +68,15 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
             ["store", "scrub"] => Scrub,
             ["history", "list"] => (folder, token) => History(folder, null, token),
             ["history", "list", var product] => (folder, token) => History(folder, product, token),
+            ["builds", "list"] => (folder, token) => BuildsList(folder, null, token),
+            ["builds", "list", var product] => (folder, token) => BuildsList(folder, product, token),
+            ["builds", "refresh"] => (folder, token) => BuildsRefresh(folder, null, token),
+            ["builds", "refresh", var product] => (folder, token) => BuildsRefresh(folder, product, token),
             _ => null,
         };
         if (command is null) return UsageError(words.Count == 0 ? "No command given." : $"Unknown command: {string.Join(' ', words)}.");
+        if (words is ["builds", _, var named] && !Products.IsKnown(named))
+            return UsageError($"{named} isn't a reviewed product. Reviewed: {string.Join(", ", Products.Ids)}.");
 
         try
         {
@@ -108,7 +121,7 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
 
     private async Task<int> Scrub(string storeFolder, CancellationToken ct)
     {
-        await using var store = await stores.OpenWriterAsync(storeFolder, ct).ConfigureAwait(false);
+        await using var store = await stores.OpenWriterAsync(storeFolder, create: false, ct).ConfigureAwait(false);
         ScrubReport report;
         if (json) report = await store.ScrubAsync(null, ct).ConfigureAwait(false);
         else
@@ -194,6 +207,167 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
         else output.Write(new Text(count == 1 ? "1 entry\n" : $"{count:N0} entries\n"));
         return Ok;
     }
+
+    /// <summary>
+    /// Lists from the history log, read-only. A product with no versions history is fetched first (with the summary): that
+    /// writes, so this run takes the writer lock and says so, creating the store if there is none.
+    /// </summary>
+    private async Task<int> BuildsList(string storeFolder, string? product, CancellationToken ct)
+    {
+        IReadOnlyList<string> products = product is null ? Products.Ids : [product];
+        var missing = new List<string>();
+        IStoreHandle? store = null;
+        try
+        {
+            try { store = await stores.OpenReadOnlyAsync(storeFolder, ct).ConfigureAwait(false); }
+            catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.Missing) { missing.AddRange(products); }
+            if (store is not null)
+                foreach (var id in products)
+                    if ((await store.Objects.ReadHistoryAsync(new HistoryQuery(Product: id, Kind: HistoryKind.Versions, Limit: 1), ct).ConfigureAwait(false)).Count == 0)
+                        missing.Add(id);
+            if (missing.Count == 0)
+            {
+                var catalog = await store!.CatalogAsync(ct).ConfigureAwait(false);
+                var lists = new List<ProductReport>();
+                foreach (var id in products) lists.Add(new(id, await catalog.ListBuildsAsync(id, ct).ConfigureAwait(false), null));
+                return await ReportBuilds(storeFolder, store, lists, null);
+            }
+            if (store is not null) { var open = store; store = null; await open.DisposeAsync().ConfigureAwait(false); }
+
+            var names = string.Join(", ", missing);
+            if (!json) error.Write(new Text($"No history for {names}: fetching it from the version service. That writes to the store, so this run takes the writer lock.\n"));
+            try { store = await stores.OpenWriterAsync(storeFolder, create: true, ct).ConfigureAwait(false); }
+            catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.Busy)
+            {
+                return await Fail(e.Code, $"Another writer holds the object store (is VibeMiner running?). builds list has no history for {names} and needs the writer lock to fetch it. Close it and try again, or run it while VibeMiner is closed.");
+            }
+            var writer = await store.CatalogAsync(ct).ConfigureAwait(false);
+            var reports = new List<ProductReport>();
+            foreach (var id in products)
+                reports.Add(missing.Contains(id) ? Refreshed(await writer.RefreshAsync(id, ct).ConfigureAwait(false))
+                    : new(id, await writer.ListBuildsAsync(id, ct).ConfigureAwait(false), null));
+            var summary = await writer.RefreshSummaryAsync(ct).ConfigureAwait(false);
+            return await ReportBuilds(storeFolder, store, reports, summary);
+        }
+        finally { if (store is not null) await store.DisposeAsync().ConfigureAwait(false); }
+    }
+
+    /// <summary>Fetches versions and cdns for each product and the summary, as the store's writer (creating the store if needed), then lists.</summary>
+    private async Task<int> BuildsRefresh(string storeFolder, string? product, CancellationToken ct)
+    {
+        IReadOnlyList<string> products = product is null ? Products.Ids : [product];
+        await using var store = await stores.OpenWriterAsync(storeFolder, create: true, ct).ConfigureAwait(false);
+        if (!json) error.Write(new Text($"Fetching versions and cdns for {(product is null ? $"{products.Count} products" : product)} and the product summary, as the store's writer.\n"));
+        var catalog = await store.CatalogAsync(ct).ConfigureAwait(false);
+        var reports = new List<ProductReport>();
+        foreach (var id in products) reports.Add(Refreshed(await catalog.RefreshAsync(id, ct).ConfigureAwait(false)));
+        var summary = await catalog.RefreshSummaryAsync(ct).ConfigureAwait(false);
+        return await ReportBuilds(storeFolder, store, reports, summary);
+    }
+
+    /// <summary>One product's list, and the refresh that came before it when this run fetched.</summary>
+    private sealed record ProductReport(string Product, BuildList List, CatalogRefresh? Refresh)
+    {
+        /// <summary>False when this run asked the version service and its versions reply didn't come.</summary>
+        public bool Available => Refresh is null || Refresh.Versions.State == ObjectState.Present;
+    }
+
+    private static ProductReport Refreshed(CatalogRefresh refresh) => new(refresh.Product, refresh.List, refresh);
+
+    /// <summary>
+    /// An observation that failed for a reason other than "the service has no such document" (offline, a bad reply, a store
+    /// that couldn't take it) makes the run fail; a product the service doesn't answer for is an answer.
+    /// </summary>
+    private static bool FailedObservation(ObservationResult r) => r.State is not (ObjectState.Present or ObjectState.NotFound);
+
+    private async Task<int> ReportBuilds(string storeFolder, IStoreHandle store, IReadOnlyList<ProductReport> reports, SummaryRefresh? summary)
+    {
+        var failed = reports.Any(r => r.Refresh is { } x && (FailedObservation(x.Versions) || FailedObservation(x.Cdns))) || summary is not null && FailedObservation(summary.Summary);
+        if (json)
+        {
+            static object? Observed(ObservationResult? r) => r is null ? null : new
+            {
+                state = StateName(r.State), r.Recorded, r.Code, r.Message, url = r.Observation?.Url.AbsoluteUri, observedAt = r.Observation?.ObservedAt ?? r.ObservedAt,
+            };
+            static object Problem(CatalogProblem p) => new { p.Code, p.Message, record = p.Record?.KeyHex, p.Row };
+            await WriteJson(new
+            {
+                ok = !failed, dataFolder = DataFolderJson(), store = new { path = storeFolder, writer = store.Writer },
+                fetched = reports.Where(r => r.Refresh is not null).Select(r => r.Product),
+                products = reports.Select(r => new
+                {
+                    id = r.Product, label = Products.Label(r.Product), available = r.Available,
+                    versions = Observed(r.Refresh?.Versions), cdns = Observed(r.Refresh?.Cdns), lastObservedAt = r.List.LastObservedAt,
+                    builds = r.List.Builds.Select(b => new
+                    {
+                        b.Id, b.VersionsName, b.BuildConfig, b.ProductConfig, b.Current, b.FirstSeen, b.LastSeen, b.Fields,
+                        regions = b.Regions.Select(g => new { g.Region, g.CdnConfig, g.Current, g.FirstSeen, g.LastSeen, lastRecord = g.LastRecord.KeyHex }),
+                    }),
+                    problems = r.List.Problems.Select(Problem),
+                }),
+                summary = summary is null ? null : new
+                {
+                    observation = Observed(summary.Summary), summary.Sequence, listed = summary.Listed.Count, newProducts = summary.NewProducts,
+                    problems = summary.Problems.Select(Problem),
+                },
+            });
+            return failed ? Failed : Ok;
+        }
+
+        foreach (var r in reports)
+        {
+            output.Write(new Rule(Markup.Escape($"{Products.Label(r.Product)} ({r.Product})")).LeftJustified());
+            if (!r.Available)
+            {
+                var v = r.Refresh!.Versions;
+                output.Write(new Text($"not available ({v.Code ?? StateName(v.State)}{(v.Message is null ? "" : ": " + v.Message)})\n",
+                    FailedObservation(v) ? new Style(Color.Red) : Style.Plain));
+            }
+            if (r.List.Builds.Count == 0)
+            {
+                if (r.Available) output.Write(new Text("no builds listed\n"));
+            }
+            else
+            {
+                var table = new Table().Border(TableBorder.Rounded).AddColumn("Version").AddColumn("Current").AddColumn("Regions")
+                    .AddColumn("First seen (UTC)").AddColumn("Last seen (UTC)").AddColumn("Build config");
+                foreach (var b in r.List.Builds)
+                    table.AddRow(Cells(b.VersionsName, b.Current ? "yes" : "", string.Join(' ', b.Regions.Where(g => !b.Current || g.Current).Select(g => g.Region).Distinct()),
+                        $"{b.FirstSeen.ToUniversalTime():yyyy-MM-dd HH:mm}", $"{b.LastSeen.ToUniversalTime():yyyy-MM-dd HH:mm}", b.BuildConfig));
+                output.Write(table);
+                if (!r.Available) output.Write(new Text("(builds from earlier observations)\n"));
+            }
+            if (r.Refresh is { Cdns: var cdns } && r.Available && FailedObservation(cdns))
+                output.Write(new Text($"cdns not recorded ({cdns.Code ?? StateName(cdns.State)})\n", new Style(Color.Red)));
+            foreach (var problem in r.List.Problems.Take(5)) output.Write(new Text($"problem: {problem.Code}: {problem.Message}\n", new Style(Color.Yellow)));
+            if (r.List.Problems.Count > 5) output.Write(new Text($"{r.List.Problems.Count - 5} more problems (see --json)\n", new Style(Color.Yellow)));
+        }
+        if (summary is not null)
+        {
+            output.Write(new Rule("Product summary").LeftJustified());
+            var s = summary.Summary;
+            if (s.Observation is null)
+                output.Write(new Text($"not available ({s.Code ?? StateName(s.State)}{(s.Message is null ? "" : ": " + s.Message)})\n", FailedObservation(s) ? new Style(Color.Red) : Style.Plain));
+            else
+            {
+                output.Write(new Text($"{summary.Listed.Count:N0} products listed{(summary.Sequence is null ? "" : $", seqn {summary.Sequence}")}{(s.Recorded ? "" : $"; not recorded ({s.Code})")}\n",
+                    s.Recorded ? Style.Plain : new Style(Color.Red)));
+                // An unreadable reply lists nothing, which says nothing about new products.
+                var readable = !summary.Problems.Any(p => p.Code is "SUMMARY_UNREADABLE" or "SUMMARY_COLUMNS_MISSING");
+                if (!readable) output.Write(new Text("The summary couldn't be read, so new products are unknown.\n", new Style(Color.Red)));
+                else if (summary.NewProducts.Count == 0) output.Write(new Text("No new WoW products.\n"));
+                else output.Write(new Text($"New product found: {string.Join(", ", summary.NewProducts)}. Not in the reviewed list, so their builds aren't listed; adding one is a reviewed change (D017).\n"));
+                foreach (var problem in summary.Problems.Take(5)) output.Write(new Text($"problem: {problem.Code}: {problem.Message}\n", new Style(Color.Yellow)));
+            }
+        }
+        return failed ? Failed : Ok;
+    }
+
+    private static string StateName(ObjectState state) => state switch
+    {
+        ObjectState.NotFound => "not found", ObjectState.NeedsNetwork => "needs network", ObjectState.StoreFailed => "store failed",
+        _ => state.ToString().ToLowerInvariant(),
+    };
 
     private int UsageError(string message)
     {

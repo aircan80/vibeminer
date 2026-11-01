@@ -4,16 +4,19 @@ using System.Text.RegularExpressions;
 
 namespace VibeMiner.Cdn;
 
-/// <summary>The version-service documents, numbered like the history log's record kinds.</summary>
-public enum VersionDocumentKind { Versions = 1, Cdns = 2, Bgdl = 3 }
+/// <summary>
+/// The version-service documents, numbered like the history log's record kinds. <see cref="Summary"/> lists every product the
+/// service knows with its documents' sequence numbers; it belongs to no product, so its product is "".
+/// </summary>
+public enum VersionDocumentKind { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4 }
 
 /// <summary>One raw version-service reply, exactly as served, with the URL and time it was observed.</summary>
 public sealed record VersionReply(string Product, string Region, VersionDocumentKind Kind, Uri Url, DateTimeOffset ObservedAt, byte[] Bytes, TimeSpan Elapsed);
 
-/// <summary>Layer 1 version-service client: fetches versions, cdns and bgdl replies. It doesn't interpret them.</summary>
+/// <summary>Layer 1 version-service client: fetches versions, cdns, bgdl and summary replies. It doesn't interpret them.</summary>
 public interface IVersionClient
 {
-    /// <summary>One reply. Throws <see cref="CdnException"/> (Offline, NotFound, HttpStatus, Timeout, Protocol, TooLarge ...).</summary>
+    /// <summary>One reply; <paramref name="product"/> is "" for <see cref="VersionDocumentKind.Summary"/>. Throws <see cref="CdnException"/> (Offline, NotFound, HttpStatus, Timeout, Protocol, TooLarge ...).</summary>
     Task<VersionReply> FetchAsync(string product, string region, VersionDocumentKind kind, CancellationToken cancellationToken);
 }
 
@@ -26,10 +29,16 @@ public sealed class VersionClient(HttpClient client, CdnClientOptions? options =
     public static readonly IReadOnlyList<string> Regions = ["us", "eu", "kr", "tw"];
     private readonly CdnClientOptions options = options ?? new();
 
+    /// <summary>
+    /// <c>https://{region}.version.battle.net/v2/products/{product}/{versions|cdns|bgdl}</c>, or <c>/v2/summary</c> on the same host
+    /// for the summary, whose product must be "".
+    /// </summary>
     public static Uri UrlFor(string product, string region, VersionDocumentKind kind)
     {
-        if (product is null || !ProductPattern.IsMatch(product)) throw new ArgumentException("A product is 1-64 of [a-z0-9_-].", nameof(product));
+        if (kind == VersionDocumentKind.Summary ? product != "" : product is null || !ProductPattern.IsMatch(product))
+            throw new ArgumentException(kind == VersionDocumentKind.Summary ? "The summary has no product." : "A product is 1-64 of [a-z0-9_-].", nameof(product));
         if (!Regions.Contains(region)) throw new ArgumentException("Unknown version-service region.", nameof(region));
+        if (kind == VersionDocumentKind.Summary) return new Uri($"https://{region}.version.battle.net/v2/summary", UriKind.Absolute);
         var name = kind switch
         {
             VersionDocumentKind.Versions => "versions", VersionDocumentKind.Cdns => "cdns", VersionDocumentKind.Bgdl => "bgdl",

@@ -66,6 +66,12 @@ public sealed partial class Catalog : ICatalog, IAsyncDisposable
         return new CatalogRefresh(product, versions, cdns, list);
     }
 
+    public async Task<SummaryRefresh> RefreshSummaryAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return Summaries.Read(await ObserveAsync(ObservationKind.Summary, "", cancellationToken).ConfigureAwait(false));
+    }
+
     private async Task<ObservationResult> ObserveAsync(ObservationKind kind, string product, CancellationToken cancellationToken)
     {
         try

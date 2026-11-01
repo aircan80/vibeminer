@@ -38,7 +38,7 @@ The engine keeps its data in a per-OS data folder: `%LOCALAPPDATA%\VibeMiner` on
 node tools/dotnet.mjs run --project src/backend/VibeMiner.Cli -- store info
 ```
 
-Commands: `store info`, `store scrub` (takes the writer lock) and `history list [product]`.
+Commands: `store info`, `store scrub` (takes the writer lock), `history list [product]`, `builds refresh [product]` (fetches from the official version service; takes the writer lock) and `builds list [product]` (read-only, except that the first use for a product fetches it under the writer lock).
 
 ## Verification
 

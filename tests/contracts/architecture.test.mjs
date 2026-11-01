@@ -18,7 +18,7 @@ test('production project dependencies preserve pure engine boundaries and the or
     // Layer 3 builds (D138): builds only on layer 2, with its own table reader and identity.
     Builds: ['ObjectAccess'],
     // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
-    Cli: ['Objects', 'ObjectAccess'],
+    Cli: ['Objects', 'Cdn', 'ObjectAccess', 'Builds'],
   };
   for (const [project, dependencies] of Object.entries(allowed)) {
     const source = await readFile(path.join(root, `src/backend/VibeMiner.${project}/VibeMiner.${project}.csproj`), 'utf8');

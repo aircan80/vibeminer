@@ -137,6 +137,19 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "vibeminer.builds": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Data.Sqlite": "[10.0.13, )",
+          "VibeMiner.ObjectAccess": "[1.0.0, )"
+        }
+      },
+      "vibeminer.builds.testing": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Builds": "[1.0.0, )"
+        }
+      },
       "vibeminer.cdn": {
         "type": "Project"
       },
@@ -163,6 +176,8 @@
         "type": "Project",
         "dependencies": {
           "Spectre.Console": "[0.50.0, )",
+          "VibeMiner.Builds": "[1.0.0, )",
+          "VibeMiner.Cdn": "[1.0.0, )",
           "VibeMiner.ObjectAccess": "[1.0.0, )",
           "VibeMiner.Objects": "[1.0.0, )"
         }

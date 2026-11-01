@@ -97,6 +97,18 @@ public abstract class ObjectSourceContract
     }
 
     [Fact]
+    public async Task TheSummaryIsObservedWithNoProduct()
+    {
+        var source = Arrange([]);
+        var r = await source.ObserveAsync(new(ObservationKind.Summary, "", "us"), None);
+        Assert.Equal((ObjectState.Present, true), (r.State, r.Recorded));
+        Assert.Equal("https://us.version.battle.net/v2/summary", r.Observation!.Url.AbsoluteUri);
+        var entry = Assert.Single(await source.ReadHistoryAsync(new(Kind: HistoryKind.Summary), None));
+        Assert.Equal(("", "us", r.Observation.Url.AbsoluteUri), (entry.Product, entry.Region, entry.Url));
+        Assert.Empty(await source.ReadHistoryAsync(new(Product: "wow"), None));
+    }
+
+    [Fact]
     public async Task OnlyStoredKeysCountAsPresent()
     {
         var a = Synthetic.Config(1); var b = Synthetic.Config(2); var c = Synthetic.Config(3);
@@ -124,6 +136,7 @@ public sealed class InMemoryObjectSourceContractTests : ObjectSourceContract
         var fake = new InMemoryObjectSource();
         foreach (var o in available) fake.Add(o.Key, o.Bytes.ToArray());
         fake.AddReply("wow", "us", ObservationKind.Versions, "Region!STRING:0\nus\n"u8.ToArray());
+        fake.AddReply("", "us", ObservationKind.Summary, "Product!STRING:0|Seqn!DEC:4|Flags!STRING:0\nwow|1|\n"u8.ToArray());
         return fake;
     }
 }

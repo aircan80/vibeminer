@@ -42,6 +42,21 @@ public sealed class VersionClientTests
     }
 
     [Fact]
+    public async Task TheSummaryIsFetchedFromTheSameHostWithNoProduct()
+    {
+        var body = "Product!STRING:0|Seqn!DEC:4|Flags!STRING:0\n## seqn = 9\nwow|8|\nwow|7|cdn\n"u8.ToArray();
+        var (client, handler) = Make(r => Replies.Make(r, HttpStatusCode.OK, body, "text/plain"));
+        var reply = await client.FetchAsync("", "us", VersionDocumentKind.Summary, CancellationToken.None);
+        Assert.Equal("https://us.version.battle.net/v2/summary", reply.Url.AbsoluteUri);
+        Assert.Equal(reply.Url, handler.Requests.Single().RequestUri);
+        Assert.Equal(body, reply.Bytes);
+        Assert.Equal(("", VersionDocumentKind.Summary), (reply.Product, reply.Kind));
+        Assert.Throws<ArgumentException>(() => VersionClient.UrlFor("wow", "us", VersionDocumentKind.Summary));
+        Assert.Throws<ArgumentException>(() => VersionClient.UrlFor("", "us", VersionDocumentKind.Versions));
+        Assert.Throws<ArgumentException>(() => VersionClient.UrlFor("", "xx", VersionDocumentKind.Summary));
+    }
+
+    [Fact]
     public async Task FailuresAreTyped()
     {
         async Task<CdnFailure> Fail(Func<HttpRequestMessage, HttpResponseMessage> answer)

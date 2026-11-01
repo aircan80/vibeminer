@@ -34,6 +34,12 @@ public sealed class InMemoryCatalog(IObjectSource source, string sourceRegion = 
         return new(product, versions, cdns, await ListAsync(product, cancellationToken).ConfigureAwait(false));
     }
 
+    public async Task<SummaryRefresh> RefreshSummaryAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return Summaries.Read(await ObserveAsync(ObservationKind.Summary, "", cancellationToken).ConfigureAwait(false));
+    }
+
     private async Task<ObservationResult> ObserveAsync(ObservationKind kind, string product, CancellationToken cancellationToken)
     {
         try { return await source.ObserveAsync(new(kind, product, sourceRegion), cancellationToken).ConfigureAwait(false); }

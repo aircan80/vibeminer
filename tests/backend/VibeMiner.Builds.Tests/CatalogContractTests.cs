@@ -317,6 +317,40 @@ public abstract class CatalogContract
     }
 
     [Fact]
+    public async Task TheSummaryReportsUnreviewedWowProductsOnlyAndListsNoBuilds()
+    {
+        var catalog = await OpenAsync();
+        Reply("wow", Both("1000", A, B, "11.0.0.1000"));
+        await catalog.RefreshAsync("wow", Ct);
+        inner.AddReply("", "us", ObservationKind.Summary, Encoding.UTF8.GetBytes(
+            "Product!STRING:0|Seqn!DEC:4|Flags!STRING:0\n## seqn = 42\nwow|1|\nwow|2|cdn\nwowz|3|\nagent|4|\nwow_classic_era_beta|5|cdn\nwowdev|6|\nwowt|7|\n"));
+        var summary = await catalog.RefreshSummaryAsync(Ct);
+        Assert.Equal((ObjectState.Present, true), (summary.Summary.State, summary.Summary.Recorded));
+        Assert.Equal(["wow_classic_era_beta", "wowdev", "wowz"], summary.NewProducts);
+        Assert.Equal(["agent", "wow", "wow_classic_era_beta", "wowdev", "wowt", "wowz"], summary.Listed);
+        Assert.Equal("42", summary.Sequence);
+        Assert.Empty(summary.Problems);
+        var entry = Assert.Single(await inner.ReadHistoryAsync(new(Kind: HistoryKind.Summary), Ct));
+        Assert.Equal(("", "us"), (entry.Product, entry.Region));
+        // The summary is in the log but never in a list, and an unreviewed product still can't be listed.
+        Assert.Single((await catalog.ListBuildsAsync("wow", Ct)).Builds);
+        Assert.Equal("wowt|\n", Shape(await catalog.ListBuildsAsync("wowt", Ct)));
+        await Assert.ThrowsAsync<ArgumentException>(() => catalog.ListBuildsAsync("wowdev", Ct));
+    }
+
+    [Fact]
+    public async Task AMissingSummaryIsReportedAndListsNothing()
+    {
+        var catalog = await OpenAsync();
+        var summary = await catalog.RefreshSummaryAsync(Ct);
+        Assert.Equal(ObjectState.NotFound, summary.Summary.State);
+        Assert.Empty(summary.NewProducts);
+        Assert.Empty(summary.Listed);
+        Assert.Null(summary.Sequence);
+        Assert.Empty(await inner.ReadHistoryAsync(new(), Ct));
+    }
+
+    [Fact]
     public async Task UseAfterDisposeThrows()
     {
         var catalog = await OpenAsync();
@@ -327,6 +361,7 @@ public abstract class CatalogContract
         await disposable.DisposeAsync();
         await Assert.ThrowsAsync<ObjectDisposedException>(() => catalog.ListBuildsAsync("wow", Ct));
         await Assert.ThrowsAsync<ObjectDisposedException>(() => catalog.RefreshAsync("wow", Ct));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => catalog.RefreshSummaryAsync(Ct));
     }
 
     /// <summary>Whole-millisecond UTC time that moves only when told.</summary>
