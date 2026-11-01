@@ -357,10 +357,10 @@ internal static class ObjectIndex
                 var (count, digest) = MeasureObjectsParallel(path, ct);
                 var history = MeasureHistory(c);
                 if (Stamp(c) != before) continue;  // a writer committed meanwhile: the comparison would mix two snapshots
-                if (count != before.Totals.Objects || digest != before.Totals.ObjectDigest)
-                    return (null, $"the index's object rows don't match its totals ({count} rows, {before.Totals.Objects} recorded)", false, true);
-                if (history.count != before.Totals.History || history.digest != before.Totals.HistoryDigest)
-                    return (null, "the index's history rows don't match its totals", false, true);
+                if (TotalsMismatch("object", count, digest, before.Totals.Objects, before.Totals.ObjectDigest) is { } objects)
+                    return (null, objects, false, true);
+                if (TotalsMismatch("history", history.count, history.digest, before.Totals.History, before.Totals.HistoryDigest) is { } rows)
+                    return (null, rows, false, true);
                 return (id, null, clean, true);
             }
             return (id, null, clean, false);
@@ -374,6 +374,12 @@ internal static class ObjectIndex
             return (null, $"the index can't be read ({e.Message})", false, true);
         }
     }
+
+    // Names what differs: a count that agrees with a digest that doesn't must not read as "9 rows, 9 recorded".
+    private static string? TotalsMismatch(string what, long count, long digest, long recordedCount, long recordedDigest) =>
+        count != recordedCount ? $"the index has {count} {what} rows but its totals record {recordedCount}"
+        : digest != recordedDigest ? $"the index's {count} {what} rows don't match the digest in its totals"
+        : null;
 
     public static SqliteCommand LookupCommand(SqliteConnection c, SqliteTransaction? tx = null)
     {

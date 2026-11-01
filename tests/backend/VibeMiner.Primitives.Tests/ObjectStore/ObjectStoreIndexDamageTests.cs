@@ -86,6 +86,31 @@ public sealed class ObjectStoreIndexDamageTests
         }
     }
 
+    [Theory]
+    [InlineData("DELETE FROM objects WHERE k = (SELECT min(k) FROM objects)", "the index has 25 object rows but its totals record 26")]
+    [InlineData("UPDATE objects SET sha256 = zeroblob(32) WHERE k = (SELECT min(k) FROM objects)", "the index's 26 object rows don't match the digest in its totals")]
+    [InlineData("DELETE FROM history", "the index has 0 history rows but its totals record 1")]
+    [InlineData("UPDATE history SET url = url || 'x'", "the index's 1 history rows don't match the digest in its totals")]
+    public async Task AFullCheckNamesWhetherTheCountOrTheDigestDiffers(string damage, string problem)
+    {
+        // #163: a digest-only mismatch read as "(9 rows, 9 recorded)", which contradicts itself.
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            await store.PutAsync(Fill());
+            await store.PutAsync(HistoryRecordFormat.Objects(Synthetic.Observation(1)));
+        }
+        using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(dir, "objects.sqlite3")};Pooling=False"))
+        {
+            c.Open();
+            using var cmd = c.CreateCommand(); cmd.CommandText = damage;
+            Assert.Equal(1, cmd.ExecuteNonQuery());
+        }
+        await using var shared = await ObjectStore.OpenReadOnlyAsync(dir);
+        Assert.Equal(problem, (await shared.ScrubAsync()).IndexProblem);
+    }
+
     [Fact]
     public async Task AFullCheckWhileTheWriterCommitsNeverCallsASoundIndexDamaged()
     {
