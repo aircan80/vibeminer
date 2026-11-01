@@ -36,6 +36,9 @@ public static class HistoryRecordFormat
 {
     internal const int MaxBytes = 28 + 1 + 64 + 1 + 16 + 2 + 1024;  // 1,136
 
+    /// <summary>UTF-8 that throws on an unpaired surrogate (encoding) or ill-formed bytes (decoding) instead of writing U+FFFD.</summary>
+    private static readonly UTF8Encoding Strict = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     internal readonly record struct Parsed(HistoryKind Kind, long ObservedMs, ObjectKey Document, string Product, string Region, string Url);
 
     /// <summary>The two objects one observation adds: the reply document, then the record naming it. Put them in one batch, in this order.</summary>
@@ -54,7 +57,8 @@ public static class HistoryRecordFormat
         if (!Enum.IsDefined(kind)) throw new ArgumentOutOfRangeException(nameof(kind));
         if (!ValidProduct(kind, product)) throw new ArgumentException(kind == HistoryKind.Summary ? "A summary has no product." : "A product is 1-64 of [a-z0-9_-].", nameof(product));
         if (!ValidRegion(region)) throw new ArgumentException("A region is 1-16 of [a-z0-9].", nameof(region));
-        var u = Encoding.UTF8.GetBytes(url ?? "");
+        byte[] u;
+        try { u = Strict.GetBytes(url ?? ""); } catch (EncoderFallbackException) { throw new ArgumentException("A URL is well-formed Unicode: no unpaired surrogates.", nameof(url)); }
         if (u.Length > 1024) throw new ArgumentException("A URL is at most 1024 UTF-8 bytes.", nameof(url));
         var b = new byte[28 + 1 + product.Length + 1 + region.Length + 2 + u.Length];
         b[0] = 1; b[1] = (byte)kind;
@@ -83,7 +87,7 @@ public static class HistoryRecordFormat
         int ul = BinaryPrimitives.ReadUInt16LittleEndian(b[at..]); at += 2;
         if (ul > 1024 || at + ul != b.Length) return false;
         string url;
-        try { url = new UTF8Encoding(false, true).GetString(b.Slice(at, ul)); } catch (DecoderFallbackException) { return false; }
+        try { url = Strict.GetString(b.Slice(at, ul)); } catch (DecoderFallbackException) { return false; }
         parsed = new(kind, BinaryPrimitives.ReadInt64LittleEndian(b[4..]), new ObjectKey(ObjectKeyType.HistoryDocument, b.Slice(12, 16)), product, region, url);
         return true;
     }

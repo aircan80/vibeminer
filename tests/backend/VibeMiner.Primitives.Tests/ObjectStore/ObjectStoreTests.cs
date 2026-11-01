@@ -909,6 +909,31 @@ public sealed class ObjectStoreTests
     }
 
     [Fact]
+    public async Task AUrlWithAnUnpairedSurrogateIsRefusedAndIllFormedUrlBytesFailTheGrammar()
+    {
+        // The writer refuses a lone surrogate rather than storing U+FFFD in its place.
+        foreach (var bad in new[] { "https://x/\uD800", "https://x/\uDC00", "\uDBFFhttps://x/", "https://x/\uDC00\uD800" })
+            Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(1) with { Url = bad }));
+        // A paired surrogate is a real character (4 UTF-8 bytes) and round-trips.
+        const string pair = "https://x/\uD83D\uDE00";
+        var objects = HistoryRecordFormat.Objects(Synthetic.Observation(1) with { Url = pair });
+        Assert.True(HistoryRecordFormat.TryParse(objects[1].Bytes.Span, out var parsed));
+        Assert.Equal(pair, parsed.Url);
+        Assert.Equal([0xF0, 0x9F, 0x98, 0x80], objects[1].Bytes.Span[^4..].ToArray());
+
+        // A record whose URL bytes encode a surrogate (ED A0 80) fails the grammar on the way in.
+        var abc = HistoryRecordFormat.Objects(Synthetic.Observation(2) with { Url = "abc" });
+        var bytes = abc[1].Bytes.ToArray();
+        bytes[^3] = 0xED; bytes[^2] = 0xA0; bytes[^1] = 0x80;
+        Assert.False(HistoryRecordFormat.TryParse(bytes, out _));
+        using var t = new TempDirectory();
+        await using var store = await ObjectStore.OpenAsync(StoreDir(t), Quick);
+        var results = await store.PutAsync([abc[0], new PutObject(new ObjectKey(ObjectKeyType.HistoryRecord, MD5.HashData(bytes)), bytes.Length, bytes)]);
+        Assert.Equal(PutOutcome.Refused, results[1].Outcome);
+        Assert.Equal(ObjectRefusalCodes.HistoryInvalid, results[1].Code);
+    }
+
+    [Fact]
     public async Task ADefinitionKeepsItsTableIdRegionAndCommitUrlAndSurvivesARebuildFromThePacks()
     {
         using var t = new TempDirectory();
