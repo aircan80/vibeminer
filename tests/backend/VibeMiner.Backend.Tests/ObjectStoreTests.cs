@@ -614,6 +614,30 @@ public sealed class ObjectStoreTests
     }
 
     [Fact]
+    public async Task ScanAndRebuildFindNoDanglingHistoryWhenEveryDocumentIsStored()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        // Four records sharing two documents (#153).
+        var a = Synthetic.Observation(1, "wow", "us"); var b = Synthetic.Observation(2, "wow", "eu");
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            foreach (var o in new[] { a, a with { ObservedAt = a.ObservedAt.AddDays(1) }, b, b with { ObservedAt = b.ObservedAt.AddDays(1) } })
+                await store.AppendHistoryAsync(o);
+            Assert.Equal(4, (await store.ReadHistoryAsync(new HistoryQuery())).Count);
+            var report = await store.ScanAsync();
+            Assert.Empty(report.Problems);
+        }
+        foreach (var f in Directory.GetFiles(dir, "objects.sqlite3*")) File.Delete(f);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.True(store.OpenReport.IndexRebuilt);
+            Assert.DoesNotContain(store.OpenReport.Problems, p => p.Contains("history", StringComparison.Ordinal));
+            Assert.Equal(4, (await store.ReadHistoryAsync(new HistoryQuery())).Count);
+        }
+    }
+
+    [Fact]
     public async Task ReadsRecordTheirDayInTheIndex()
     {
         using var t = new TempDirectory();

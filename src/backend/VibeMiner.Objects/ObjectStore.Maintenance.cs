@@ -152,7 +152,7 @@ public sealed partial class ObjectStore
                 ("$n", (long)maxSeq + 1), ("$oc", measured.Objects), ("$od", measured.ObjectDigest), ("$hc", measured.History), ("$hd", measured.HistoryDigest));
             var live = Count(c, tx, "SELECT count(*) FROM objects");
             // Dangling history (a record whose document no copy holds) is reported; the record stays as stored.
-            var dangling = Count(c, tx, "SELECT count(*) FROM history WHERE NOT EXISTS (SELECT 1 FROM objects WHERE k = X'0500' || history.document)");
+            var dangling = Count(c, tx, "SELECT count(*) FROM history WHERE NOT EXISTS (SELECT 1 FROM objects WHERE k = CAST(X'0500' || history.document AS BLOB))");  // || yields TEXT, which never equals a BLOB key
             if (dangling > 0) found.Add($"{dangling} history records name a document the store doesn't have");
             progress?.Report(new(entries, bytes));
             problems.AddRange(found);
