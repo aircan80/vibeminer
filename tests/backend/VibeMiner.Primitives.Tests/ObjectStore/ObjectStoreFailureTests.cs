@@ -2,9 +2,9 @@ using Microsoft.Data.Sqlite;
 using VibeMiner.Objects;
 using VibeMiner.Objects.Testing;
 using Xunit;
-using static VibeMiner.Backend.Tests.ObjectStoreTestKit;
+using static VibeMiner.Primitives.Tests.ObjectStoreTestKit;
 
-namespace VibeMiner.Backend.Tests;
+namespace VibeMiner.Primitives.Tests;
 
 /// <summary>Write errors, cancellation, and index commits lost the way power loss loses them.</summary>
 public sealed class ObjectStoreFailureTests

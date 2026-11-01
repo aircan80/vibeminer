@@ -1,9 +1,9 @@
 using VibeMiner.Objects;
 using VibeMiner.Objects.Testing;
 using Xunit;
-using static VibeMiner.Backend.Tests.ObjectStoreTestKit;
+using static VibeMiner.Primitives.Tests.ObjectStoreTestKit;
 
-namespace VibeMiner.Backend.Tests;
+namespace VibeMiner.Primitives.Tests;
 
 /// <summary>More packs than cached handles, and an index file with a flipped bit: named states or a rebuild, never a raw exception.</summary>
 public sealed class ObjectStoreIndexDamageTests
@@ -280,7 +280,7 @@ public sealed class ObjectStoreIndexDamageTests
 
     public static TheoryData<int> Seeds() { var d = new TheoryData<int>(); for (var i = 0; i < 60; i++) d.Add(i); return d; }
 
-    [Theory]
+    [Theory, Trait("Speed", "Slow")]
     [MemberData(nameof(Seeds))]
     public async Task AFlippedBitInTheIndexRebuildsItOrIsANamedStateNeverARawException(int seed)
     {

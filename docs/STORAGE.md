@@ -56,6 +56,76 @@ Synthetic headerless objects, i9-13900K (32 threads), btrfs on LUKS on NVMe, pag
 
 Every object pays three hashes on Put (its key's MD5, SHA-256, CRC-32C), about 520 MiB/s on one core; one fsync is about 6.6 ms here. The scale checks are opt-in, not part of `npm test` ([TESTING](TESTING.md#object-store-scale-store)).
 
+## Getting keys: the CDN clients and object access
+
+Slice 2 (#154) adds the layer 1 clients that talk to Blizzard and layer 2, object access, the only place that decides local or CDN ([D132](DECISIONS.md)-[D136](DECISIONS.md)). Nothing above layer 2 touches layer 1 except the composition root.
+
+### Layer 1: CDN and version-service clients
+
+Code: [`src/backend/VibeMiner.Cdn/`](../src/backend/VibeMiner.Cdn/), a project with no engine references. It knows keys, byte ranges and HTTP, nothing about stores or builds.
+
+- **`ICdnClient`** (`CdnClient`) runs one request at a time over a `CdnRoute` (a `cdns` row's official hosts in advertised order, plus the product path). A request is a whole key or exactly one byte range of it, under `config/`, `data/` or `data/…​.index`. Multi-range requests are never sent: `us.cdn` answers them with the whole 256 MiB archive.
+- **Reply checks**, all before the body is read: no redirect; 404 (and level3's 403 for a missing key) is `NotFound`; a 200 to a range request is `RangeIgnored` and the response is dropped at the headers, which closes the HTTP/1.1 connection or resets the HTTP/2 stream; a 206 must carry exactly `bytes from-to/total` for the request, and the total must equal an expected one when given; no `Content-Encoding`; media type one the CDN serves; `Content-Length`, the range length and the received length must match the declared length (`SizeConflict`). A whole in-memory reply (at most 64 MiB) can carry a check (`CdnCheck`), which layer 2 fills with `ObjectVerification.Default`; failing it is `VerificationFailed` with the store's refusal code.
+- **Hosts** are tried in the order given. Every failure moves to the next host (a check failure too: the next host's bytes are checked again), except in a streamed fetch, which never moves once a byte has reached its sink, so a sink never sees two hosts' bytes. `CdnException` lists every attempt. Its overall state: `Offline` only when no host answered; `NotFound` when hosts answered 404 or not at all, a dated observation that is retryable and never means absent; size conflicts and check failures are not retryable, unless another host failed for a passing reason (no connection, timeout, 5xx), which wins: one host's bad copy doesn't prove the key is bad. Layer 2 does the same above the client: a merged-range member or a staged chunk that fails its check is fetched again from the remaining hosts in ranked order, never from a host that already sent bad bytes (a staging resumes from its proven bytes), and is refused only when no host is left.
+- **Timeouts:** 20 s to the headers, 30 s without body bytes, plus the caller's cancellation. Cancellation is never a `CdnException`.
+- **`IVersionClient`** (`VersionClient`) fetches `https://{region}.version.battle.net/v2/products/{product}/{versions|cdns|bgdl}` for regions us, eu, kr and tw: at most 1 MiB, `text/plain` or `application/octet-stream`, no redirects, the raw bytes with URL and observation time. `VersionTable` reads the table grammar (the same rules as `MetadataParser`, kept in layer 1 so it needs no engine project), and `CdnsRoutes` turns a `cdns` reply into one route per region, dropping hosts that aren't official and naming regions with no usable route (`ROUTE_AMBIGUOUS`, `ROUTE_INVALID`).
+- **`RangePlanner`** is pure. Index membership alone decides ranged or loose, never size. Per archive it sorts members by offset; two members whose spans overlap are both refused (`RANGE_OVERLAP`); an EKey with two sizes from any sources (EN, indexes, repeated requests) is refused (`SIZE_CONFLICT`); an EKey that several archives list gets one location, the earliest archive in the CDN config, then the lowest offset. A range keeps taking the next member while the gap is at most 1 MiB, the range is under 8 MiB, and the result stays within 16 MiB; one object larger than that is a range on its own. `Split` cuts a reply back into member slices and drops the gap bytes.
+
+### Layer 2: object access
+
+Code: [`src/backend/VibeMiner.ObjectAccess/`](../src/backend/VibeMiner.ObjectAccess/), which references only `VibeMiner.Objects` and `VibeMiner.Cdn`.
+
+`IObjectSource` is the whole boundary:
+
+| Call | Does |
+| --- | --- |
+| `GetKeyAsync(request, cdn, priority)` | One object with its bytes (when it fits in 64 MiB) |
+| `GetKeysAsync(requests, cdn, priority, progress)` | Makes every object present; one result per request, in order, no bytes |
+| `GetRangeAsync(request, offset, destination, cdn, priority)` | A byte range, after making the object present |
+| `ObserveAsync(request)` | One dated build observation, saved in the history log |
+| `CountPresentAsync(keys)` | How many keys the profile's own store holds, for the Downloaded figure |
+| `ReadHistoryAsync(query)` | The history log, for the build list |
+
+A request names the key, its declared length (from EN, an index entry or a config size pair; never a CDN config `*-index-size` hint) and the archive index entries that list it, if any. A loose request with no declared length (a config, say) is charged 4 MiB of the in-flight byte budget and may be at most that; a longer reply is refused as `TooLarge`. `Order` groups requests: lower groups go first, which is how Download all puts DOWNLOAD priority 0 first. Within a group, ranges come in CDN-config archive order, then loose objects. The `CdnContext` is the route from the current `cdns` reply and the CDN config's archive list.
+
+Results are `Present` (with where this call got it, `Store`, `SharedStore` or `Cdn`, and the origin the store recorded), `NotFound` (dated, retryable), `Unavailable` (offline, timeout, 5xx, broken connection; retryable, with a `CDN_*` code), `Refused` (wrong bytes or declarations, or a key the CDN doesn't serve), `NeedsNetwork` (local-only) or `StoreFailed` (for example `OBJECT_STORE_DISK_FULL`).
+
+| Implementation | Behaviour |
+| --- | --- |
+| `ObjectSource` | Own store, then the shared dev store (read-only; copied in through Put, which checks it again, and recorded with origin `SharedStore`; never pointed into), then the CDN. A copy that fails its read checks is deleted and fetched again |
+| `CdnObjectSource` | CDN only: fetches and checks every time, stores nothing, refuses objects over 64 MiB, counts 0 present, has no history |
+| `LocalObjectSource` | Local only, a true offline mode: own store, then the shared store; anything missing is `NeedsNetwork`, and nothing touches the network |
+| `InMemoryObjectSource` (tests) | Synthetic objects with scripted 404s, outages and refusals; the double for layer 3 and up |
+
+`ObjectSourceContractTests` run one behaviour suite against `ObjectSource` and `InMemoryObjectSource`, and `CdnClientContractTests` against `CdnClient` and `ScriptedCdnClient`, so the doubles can't drift.
+
+**Fetching.** Missing objects are planned (above) and run by a fixed set of workers, never one task per object:
+
+1. A worker claims its members in an in-flight table. A key another caller is fetching is awaited instead; an interactive caller that joins promotes the waiting transfer. If the owner is canceled, the waiter fetches the key itself.
+2. Just before the transfer, each member is checked against the store again, so an object an interactive call stored meanwhile isn't fetched twice; the range shrinks to the members left.
+3. It takes its bytes from a 256 MiB in-flight budget, then a stream ([D134](DECISIONS.md)).
+4. Each member of a range reply is checked with `ObjectVerification.Default`. Verified members are put in batches of up to 4,096; interactive batches commit at once, background ones join the store's group commit.
+5. A member that fails its check gets one request of its own, which tries every host, before it is refused: one bad object fails only itself. A merged range that fails on every host for a passing reason (timeout, 5xx, broken connection, a 200 to the range) is retried one object at a time ([#150](https://github.com/aircan80/vibeminer/issues/150)); a 404 or no connection answers for every member.
+6. An object over 64 MiB streams into the store's staging, which checks each BLTE chunk as it arrives. A broken transfer keeps the proven chunks, and the next call fetches only the rest as one range.
+
+**Streams** ([D134](DECISIONS.md)). Background work starts at 16 streams and adapts between 16 and 32: one more after a full limit's worth of successes in a row, a quarter fewer on a timeout, connection failure or 5xx. Interactive work has 4 streams of its own, borrows a free background stream when those are busy, and is always granted before any waiting background request. Hosts that answered over HTTP/2 go first for background work, interactive work keeps the advertised order, and a host that just failed goes last for 30 s. 404s don't count against a host. The composition root can give interactive work its own `CdnClient` and connection pool.
+
+**Observations** ([D135](DECISIONS.md)). An `IObservationSource` serves some `ObservationKind`s and returns raw bytes with URL and time. `VersionServiceObservations` serves versions, cdns and bgdl. Layer 2 saves each one with `AppendHistoryAsync`. The wago.tools build list (#96) arrives as another source with its own kind, which also needs a layer 1 history kind; nothing else changes.
+
+### Measured
+
+Retail `wow`/us on 2026-11-01 from one machine on a 0.9 Gbit/s line, through `ObjectSource` into a throwaway store, with the official CDN. `tools/benchmarks/ObjectAccess` ([README](../tools/benchmarks/ObjectAccess/README.md)).
+
+| Measure | Result |
+| --- | --- |
+| First pass: versions, cdns, both configs, 1,402 archive indexes and the file-index, ENCODING, ROOT, DOWNLOAD, INSTALL, SIZE | 1,410 object requests, 447 MiB, 34.8 s. Indexes 120 MiB in 3.7 s; ENCODING 179 MiB in 21.9 s on one stream |
+| Second pass on the same store | 0 object requests |
+| Half the entries in the first 32 MiB of archives, alternating archives between gaps, 4 runs | Median 15.7 MiB/s useful at 256 KiB (19-29% gap bytes), 19.1 MiB/s at 1 MiB (24-39%) |
+| A config fetched at interactive priority while 32 background streams run (512 KiB ranges) | Median 15-20 ms, at most 37 ms over 20 fetches; 23-62 ms idle |
+| The same at 16 streams with 8 MiB ranges, two earlier runs | 40-1,864 ms, median 244-338 ms; the slow ones weren't explained (the probe hits the same cached config each time) |
+
+The gap result varied run to run (one run of four favoured 256 KiB); 1 MiB is the default and stays a parameter ([D133](DECISIONS.md)). A single large loose object (ENCODING) is limited by one stream's speed on an edge cache miss.
+
 ## Identity and provenance
 
 Physical payload identity is local SHA-256 plus exact length. Blizzard content keys, encoding keys, configuration identities and locator references stay distinct typed protocol values. A header EKey is not automatically a whole-file MD5; encoded integrity and decoded CKey verification establish different facts.

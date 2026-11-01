@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable></PropertyGroup><ItemGroup>
+  <!-- The in-memory IObjectSource, the standard test double for layer 3 and up. -->
+  <ProjectReference Include="../../../src/backend/VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
+</ItemGroup></Project>

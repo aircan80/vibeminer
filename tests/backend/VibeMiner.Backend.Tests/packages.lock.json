@@ -163,18 +163,6 @@
           "VibeMiner.Protocols.Tact": "[1.0.0, )"
         }
       },
-      "vibeminer.objects": {
-        "type": "Project",
-        "dependencies": {
-          "Microsoft.Data.Sqlite": "[10.0.13, )"
-        }
-      },
-      "vibeminer.objects.crashwriter": {
-        "type": "Project",
-        "dependencies": {
-          "VibeMiner.Objects": "[1.0.0, )"
-        }
-      },
       "vibeminer.protocols.tact": {
         "type": "Project",
         "dependencies": {

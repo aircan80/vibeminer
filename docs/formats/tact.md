@@ -281,6 +281,8 @@ Limits: 10 M entries, 100,000 pages, 512 MiB index, 4 MiB TOC.
 
 ## CDN fetching
 
+**Current.** This section describes `OfficialSourceTransport`, which #158 removes. The new store's layer 1 client (`VibeMiner.Cdn`) keeps the URL and reply rules below, never sends multi-range requests, drops a 200 to a range request at the headers, and tries the next host after any failure, a failed key check included ([STORAGE](../STORAGE.md#layer-1-cdn-and-version-service-clients), [D132](../DECISIONS.md)).
+
 ### URLs
 
 [`OfficialSourceTransport.ValidateUri`](../../src/backend/VibeMiner.Infrastructure/Content/OfficialSourceTransport.cs) admits only:

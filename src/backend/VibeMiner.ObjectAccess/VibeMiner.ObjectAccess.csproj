@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
+  <!-- Layer 2 object access: the only place that decides local or CDN. Builds only on layer 1 (D121). -->
+  <ProjectReference Include="../VibeMiner.Objects/VibeMiner.Objects.csproj" />
+  <ProjectReference Include="../VibeMiner.Cdn/VibeMiner.Cdn.csproj" />
+  <InternalsVisibleTo Include="VibeMiner.ObjectAccess.Tests" />
+  <InternalsVisibleTo Include="VibeMiner.Storage.IntegrationTests" />
+</ItemGroup></Project>

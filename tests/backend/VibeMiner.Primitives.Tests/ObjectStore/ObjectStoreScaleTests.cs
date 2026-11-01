@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
+using VibeMiner.Backend.Tests;
 using VibeMiner.Objects;
 using VibeMiner.Objects.Testing;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace VibeMiner.Backend.Tests;
+namespace VibeMiner.Primitives.Tests;
 
 /// <summary>
 /// Opt-in scale checks (docs/TESTING.md). <c>VIBEMINER_OBJECT_STORE_SCALE=N</c> runs them over N million objects (3 for everyday
@@ -32,6 +33,7 @@ public sealed class ScaleScanFactAttribute : FactAttribute
     }
 }
 
+[Trait("Speed", "Slow")]
 public sealed class ObjectStoreScaleTests(ITestOutputHelper output)
 {
     /// <summary>Millions of objects asked for, or null when the scale checks are off. A value that isn't a number means 3.</summary>

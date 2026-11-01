@@ -3,9 +3,9 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using VibeMiner.Objects;
 using VibeMiner.Objects.Testing;
-using static VibeMiner.Backend.Tests.ObjectStoreTestKit;
+using static VibeMiner.Primitives.Tests.ObjectStoreTestKit;
 
-namespace VibeMiner.Backend.Tests;
+namespace VibeMiner.Primitives.Tests;
 
 public sealed class ObjectStoreStagingTests
 {
@@ -110,7 +110,7 @@ public sealed class ObjectStoreStagingTests
         await Assert.ThrowsAsync<ArgumentException>(() => store.StageAsync(Synthetic.Headerless(9).Key, (512L << 20) + 1));
     }
 
-    [Fact]
+    [Fact, Trait("Speed", "Slow")]
     public async Task A512MiBObjectStagesCommitsAndReadsByRange()
     {
         using var t = new TempDirectory();

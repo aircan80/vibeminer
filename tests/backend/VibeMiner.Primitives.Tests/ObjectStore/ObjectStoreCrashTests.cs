@@ -3,9 +3,9 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using VibeMiner.Objects;
 using VibeMiner.Objects.Testing;
-using static VibeMiner.Backend.Tests.ObjectStoreTestKit;
+using static VibeMiner.Primitives.Tests.ObjectStoreTestKit;
 
-namespace VibeMiner.Backend.Tests;
+namespace VibeMiner.Primitives.Tests;
 
 /// <summary>
 /// Crashes at every step of append, sync, commit, pack roll, compaction and rebuild, two ways: an in-process fault hook that drops
@@ -78,7 +78,7 @@ public sealed class ObjectStoreCrashTests
         return data;
     }
 
-    [Theory]
+    [Theory, Trait("Speed", "Slow")]
     [MemberData(nameof(KillPoints))]
     public async Task ASigkillAtAnyStepLosesNoConfirmedObject(string point, int occurrence)
     {
@@ -89,7 +89,7 @@ public sealed class ObjectStoreCrashTests
         await CheckWorkloadAsync(dir, lines);
     }
 
-    [Fact]
+    [Fact, Trait("Speed", "Slow")]
     public async Task SigkillsAtRandomMomentsLoseNoConfirmedObject()
     {
         var rng = new Random(20261031);

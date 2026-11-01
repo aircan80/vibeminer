@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using VibeMiner.Objects;
 
-namespace VibeMiner.Backend.Tests;
+namespace VibeMiner.Primitives.Tests;
 
 /// <summary>
 /// An in-memory layer 1 for tests of the layers above (#153): the same verification (<see cref="ObjectVerification.Default"/>) and

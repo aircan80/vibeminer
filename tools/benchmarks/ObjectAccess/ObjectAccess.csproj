@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>VibeMiner.ObjectAccess.Benchmark</AssemblyName></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/backend/VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
+    <!-- Only to find ROOT through ENCODING for the live pass; layer 2 itself parses nothing. -->
+    <ProjectReference Include="../../../src/backend/VibeMiner.Protocols.Tact/VibeMiner.Protocols.Tact.csproj" />
+  </ItemGroup>
+</Project>

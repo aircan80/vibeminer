@@ -3,9 +3,9 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using VibeMiner.Objects;
 using VibeMiner.Objects.Testing;
-using static VibeMiner.Backend.Tests.ObjectStoreTestKit;
+using static VibeMiner.Primitives.Tests.ObjectStoreTestKit;
 
-namespace VibeMiner.Backend.Tests;
+namespace VibeMiner.Primitives.Tests;
 
 public sealed class ObjectStoreTests
 {

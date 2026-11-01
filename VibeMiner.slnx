@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/Backend/">
+    <Project Path="src/backend/VibeMiner.Cdn/VibeMiner.Cdn.csproj" />
     <Project Path="src/backend/VibeMiner.Domain/VibeMiner.Domain.csproj" />
     <Project Path="src/backend/VibeMiner.Application/VibeMiner.Application.csproj" />
     <Project Path="src/backend/VibeMiner.Protocols.Tact/VibeMiner.Protocols.Tact.csproj" />
@@ -7,9 +8,15 @@
     <Project Path="src/backend/VibeMiner.Infrastructure/VibeMiner.Infrastructure.csproj" />
     <Project Path="src/backend/VibeMiner.Host/VibeMiner.Host.csproj" />
     <Project Path="src/backend/VibeMiner.Objects/VibeMiner.Objects.csproj" />
+    <Project Path="src/backend/VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="tests/backend/VibeMiner.Backend.Tests/VibeMiner.Backend.Tests.csproj" />
     <Project Path="tests/backend/VibeMiner.Objects.CrashWriter/VibeMiner.Objects.CrashWriter.csproj" />
+    <Project Path="tests/backend/VibeMiner.Primitives.Tests/VibeMiner.Primitives.Tests.csproj" />
+    <Project Path="tests/backend/VibeMiner.Cdn.Testing/VibeMiner.Cdn.Testing.csproj" />
+    <Project Path="tests/backend/VibeMiner.ObjectAccess.Tests/VibeMiner.ObjectAccess.Tests.csproj" />
+    <Project Path="tests/backend/VibeMiner.ObjectAccess.Testing/VibeMiner.ObjectAccess.Testing.csproj" />
+    <Project Path="tests/backend/VibeMiner.Storage.IntegrationTests/VibeMiner.Storage.IntegrationTests.csproj" />
   </Folder>
 </Solution>

@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable></PropertyGroup><ItemGroup>
+  <!-- Test doubles for the layer boundaries (D131): a synthetic CDN with an HTTP front end for the real client and a scripted ICdnClient. -->
+  <ProjectReference Include="../../../src/backend/VibeMiner.Cdn/VibeMiner.Cdn.csproj" />
+</ItemGroup></Project>

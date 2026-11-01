@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
+  <!-- Layer 1 CDN and version-service clients: keys, bytes and HTTP only. No store, builds, parsers or features (D121). -->
+  <InternalsVisibleTo Include="VibeMiner.Primitives.Tests" />
+</ItemGroup></Project>

@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 using VibeMiner.Objects;
 using VibeMiner.Objects.Testing;
 
-namespace VibeMiner.Backend.Tests;
+namespace VibeMiner.Primitives.Tests;
 
 /// <summary>Shared helpers for the layer 1 object store tests: index snapshots, raw pack edits and the crash-workload checker.</summary>
 internal static class ObjectStoreTestKit

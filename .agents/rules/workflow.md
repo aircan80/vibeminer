@@ -15,7 +15,7 @@ How an issue moves from idea to closed. Read this before touching issues, branch
 3. When done, the developer squashes the branch to one commit on top of current `main`. The message ends with `Refs #N` (never `Closes`/`Fixes`).
    - The commit stays local. Nothing is pushed for CI. Never force-push anything.
 4. The developer calls **reviewer** and each listed expert. Each one posts one verdict comment on the issue against `git diff main...issue-N`. Fix blockers on the same branch, re-squash, and re-request only the reviewer who raised them.
-5. All verdicts pass → the developer rebases onto `main`, runs `npm run build` and the unit tests of the layer it changed (see [TESTING.md](../../docs/TESTING.md#layer-scoped-unit-tests)), and pushes: `git push origin <sha>:refs/heads/main`, then `git merge --ff-only`. No owner OK and no full gate needed. Flip the issue to `ready-for-qa`.
+5. All verdicts pass → the developer rebases onto `main`, runs `npm run build` and the unit tests of the layer it changed (`npm run test:layers`, see [TESTING.md](../../docs/TESTING.md#layer-scoped-unit-tests)), and pushes: `git push origin <sha>:refs/heads/main`, then `git merge --ff-only`. No owner OK and no full gate needed. Flip the issue to `ready-for-qa`.
    - If conflict fixes changed code, the reviewer reviews again first.
    - Several passed issues can go in one push, stacked in merge order.
 6. CI (`.github/workflows/ci.yml`) runs everything on Linux after each push. That's the full run per change. Windows and macOS are parked.

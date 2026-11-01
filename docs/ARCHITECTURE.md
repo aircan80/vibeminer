@@ -33,7 +33,7 @@ flowchart TB
 
 ### Rules
 
-- **Downward only.** A layer calls only layers below it, through their interfaces. Today `tests/contracts/architecture.test.mjs` checks a fixed list of allowed project references and knows nothing about layers. #154 adds the layer check.
+- **Downward only.** A layer calls only layers below it, through their interfaces. `tests/contracts/architecture.test.mjs` checks the allowed project references and that no project, fake or layer test project references a higher layer.
 - **Interfaces at every boundary.** A boundary consumed by the layer above has a real implementation, an in-memory fake in the tests, and a shared contract test suite that runs against both, so a fake cannot drift. Layers above test against the fakes. #153 does this for the object store and #154 for the CDN clients and `IObjectSource`. The later slices follow the same rule.
 - **Everything outside comes in through layer 2.** Nothing above layer 2 touches layer 1. The only exception is the composition root, which builds and wires the pieces. Layer 2 serves keyed CDN objects (`IObjectSource`), the read-only paths layer 3 needs (`CountPresent` for the Downloaded figure, history reads for the build list), and dated build observations saved in the history log. Those come from the version service today, and from the wago.tools build list later (#96). No screen, table provider, generator or export action creates its own cache or downloader.
 - **Swappable object access.** `IObjectSource` has a real implementation (local, then shared dev store, then CDN), and can also run CDN-only, local-only (offline) or as a fake. Nothing above it changes: a CDN-only source reports 0% downloaded, and a fake answers from its own data.
@@ -55,7 +55,7 @@ flowchart TB
 
 ### Testing by layer
 
-**Planned (#154).** A change runs the tests of its own layer and of every layer above it. A change to shared foundations (toolchain, packages, shared fixtures, build configuration) or to a layer's public interface runs everything. Slow layer 1 tests (real crash runs, large objects, scale) run in the full gate and CI only. See [TESTING](TESTING.md); the tooling lands in #154.
+Each layer has its own test project and tests only that layer, against the fakes of the layers below (D137). A change runs its own layer's tests; an interface or fake change also runs the callers' projects; shared foundations run everything. `npm run test:layers` works out the plan from the changed paths. Slow layer 1 tests are tagged and skipped in callers' runs. See [TESTING](TESTING.md#layer-scoped-unit-tests).
 
 ## Process ownership
 
@@ -78,6 +78,8 @@ C# owns source discovery, acquisition, exact build contexts, parsing, job schedu
 | Project | Code layer | Responsibility | Allowed production dependencies |
 | --- | --- | --- | --- |
 | `VibeMiner.Objects` | 1 (planned, #153) | Object store: packs, its own index, per-key-type verification, history log ([STORAGE](STORAGE.md)) | None (SQLite only) |
+| `VibeMiner.Cdn` | 1 (planned, #154) | CDN client (`ICdnClient`), version-service client (`IVersionClient`) and the pure range planner ([STORAGE](STORAGE.md#layer-1-cdn-and-version-service-clients)) | None |
+| `VibeMiner.ObjectAccess` | 2 (planned, #154) | `IObjectSource` and its real, CDN-only and local-only implementations; streams, hosts and dated observations (`IObservationSource`) ([STORAGE](STORAGE.md#layer-2-object-access)) | Objects, Cdn |
 | `VibeMiner.Domain` | shared | Identities, invariants, provenance, readiness and capability values | None |
 | `VibeMiner.Protocols.Tact` | shared, pure | Original bounded configuration, BLTE, EN, IN, DL, DS and locator parsing | Domain |
 | `VibeMiner.Formats.Wow` | shared, pure | Original WoW ROOT, DB2, schema interpretation and staged asset decoding | Protocols.Tact |
@@ -87,7 +89,7 @@ C# owns source discovery, acquisition, exact build contexts, parsing, job schedu
 
 The dependency column lists the direct project references `tests/contracts/architecture.test.mjs` allows.
 
-New code goes into a project for its layer. #154 splits the backend tests into one test project per layer. `Application` and `Infrastructure` shrink as the slices move their parts into layer projects, and #158 removes the old object store.
+New code goes into a project for its layer. Its tests go into that layer's test project. `Application` and `Infrastructure` shrink as the slices move their parts into layer projects, and #158 removes the old object store.
 
 Pure parsers consume bounded caller-provided bytes or streams and return records and completion facts. They never fetch dependencies, discover paths, run SQL, decide retention or claim acquisition provenance. Results that cross a layer boundary contain no Electron, HTTP response, SQLite or parser implementation types.
 

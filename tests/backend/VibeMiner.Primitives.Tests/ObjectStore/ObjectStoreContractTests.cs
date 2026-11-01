@@ -3,7 +3,7 @@ using VibeMiner.Objects;
 using VibeMiner.Objects.Testing;
 using Xunit;
 
-namespace VibeMiner.Backend.Tests;
+namespace VibeMiner.Primitives.Tests;
 
 /// <summary>
 /// The layer 1 contract (#153), one suite run against the real store and against <see cref="InMemoryObjectStore"/>, so tests of the

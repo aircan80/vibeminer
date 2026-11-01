@@ -27,6 +27,10 @@ Each code layer in [ARCHITECTURE.md](ARCHITECTURE.md) has its own test project, 
 
 When you change one layer, run only that layer's unit tests. Callers above use the fake, so they can't see an implementation change. A change to a layer's interface or fake also runs the contract tests and the test projects of the layers that call it. A change to shared test helpers or build files runs everything. CI on `main` runs every suite after each push, and integration and e2e tests stay cross-layer by design.
 
+Projects: layer 1 is `tests/backend/VibeMiner.Primitives.Tests` (object store, CDN and version clients), layer 2 is `tests/backend/VibeMiner.ObjectAccess.Tests`, and `tests/backend/VibeMiner.Storage.IntegrationTests` runs object access over the real store. `VibeMiner.Backend.Tests` covers the current code the rewrite replaces. `tests/contracts/architecture.test.mjs` checks that each project, fake and layer test project references only its own layer and lower ones.
+
+`npm run test:layers -- [base] [--list]` ([tools/test-layers.mjs](../tools/test-layers.mjs)) maps the paths changed since `base` (default `main`) to these rules and runs the result; `--list` prints the plan. An interface change is any changed line containing `public ` in a layer's source project, or any change to its fake project. Slow layer 1 tests (real SIGKILL runs, the 512 MiB object, the index bit-flip sweep, scale) carry `[Trait("Speed", "Slow")]`. Callers' runs skip them with `--filter "Speed!=Slow"`; a layer 1 change and CI run them.
+
 ## Async tests
 
 Tests must await real completion and observe failures. Avoid `.Result`, `.Wait()`, arbitrary sleeps, timing-sensitive assertions and live services. Bounded timeouts are deadlock guards, not performance claims.
@@ -77,7 +81,7 @@ Simulated I/O failures, process termination and physical full-volume/power-loss 
 | Variable | Used by | Effect |
 | --- | --- | --- |
 | `VIBEMINER_DATA_DIR` | Desktop main | Engine data folder instead of the chosen or per-OS default one ([D128](DECISIONS.md)). Every test and QA run sets it. |
-| `VIBEMINER_OBJECT_STORE_SCALE` | `tests/backend` (`ObjectStoreScaleTests`) | `N` runs the object store scale checks over N million objects: lookups under 10 µs, Read, and the open-time index check. `3` (about one Retail build) for everyday checks; `10` for sign-off and for changes to index, lookup or rebuild code (builds share 97-99.5% of their objects, so even heavy real use lands around 5-10M unique objects); `30` is an optional extreme run that nothing requires. Skipped when unset. See [scale store](#object-store-scale-store). |
+| `VIBEMINER_OBJECT_STORE_SCALE` | `tests/backend/VibeMiner.Primitives.Tests` (`ObjectStoreScaleTests`) | `N` runs the object store scale checks over N million objects: lookups under 10 µs, Read, and the open-time index check. `3` (about one Retail build) for everyday checks; `10` for sign-off and for changes to index, lookup or rebuild code (builds share 97-99.5% of their objects, so even heavy real use lands around 5-10M unique objects); `30` is an optional extreme run that nothing requires. Skipped when unset. See [scale store](#object-store-scale-store). |
 | `VIBEMINER_OBJECT_STORE_SCALE_REBUILD` | `ObjectStoreScaleTests` | `1` rebuilds the cached scale store even when it matches. |
 | `VIBEMINER_OBJECT_STORE_SCALE_SCAN` | `ObjectStoreScaleTests` | `1` also runs the Scan rebuild at scale (about 13 minutes at 30M, proportionally less below), on a copy. Only needed when the rebuild code changes. |
 | `VIBEMINER_ENGINE_PATH` | Desktop main | Engine binary or DLL to launch |
