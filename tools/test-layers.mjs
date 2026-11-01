@@ -45,6 +45,13 @@ export const layers = [
     paths: ['tests/backend/VibeMiner.Builds.Tests/'],
     testProject: 'tests/backend/VibeMiner.Builds.Tests',
   },
+  {
+    layer: 7, name: 'Developer CLI',
+    src: ['src/backend/VibeMiner.Cli/'],
+    fakes: [],
+    paths: ['tests/backend/VibeMiner.Cli.Tests/'],
+    testProject: 'tests/backend/VibeMiner.Cli.Tests',
+  },
 ];
 
 // Cross-layer integration tests over the real layers 1 and 2. Runs only once the project exists.

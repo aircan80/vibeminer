@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><AssemblyName>vm</AssemblyName><RootNamespace>VibeMiner.Cli</RootNamespace></PropertyGroup><ItemGroup>
+  <!-- Layer 7 developer CLI (#170): its own composition root over the layer projects, beside the UI. -->
+  <ProjectReference Include="../VibeMiner.Objects/VibeMiner.Objects.csproj" />
+  <ProjectReference Include="../VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
+  <!-- Terminal tables, progress and panels for the text output only (D151). Not in the desktop package. -->
+  <PackageReference Include="Spectre.Console" Version="0.50.0" />
+  <InternalsVisibleTo Include="VibeMiner.Cli.Tests" />
+</ItemGroup></Project>

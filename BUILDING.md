@@ -32,6 +32,14 @@ Click **Refresh builds** to explicitly check official sources for every product.
 
 The engine keeps its data in a per-OS data folder: `%LOCALAPPDATA%\VibeMiner` on Windows, `~/Library/Application Support/VibeMiner` on macOS (excluded from Time Machine), `~/.local/share/VibeMiner` on Linux, or a folder saved in `data-folder-v1.json` in Electron's user-data directory (see [D128](docs/DECISIONS.md) and [STORAGE](docs/STORAGE.md#data-folder)). Earlier versions used `engine-v1/` in the user-data directory; that folder is no longer read. To isolate a development catalog, set `VIBEMINER_DATA_DIR` to an absolute app-owned directory. `VIBEMINER_DOTNET` can override the SDK executable; `VIBEMINER_ENGINE_PATH` can override the development host. Never point this port at Java application storage or a game installation.
 
+`vm`, the developer CLI ([D150](docs/DECISIONS.md)), reads the same data folder (or `--data <dir>`); add `--json` for scripts:
+
+```bash
+node tools/dotnet.mjs run --project src/backend/VibeMiner.Cli -- store info
+```
+
+Commands: `store info`, `store scrub` (takes the writer lock) and `history list [product]`.
+
 ## Verification
 
 ```bash

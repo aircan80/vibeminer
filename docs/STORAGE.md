@@ -20,6 +20,7 @@ The storage rewrite (#153-#160) splits local data into three layers. Layer 1, th
   - every open runs a cheap index check (schema, CRC-checked store and pack rows); the full check (`integrity_check`, totals over every row) runs after an unclean shutdown or as a scrub, and a failing index is rebuilt from the packs;
   - Scan rebuilds it in place.
 - **History log** ([D127](DECISIONS.md)): raw versions, cdns and bgdl replies, stored once, with dated records.
+- **Stats** ([D150](DECISIONS.md)): `StatsAsync` on the store and the read-only store gives packs, object and history counts and pack bytes from one index read, no pack touched.
 - **Formats** ([D129](DECISIONS.md)): anything newer is refused by name and never truncated.
 - **Second store** ([D130](DECISIONS.md)): a read-only store, such as the shared dev store, can be read alongside the profile's own.
 - **Interfaces** ([D131](DECISIONS.md)): the layers above use `IObjectReader`, `IObjectWriter`, `IHistoryReader`/`IHistoryLog`, `IObjectStoreMaintenance` and `IObjectVerifier` (`ObjectVerification.Default`, the one instance Put uses). Tests use `InMemoryObjectStore`, kept in step with the real store by `ObjectStoreContractTests`.

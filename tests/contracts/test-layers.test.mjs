@@ -9,6 +9,8 @@ const commands = (changes, exists = () => false) =>
 const everything = ['npm run contracts:check', 'npm run test:backend', 'npm run test:desktop', 'npm run test:contracts'];
 const primitives = 'node tools/dotnet.mjs test tests/backend/VibeMiner.Primitives.Tests';
 const objectAccess = 'node tools/dotnet.mjs test tests/backend/VibeMiner.ObjectAccess.Tests';
+const builds = 'node tools/dotnet.mjs test tests/backend/VibeMiner.Builds.Tests';
+const cli = 'node tools/dotnet.mjs test tests/backend/VibeMiner.Cli.Tests';
 const integration = 'node tools/dotnet.mjs test tests/backend/VibeMiner.Storage.IntegrationTests';
 
 test('a change inside layer 1 runs only Primitives, in full', () => {
@@ -20,13 +22,17 @@ test('a change inside layer 2 runs only layer 2', () => {
 });
 
 test('a layer 1 interface or fake change also runs the callers without slow tests', () => {
-  const callers = [primitives, `${objectAccess} --filter Speed!=Slow`];
+  const callers = [primitives, `${objectAccess} --filter Speed!=Slow`, `${builds} --filter Speed!=Slow`, `${cli} --filter Speed!=Slow`];
   assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.Objects/IObjectReader.cs', publicApi: true }]), callers);
   assert.deepEqual(commands(['tests/backend/VibeMiner.Cdn.Testing/FakeCdn.cs']), callers);
 });
 
-test('a layer 2 interface change has no callers with projects yet', () => {
-  assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.ObjectAccess/IObjectSource.cs', publicApi: true }]), [objectAccess]);
+test('a layer 2 interface change also runs layer 3 and the CLI', () => {
+  assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.ObjectAccess/IObjectSource.cs', publicApi: true }]), [objectAccess, `${builds} --filter Speed!=Slow`, `${cli} --filter Speed!=Slow`]);
+});
+
+test('a change inside the layer 7 CLI runs only its own tests', () => {
+  assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.Cli/VmCommands.cs', publicApi: true }, 'tests/backend/VibeMiner.Cli.Tests/CommandTests.cs']), [cli]);
 });
 
 test('the storage integration project runs on layer 1 or 2 changes once it exists', () => {

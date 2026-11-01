@@ -167,6 +167,7 @@ public sealed class ReadOnlyObjectStore : IObjectReader, IHistoryReader, IAsyncD
     public ValueTask<ObjectRead> ReadAsync(ObjectKey key, CancellationToken ct = default) => inner.ReadAsync(key, ct);
     public ValueTask<RangeRead> ReadRangeAsync(ObjectKey key, long offset, Memory<byte> destination, CancellationToken ct = default) => inner.ReadRangeAsync(key, offset, destination, ct);
     public ValueTask<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken ct = default) => inner.ReadHistoryAsync(query, ct);
+    public ValueTask<StoreStats> StatsAsync(CancellationToken ct = default) => inner.StatsAsync(ct);
     /// <summary>Scrubs every indexed object, as the writer's Verify does; it reads only.</summary>
     public Task<VerifyReport> VerifyAsync(bool full = false, IProgress<ScanProgress>? progress = null, CancellationToken ct = default) => inner.VerifyAsync(full, progress, ct);
     /// <summary>The full index check and Verify; a failing index is reported, since only its writer can rebuild it.</summary>

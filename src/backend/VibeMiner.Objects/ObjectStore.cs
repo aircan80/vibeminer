@@ -208,6 +208,24 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
         return page;
     }
 
+    /// <summary>Counts and sizes from the index (<see cref="StoreStats"/>): one statement, so one committed state. No pack is read.</summary>
+    public async ValueTask<StoreStats> StatsAsync(CancellationToken ct = default)
+    {
+        ThrowIfClosed();
+        return await readers.Use(0, static (c, _, _) =>
+        {
+            using var cmd = c.CreateCommand();
+            var live = $"state IN ({(int)PackState.Active}, {(int)PackState.Sealed})";
+            cmd.CommandText = "SELECT s.object_count, s.history_count, s.created_at, " +
+                $"(SELECT COUNT(*) FROM packs WHERE {live}), " +
+                $"(SELECT COALESCE(SUM(committed_length), 0) FROM packs WHERE {live}), " +
+                $"(SELECT COALESCE(SUM(live_bytes), 0) FROM packs WHERE {live}) FROM store s WHERE s.id = 1";
+            using var r = cmd.ExecuteReader();
+            if (!r.Read()) throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index has no store row; a Scan rebuilds it from the packs.");
+            return new StoreStats(r.GetInt32(3), r.GetInt64(0), r.GetInt64(1), r.GetInt64(4), r.GetInt64(5), DateTimeOffset.FromUnixTimeMilliseconds(r.GetInt64(2)));
+        }, ct);
+    }
+
     private static List<HistoryEntry> History(SqliteConnection c, HistoryQuery q)
     {
         using var cmd = c.CreateCommand();

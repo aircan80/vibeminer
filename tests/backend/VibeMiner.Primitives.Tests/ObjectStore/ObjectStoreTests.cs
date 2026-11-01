@@ -36,6 +36,22 @@ public sealed class ObjectStoreTests
     }
 
     [Fact]
+    public async Task StatsCountTheCommittedObjectsHistoryAndPacksForTheWriterAndAReader()
+    {
+        using var t = new TempDirectory();
+        await using var store = await ObjectStore.OpenAsync(StoreDir(t), Quick);
+        var empty = await store.StatsAsync();
+        Assert.Equal((0L, 0L, 0L), (empty.Objects, empty.HistoryRecords, empty.LiveBytes));
+        await store.PutAsync([Synthetic.Config(1), Synthetic.Headerless(2, 9), .. HistoryRecordFormat.Objects(Synthetic.Observation(1))], commitNow: true);
+        var stats = await store.StatsAsync();
+        Assert.Equal((1, 4L, 1L), (stats.Packs, stats.Objects, stats.HistoryRecords));
+        Assert.InRange(stats.LiveBytes, 1, stats.PackBytes);
+        Assert.Equal(new FileInfo(PackFiles(StoreDir(t)).Single()).Length, stats.PackBytes);
+        await using var reader = await ObjectStore.OpenReadOnlyAsync(StoreDir(t));
+        Assert.Equal(stats, await reader.StatsAsync());
+    }
+
+    [Fact]
     public async Task BytesThatFailTheirKeyTypeCheckNeverReachAPack()
     {
         using var t = new TempDirectory();

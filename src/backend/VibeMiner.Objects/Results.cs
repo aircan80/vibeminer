@@ -55,6 +55,13 @@ public sealed record VerifyReport(long Checked, long Bytes, long CorruptCount, l
 public sealed record CompactReport(int PacksCompacted, long BytesBefore, long BytesAfter, long Moved, long SkippedCorrupt);
 public sealed record ScanProgress(long Entries, long Bytes);
 
+/// <summary>
+/// What the index holds as of the last commit, from one read of its store and pack rows. <see cref="Objects"/> counts every object
+/// row (history documents and records included); <see cref="PackBytes"/> is the committed length of the live packs and
+/// <see cref="LiveBytes"/> the part of it live entries use. Compaction targets and retired packs are left out.
+/// </summary>
+public sealed record StoreStats(int Packs, long Objects, long HistoryRecords, long PackBytes, long LiveBytes, DateTimeOffset CreatedAt);
+
 /// <summary>Bounds and timing. The defaults are the D123 group-commit rule and pack size.</summary>
 public sealed record ObjectStoreOptions
 {

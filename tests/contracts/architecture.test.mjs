@@ -17,13 +17,17 @@ test('production project dependencies preserve pure engine boundaries and the or
     ObjectAccess: ['Objects', 'Cdn'],
     // Layer 3 builds (D138): builds only on layer 2, with its own table reader and identity.
     Builds: ['ObjectAccess'],
+    // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
+    Cli: ['Objects', 'ObjectAccess'],
   };
   for (const [project, dependencies] of Object.entries(allowed)) {
     const source = await readFile(path.join(root, `src/backend/VibeMiner.${project}/VibeMiner.${project}.csproj`), 'utf8');
     const references = [...source.matchAll(/<ProjectReference\s+Include="([^"]+)"/g)].map(match => path.basename(match[1].replaceAll('\\', '/'), '.csproj').replace('VibeMiner.', '')).sort();
     assert.deepEqual(references, [...dependencies].sort(), `${project} references only its declared architecture dependencies`);
     const packages = [...source.matchAll(/<PackageReference\s+Include="([^"]+)"/g)].map(match => match[1]);
-    assert.deepEqual(packages, project === 'Infrastructure' || project === 'Objects' || project === 'Builds' ? ['Microsoft.Data.Sqlite'] : [], `${project} does not acquire a game parsing/download dependency`);
+    // Spectre.Console is terminal output for the developer CLI only (D151).
+    const expected = project === 'Infrastructure' || project === 'Objects' || project === 'Builds' ? ['Microsoft.Data.Sqlite'] : project === 'Cli' ? ['Spectre.Console'] : [];
+    assert.deepEqual(packages, expected, `${project} does not acquire a game parsing/download dependency`);
   }
 });
 
@@ -34,12 +38,12 @@ test('backend projects reference only their own code layer or lower ones', async
   const production = {
     Domain: 0, 'Protocols.Tact': 0, 'Formats.Wow': 0,
     Objects: 1, Cdn: 1, ObjectAccess: 2, Builds: 3,
-    Application: 3, Infrastructure: 3, Host: 7,
+    Application: 3, Infrastructure: 3, Host: 7, Cli: 7,
   };
-  const layerProjects = new Set(['Objects', 'Cdn', 'ObjectAccess', 'Builds']);
+  const layerProjects = new Set(['Objects', 'Cdn', 'ObjectAccess', 'Builds', 'Cli']);
   const legacy = new Set(Object.keys(production).filter(name => !layerProjects.has(name)));
   const fakes = { 'Cdn.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Objects.CrashWriter': 1 };
-  const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3 };
+  const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Cli.Tests': 7 };
   // Cross-layer integration projects drive real lower layers by design (D137), so they have no single layer.
   const exemptTests = new Set(['Backend.Tests', 'Storage.IntegrationTests']);
   const referencesOf = async file => {
