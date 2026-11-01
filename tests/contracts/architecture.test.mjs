@@ -19,6 +19,8 @@ test('production project dependencies preserve pure engine boundaries and the or
     Builds: ['ObjectAccess'],
     // Layer 4 files (D160): a file system per build and locale over layers 3 and 2, never layer 1.
     Files: ['Builds', 'ObjectAccess'],
+    // Layer 5 formats: reads through layer 4 only (#177).
+    Formats: ['Files'],
     // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
     Cli: ['Objects', 'Cdn', 'ObjectAccess', 'Builds'],
   };
@@ -39,15 +41,16 @@ test('backend projects reference only their own code layer or lower ones', async
   // reference no layer project, so 3 keeps them above the new layer 1-2 projects), Host at 7 (composition).
   const production = {
     Domain: 0, 'Protocols.Tact': 0, 'Formats.Wow': 0,
-    Objects: 1, Cdn: 1, ObjectAccess: 2, Builds: 3, Files: 4,
+    Objects: 1, Cdn: 1, ObjectAccess: 2, Builds: 3, Files: 4, Formats: 5,
     Application: 3, Infrastructure: 3, Host: 7, Cli: 7,
   };
-  const layerProjects = new Set(['Objects', 'Cdn', 'ObjectAccess', 'Builds', 'Files', 'Cli']);
+  const layerProjects = new Set(['Objects', 'Cdn', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Cli']);
   const legacy = new Set(Object.keys(production).filter(name => !layerProjects.has(name)));
   const fakes = { 'Cdn.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Objects.CrashWriter': 1 };
-  const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Files.Tests': 4, 'Cli.Tests': 7 };
+  const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Files.Tests': 4, 'Formats.Tests': 5, 'Cli.Tests': 7 };
   // Cross-layer integration projects drive real lower layers by design (D137), so they have no single layer.
-  const exemptTests = new Set(['Backend.Tests', 'Storage.IntegrationTests']);
+  // Formats.Comparison cross-checks the layer 5 reader against the legacy Formats.Wow one until slice 9 deletes it (#177).
+  const exemptTests = new Set(['Backend.Tests', 'Storage.IntegrationTests', 'Formats.Comparison']);
   const referencesOf = async file => {
     const source = await readFile(path.join(root, file), 'utf8');
     return [...source.matchAll(/<ProjectReference\s+Include="([^"]+)"/g)].map(match => path.basename(match[1].replaceAll('\\', '/'), '.csproj').replace('VibeMiner.', ''));
@@ -79,4 +82,7 @@ test('backend projects reference only their own code layer or lower ones', async
       assert.ok(!legacy.has(reference), `layer test project ${project} does not reference legacy project ${reference}`);
     }
   }
+  // The comparison exemption stays narrow: exactly the two readers it diffs, nothing else.
+  assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Formats.Comparison/VibeMiner.Formats.Comparison.csproj')).sort(), ['Formats', 'Formats.Wow'],
+    'Formats.Comparison references only the layer 5 and legacy DB2 readers');
 });

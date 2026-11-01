@@ -11,6 +11,7 @@
     <Project Path="src/backend/VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
     <Project Path="src/backend/VibeMiner.Builds/VibeMiner.Builds.csproj" />
     <Project Path="src/backend/VibeMiner.Files/VibeMiner.Files.csproj" />
+    <Project Path="src/backend/VibeMiner.Formats/VibeMiner.Formats.csproj" />
     <Project Path="src/backend/VibeMiner.Cli/VibeMiner.Cli.csproj" />
   </Folder>
   <Folder Name="/Tests/">
@@ -26,5 +27,7 @@
     <Project Path="tests/backend/VibeMiner.Builds.Testing/VibeMiner.Builds.Testing.csproj" />
     <Project Path="tests/backend/VibeMiner.Files.Tests/VibeMiner.Files.Tests.csproj" />
     <Project Path="tests/backend/VibeMiner.Files.Testing/VibeMiner.Files.Testing.csproj" />
+    <Project Path="tests/backend/VibeMiner.Formats.Tests/VibeMiner.Formats.Tests.csproj" />
+    <Project Path="tests/backend/VibeMiner.Formats.Comparison/VibeMiner.Formats.Comparison.csproj" />
   </Folder>
 </Solution>

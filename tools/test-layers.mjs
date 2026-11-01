@@ -12,6 +12,7 @@
 //   A change under a layer's *.Testing fake project always counts.
 // - Callers skip slow tests (--filter "Speed!=Slow"); a layer 1 change runs Primitives.Tests in full.
 // - The cross-layer storage integration project runs whenever layer 1 or 2 changed.
+// - The Formats comparison project runs whenever layer 5 or the legacy Formats.Wow reader changed.
 // - Shared foundations (toolchain, packages, project files, CI, this script) run everything.
 // - Legacy projects map to VibeMiner.Backend.Tests. Desktop and contract paths run their npm suites;
 //   docs and Markdown run nothing; anything unknown runs everything.
@@ -53,6 +54,13 @@ export const layers = [
     testProject: 'tests/backend/VibeMiner.Files.Tests',
   },
   {
+    layer: 5, name: 'Formats',
+    src: ['src/backend/VibeMiner.Formats/'],
+    fakes: [],
+    paths: ['tests/backend/VibeMiner.Formats.Tests/'],
+    testProject: 'tests/backend/VibeMiner.Formats.Tests',
+  },
+  {
     layer: 7, name: 'Developer CLI',
     src: ['src/backend/VibeMiner.Cli/'],
     fakes: [],
@@ -63,6 +71,10 @@ export const layers = [
 
 // Cross-layer integration tests over the real layers 1 and 2. Runs only once the project exists.
 const integration = { project: 'tests/backend/VibeMiner.Storage.IntegrationTests', layers: [1, 2] };
+
+// Temporary cross-check of the layer 5 reader against the legacy Formats.Wow reader (#177), until slice 9 deletes
+// both. Runs only once the project exists, whenever layer 5, the legacy reader or the project itself changes.
+const comparison = { project: 'tests/backend/VibeMiner.Formats.Comparison', layers: [5], legacy: ['src/backend/VibeMiner.Formats.Wow/'] };
 
 const legacy = {
   paths: ['src/backend/VibeMiner.Domain/', 'src/backend/VibeMiner.Protocols.Tact/', 'src/backend/VibeMiner.Formats.Wow/',
@@ -92,12 +104,15 @@ export function planFor(changes, { exists = project => existsSync(path.join(root
   const callers = new Set();  // layers whose interface or fake changed, so the layers above run too
   let everything = false;
   let integrationTests = false;
+  let comparisonTests = false;
+  let comparisonLegacy = false;
   let legacyTests = false;
   let desktop = false;
   let contracts = false;
   const full = why => { everything = true; reasons.push(why); };
 
   for (const { path: file, publicApi } of changes) {
+    if (under(file, comparison.legacy)) comparisonLegacy = true;
     const layer = layers.find(row => [row.src, row.fakes, row.paths].some(prefixes => under(file, prefixes)));
     if (foundations.some(pattern => pattern.test(file))) full(`${file}: shared foundation`);
     else if (layer) {
@@ -106,6 +121,7 @@ export function planFor(changes, { exists = project => existsSync(path.join(root
       else if (publicApi && under(file, layer.src)) { callers.add(layer.layer); reasons.push(`${file}: layer ${layer.layer} interface`); }
       else reasons.push(`${file}: inside layer ${layer.layer} (${layer.name})`);
     } else if (file.startsWith(`${integration.project}/`)) { integrationTests = true; reasons.push(`${file}: storage integration tests`); }
+    else if (file.startsWith(`${comparison.project}/`)) { comparisonTests = true; reasons.push(`${file}: formats comparison tests`); }
     else if (under(file, legacy.paths)) { legacyTests = true; reasons.push(`${file}: legacy backend`); }
     else if (file.startsWith('apps/desktop/')) {
       desktop = true; notes.add('e2e: run the e2e specs that cover this area'); reasons.push(`${file}: desktop`);
@@ -129,6 +145,9 @@ export function planFor(changes, { exists = project => existsSync(path.join(root
   }
   if ((integrationTests || integration.layers.some(layer => own.has(layer))) && exists(integration.project)) {
     runs.push(dotnet(integration.project, integrationTests ? null : 'Speed!=Slow'));
+  }
+  if ((comparisonTests || comparisonLegacy || comparison.layers.some(layer => own.has(layer))) && exists(comparison.project)) {
+    runs.push(dotnet(comparison.project, comparisonTests ? null : 'Speed!=Slow'));
   }
   if (legacyTests) runs.push(dotnet(legacy.testProject, 'Speed!=Slow'));
   if (desktop) runs.push(npm('test:desktop'));

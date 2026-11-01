@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
+  <!-- Layer 5 formats (#177): the DB2 and DBD readers. Reads through layer 4 only; until layer 4 reads land (#172) the DB2 reader takes bytes through its own range seam. -->
+  <ProjectReference Include="../VibeMiner.Files/VibeMiner.Files.csproj" />
+  <InternalsVisibleTo Include="VibeMiner.Formats.Tests" />
+  <InternalsVisibleTo Include="VibeMiner.Formats.Comparison" />
+</ItemGroup></Project>

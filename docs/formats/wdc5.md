@@ -4,6 +4,14 @@ What our original WDC5 reader admits and how it turns physical storage into valu
 
 The reader needs a readable, seekable, caller-owned decoded stream, the DBD document and the exact four-part build. It emits a header callback and then rows; all of it is provisional until the reader returns. Errors are `DB2_*`.
 
+## Layer 5 reader
+
+[`src/backend/VibeMiner.Formats/Db2/`](../../src/backend/VibeMiner.Formats/Db2/) and [`Definitions/`](../../src/backend/VibeMiner.Formats/Definitions/) hold the layer 5 port (#177, D170-D174), revision `db2-values-v1`. It reads bytes through `IDb2ByteSource`, an immutable decoded file with named `Db2Hole` ranges, until layer 4's ranged reads replace it (#172). A read touching a hole throws `BLTE_RANGE_UNAVAILABLE`.
+
+`Db2Reader.OpenAsync` checks the structure and builds the ID, copy and relationship indexes without reading record bodies. The `Db2Table` it returns decodes rows on demand: `ReadSectionAsync`, `ReadAllAsync` and `FindAsync`, which answers `Found`, `Protected`, `Absent` or `NotInReadableSections`. Broken copy chains are counted at open (`UnresolvedCopies`) and throw when read. `Db2Reader.ReadAsync` keeps the legacy single-pass output. It also reads [WDC3 and WDC4](#wdc3-and-wdc4-layer-5-reader-only).
+
+Everything below holds for both readers unless it says otherwise.
+
 ## File layout
 
 All integers little-endian.
@@ -33,6 +41,15 @@ All integers little-endian.
 | 200 | 4 | Section count | |
 
 Then: section headers (40 bytes each), field structures (4 bytes each: i16 bits, u16 offset), storage infos (24 bytes each), pallet data, common data, then one encrypted-ID list per keyed section (u32 count + count × u32 IDs), then the sections. Gaps between regions must be zero. Trailing bytes are rejected.
+
+### WDC3 and WDC4 (layer 5 reader only)
+
+The layer 5 reader in [`src/backend/VibeMiner.Formats/Db2/`](../../src/backend/VibeMiner.Formats/Db2/) also reads WDC3 and WDC4 (#177). Their header is 72 bytes: the magic, then the same 68 bytes WDC5 keeps at 136..203, so every field above sits 132 bytes earlier. No schema version, no schema string. Everything after the header is the same as WDC5, including the section tail order. `Db2TableHeader.Format` is the magic; `SchemaVersion` is 0 for WDC3/WDC4.
+
+- WDC4 has the per-keyed-section encrypted-ID lists after common data, like WDC5. WDC3 has none.
+- A WDC3 table with any keyed section is `DB2_ENCRYPTED`, even with `AllowPartialEncryptedSections`: without ID lists, a hidden record sharing a readable ID or a copy of a hidden record can't be told from corruption.
+- Any other magic (WDBC, WDB2..WDB6, WDC1, WDC2, CLS1 stored as `1SLC`, unknown) is `DB2_UNSUPPORTED`, naming the magic as ASCII or hex. WDC5 still needs schema version 5, and its messages are unchanged; WDC3/WDC4 messages name their own version. A refused magic is checked where the legacy reader checked it: after the 204-byte truncation check and the hole checks.
+- A hole over bytes 0..3 hides the magic, so the file is taken as WDC5: under 204 bytes it is `DB2_INVALID` (header truncated) whatever its real version; otherwise it fails on the hole like any WDC5 header hole.
 
 ### Section header (40 bytes)
 
