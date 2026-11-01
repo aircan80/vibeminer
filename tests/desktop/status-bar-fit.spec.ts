@@ -119,8 +119,9 @@ test('status bar facts stay inside the window, give way in order, and a cut fact
     // ellipsis (as a flex row it was clipped mid-word, "0 of 2 don") and be focusable.
     await size(app, 600, 480); await text(page, 2);
     await page.evaluate(() => { const s = document.createElement('style'); s.id = 'narrow-bar'; s.textContent = '.discovery-screen .dv-statusbar{padding-right:50%}'; document.head.append(s); });
-    await expect.poll(async () => (await measure(page, '.dv-statusbar')).problems, 'forced busy cut').toEqual([]);
-    expect((await measure(page, '.dv-statusbar')).cut, 'the busy line is cut').toContain('Checking 2 products · 0 of 2 done…');
+    // One poll over both: right after the resize the bar can still be wide, with no problems and nothing cut yet.
+    await expect.poll(() => measure(page, '.dv-statusbar'), 'forced busy cut, with the busy line cut')
+      .toEqual({ problems: [], cut: expect.arrayContaining(['Checking 2 products · 0 of 2 done…']) });
     await readByKeyboard(page, app, '.dv-statusbar', 'Discovery busy, forced cut', [600, 480, 2]);
     // The busy line ending while it has focus takes its full-text line with it.
     await discovery.locator('.dv-busy').focus();
