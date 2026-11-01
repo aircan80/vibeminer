@@ -1,11 +1,14 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using VibeMiner.Builds;
+using VibeMiner.Files.Names;
 
 namespace VibeMiner.Files.Testing;
 
 /// <summary>
-/// One file of a fake build. <see cref="Locales"/> null means every locale. <see cref="Path"/> resolves stats by path (as
-/// ROOT's name hash does) and is the listed name when the file system lists names. A null <see cref="ContentKey"/> is the MD5 of
+/// One file of a fake build. <see cref="Locales"/> null means every locale. <see cref="Path"/> is the build's own name for
+/// the file, as ROOT's name hash is: a lookup by path tries it first, and it is never listed (listed names come from
+/// <see cref="InMemoryFileSystem.Names"/>, the listfile side). A null <see cref="ContentKey"/> is the MD5 of
 /// <see cref="Content"/>, or without content 32 hex digits made from the FileDataID; a given one must be the content's MD5. A file with
 /// <see cref="NotInEncoding"/> lists with <see cref="FileStorage.NoEncodedCopy"/> and no size, whatever <see cref="Storage"/> says.
 /// <see cref="Content"/> is the decoded file (it sets the listed size); without it a read answers NeedsNetwork, and the file can't
@@ -14,10 +17,13 @@ namespace VibeMiner.Files.Testing;
 /// that state; a whole read over the limit is TooLarge and an empty range is Complete first, as both come from the listed size.
 /// A failure that shows on stream reads (<see cref="FakeReadFailure.OnStreamRead"/>, and always WrongKey) lets the stream open and
 /// fails its reads of readable bytes instead. A failed read never marks the file stored. Files never share a stored copy (the real
-/// side shares one EKey between files of identical content).
+/// side shares one EKey between files of identical content). The listed format follows the real rules: a stored file's first
+/// <see cref="Content"/> bytes up to its first hole, when it has no <see cref="ReadFailure"/>, go through the same detection
+/// with the listed name; anything else gets the listed name's extension (none when the file has no name).
+/// The fake assumes <see cref="Holes"/> are sorted and doesn't model the real side's first-chunk size cap on detection.
 /// </summary>
 public sealed record FakeFile(uint FileDataId, string? Path = null, long? Size = 0, FileStorage Storage = FileStorage.NotStored,
-    bool Encrypted = false, IReadOnlyList<string>? Locales = null, string? ContentKey = null, FileFormat Format = FileFormat.Unknown,
+    bool Encrypted = false, IReadOnlyList<string>? Locales = null, string? ContentKey = null,
     bool NotInEncoding = false, byte[]? Content = null, IReadOnlyList<FileHole>? Holes = null, FakeReadFailure? ReadFailure = null);
 
 /// <summary>
@@ -44,13 +50,18 @@ public sealed record FakeReadFailure(FileReadState State, string Code, string? M
 /// <summary>
 /// The standard <see cref="IFileSystem"/> test double for layer 5 and up: files are listed from memory, nothing is fetched.
 /// Builds are added with their locales and files or scripted to fail; anything else answers NeedsNetwork, as the real file
-/// system does offline. Storage can be changed while a handle is open, and the handle sees it on its next call. With
-/// <paramref name="listNames"/> false, no file is named (Path null, a path prefix matches nothing), as before names come in
-/// #173; paths still resolve. Reads serve <see cref="FakeFile.Content"/> and mark the file stored, as a fetch would;
+/// system does offline. Storage can be changed while a handle is open, and the handle sees it on its next call. Names follow
+/// the real rules: <see cref="FakeFile.Path"/> is the ROOT name hash side, <see cref="Names"/> the listfile side (off until
+/// set), read once per call. Reads serve <see cref="FakeFile.Content"/> and mark the file stored, as a fetch would;
 /// <paramref name="maxReadBytes"/> is <see cref="FileSystemOptions.MaxReadBytes"/>.
 /// </summary>
-public sealed class InMemoryFileSystem(bool listNames = false, long maxReadBytes = 256L << 20) : IFileSystem
+public sealed class InMemoryFileSystem(long maxReadBytes = 256L << 20) : IFileSystem
 {
+    /// <summary>The listfile side of names: off until <see cref="InMemoryFileNames.Use"/>.</summary>
+    public InMemoryFileNames Names { get; } = new();
+
+    IFileNames IFileSystem.Names => Names;
+
     private readonly long maxRead = maxReadBytes >= 0 && maxReadBytes <= Array.MaxLength ? maxReadBytes
         : throw new ArgumentOutOfRangeException(nameof(maxReadBytes));
     private readonly Lock gate = new();
@@ -130,7 +141,7 @@ public sealed class InMemoryFileSystem(bool listNames = false, long maxReadBytes
                 return Task.FromResult(new FilesOpenResult(build, locale, failed.State, null, failed.Code, $"The build is {failed.State} ({failed.Code}).", null));
             if (builds.TryGetValue(build, out var fake))
                 return Task.FromResult(fake.HasLocale(locale)
-                    ? new FilesOpenResult(build, locale, FilesOpenState.Open, new Handle(build, locale, fake, listNames, maxRead), null, null, null)
+                    ? new FilesOpenResult(build, locale, FilesOpenState.Open, new Handle(build, locale, fake, Names, maxRead), null, null, null)
                     : new FilesOpenResult(build, locale, FilesOpenState.LocaleNotInBuild, null, "FILES_LOCALE_NOT_IN_BUILD",
                         $"The build has no {locale} files.", null));
         }
@@ -180,9 +191,11 @@ public sealed class InMemoryFileSystem(bool listNames = false, long maxReadBytes
         public static string Normalize(string path) => path.Replace('/', '\\').ToUpperInvariant();
     }
 
-    private sealed class Handle(BuildRef build, string locale, FakeBuildFiles fake, bool listNames, long maxReadBytes) : IBuildFiles
+    private sealed class Handle(BuildRef build, string locale, FakeBuildFiles fake, InMemoryFileNames names, long maxReadBytes) : IBuildFiles
     {
         private int disposed;
+        // What a file's first bytes proved, by FileDataID (Unknown: read, nothing proved), as the real handle remembers it.
+        private readonly ConcurrentDictionary<uint, FileFormat> proven = new();
 
         public BuildRef Build { get; } = build;
         public string Locale { get; } = locale;
@@ -195,17 +208,21 @@ public sealed class InMemoryFileSystem(bool listNames = false, long maxReadBytes
         {
             ArgumentNullException.ThrowIfNull(filter);
             ThrowIfDisposed();
-            var prefix = filter.PathPrefix is null ? null : FakeBuildFiles.Normalize(filter.PathPrefix);
+            var prefix = filter.PathPrefix;
+            var index = names.Current();
+            if (prefix is not null && index is null) yield break;
             foreach (var id in fake.IdsFrom(filter.FromId))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (id > filter.ToId) yield break;
                 if (fake.Find(id) is not { } file || !FakeBuildFiles.InLocale(file, Locale)) continue;
-                var listed = ToFile(file);
-                if (prefix is not null && (listed.Path is null || !FakeBuildFiles.Normalize(listed.Path).StartsWith(prefix, StringComparison.Ordinal))) continue;
-                if (filter.Formats is { } formats && !formats.Contains(listed.Format)) continue;
+                var name = index?.NameOf(id);
+                if (prefix is not null && (name is null || !ListfileIndex.HasPrefix(name, prefix))) continue;
+                var listed = ToFileWithoutFormat(file, name, name is null ? FilePathSource.None : FilePathSource.Listfile);
                 if (filter.Storage is { } storage && !storage.Contains(listed.Storage)) continue;
                 if (filter.Encrypted is { } encrypted && listed.Encrypted != encrypted) continue;
+                listed = WithFormat(file, listed);
+                if (filter.Formats is { } formats && !formats.Contains(listed.Format)) continue;
                 yield return listed;
                 await Task.Yield();
             }
@@ -218,12 +235,33 @@ public sealed class InMemoryFileSystem(bool listNames = false, long maxReadBytes
             return Task.FromResult(Lookup(file).Stat);
         }
 
+        /// <summary>
+        /// By id; or by path, the ROOT side (<see cref="FakeFile.Path"/>) first, then the listfile side: of the ids it gives the
+        /// name, the files listed in this locale, else any listed; the highest.
+        /// </summary>
         private (FileStat Stat, FakeFile? File) Lookup(FileRef file)
         {
-            var found = file.FileDataId is { } id ? fake.Find(id) : file.Path is { } path ? fake.Find(path) : throw new ArgumentException("An empty file reference.", nameof(file));
+            var index = names.Current();
+            FakeFile? found;
+            var byRoot = false;
+            if (file.FileDataId is { } id) found = fake.Find(id);
+            else if (file.Path is { } path)
+            {
+                found = fake.Find(path);
+                byRoot = found is not null;
+                if (found is null && index is not null)
+                {
+                    var listed = index.IdsOf(path).Select(fake.Find).OfType<FakeFile>().ToArray();
+                    found = listed.LastOrDefault(f => FakeBuildFiles.InLocale(f, Locale)) ?? listed.LastOrDefault();
+                }
+            }
+            else throw new ArgumentException("An empty file reference.", nameof(file));
             if (found is null) return (new FileStat(FileLookupState.UnknownFile, null), null);
             if (!FakeBuildFiles.InLocale(found, Locale)) return (new FileStat(FileLookupState.NotInLocale, null), null);
-            return (new FileStat(found.NotInEncoding ? FileLookupState.NotInEncoding : FileLookupState.Found, ToFile(found)), found);
+            var (name, source) = index?.NameOf(found.FileDataId) is { } n ? (n, FilePathSource.Listfile)
+                : byRoot ? (file.Path, FilePathSource.RootHash) : (null, FilePathSource.None);
+            var stat = WithFormat(found, ToFileWithoutFormat(found, name, source));
+            return (new FileStat(found.NotInEncoding ? FileLookupState.NotInEncoding : FileLookupState.Found, stat), found);
         }
 
         /// <summary>The listed file to read, or the lookup state that says why there is none.</summary>
@@ -271,7 +309,9 @@ public sealed class InMemoryFileSystem(bool listNames = false, long maxReadBytes
             if (size > maxReadBytes)
                 return Task.FromResult(FileRead.Failed(FileReadState.TooLarge, 0, "FILES_READ_TOO_LARGE",
                     $"The file is {size} bytes, over the {maxReadBytes} a whole read returns."));
-            return Task.FromResult(Fetch(found, 0, (int?)size, 0));
+            var read = Fetch(found, 0, (int?)size, 0);
+            if (HeadOf(read) is { } head) Remember(found.FileDataId, head, found.Content?.Length ?? 0);
+            return Task.FromResult(read);
         }
 
         public Task<FileRead> ReadRangeAsync(FileRef file, long offset, int length, CancellationToken cancellationToken)
@@ -330,11 +370,57 @@ public sealed class InMemoryFileSystem(bool listNames = false, long maxReadBytes
         private static FileReadState StateOf(long length, long inHoles) =>
             inHoles == 0 ? FileReadState.Complete : inHoles == length ? FileReadState.Protected : FileReadState.Partial;
 
-        private BuildFile ToFile(FakeFile f) => new(f.FileDataId, listNames ? f.Path : null, f.NotInEncoding ? null : f.Content?.Length ?? f.Size,
+        private static BuildFile ToFileWithoutFormat(FakeFile f, string? path, FilePathSource source) => new(f.FileDataId, path, source,
+            f.NotInEncoding ? null : f.Content?.Length ?? f.Size,
             f.ContentKey?.ToLowerInvariant()
                 ?? (f.Content is { } content ? Convert.ToHexStringLower(System.Security.Cryptography.MD5.HashData(content))
-                    : f.FileDataId.ToString("x32", System.Globalization.CultureInfo.InvariantCulture)), f.Format,
+                    : f.FileDataId.ToString("x32", System.Globalization.CultureInfo.InvariantCulture)), FileFormat.Unknown, FileFormatSource.None,
             f.NotInEncoding ? FileStorage.NoEncodedCopy : f.Storage, f.Encrypted);
+
+        /// <summary>The listed file's format, by the real rules: remembered bytes, else a stored file's first bytes, else the listed name.</summary>
+        private BuildFile WithFormat(FakeFile f, BuildFile listed)
+        {
+            FileFormat proved;
+            if (!proven.TryGetValue(f.FileDataId, out proved))
+            {
+                if (listed.Storage != FileStorage.Stored || LocalHead(f) is not { } head)
+                {
+                    var (named, source) = Formats.FormatDetection.Detect(null, listed.Path);
+                    return listed with { Format = named, FormatSource = source };
+                }
+                proved = Remember(f.FileDataId, head, f.Content?.Length ?? 0);
+            }
+            var (format, from) = proved != FileFormat.Unknown ? (proved, FileFormatSource.Magic) : Formats.FormatDetection.Detect(null, listed.Path);
+            return listed with { Format = format, FormatSource = from };
+        }
+
+        /// <summary>As the real handle: Unknown only from a complete head, and never over a strong entry.</summary>
+        private FileFormat Remember(uint fileDataId, byte[] head, long size)
+        {
+            var evidence = Formats.FormatDetection.FromBytes(head);
+            var proved = evidence.Strong ? evidence.Format : FileFormat.Unknown;
+            var old = proven.TryGetValue(fileDataId, out var known) ? known : (FileFormat?)null;
+            if (proved == FileFormat.Unknown && (head.Length < Math.Min(Formats.FormatDetection.HeadBytes, size) || old is { } strong && strong != FileFormat.Unknown))
+                return old ?? FileFormat.Unknown;
+            if (old is not null || proven.Count < BuildFiles.MaxRememberedFormats) proven[fileDataId] = proved;
+            return proved;
+        }
+
+        /// <summary>The first bytes up to the first hole, as a local read of a stored copy gives them; null when it would fail or start in a hole.</summary>
+        private static byte[]? LocalHead(FakeFile f)
+        {
+            if (f.Content is not { } content || f.ReadFailure is not null) return null;
+            var length = Math.Min(content.Length, Formats.FormatDetection.HeadBytes);
+            if (f.Holes is { Count: > 0 } holes) length = (int)Math.Min(length, holes[0].Offset);
+            return length == 0 && content.Length > 0 ? null : content[..length];
+        }
+
+        private static byte[]? HeadOf(FileRead read)
+        {
+            if (read.State is not (FileReadState.Complete or FileReadState.Partial) || read.Offset != 0) return null;
+            if (read.Segments.Count == 0) return read.Length == 0 ? [] : null;
+            return read.Segments[0].Offset == 0 ? read.Segments[0].Bytes.ToArray() : null;
+        }
     }
 
     /// <summary>A failed read's state, code, message and time; Missing gets the time of the read when none is scripted.</summary>

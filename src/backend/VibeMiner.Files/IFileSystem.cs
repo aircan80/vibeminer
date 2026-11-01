@@ -1,4 +1,5 @@
 using VibeMiner.Builds;
+using VibeMiner.Files.Names;
 
 namespace VibeMiner.Files;
 
@@ -14,6 +15,14 @@ public interface IFileSystem
     /// Opening fetches only metadata, never file content. An unregistered locale name throws <see cref="ArgumentException"/>.
     /// </summary>
     Task<FilesOpenResult> ForAsync(BuildRef build, string locale, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The community file names (D105) every handle of this file system reads: <see cref="BuildFile.Path"/>, path lookups and
+    /// <see cref="FileFilter.PathPrefix"/>. Handles only use the copy already loaded; <see cref="IFileNames.UpdateAsync"/> fetches.
+    /// A handle reads the names once per list batch and per stat; reads and <see cref="IBuildFiles.ExistsAsync"/> by path only
+    /// when ROOT's name hash misses; reads and exists checks by FileDataID never read them.
+    /// </summary>
+    IFileNames Names { get; }
 }
 
 /// <summary>
@@ -31,10 +40,14 @@ public interface IBuildFiles : IAsyncDisposable
     /// The build's files for this locale that match <paramref name="filter"/>, ascending by FileDataID. Stored state is checked
     /// through layer 2 in batches; a layer 2 failure throws. To page, stop reading and call again with
     /// <see cref="FileFilter.FromId"/> one past the last FileDataID read (there is no next page after <see cref="uint.MaxValue"/>).
+    /// Formats are found only for files that pass the other criteria, a few local reads at a time (see <see cref="BuildFile"/>).
     /// </summary>
     IAsyncEnumerable<BuildFile> ListAsync(FileFilter filter, CancellationToken cancellationToken);
 
-    /// <summary>One file by FileDataID or path. Never fetches content; a layer 2 failure throws.</summary>
+    /// <summary>
+    /// One file by FileDataID or path. Never fetches content (a stored file's first bytes are read locally for its format, see
+    /// <see cref="BuildFile"/>); a layer 2 failure to check stored state throws.
+    /// </summary>
     Task<FileStat> StatAsync(FileRef file, CancellationToken cancellationToken);
 
     /// <summary>
@@ -193,7 +206,14 @@ public sealed class TactKeys : ITactKeys
     public ReadOnlyMemory<byte>? Find(ulong keyName) => keys.TryGetValue(keyName, out var key) ? key : (ReadOnlyMemory<byte>?)null;
 }
 
-/// <summary>A file asked for by FileDataID or by path (case and slash direction don't matter).</summary>
+/// <summary>
+/// A file asked for by FileDataID or by path (ASCII case and slash direction don't matter). A path is looked up first by ROOT's
+/// name hash; when ROOT doesn't name it, through the community listfile (D105) when names are on and loaded. ROOT wins when
+/// both name a file. Since 8.2 most ROOT entries have no name hash, so the listfile resolves most path lookups. When the
+/// listfile gives one name to several FileDataIDs, only those this build lists in this locale count (or, when none is in
+/// the locale, those it lists at all), and of those the highest FileDataID is used (usually the newest). A listfile name
+/// whose FileDataIDs this build doesn't list is <see cref="FileLookupState.UnknownFile"/>, not an error.
+/// </summary>
 public readonly record struct FileRef
 {
     private FileRef(uint? id, string? path) { FileDataId = id; Path = path; }
@@ -214,6 +234,17 @@ public readonly record struct FileRef
     public override string ToString() => FileDataId is { } id ? id.ToString(System.Globalization.CultureInfo.InvariantCulture) : Path ?? "";
 }
 
+/// <summary>Where <see cref="BuildFile.Path"/> came from.</summary>
+public enum FilePathSource
+{
+    /// <summary>No name: names are off or not loaded, or the listfile doesn't name the file.</summary>
+    None,
+    /// <summary>The community listfile's name for the FileDataID.</summary>
+    Listfile,
+    /// <summary>The path asked for, as given, which ROOT's name hash matched; the listfile doesn't name the file. Stat only.</summary>
+    RootHash,
+}
+
 /// <summary>Whether a file's bytes are in the profile's object store.</summary>
 public enum FileStorage
 {
@@ -223,10 +254,95 @@ public enum FileStorage
     NoEncodedCopy,
 }
 
-/// <summary>A file's format. Detection from magic bytes, with the listfile extension as a fallback, comes in #173.</summary>
+/// <summary>
+/// A file's format, from its first decoded bytes where a magic proves it, else from the listfile name's extension. See
+/// <see cref="FileFormatSource"/> for which one said so.
+/// </summary>
 public enum FileFormat
 {
-    Unknown,
+    /// <summary>Neither the bytes nor the name say what the file is.</summary>
+    Unknown = 0,
+    /// <summary>A DB2 or DBC client table (WDBC through WDC5, 1SLC).</summary>
+    Db2,
+    /// <summary>A BLP texture.</summary>
+    Blp,
+    /// <summary>An M2 model by its .m2 name only: the bytes didn't say whether it is chunked or legacy.</summary>
+    M2,
+    /// <summary>A chunked M2 model (MD21 wrapping MD20).</summary>
+    M2Chunked,
+    /// <summary>A pre-chunked M2 model (bare MD20).</summary>
+    M2Legacy,
+    /// <summary>An M2 skin profile (.skin).</summary>
+    Skin,
+    /// <summary>An external M2 animation (.anim).</summary>
+    Anim,
+    /// <summary>M2 bone data (.bone).</summary>
+    Bone,
+    /// <summary>M2 physics data (.phys).</summary>
+    Phys,
+    /// <summary>An M2 skeleton (.skel).</summary>
+    Skel,
+    /// <summary>Texture info (.tex).</summary>
+    Tex,
+    /// <summary>A WMO root file.</summary>
+    WmoRoot,
+    /// <summary>A WMO group file (name ends _NNN or _NNN_lodN).</summary>
+    WmoGroup,
+    /// <summary>An ADT root terrain tile.</summary>
+    AdtRoot,
+    /// <summary>An ADT texture split file (_texN).</summary>
+    AdtTex,
+    /// <summary>An ADT object split file (_objN).</summary>
+    AdtObj,
+    /// <summary>An ADT level-of-detail file (_lod).</summary>
+    AdtLod,
+    /// <summary>A WDT map file.</summary>
+    Wdt,
+    /// <summary>A WDT split file (_occ, _lgt, _fogs, _mpv, _preload).</summary>
+    WdtSplit,
+    /// <summary>A WDL low-resolution world file.</summary>
+    Wdl,
+    /// <summary>A compiled shader (.bls).</summary>
+    Bls,
+    /// <summary>A .wwf data file.</summary>
+    Wwf,
+    /// <summary>Ogg audio.</summary>
+    Ogg,
+    /// <summary>MP3 audio.</summary>
+    Mp3,
+    /// <summary>RIFF WAVE audio.</summary>
+    Wav,
+    /// <summary>A TrueType font.</summary>
+    Ttf,
+    /// <summary>An OpenType font with CFF outlines.</summary>
+    Otf,
+    /// <summary>A TrueType font collection.</summary>
+    Ttc,
+    /// <summary>A PNG image.</summary>
+    Png,
+    /// <summary>A JPEG image.</summary>
+    Jpeg,
+    /// <summary>Lua source.</summary>
+    Lua,
+    /// <summary>XML (.xml, .xsd).</summary>
+    Xml,
+    /// <summary>An addon table of contents (.toc).</summary>
+    Toc,
+    /// <summary>Plain text.</summary>
+    Txt,
+    /// <summary>HTML.</summary>
+    Html,
+}
+
+/// <summary>What said a file's <see cref="FileFormat"/>.</summary>
+public enum FileFormatSource
+{
+    /// <summary>Neither the bytes nor the name said anything; the format is Unknown.</summary>
+    None,
+    /// <summary>The first decoded bytes proved the format, whatever the name says.</summary>
+    Magic,
+    /// <summary>The listfile name's extension only; the bytes weren't read or didn't prove anything.</summary>
+    Extension,
 }
 
 /// <summary>
@@ -235,21 +351,30 @@ public enum FileFormat
 /// ENCODING lists it and it is neither low violence (content flag 0x80) nor a high-resolution texture (0x1); ENCODING lists it
 /// and it isn't low violence; ENCODING lists it; any in the locale. Reads (#172) use the same variant. <see cref="Storage"/>
 /// checks the first encoded key ENCODING lists for the content.
-/// <see cref="Path"/> is the listfile name, null when the listfile doesn't name the file (names come in #173), even when it
-/// was looked up by path. <see cref="Size"/> is the decoded size ENCODING declares. <see cref="ContentKey"/> is the decoded
+/// <see cref="Path"/> is a community label from the loaded wow-listfile release (<see cref="IFileNames.StatusAsync"/> gives
+/// its tag), not Blizzard data, and the same for every build: it can be a placeholder and can change when a newer release is
+/// loaded, so never key on it, and it doesn't prove the build has a file at that path. <see cref="PathSource"/> says where it
+/// came from: the listfile name when there is one (even when a lookup by path hit ROOT's name hash under another
+/// spelling); else, for a stat by a path ROOT's name hash matched, that path as the caller gave it; else null. Listed files
+/// only ever carry a listfile name or none. <see cref="Size"/> is the decoded size ENCODING declares. <see cref="ContentKey"/> is the decoded
 /// content's MD5 (the CKey) as 32 lowercase hex digits: content identity, the same for the same bytes in any build, so build
 /// diffs can compare it. It is never an encoding key or a TACT key. <see cref="Encrypted"/> is ROOT's encrypted content flag
-/// (0x8000000), a hint; whether the file can be read comes with reading (#172).
+/// (0x8000000), a hint; whether the file can be read comes with reading (#172). <see cref="Format"/> is the magic of the first
+/// decoded bytes when they prove one, else the extension of <see cref="Path"/>, else Unknown; <see cref="FormatSource"/> says
+/// which. The bytes are read only when the file is stored, from the store alone (never fetched), and only the first BLTE chunk
+/// is decoded. A file not stored, or whose first bytes can't be read (an encrypted first chunk without its key, corrupt, a
+/// layer 2 failure), gets its extension's format; that is a state, never an error. What the bytes said is remembered per
+/// handle, so a file is read for this at most once; a whole read (<see cref="IBuildFiles.GetAsync"/>) also refreshes it.
 /// </summary>
-public sealed record BuildFile(uint FileDataId, string? Path, long? Size, string ContentKey, FileFormat Format, FileStorage Storage,
-    bool Encrypted);
+public sealed record BuildFile(uint FileDataId, string? Path, FilePathSource PathSource, long? Size, string ContentKey, FileFormat Format, FileFormatSource FormatSource,
+    FileStorage Storage, bool Encrypted);
 
 public enum FileLookupState
 {
     Found,
     /// <summary>
-    /// The build doesn't list the FileDataID, or no named ROOT entry matches the path. Retail ROOT mostly has no names, so a
-    /// path that misses doesn't prove the file is absent.
+    /// The build doesn't list the FileDataID, or neither ROOT's name hash nor the loaded listfile maps the path to a file this
+    /// build lists. Names can be off, not loaded yet or incomplete, so a path that misses doesn't prove the file is absent.
     /// </summary>
     UnknownFile,
     /// <summary>The build lists the file, but not for this handle's locale.</summary>
@@ -263,7 +388,10 @@ public sealed record FileStat(FileLookupState State, BuildFile? File);
 
 /// <summary>
 /// What <see cref="IBuildFiles.ListAsync"/> returns. Every set criterion must hold. <see cref="FromId"/> and <see cref="ToId"/>
-/// are inclusive. <see cref="PathPrefix"/> matches only named files (case and slash direction don't matter); a null set means
+/// are inclusive. <see cref="PathPrefix"/> matches the start of <see cref="BuildFile.Path"/>, so only files the loaded listfile
+/// names (ASCII case and slash direction don't matter); <c>""</c> matches every named file. Names are read once per batch:
+/// with names off or not loaded it matches nothing, and when they go off mid-listing the listing ends at the next batch
+/// boundary (files already read for the current batch are still returned). A null set means
 /// any value. Sets compare by reference, so two equal filters aren't equal records.
 /// </summary>
 public sealed record FileFilter

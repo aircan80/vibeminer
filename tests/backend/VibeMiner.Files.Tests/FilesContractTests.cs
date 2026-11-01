@@ -24,6 +24,11 @@ public abstract class FilesContractTests
     /// whose open already reads layer 2) scripts it now.
     /// </summary>
     protected abstract void StreamOpened(uint fileDataId);
+    /// <summary>
+    /// On the file system <see cref="Create"/> returned last: turns the community names on with exactly these names (the
+    /// listfile side, apart from <see cref="FakeFile.Path"/>, the ROOT name hash side), or off when null.
+    /// </summary>
+    protected abstract Task UseNamesAsync(IReadOnlyDictionary<uint, string>? names);
 
     private static readonly IReadOnlyList<string> Locales = ["enUS", "deDE"];
 
@@ -218,10 +223,10 @@ public abstract class FilesContractTests
     {
         await using var files = await OpenAsync();
         var byId = (await ListAsync(files, FileFilter.All)).ToDictionary(f => f.FileDataId);
-        Assert.Equal(new BuildFile(100, null, 1000, FilesFixture.ContentKeyOf(Content100), FileFormat.Unknown, FileStorage.Stored, false), byId[100]);
-        Assert.Equal(new BuildFile(200, null, 2000, FilesFixture.ContentKeyOf(200), FileFormat.Unknown, FileStorage.NotStored, true), byId[200]);
-        Assert.Equal(new BuildFile(300, null, 3000, KeyOf300.ToLowerInvariant(), FileFormat.Unknown, FileStorage.Stored, true), byId[300]);
-        Assert.Equal(new BuildFile(400, null, 4000, FilesFixture.ContentKeyOf(Content400), FileFormat.Unknown, FileStorage.NotStored, false), byId[400]);
+        Assert.Equal(new BuildFile(100, null, FilePathSource.None, 1000, FilesFixture.ContentKeyOf(Content100), FileFormat.Unknown, FileFormatSource.None, FileStorage.Stored, false), byId[100]);
+        Assert.Equal(new BuildFile(200, null, FilePathSource.None, 2000, FilesFixture.ContentKeyOf(200), FileFormat.Unknown, FileFormatSource.None, FileStorage.NotStored, true), byId[200]);
+        Assert.Equal(new BuildFile(300, null, FilePathSource.None, 3000, KeyOf300.ToLowerInvariant(), FileFormat.Unknown, FileFormatSource.None, FileStorage.Stored, true), byId[300]);
+        Assert.Equal(new BuildFile(400, null, FilePathSource.None, 4000, FilesFixture.ContentKeyOf(Content400), FileFormat.Unknown, FileFormatSource.None, FileStorage.NotStored, false), byId[400]);
         Assert.All(byId.Values, f => Assert.Matches("^[0-9a-f]{32}$", f.ContentKey));
     }
 
@@ -230,7 +235,111 @@ public abstract class FilesContractTests
     {
         await using var files = await OpenAsync();
         var file = Assert.Single(await ListAsync(files, FileFilter.All with { FromId = 250, ToId = 250 }));
-        Assert.Equal(new BuildFile(250, null, null, FilesFixture.ContentKeyOf(250), FileFormat.Unknown, FileStorage.NoEncodedCopy, false), file);
+        Assert.Equal(new BuildFile(250, null, FilePathSource.None, null, FilesFixture.ContentKeyOf(250), FileFormat.Unknown, FileFormatSource.None, FileStorage.NoEncodedCopy, false), file);
+    }
+
+    // Formats
+
+    // Distinct content per file: the real side shares one stored copy between files of identical content.
+    private static byte[] Blp(int seed) => [.. "BLP2"u8, .. BlteBuilder.Bytes(296, seed)];
+    private static readonly byte[] Md20Content = [.. "MD20"u8, .. BlteBuilder.Bytes(296, 8)];
+
+    /// <summary>
+    /// 10 stored BLP; 11 stored, no magic; 12 not stored, BLP; 13 stored BLP whose first chunk is encrypted with an unknown key;
+    /// 14 stored BLP with a hole from byte 10; 15 stored BLP, corrupt; 16 stored, empty; 17 stored MD20.
+    /// </summary>
+    private static IReadOnlyList<FakeFile> FormatFiles() =>
+    [
+        new(10, "textures/a.blp", Storage: FileStorage.Stored, Content: Blp(10)),
+        new(11, "textures/b.blp", Storage: FileStorage.Stored, Content: Content100),
+        new(12, "textures/c.blp", Content: Blp(12)),
+        new(13, "textures/d.blp", Storage: FileStorage.Stored, Content: Blp(13), Holes: [new(0, 128, KeyA)]),
+        new(14, "textures/e.blp", Storage: FileStorage.Stored, Content: Blp(14), Holes: [new(10, 100, KeyA)]),
+        new(15, "textures/f.blp", Storage: FileStorage.Stored, Content: Blp(15), ReadFailure: new(FileReadState.Corrupt, "BLTE_INVALID")),
+        new(16, "textures/g.blp", Storage: FileStorage.Stored, Content: []),
+        new(17, "creature/a/a.m2", Storage: FileStorage.Stored, Content: Md20Content),
+    ];
+
+    private static async Task<Dictionary<uint, (FileFormat, FileFormatSource)>> FormatsAsync(IBuildFiles files, FileFilter? filter = null) =>
+        (await ListAsync(files, filter ?? FileFilter.All)).ToDictionary(f => f.FileDataId, f => (f.Format, f.FormatSource));
+
+    [Fact]
+    public async Task StoredFilesGetTheirFormatFromTheirFirstBytes()
+    {
+        await using var files = await OpenAsync(files: FormatFiles());
+        var formats = await FormatsAsync(files);
+        Assert.Equal((FileFormat.Blp, FileFormatSource.Magic), formats[10]);
+        Assert.Equal((FileFormat.M2Legacy, FileFormatSource.Magic), formats[17]);
+        // Bytes before a hole that starts past 0 still count.
+        Assert.Equal((FileFormat.Blp, FileFormatSource.Magic), formats[14]);
+        // No names are listed yet, so bytes that prove nothing leave the format unknown.
+        Assert.Equal((FileFormat.Unknown, FileFormatSource.None), formats[11]);
+        Assert.Equal((FileFormat.Unknown, FileFormatSource.None), formats[16]);
+        foreach (var id in new uint[] { 10, 11, 14, 16, 17 })
+        {
+            var stat = (await files.StatAsync(id, Ct)).File!;
+            Assert.Equal(formats[id], (stat.Format, stat.FormatSource));
+        }
+    }
+
+    [Fact]
+    public async Task UnreadableFirstBytesAreNoEvidenceAndNeverFailTheListing()
+    {
+        await using var files = await OpenAsync(files: FormatFiles());
+        var formats = await FormatsAsync(files);
+        Assert.Equal(8, formats.Count);
+        // An encrypted first chunk without its key, and a corrupt copy: the magic isn't read.
+        Assert.Equal((FileFormat.Unknown, FileFormatSource.None), formats[13]);
+        Assert.Equal((FileFormat.Unknown, FileFormatSource.None), formats[15]);
+        var stat = await files.StatAsync(15, Ct);
+        Assert.Equal((FileLookupState.Found, FileFormat.Unknown, FileFormatSource.None), (stat.State, stat.File!.Format, stat.File.FormatSource));
+    }
+
+    [Fact]
+    public async Task FormatDetectionNeverFetches()
+    {
+        await using var files = await OpenAsync(files: FormatFiles());
+        Assert.Equal((FileFormat.Unknown, FileFormatSource.None), (await FormatsAsync(files))[12]);
+        var stat = (await files.StatAsync(12, Ct)).File!;
+        Assert.Equal((FileStorage.NotStored, FileFormat.Unknown, FileFormatSource.None), (stat.Storage, stat.Format, stat.FormatSource));
+        Assert.Equal(FileStorage.NotStored, (await files.StatAsync(12, Ct)).File!.Storage);
+    }
+
+    [Fact]
+    public async Task ANotStoredFileGetsItsMagicOnceStored()
+    {
+        await using var files = await OpenAsync(files: FormatFiles());
+        Assert.Equal(FileFormatSource.None, (await files.StatAsync(12, Ct)).File!.FormatSource);
+        MarkStored(FilesFixture.Build, 12);
+        var stat = (await files.StatAsync(12, Ct)).File!;
+        Assert.Equal((FileStorage.Stored, FileFormat.Blp, FileFormatSource.Magic), (stat.Storage, stat.Format, stat.FormatSource));
+    }
+
+    [Fact]
+    public async Task AWholeReadGivesTheFormat()
+    {
+        await using var files = await OpenAsync(files: FormatFiles());
+        Assert.Equal(FileReadState.Complete, (await files.GetAsync(12, Ct)).State);
+        Assert.Equal((FileFormat.Blp, FileFormatSource.Magic), (await FormatsAsync(files))[12]);
+    }
+
+    [Fact]
+    public async Task FiltersByDetectedFormat()
+    {
+        await using var files = await OpenAsync(files: FormatFiles());
+        Assert.Equal((uint[])[10u, 14], await IdsAsync(files, FileFilter.All with { Formats = new HashSet<FileFormat> { FileFormat.Blp } }));
+        Assert.Equal((uint[])[11u, 12, 13, 15, 16], await IdsAsync(files, FileFilter.All with { Formats = new HashSet<FileFormat> { FileFormat.Unknown } }));
+        Assert.Equal((uint[])[10u, 14, 17], await IdsAsync(files,
+            FileFilter.All with { Formats = new HashSet<FileFormat> { FileFormat.Blp, FileFormat.M2Legacy } }));
+        Assert.Equal((uint[])[14u], await IdsAsync(files,
+            FileFilter.All with { FromId = 11, ToId = 16, Formats = new HashSet<FileFormat> { FileFormat.Blp } }));
+        Assert.Empty(await IdsAsync(files, FileFilter.All with { Formats = new HashSet<FileFormat> { FileFormat.Ogg } }));
+        Assert.Empty(await IdsAsync(files, FileFilter.All with { Formats = new HashSet<FileFormat>() }));
+        // The other criteria still hold.
+        Assert.Equal((uint[])[11u, 13, 15, 16], await IdsAsync(files, FileFilter.All with
+        {
+            Formats = new HashSet<FileFormat> { FileFormat.Unknown }, Storage = new HashSet<FileStorage> { FileStorage.Stored },
+        }));
     }
 
     // StatAsync and ExistsAsync
@@ -242,11 +351,17 @@ public abstract class FilesContractTests
         var listed = (await ListAsync(files, FileFilter.All)).ToDictionary(f => f.FileDataId);
         foreach (var (id, path) in new[] { (100u, "Interface/Icons/One.blp"), (200u, "world/en/three.m2"), (300u, "sound/four.ogg"), (400u, "sound/five.ogg") })
         {
-            foreach (var file in new[] { FileRef.Id(id), FileRef.ForPath(path), FileRef.ForPath(path.ToUpperInvariant()),
-                FileRef.ForPath(path.ToLowerInvariant().Replace('/', '\\')) })
+            Assert.Equal(new FileStat(FileLookupState.Found, listed[id]), await files.StatAsync(id, Ct));
+            Assert.True(await files.ExistsAsync(id, Ct));
+            foreach (var asked in new[] { path, path.ToUpperInvariant(), path.ToLowerInvariant().Replace('/', '\\') })
             {
-                Assert.Equal(new FileStat(FileLookupState.Found, listed[id]), await files.StatAsync(file, Ct));
-                Assert.True(await files.ExistsAsync(file, Ct));
+                // ROOT's name hash matched and the listfile doesn't name it: the asked path, as given, labels it.
+                var stat = await files.StatAsync(FileRef.ForPath(asked), Ct);
+                Assert.Equal(FileLookupState.Found, stat.State);
+                Assert.Equal((asked, FilePathSource.RootHash), (stat.File!.Path, stat.File.PathSource));
+                Assert.Equal(listed[id] with { Format = stat.File.Format, FormatSource = stat.File.FormatSource },
+                    stat.File with { Path = null, PathSource = FilePathSource.None });
+                Assert.True(await files.ExistsAsync(FileRef.ForPath(asked), Ct));
             }
         }
     }
@@ -280,12 +395,15 @@ public abstract class FilesContractTests
     public async Task StatsNotInEncodingWithFile()
     {
         await using var files = await OpenAsync();
-        var expected = new BuildFile(250, null, null, FilesFixture.ContentKeyOf(250), FileFormat.Unknown, FileStorage.NoEncodedCopy, false);
-        foreach (var file in new[] { FileRef.Id(250), FileRef.ForPath("Sound\\Missing.OGG") })
+        var expected = new BuildFile(250, null, FilePathSource.None, null, FilesFixture.ContentKeyOf(250), FileFormat.Unknown, FileFormatSource.None, FileStorage.NoEncodedCopy, false);
+        Assert.Equal(new FileStat(FileLookupState.NotInEncoding, expected), await files.StatAsync(250, Ct));
+        Assert.True(await files.ExistsAsync(250, Ct));
+        var byPath = FileRef.ForPath("Sound\\Missing.OGG");
+        Assert.Equal(new FileStat(FileLookupState.NotInEncoding, expected with
         {
-            Assert.Equal(new FileStat(FileLookupState.NotInEncoding, expected), await files.StatAsync(file, Ct));
-            Assert.True(await files.ExistsAsync(file, Ct));
-        }
+            Path = "Sound\\Missing.OGG", PathSource = FilePathSource.RootHash, Format = FileFormat.Ogg, FormatSource = FileFormatSource.Extension,
+        }), await files.StatAsync(byPath, Ct));
+        Assert.True(await files.ExistsAsync(byPath, Ct));
     }
 
     [Fact]
@@ -337,6 +455,175 @@ public abstract class FilesContractTests
             };
             Assert.Equal(expected, stats[i]);
         }
+    }
+
+    // Names: FakeFile.Path is ROOT's name hash, UseNamesAsync the listfile.
+
+    private static readonly byte[] Content2 = BlteBuilder.Bytes(64, 2), Content3 = BlteBuilder.Bytes(64, 3), Content5 = BlteBuilder.Bytes(64, 5);
+
+    /// <summary>
+    /// 1 and 5 have ROOT names; 3 is listfile-named with 5's ROOT name; 4 is deDE only and shares its listfile name with 6,
+    /// which the build lacks; 8 and 9 share a name; 10 (enUS) and 11 (deDE) share a name; 7 is named but not in the build;
+    /// 12 has no name at all.
+    /// </summary>
+    private static IReadOnlyList<FakeFile> NamedFiles() =>
+    [
+        new(1, "root/a.blp", 100),
+        new(2, Content: Content2),
+        new(3, Content: Content3),
+        new(4, Size: 400, Locales: ["deDE"]),
+        new(5, "root/b.blp", Content: Content5),
+        new(8, Size: 800),
+        new(9, Size: 900),
+        new(10, Size: 1000, Locales: ["enUS"]),
+        new(11, Size: 1100, Locales: ["deDE"]),
+        new(12, Size: 1200),
+    ];
+
+    private static readonly IReadOnlyDictionary<uint, string> Listfile = new Dictionary<uint, string>
+    {
+        [1] = "LF/A.blp", [2] = "lf/Two.BLP", [3] = "Root/B.BLP", [4] = "lf/dup.m2", [6] = "lf/dup.m2", [7] = "lf/gone.blp",
+        [8] = "lf/twice.ogg", [9] = "LF\\TWICE.ogg", [10] = "lf/locale.lua", [11] = "lf/locale.lua",
+    };
+
+    private async Task<IBuildFiles> OpenNamedAsync(string locale = "enUS", bool names = true)
+    {
+        var fs = Create(FilesFixture.Build, Locales, NamedFiles());
+        if (names) await UseNamesAsync(Listfile);
+        var result = await fs.ForAsync(FilesFixture.Build, locale, Ct);
+        Assert.Equal(FilesOpenState.Open, result.State);
+        return result.Files!;
+    }
+
+    [Fact]
+    public async Task ListedPathsAreListfileNamesWhenNamesAreOn()
+    {
+        await using var files = await OpenNamedAsync();
+        var listed = (await ListAsync(files, FileFilter.All)).ToDictionary(f => f.FileDataId, f => (f.Path, f.PathSource));
+        Assert.Equal((uint[])[1u, 2, 3, 5, 8, 9, 10, 12], listed.Keys.ToArray());
+        Assert.Equal(("LF/A.blp", FilePathSource.Listfile), listed[1]);
+        Assert.Equal(("Root/B.BLP", FilePathSource.Listfile), listed[3]);
+        // A ROOT name is never listed.
+        Assert.Equal((null, FilePathSource.None), listed[5]);
+        Assert.Equal((null, FilePathSource.None), listed[12]);
+        var stat = (await files.StatAsync(9, Ct)).File!;
+        Assert.Equal(("LF\\TWICE.ogg", FilePathSource.Listfile), (stat.Path, stat.PathSource));
+    }
+
+    [Fact]
+    public async Task TurningNamesOffTakesEffectOnTheNextCall()
+    {
+        await using var files = await OpenNamedAsync();
+        Assert.Equal("lf/Two.BLP", (await files.StatAsync(2, Ct)).File!.Path);
+        await UseNamesAsync(null);
+        Assert.All(await ListAsync(files, FileFilter.All), f => Assert.Equal((null, FilePathSource.None), (f.Path, f.PathSource)));
+        Assert.Equal((null, FilePathSource.None), ((await files.StatAsync(2, Ct)).File!.Path, (await files.StatAsync(2, Ct)).File!.PathSource));
+        Assert.Equal(FileLookupState.UnknownFile, (await files.StatAsync(FileRef.ForPath("lf/two.blp"), Ct)).State);
+        Assert.False(await files.ExistsAsync(FileRef.ForPath("lf/two.blp"), Ct));
+        // ROOT's name hash doesn't need names.
+        Assert.Equal(1u, (await files.StatAsync(FileRef.ForPath("root/a.blp"), Ct)).File!.FileDataId);
+        await UseNamesAsync(Listfile);
+        Assert.Equal("lf/Two.BLP", (await files.StatAsync(2, Ct)).File!.Path);
+    }
+
+    [Fact]
+    public async Task NamesStartOff()
+    {
+        await using var files = await OpenNamedAsync(names: false);
+        Assert.All(await ListAsync(files, FileFilter.All), f => Assert.Null(f.Path));
+        Assert.Equal(FileLookupState.UnknownFile, (await files.StatAsync(FileRef.ForPath("lf/two.blp"), Ct)).State);
+    }
+
+    [Fact]
+    public async Task LooksUpByARootHashPath()
+    {
+        await using var files = await OpenNamedAsync();
+        // The listfile names 1 differently: its name is the label.
+        var stat = await files.StatAsync(FileRef.ForPath("ROOT\\A.BLP"), Ct);
+        Assert.Equal((FileLookupState.Found, 1u, "LF/A.blp", FilePathSource.Listfile),
+            (stat.State, stat.File!.FileDataId, stat.File.Path, stat.File.PathSource));
+        Assert.True(await files.ExistsAsync(FileRef.ForPath("root/a.blp"), Ct));
+    }
+
+    [Fact]
+    public async Task LooksUpByAListfileOnlyPath()
+    {
+        await using var files = await OpenNamedAsync();
+        var path = FileRef.ForPath("LF\\two.blp");
+        var stat = await files.StatAsync(path, Ct);
+        Assert.Equal((FileLookupState.Found, 2u, "lf/Two.BLP", FilePathSource.Listfile), (stat.State, stat.File!.FileDataId, stat.File.Path, stat.File.PathSource));
+        Assert.True(await files.ExistsAsync(path, Ct));
+        AssertComplete(await files.GetAsync(path, Ct), Content2, 0, 64);
+        AssertComplete(await files.ReadRangeAsync(path, 10, 20, Ct), Content2, 10, 20);
+        var open = await files.OpenReadAsync(path, Ct);
+        await using var stream = open.Stream!;
+        Assert.Equal((FileReadState.Complete, 64L), (open.State, stream.Length));
+        // Named, but this build has no such file.
+        Assert.Equal(new FileStat(FileLookupState.UnknownFile, null), await files.StatAsync(FileRef.ForPath("lf/gone.blp"), Ct));
+        Assert.False(await files.ExistsAsync(FileRef.ForPath("lf/gone.blp"), Ct));
+        Assert.Equal(FileReadState.UnknownFile, (await files.GetAsync(FileRef.ForPath("lf/gone.blp"), Ct)).State);
+    }
+
+    [Fact]
+    public async Task RootWinsWhenItAndTheListfileDisagree()
+    {
+        await using var files = await OpenNamedAsync();
+        var path = FileRef.ForPath("Root/B.BLP");
+        var stat = await files.StatAsync(path, Ct);
+        // 5 has no listfile name, so the asked path labels it.
+        Assert.Equal((5u, "Root/B.BLP", FilePathSource.RootHash), (stat.File!.FileDataId, stat.File.Path, stat.File.PathSource));
+        AssertComplete(await files.GetAsync(path, Ct), Content5, 0, 64);
+        AssertComplete(await files.ReadRangeAsync(path, 0, 8, Ct), Content5, 0, 8);
+    }
+
+    [Fact]
+    public async Task ARepeatedNamePicksTheHighestFileInTheLocale()
+    {
+        await using (var en = await OpenNamedAsync("enUS"))
+        {
+            Assert.Equal(9u, (await en.StatAsync(FileRef.ForPath("lf/twice.ogg"), Ct)).File!.FileDataId);
+            // 11 is higher but deDE only.
+            Assert.Equal(10u, (await en.StatAsync(FileRef.ForPath("lf/locale.lua"), Ct)).File!.FileDataId);
+            // Only 4 is in the build, and not in this locale; 6 isn't in the build.
+            Assert.Equal(new FileStat(FileLookupState.NotInLocale, null), await en.StatAsync(FileRef.ForPath("lf/dup.m2"), Ct));
+            Assert.False(await en.ExistsAsync(FileRef.ForPath("lf/dup.m2"), Ct));
+            Assert.Equal(FileReadState.NotInLocale, (await en.GetAsync(FileRef.ForPath("lf/dup.m2"), Ct)).State);
+        }
+        await using var de = await OpenNamedAsync("deDE");
+        Assert.Equal(11u, (await de.StatAsync(FileRef.ForPath("lf/locale.lua"), Ct)).File!.FileDataId);
+        Assert.Equal(4u, (await de.StatAsync(FileRef.ForPath("LF/DUP.M2"), Ct)).File!.FileDataId);
+    }
+
+    [Fact]
+    public async Task PathPrefixMatchesListfileNames()
+    {
+        await using var files = await OpenNamedAsync();
+        Assert.Equal((uint[])[1u, 2, 8, 9, 10], await IdsAsync(files, FileFilter.All with { PathPrefix = "lf/" }));
+        Assert.Equal((uint[])[1u, 2, 8, 9, 10], await IdsAsync(files, FileFilter.All with { PathPrefix = "Lf\\" }));
+        Assert.Equal((uint[])[8u, 9], await IdsAsync(files, FileFilter.All with { PathPrefix = "LF/twice" }));
+        // ROOT names don't count: 5's ROOT name starts root/, but only 3 has a listfile name there.
+        Assert.Equal((uint[])[3u], await IdsAsync(files, FileFilter.All with { PathPrefix = "root/" }));
+        // Every named file; 12 has no name.
+        Assert.Equal((uint[])[1u, 2, 3, 8, 9, 10], await IdsAsync(files, FileFilter.All with { PathPrefix = "" }));
+        Assert.Equal((uint[])[9u, 10], await IdsAsync(files, FileFilter.All with { PathPrefix = "lf/", FromId = 9 }));
+        Assert.Equal((uint[])[2u, 8], await IdsAsync(files, FileFilter.All with { PathPrefix = "lf/", FromId = 2, ToId = 8, Encrypted = false }));
+        Assert.Empty(await IdsAsync(files, FileFilter.All with { PathPrefix = "lf/x" }));
+        await UseNamesAsync(null);
+        Assert.Empty(await IdsAsync(files, FileFilter.All with { PathPrefix = "lf/" }));
+        Assert.Empty(await IdsAsync(files, FileFilter.All with { PathPrefix = "" }));
+    }
+
+    [Fact]
+    public async Task ANamedFileNotStoredGetsItsExtensionsFormat()
+    {
+        await using var files = await OpenNamedAsync();
+        var listed = (await ListAsync(files, FileFilter.All)).ToDictionary(f => f.FileDataId);
+        Assert.Equal((FileFormat.Blp, FileFormatSource.Extension), (listed[2].Format, listed[2].FormatSource));
+        Assert.Equal((FileFormat.Ogg, FileFormatSource.Extension), (listed[8].Format, listed[8].FormatSource));
+        Assert.Equal((FileFormat.Unknown, FileFormatSource.None), (listed[12].Format, listed[12].FormatSource));
+        Assert.Equal((uint[])[1u, 2, 3], await IdsAsync(files, FileFilter.All with { Formats = new HashSet<FileFormat> { FileFormat.Blp } }));
+        var stat = (await files.StatAsync(2, Ct)).File!;
+        Assert.Equal((FileFormat.Blp, FileFormatSource.Extension), (stat.Format, stat.FormatSource));
     }
 
     // GetAsync, ReadRangeAsync and OpenReadAsync
@@ -876,23 +1163,32 @@ public sealed class InMemoryFilesContractTests : FilesContractTests
     private InMemoryFileSystem? last;
 
     protected override IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20) =>
-        last = new InMemoryFileSystem(listNames: false, maxReadBytes).Add(build, locales, files);
+        last = new InMemoryFileSystem(maxReadBytes).Add(build, locales, files);
 
     protected override IFileSystem CreateFailing(BuildRef build, FilesOpenState state, string code) =>
-        new InMemoryFileSystem(listNames: false).Fail(build, state, code);
+        new InMemoryFileSystem().Fail(build, state, code);
 
     protected override void MarkStored(BuildRef build, uint fileDataId) => last!.SetStorage(build, fileDataId, FileStorage.Stored);
 
     protected override void StreamOpened(uint fileDataId) { }
+
+    protected override Task UseNamesAsync(IReadOnlyDictionary<uint, string>? names)
+    {
+        if (names is null) last!.Names.State = VibeMiner.Files.Names.FileNamesState.Off;
+        else last!.Names.Use(names);
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class RealFilesContractTests : FilesContractTests
 {
     private RealFiles? last;
+    private RealNames? names;
 
     protected override IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20)
     {
-        last = FilesFixture.Real(build, locales, files, new FileSystemOptions { MaxReadBytes = maxReadBytes });
+        names = new RealNames();
+        last = FilesFixture.Real(build, locales, files, new FileSystemOptions { MaxReadBytes = maxReadBytes, Names = names });
         return last.Files;
     }
 
@@ -905,4 +1201,10 @@ public sealed class RealFilesContractTests : FilesContractTests
     protected override void MarkStored(BuildRef build, uint fileDataId) => last!.MarkStored(fileDataId);
 
     protected override void StreamOpened(uint fileDataId) => last!.FailStreamReads(fileDataId);
+
+    protected override async Task UseNamesAsync(IReadOnlyDictionary<uint, string>? use)
+    {
+        if (use is null) names!.On = false;
+        else await names!.UseAsync(last!.Files, last.Objects, use);
+    }
 }

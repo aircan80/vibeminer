@@ -53,24 +53,67 @@ public sealed record ObjectResult(ObjectKey Key, ObjectState State, ServedFrom? 
 /// A kind of dated observation. The numbers are the history log's record kinds. The wago.tools build list (#96) adds a
 /// kind here, a history kind in layer 1 and an <see cref="IObservationSource"/>; nothing else changes. <see cref="Summary"/> is
 /// the version service's list of every product; it has no product. <see cref="Definition"/> is one WoWDBDefs table definition
-/// (D081), served by <see cref="WoWDBDefsObservations"/>.
+/// (D081), served by <see cref="WoWDBDefsObservations"/>. <see cref="ListfileRelease"/> is the wow-listfile's latest GitHub
+/// release (the release JSON) and <see cref="ListfilePart"/> one fixed 8 MiB part of that release's CSV asset.
 /// </summary>
-public enum ObservationKind { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4, Definition = 5 }
+public enum ObservationKind { Versions = 1, Cdns = 2, Bgdl = 3, Summary = 4, Definition = 5, ListfileRelease = 6, ListfilePart = 7 }
 
 /// <summary>
 /// One observation to make. <see cref="Product"/> is "" for <see cref="ObservationKind.Summary"/>. A
 /// <see cref="ObservationKind.Definition"/> request is <see cref="Product"/> = the table id (8 lower hex, the manifest's table
 /// hash), <see cref="Region"/> = <see cref="DefinitionRegion"/> and <see cref="Name"/> = the exact table name. Only a definition
-/// request has a <see cref="Name"/>. A request that breaks these rules is Refused with <c>OBSERVATION_REQUEST_INVALID</c>.
+/// request has a <see cref="Name"/>. A <see cref="ObservationKind.ListfileRelease"/> request is <see cref="Product"/> =
+/// <see cref="ListfileProduct"/> and <see cref="Region"/> = <see cref="ListfileReleaseRegion"/>. A
+/// <see cref="ObservationKind.ListfilePart"/> request is <see cref="Product"/> = the release tag (1-64 of [a-z0-9_-]) and
+/// <see cref="Region"/> = <see cref="ListfilePartRegion"/> of the part index. A request that breaks these rules is Refused with
+/// <c>OBSERVATION_REQUEST_INVALID</c>.
 /// </summary>
 public sealed record ObservationRequest(ObservationKind Kind, string Product, string Region, string? Name = null)
 {
     /// <summary>The region every definition observation is recorded under.</summary>
     public const string DefinitionRegion = "wowdbdefs";
+    /// <summary>The product every listfile release observation is recorded under.</summary>
+    public const string ListfileProduct = "wowlistfile";
+    /// <summary>The region every listfile release observation is recorded under.</summary>
+    public const string ListfileReleaseRegion = "latest";
+    /// <summary>The size of every listfile part but the last.</summary>
+    public const int ListfilePartBytes = 8 * 1024 * 1024;
+    /// <summary>The number of listfile parts a release can have (0..63, so an asset of at most 512 MiB).</summary>
+    public const int ListfileMaxParts = 64;
+
+    /// <summary>The region a listfile part is recorded under: "p" and the index in decimal, no leading zeros.</summary>
+    public static string ListfilePartRegion(int index)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, ListfileMaxParts);
+        return "p" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>The part index a region names ("p0".."p63", no leading zeros), or null for any other region.</summary>
+    public static int? ListfilePartIndex(string? region)
+    {
+        if (region is not { Length: 2 or 3 } || region[0] != 'p' || region.Skip(1).Any(c => c is < '0' or > '9')) return null;
+        if (region.Length == 3 && region[1] == '0') return null;
+        var index = region.Length == 2 ? region[1] - '0' : (region[1] - '0') * 10 + (region[2] - '0');
+        return index < ListfileMaxParts ? index : null;
+    }
 
     /// <summary>Why this request's shape is refused, or null. Product and region rules of the other kinds are their client's.</summary>
     public string? Problem()
     {
+        if (Kind == ObservationKind.ListfileRelease)
+        {
+            if (Product != ListfileProduct || Region != ListfileReleaseRegion)
+                return $"A listfile release request is product \"{ListfileProduct}\", region \"{ListfileReleaseRegion}\".";
+            return Name is null ? null : "Only a definition request has a name, not ListfileRelease.";
+        }
+        if (Kind == ObservationKind.ListfilePart)
+        {
+            if (Product is not { Length: > 0 and <= 64 } || Product.Any(c => c is not ((>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-')))
+                return "A listfile part request's product is the release tag, 1-64 of [a-z0-9_-].";
+            if (ListfilePartIndex(Region) is null) return "A listfile part request's region is \"p0\"..\"p63\", no leading zeros.";
+            return Name is null ? null : "Only a definition request has a name, not ListfilePart.";
+        }
         if (Kind != ObservationKind.Definition)
             return Name is null ? null : $"Only a definition request has a name, not {Kind}.";
         if (Product is not { Length: 8 } || Product.Any(c => c is not ((>= '0' and <= '9') or (>= 'a' and <= 'f'))))
@@ -139,6 +182,51 @@ public sealed class WoWDBDefsObservations(IWoWDBDefsClient client) : IObservatio
         var reply = await client.FetchAsync(request.Name!, cancellationToken).ConfigureAwait(false);
         return new(ObservationKind.Definition, request.Product, request.Region, reply.Url, reply.ObservedAt, reply.Bytes);
     }
+}
+
+/// <summary>
+/// The wow-listfile's GitHub releases (D105): serves <see cref="ObservationKind.ListfileRelease"/> (the latest release JSON) and
+/// <see cref="ObservationKind.ListfilePart"/> (one 8 MiB part of a release's CSV asset). A part's URL is the github.com asset
+/// address, never the signed address it redirected to. A request of the wrong shape is refused before the client is asked; a part
+/// that isn't exactly the one asked for (address, offset, length, a file of at most 512 MiB) is a Protocol failure.
+/// </summary>
+public sealed class WowListfileObservations(IWowListfileClient client) : IObservationSource
+{
+    public IReadOnlyCollection<ObservationKind> Kinds { get; } = [ObservationKind.ListfileRelease, ObservationKind.ListfilePart];
+
+    /// <summary>The release's CSV asset name.</summary>
+    public const string AssetName = WowListfileClient.AssetName;
+    /// <summary>The github.com address every part of release <paramref name="tag"/>'s asset is recorded under.</summary>
+    public static string AssetUrl(string tag) => WowListfileClient.AssetUrl(tag).AbsoluteUri;
+    /// <summary>The address the latest release JSON is recorded under.</summary>
+    public static string ReleaseUrl => WowListfileClient.LatestReleaseUrl.AbsoluteUri;
+
+    public async Task<Observation> FetchAsync(ObservationRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Kind is not (ObservationKind.ListfileRelease or ObservationKind.ListfilePart))
+            throw new ArgumentException($"The wow-listfile serves only releases and parts, not {request.Kind}.", nameof(request));
+        if (request.Problem() is { } problem) throw new ArgumentException(problem, nameof(request));
+        if (request.Kind == ObservationKind.ListfileRelease)
+        {
+            var reply = await client.FetchReleaseAsync(cancellationToken).ConfigureAwait(false);
+            return new(ObservationKind.ListfileRelease, request.Product, request.Region, reply.Url, reply.ObservedAt, reply.Bytes);
+        }
+        var index = ObservationRequest.ListfilePartIndex(request.Region)!.Value;
+        var part = await client.FetchPartAsync(request.Product, index, cancellationToken).ConfigureAwait(false);
+        var asset = new Uri(AssetUrl(request.Product));
+        if (part.Url is null || part.Url.AbsoluteUri != asset.AbsoluteUri) throw Protocol(asset, part.ObservedAt, $"The wow-listfile client returned part {index} from another address.");
+        if (part.Offset != (long)index * ObservationRequest.ListfilePartBytes)
+            throw Protocol(asset, part.ObservedAt, $"The wow-listfile client returned bytes at offset {part.Offset} for part {index}.");
+        if (part.TotalLength <= part.Offset || part.TotalLength > WowListfileClient.MaxAssetBytes)
+            throw Protocol(asset, part.ObservedAt, $"The wow-listfile client returned part {index} of a file of {part.TotalLength} bytes.");
+        if (part.Bytes is null || part.Bytes.Length != Math.Min(ObservationRequest.ListfilePartBytes, part.TotalLength - part.Offset))
+            throw Protocol(asset, part.ObservedAt, $"The wow-listfile client returned part {index} with the wrong number of bytes.");
+        return new(ObservationKind.ListfilePart, request.Product, request.Region, part.Url, part.ObservedAt, part.Bytes);
+    }
+
+    private static CdnException Protocol(Uri url, DateTimeOffset at, string message) =>
+        new([new CdnAttempt(url.Host, url, CdnFailure.Protocol, null, at, message)]);
 }
 
 /// <summary>An observation and whether it is now in the history log.</summary>

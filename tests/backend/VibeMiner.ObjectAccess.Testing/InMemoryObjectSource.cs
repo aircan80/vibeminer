@@ -6,7 +6,7 @@ namespace VibeMiner.ObjectAccess.Testing;
 
 /// <summary>
 /// The standard <see cref="IObjectSource"/> test double for layer 3 and up: serves synthetic objects from memory, with
-/// scripted 404s, outages and refusals, version and definition replies with their real URLs, scripted observation failures,
+/// scripted 404s, outages and refusals, version, definition and listfile replies with their real URLs, scripted observation failures,
 /// and counts what was asked. The shared contract tests run it beside the real source.
 /// Like the real source it publishes its store commits: a key the first time an answer stores it, and keys dropped with <see cref="Remove"/>.
 /// </summary>
@@ -16,6 +16,7 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
     private readonly Dictionary<ObjectKey, byte[]> objects = [];
     private readonly Dictionary<ObjectKey, ObjectResult> scripted = [];
     private readonly List<(ObjectKey Key, FetchPriority Priority)> asked = [];
+    private readonly List<ObjectKey> fetched = [];
     private readonly Dictionary<(string, string, ObservationKind), byte[]> replies = [];
     private readonly Dictionary<string, (string Name, string Revision, byte[] Bytes)> definitions = [];
     private readonly Dictionary<(string, string, ObservationKind), ObservationResult> failures = [];
@@ -52,6 +53,27 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
         return this;
     }
     /// <summary>
+    /// Scripts a whole wow-listfile release: <paramref name="releaseJson"/> is the latest-release reply and
+    /// <paramref name="asset"/> is split into 8 MiB part replies p0..pN for <paramref name="tag"/>, the last one short (an empty
+    /// asset has no parts). Part URLs are <see cref="WowListfileObservations.AssetUrl"/>; a part past the end is Unavailable
+    /// <c>CDN_HTTP_STATUS</c>, as the real client's 416 is.
+    /// </summary>
+    public InMemoryObjectSource AddListfile(string tag, byte[] releaseJson, byte[] asset)
+    {
+        ArgumentNullException.ThrowIfNull(releaseJson);
+        ArgumentNullException.ThrowIfNull(asset);
+        var parts = (asset.Length + ObservationRequest.ListfilePartBytes - 1) / ObservationRequest.ListfilePartBytes;
+        if (parts > ObservationRequest.ListfileMaxParts) throw new ArgumentException("A listfile asset is at most 512 MiB.", nameof(asset));
+        AddReply(ObservationRequest.ListfileProduct, ObservationRequest.ListfileReleaseRegion, ObservationKind.ListfileRelease, releaseJson);
+        for (var i = 0; i < parts; i++)
+        {
+            var start = i * ObservationRequest.ListfilePartBytes;
+            AddReply(tag, ObservationRequest.ListfilePartRegion(i), ObservationKind.ListfilePart,
+                asset.AsSpan(start, Math.Min(ObservationRequest.ListfilePartBytes, asset.Length - start)).ToArray());
+        }
+        return this;
+    }
+    /// <summary>
     /// Every observation of (product, region, kind) fails with this state and code until a reply is added again. NotFound and
     /// Unavailable are dated now, like the real source's.
     /// </summary>
@@ -80,6 +102,8 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
     private InMemoryObjectSource Script(ObjectResult result) { lock (gate) scripted[result.Key] = result; return this; }
 
     public IReadOnlyList<(ObjectKey Key, FetchPriority Priority)> Asked { get { lock (gate) return asked.ToArray(); } }
+    /// <summary>Every object served that wasn't stored yet (a fetch, which stores it), in order.</summary>
+    public IReadOnlyList<ObjectKey> Fetched { get { lock (gate) return fetched.ToArray(); } }
     /// <summary>Every <see cref="ObserveAsync"/> call made, in order, refused and failed ones included.</summary>
     public IReadOnlyList<ObservationRequest> Observed { get { lock (gate) return observed.ToArray(); } }
 
@@ -97,6 +121,7 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
                 if (request.DeclaredLength is { } declared && declared != bytes.Length)
                     return new(request.Key, ObjectState.Refused, Code: "OBJECT_SIZE_MISMATCH");
                 var from = stored.Add(request.Key) ? ServedFrom.Cdn : ServedFrom.Store;
+                if (from == ServedFrom.Cdn) fetched.Add(request.Key);
                 result = new(request.Key, ObjectState.Present, from, ObjectOrigin.Cdn, bytes.Length, withBytes ? (byte[])bytes.Clone() : null);
             }
             else return cdn is null
@@ -157,8 +182,14 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
             }
             else
             {
-                if (!replies.TryGetValue((request.Product, request.Region, request.Kind), out var reply)) return Task.FromResult(NotObserved());
-                url = VersionClient.UrlFor(request.Product, request.Region, (VersionDocumentKind)(int)request.Kind);
+                if (!replies.TryGetValue((request.Product, request.Region, request.Kind), out var reply))
+                    return Task.FromResult(request.Kind == ObservationKind.ListfilePart ? PastTheEnd() : NotObserved());
+                url = request.Kind switch
+                {
+                    ObservationKind.ListfileRelease => new Uri(WowListfileObservations.ReleaseUrl),
+                    ObservationKind.ListfilePart => new Uri(WowListfileObservations.AssetUrl(request.Product)),
+                    _ => VersionClient.UrlFor(request.Product, request.Region, (VersionDocumentKind)(int)request.Kind),
+                };
                 bytes = reply;
             }
             var observation = new Observation(request.Kind, request.Product, request.Region, url, Time.GetUtcNow(), bytes);
@@ -173,6 +204,9 @@ public sealed class InMemoryObjectSource : IObjectSource, IStoreCommits
         }
     }
 
+    // GitHub answers a range past the end of the asset with a 416, which the real client reports as HttpStatus.
+    private ObservationResult PastTheEnd() =>
+        new(ObjectState.Unavailable, Code: "CDN_HTTP_STATUS", Message: "The listfile ends before this part.", ObservedAt: Time.GetUtcNow());
     private ObservationResult NotObserved() => new(ObjectState.NotFound, Code: "CDN_NOT_FOUND", ObservedAt: Time.GetUtcNow());
     private static ObservationResult Invalid(string message) => new(ObjectState.Refused, Code: "OBSERVATION_REQUEST_INVALID", Message: message);
 

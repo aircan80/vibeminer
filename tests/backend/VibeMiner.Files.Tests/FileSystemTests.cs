@@ -72,7 +72,10 @@ public sealed class FileSystemTests(ITestOutputHelper output)
         Assert.False(await files.ExistsAsync(5000u, Ct));
         Assert.Equal(11, objects.HasKeysCalls);
 
-        Assert.Empty(objects.Asked);
+        // Only stored copies are read (for their format), and nothing is fetched.
+        Assert.Empty(objects.Fetched);
+        var stored = Enumerable.Range(1, 1000).Where(i => i % 3 == 0).Select(i => FilesFixture.ObjectKeyOf((uint)i)).ToHashSet();
+        Assert.All(objects.Asked, a => Assert.Contains(a.Key, stored));
 
         await OpenAsync(fs, FilesFixture.Build);
         Assert.Equal(1, builds.Opens);
@@ -318,7 +321,7 @@ public sealed class FileSystemTests(ITestOutputHelper output)
         Assert.Equal(count, listed);
         Assert.Equal(count / 10, listedStored);
         Assert.Equal((count + 4095) / 4096, calls);
-        Assert.Empty(objects.Asked);
+        Assert.Empty(objects.Fetched);
         // Loose guards against a per-file re-verify or a hang, not performance claims.
         Assert.True(statMean < TimeSpan.FromMicroseconds(50), $"Mean stat took {statMean.TotalMicroseconds:F2} us.");
         Assert.True(list < TimeSpan.FromSeconds(60), $"The full list took {list.TotalSeconds:F1} s.");

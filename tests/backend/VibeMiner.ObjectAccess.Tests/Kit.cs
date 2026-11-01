@@ -24,9 +24,11 @@ internal sealed class Scenario
 
     private ObjectSource? source;
     public ObjectSource Source => source ??= new ObjectSource(Store, Store, Store, Shared, new ScriptedCdnClient(Cdn),
-        [new VersionServiceObservations(new VersionClient(new HttpClient(Versions))), new WoWDBDefsObservations(Definitions)], ObjectVerification.Default, Options);
+        [new VersionServiceObservations(new VersionClient(new HttpClient(Versions))), new WoWDBDefsObservations(Definitions),
+            new WowListfileObservations(Listfile)], ObjectVerification.Default, Options);
     public VersionHandler Versions { get; } = new();
     public DefinitionClient Definitions { get; } = new();
+    public ListfileClient Listfile { get; } = new();
 
     public static CdnKey KeyOf(ObjectKey key) => new(key.KeyBytes());
 
@@ -89,5 +91,53 @@ internal sealed class Scenario
             var url = WoWDBDefsClient.CommitsUrl(tableName);
             throw new CdnException([new CdnAttempt(url.Host, url, failure, null, At, $"Scripted {failure} for {tableName}.")]);
         }
+    }
+
+    /// <summary>
+    /// A wow-listfile client with a scripted release, scripted parts per (tag, index) and scripted failures; it counts what it
+    /// was asked. Like the real client it refuses a bad tag or index with a faulted task, and a part that isn't scripted is
+    /// HttpStatus, as the real client reports GitHub's 416 past the end. A release that isn't scripted is NotFound.
+    /// </summary>
+    internal sealed class ListfileClient : IWowListfileClient
+    {
+        private byte[]? release;
+        private CdnFailure? releaseFailure;
+        private readonly Dictionary<(string, int), (byte[] Bytes, long Offset, long Total, Uri? Url)> parts = [];
+        private readonly Dictionary<(string, int), CdnFailure> partFailures = [];
+        public DateTimeOffset At { get; set; } = new(2026, 11, 1, 12, 0, 0, TimeSpan.Zero);
+        public List<string> Fetched { get; } = [];
+        public ListfileClient Release(byte[] bytes) { release = bytes; releaseFailure = null; return this; }
+        public ListfileClient FailRelease(CdnFailure failure) { releaseFailure = failure; return this; }
+        /// <summary>Scripts a part; <paramref name="offset"/> and <paramref name="url"/> override the right ones to script a bad reply.</summary>
+        public ListfileClient Part(string tag, int index, byte[] bytes, long total, long? offset = null, Uri? url = null)
+        {
+            parts[(tag, index)] = (bytes, offset ?? (long)index * WowListfileClient.PartBytes, total, url);
+            return this;
+        }
+        public ListfileClient FailPart(string tag, int index, CdnFailure failure) { partFailures[(tag, index)] = failure; return this; }
+
+        public async Task<WowListfileReply> FetchReleaseAsync(CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (Fetched) Fetched.Add("release");
+            if (releaseFailure is null && release is { } bytes) return new WowListfileReply(WowListfileClient.LatestReleaseUrl, At, bytes);
+            throw Failure(WowListfileClient.LatestReleaseUrl, releaseFailure ?? CdnFailure.NotFound);
+        }
+
+        public async Task<WowListfilePart> FetchPartAsync(string tag, int index, CancellationToken cancellationToken)
+        {
+            var url = WowListfileClient.AssetUrl(tag);
+            if (index is < 0 or >= WowListfileClient.MaxParts)
+                throw new ArgumentOutOfRangeException(nameof(index), index, $"A part index is 0 to {WowListfileClient.MaxParts - 1}.");
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (Fetched) Fetched.Add($"{tag}/{index}");
+            if (!partFailures.ContainsKey((tag, index)) && parts.TryGetValue((tag, index), out var p))
+                return new WowListfilePart(p.Url ?? url, At, p.Bytes, p.Offset, p.Total);
+            throw Failure(url, partFailures.GetValueOrDefault((tag, index), CdnFailure.HttpStatus));
+        }
+
+        private CdnException Failure(Uri url, CdnFailure failure) => new([new CdnAttempt(url.Host, url, failure, null, At, $"Scripted {failure}.")]);
     }
 }

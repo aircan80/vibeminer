@@ -3,4 +3,5 @@
   <ProjectReference Include="../VibeMiner.Builds/VibeMiner.Builds.csproj" />
   <ProjectReference Include="../VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
   <InternalsVisibleTo Include="VibeMiner.Files.Tests" />
+  <InternalsVisibleTo Include="VibeMiner.Files.Testing" />
 </ItemGroup></Project>

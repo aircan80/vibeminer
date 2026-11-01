@@ -144,6 +144,15 @@ public abstract class ObjectSourceContract
     [InlineData(ObservationKind.Definition, "0123abcd", "wowdbdefs", "")]
     [InlineData(ObservationKind.Definition, "0123abcd", "wowdbdefs", "../Map")]
     [InlineData(ObservationKind.Versions, "wow", "us", "Map")]
+    [InlineData(ObservationKind.ListfileRelease, "wowlistfile", "p0", null)]
+    [InlineData(ObservationKind.ListfileRelease, "wow", "latest", null)]
+    [InlineData(ObservationKind.ListfileRelease, "wowlistfile", "latest", "Map")]
+    [InlineData(ObservationKind.ListfilePart, "202611010042", "latest", null)]
+    [InlineData(ObservationKind.ListfilePart, "202611010042", "p64", null)]
+    [InlineData(ObservationKind.ListfilePart, "202611010042", "p00", null)]
+    [InlineData(ObservationKind.ListfilePart, "Tag", "p0", null)]
+    [InlineData(ObservationKind.ListfilePart, "", "p0", null)]
+    [InlineData(ObservationKind.ListfilePart, "202611010042", "p1", "Map")]
     public async Task ARequestOfTheWrongShapeIsRefused(ObservationKind kind, string product, string region, string? name)
     {
         var source = Arrange([]);

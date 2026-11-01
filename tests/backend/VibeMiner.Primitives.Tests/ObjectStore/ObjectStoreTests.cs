@@ -652,7 +652,7 @@ public sealed class ObjectStoreTests
         // Only a summary has no product, and a summary never has one.
         Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "")));
         Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", HistoryKind.Summary)));
-        Assert.Throws<ArgumentOutOfRangeException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", (HistoryKind)6)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "wow", "us", (HistoryKind)8)));
     }
 
     [Fact]
@@ -683,10 +683,56 @@ public sealed class ObjectStoreTests
         Assert.Throws<ArgumentException>(() => HistoryRecordFormat.Objects(Synthetic.Observation(3, "", "wowdbdefs", HistoryKind.Definition)));
     }
 
+    [Fact]
+    public async Task AListfileReleaseAndItsPartsKeepTheirTagRegionAndUrlAndSurviveARebuildFromThePacks()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        const string tag = "202611010042";
+        const string releaseUrl = "https://api.github.com/repos/wowdev/wow-listfile/releases/latest";
+        const string partUrl = $"https://github.com/wowdev/wow-listfile/releases/download/{tag}/community-listfile-withcapitals.csv";
+        var release = new HistoryObservation(HistoryKind.ListfileRelease, "wowlistfile", "latest", new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero),
+            releaseUrl, "{\"tag_name\":\"202611010042\"}"u8.ToArray());
+        // A full 8 MiB part fits one document; the last part is shorter.
+        var full = new byte[8 * 1024 * 1024];
+        for (var i = 0; i < full.Length; i++) full[i] = (byte)(i * 31 + 7);
+        var part0 = new HistoryObservation(HistoryKind.ListfilePart, tag, "p0", release.ObservedAt.AddSeconds(1), partUrl, full);
+        var part63 = new HistoryObservation(HistoryKind.ListfilePart, tag, "p63", release.ObservedAt.AddSeconds(2), partUrl, "1;a.blp\n"u8.ToArray());
+        foreach (var o in new[] { release, part0, part63 })
+        {
+            var objects = HistoryRecordFormat.Objects(o);
+            Assert.True(HistoryRecordFormat.TryParse(objects[1].Bytes.Span, out var parsed));
+            Assert.Equal((o.Kind, o.Product, o.Region, o.Url, o.ObservedAt.ToUnixTimeMilliseconds(), objects[0].Key),
+                (parsed.Kind, parsed.Product, parsed.Region, parsed.Url, parsed.ObservedMs, parsed.Document));
+        }
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            await store.AppendHistoryAsync(release);
+            await store.AppendHistoryAsync(part0);
+            await store.AppendHistoryAsync(part63);
+            await store.AppendHistoryAsync(Synthetic.Observation(2));
+        }
+        foreach (var f in Directory.GetFiles(dir, "objects.sqlite3*")) File.Delete(f);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.True(store.OpenReport.IndexRebuilt);
+            var r = Assert.Single(await store.ReadHistoryAsync(new HistoryQuery(Kind: HistoryKind.ListfileRelease)));
+            Assert.Equal(("wowlistfile", "latest", releaseUrl, release.ObservedAt), (r.Product, r.Region, r.Url, r.ObservedAt));
+            Assert.Equal(release.Reply.ToArray(), (await store.ReadAsync(r.Document)).Bytes);
+            var parts = await store.ReadHistoryAsync(new HistoryQuery(Product: tag, Kind: HistoryKind.ListfilePart));
+            Assert.Equal(["p0", "p63"], parts.Select(p => p.Region).Order(StringComparer.Ordinal));
+            var p0 = parts.Single(p => p.Region == "p0");
+            Assert.Equal((partUrl, part0.ObservedAt), (p0.Url, p0.ObservedAt));
+            Assert.Equal(full, (await store.ReadAsync(p0.Document)).Bytes);
+        }
+    }
+
     [Theory]
     [InlineData(1, 0)]   // versions with no product
+    [InlineData(6, 0)]   // a listfile release with no product
+    [InlineData(7, 0)]   // a listfile part with no tag
     [InlineData(4, 3)]   // a summary with a product
-    [InlineData(6, 3)]   // a kind past definition
+    [InlineData(8, 3)]   // a kind past listfile part
     [InlineData(0, 3)]
     public void TheRecordGrammarTiesAnEmptyProductToTheSummary(byte kind, int productLength)
     {
