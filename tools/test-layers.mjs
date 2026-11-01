@@ -38,6 +38,13 @@ export const layers = [
     paths: ['tests/backend/VibeMiner.ObjectAccess.Tests/'],
     testProject: 'tests/backend/VibeMiner.ObjectAccess.Tests',
   },
+  {
+    layer: 3, name: 'Builds',
+    src: ['src/backend/VibeMiner.Builds/'],
+    fakes: ['tests/backend/VibeMiner.Builds.Testing/'],
+    paths: ['tests/backend/VibeMiner.Builds.Tests/'],
+    testProject: 'tests/backend/VibeMiner.Builds.Tests',
+  },
 ];
 
 // Cross-layer integration tests over the real layers 1 and 2. Runs only once the project exists.

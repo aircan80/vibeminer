@@ -126,6 +126,23 @@ Retail `wow`/us on 2026-11-01 from one machine on a 0.9 Gbit/s line, through `Ob
 
 The gap result varied run to run (one run of four favoured 256 KiB); 1 MiB is the default and stays a parameter ([D133](DECISIONS.md)). A single large loose object (ENCODING) is limited by one stream's speed on an edge cache miss.
 
+### Layer 3: the build catalog
+
+`ICatalog` in `VibeMiner.Builds` lists a product's builds ([D138](DECISIONS.md), [D139](DECISIONS.md)). It references only layer 2 and keeps its own versions table reader and build identity v2 port (byte-identical Ids). The list comes only from versions entries in the history log, read through layer 2, so it works offline and keeps older builds. `RefreshAsync` observes versions and cdns from one version-service host (default `us`); layer 2 appends both to the history log, and only versions drive the list. A failed observation is reported (`CATALOG_OBSERVE_FAILED` if it throws) and the list is still served.
+
+A build is one build identity v2 ([D061](DECISIONS.md)); each (Region, CDN config) is one region listing. Current means listed by the newest readable versions reply from at least one host ever read: highest numeric `## seqn`, then latest observed. A reply with a whole-reply problem never counts.
+
+Problems:
+- `VERSIONS_ROW_INVALID` drops one row; `VERSIONS_REGION_AMBIGUOUS` drops a region listed twice.
+- `VERSIONS_UNREADABLE`, `VERSIONS_WRONG_KIND`, `VERSIONS_UNKNOWN_PRODUCT` and `VERSIONS_COLUMNS_MISSING` skip the whole reply. Stored; a list returns at most 1000, newest entry first.
+- `CATALOG_DOCUMENT_UNAVAILABLE`, `_REFUSED`, `_STORE_FAILED` and `_TOO_LARGE`: layer 2 couldn't serve the reply. Not stored, retried on the next list. At most 50 per list, then `CATALOG_PROBLEMS_TRUNCATED`.
+
+No locales yet: opening a build reads them from its manifests.
+
+The catalog store is a SQLite cache (`user_version` 1, application_id `0x564D6373`, WAL). Deleting it rebuilds the same list from layer 1. A newer (`CATALOG_NEWER`) or unreadable or foreign (`CATALOG_UNREADABLE`) file is refused after a read-only check and left byte-for-byte unchanged. Every list syncs first. The first sync per process reads the versions history from the start, skipping stored entries. Later syncs resume after a real entry at least 10 minutes older than the newest one read, so a late append with an older time is still seen. Failed entries are retried by key, up to 1000; past that the next sync starts from the beginning. The planned path is `catalog-v1/catalog.sqlite3` in the data folder, wired into the Host later in #155.
+
+`InMemoryCatalog` in `VibeMiner.Builds.Testing` is the fake for layers 4 and up: no SQLite, no files, the same list rules. `CatalogContractTests` runs one suite against it and the real `Catalog`.
+
 ## Identity and provenance
 
 Physical payload identity is local SHA-256 plus exact length. Blizzard content keys, encoding keys, configuration identities and locator references stay distinct typed protocol values. A header EKey is not automatically a whole-file MD5; encoded integrity and decoded CKey verification establish different facts.

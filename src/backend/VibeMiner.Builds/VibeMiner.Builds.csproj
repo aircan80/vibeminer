@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
+  <!-- Layer 3 builds: the catalog store and the build list. Builds only on layer 2 (D135, D138); keeps its own table reader and build identity v2 port, so no engine project. -->
+  <ProjectReference Include="../VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
+  <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
+  <InternalsVisibleTo Include="VibeMiner.Builds.Tests" />
+  <InternalsVisibleTo Include="VibeMiner.Builds.Testing" />
+</ItemGroup></Project>
