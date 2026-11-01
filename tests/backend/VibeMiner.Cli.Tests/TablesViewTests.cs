@@ -88,14 +88,36 @@ public sealed class TablesViewTests : IAsyncDisposable
 
     private static string I(long value) => value.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>The catalog lists one current wow build (us and eu).</summary>
-    private async Task ServeBuildAsync()
+    private const string CdnsHeader = "Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0|ConfigPath!STRING:0";
+    private const string Netease = "cn|tpr/wow|blzdist-wow.necdn.leihuo.netease.com|x|tpr/configs/data\n";
+    private const string EuCdn = "eu|tpr/wow|eu.cdn.blizzard.com|x|tpr/configs/data\n";
+
+    /// <summary>
+    /// The catalog lists one current wow build in <paramref name="regions"/> (us and eu by default), and the cdns reply routes
+    /// <paramref name="cdns"/> (eu only by default), so the build opens in eu.
+    /// </summary>
+    private async Task ServeBuildAsync(string[]? regions = null, string cdns = EuCdn)
     {
         const string header = "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|KeyRing!HEX:16|BuildId!DEC:4|VersionsName!String:0|ProductConfig!HEX:16";
-        var versions = Encoding.UTF8.GetBytes($"{header}\n## seqn = 1\nus|{A}|{B}|{C}|58123|11.0.7.58123|{C}\neu|{A}|{B}|{C}|58123|11.0.7.58123|{C}\n");
-        stores.Source.AddReply("wow", "us", ObservationKind.Versions, versions);
+        var rows = string.Concat((regions ?? ["us", "eu"]).Select(r => $"{r}|{A}|{B}|{C}|58123|11.0.7.58123|{C}\n"));
+        stores.Source.AddReply("wow", "us", ObservationKind.Versions, Encoding.UTF8.GetBytes($"{header}\n## seqn = 1\n{rows}"));
         await stores.Source.ObserveAsync(new(ObservationKind.Versions, "wow", "us"), default);
+        stores.Source.AddReply("wow", "us", ObservationKind.Cdns, Encoding.UTF8.GetBytes($"{CdnsHeader}\n## seqn = 1\n{cdns}"));
+        await stores.Source.ObserveAsync(new(ObservationKind.Cdns, "wow", "us"), default);
         time.Advance(TimeSpan.FromMinutes(1));
+    }
+
+    [Fact]
+    public async Task TheBuildOpensInTheRegionTheRoutePickerChooses()
+    {
+        // The QA case on #180: cn sorts first and its cdns row lists only a host CdnRoute doesn't admit, so a table read there
+        // had no CDN route (OBJECT_ACCESS_NO_CDN_CONTEXT). :tables takes the region f, d and a take (D280).
+        await ServeBuildAsync(["cn", "eu", "us"], Netease + EuCdn);
+        Wire();
+        var top = await GoAsync(":tables");
+        Assert.Equal([["wow", "11.0.7.58123", "eu", A]], Cells(top));
+        var list = await DrillAsync(0);
+        Assert.Equal(["100", "200", "300", "400", "500"], list.Visible.Select(r => r.Cells[0]));
     }
 
     private async Task<BrowseFrame> GoAsync(string name)

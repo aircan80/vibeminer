@@ -81,12 +81,14 @@ internal sealed class Navigator : IAsyncDisposable
             Say($"No view {name.Trim()}. Views: {string.Join(", ", registry.Entries.Select(e => e.Name))}.");
             return false;
         }
+        var view = entry.Create();
         CancelLoad();
-        frames.Clear();
         Message = null;
         Asking = null;
+        // Before the stack empties: clearing an ended task's line raises Changed, and a listener reads Current.
         Tasks.ClearEnded();
-        Open(entry.Create());
+        frames.Clear();
+        Open(view);
         return true;
     }
 

@@ -825,6 +825,43 @@ public sealed class BrowseModelTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task GoingToAViewAfterATaskEndedNeverShowsAnEmptyStack()
+    {
+        // The QA case on #175: m ended, then :tables or :settings. Clearing the ended line raised Changed while the stack was
+        // empty, and the shell's Render read Current (ArgumentOutOfRangeException, CLI_FAILED).
+        var view = new KeysView();
+        view.ActionList.Add(new('m', "metadata", "metadata", (_, _, _) => Task.FromResult("metadata: stored")));
+        var other = new KeysView("other");
+        var nav = await TestNavigatorAsync(view, other);
+        var seen = new List<string>();
+        nav.Changed += () => seen.Add(nav.Current.View.Title);
+        Assert.True(nav.TryAction('m'));
+        await nav.Tasks.Current.WaitAsync(Guard);
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal("metadata: stored", nav.Tasks.Status);
+
+        Assert.True(nav.Go("other"));
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Equal("", nav.Tasks.Status);
+        Assert.Equal("other", nav.Current.View.Title);
+        Assert.Single(nav.Frames);
+        Assert.Equal("other", seen[^1]);
+    }
+
+    [Fact]
+    public async Task AViewThatFailsToCreateLeavesTheStackAsItWas()
+    {
+        var view = new KeysView();
+        var registry = new ViewRegistry().Add(new("keys", "", () => view)).Add(new("broken", "", () => throw new InvalidOperationException("boom")));
+        var nav = new Navigator(registry, session, a => a());
+        disposables.Add(nav);
+        Assert.True(nav.Go("keys"));
+        await nav.Loading.WaitAsync(Guard);
+        Assert.Throws<InvalidOperationException>(() => nav.Go("broken"));
+        Assert.Same(view, nav.Current.View);
+    }
+
+    [Fact]
     public async Task ViewKeysCannotShadowGlobalOrActionKeysAndHelpListsTheRest()
     {
         var view = new KeysView();

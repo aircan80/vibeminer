@@ -99,8 +99,8 @@ internal static class TablesAccess
 }
 
 /// <summary>
-/// <c>:tables</c>: the current builds of every reviewed product, from the catalog (read-only, as <c>:builds</c>). Enter lists
-/// a build's tables in enUS.
+/// <c>:tables</c>: the current builds of every reviewed product, from the catalog (read-only, as <c>:builds</c>), each in the
+/// region <see cref="BrowseSession.ChooseRegionAsync"/> picks. Enter lists a build's tables in enUS.
 /// </summary>
 internal sealed class TablesView : BrowseView
 {
@@ -125,8 +125,8 @@ internal sealed class TablesView : BrowseView
                 var list = await catalog.ListBuildsAsync(product.Id, ct).ConfigureAwait(false);
                 foreach (var build in list.Builds.Where(b => b.Current))
                 {
-                    var region = build.Regions.FirstOrDefault(g => g.Current) ?? build.Regions.FirstOrDefault();
-                    if (region is null)
+                    // The region f, d and a open in (D280): the first with a usable CDN route.
+                    if ((await session.ChooseRegionAsync(store.Objects, build, ct).ConfigureAwait(false)).Region is not { } region)
                     {
                         rows.Add(new([product.Id, build.VersionsName, "-", build.BuildConfig]));
                         continue;

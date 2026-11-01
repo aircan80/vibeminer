@@ -24,6 +24,9 @@ internal sealed class BrowseShell : Window
     private char promptMode;
     // What the table or list was last built from, so a status change doesn't rebuild it and move the cursor.
     private (BrowseFrame Frame, ViewContent? Content, string Filter)? built;
+    // Set once the first view is up. From then on an exception from a key, a draw or a posted result is a line on the status
+    // line, not the end of the browser; before it, it fails the start (CLI_FAILED).
+    private bool started;
 
     public BrowseShell(IApplication app, Navigator navigator, string start = "store")
     {
@@ -40,7 +43,7 @@ internal sealed class BrowseShell : Window
         table.Accepting += (_, e) =>
         {
             e.Handled = true;
-            if (table.Value is { } selection) navigator.Drill(selection.SelectedCell.Y);
+            if (table.Value is { } selection) Guard(() => navigator.Drill(selection.SelectedCell.Y));
         };
         table.ValueChanged += (_, _) =>
         {
@@ -57,6 +60,27 @@ internal sealed class BrowseShell : Window
         app.Keyboard.KeyDown += OnKey;
         navigator.Go(start);
         Render();
+        started = true;
+    }
+
+    /// <summary>The status line an unexpected exception leaves, cut to the screen.</summary>
+    internal static string Failed(Exception e)
+    {
+        var line = $"error: {BrowseSession.Explain(e)}".ReplaceLineEndings(" ");
+        return line.Length > FilesView.Width ? line[..(FilesView.Width - 3)] + "..." : line;
+    }
+
+    /// <summary>Runs <paramref name="action"/>; once started, an exception it throws shows on the status line instead.</summary>
+    internal void Guard(Action action)
+    {
+        try { action(); }
+        catch (Exception e) when (started) { Report(e); }
+    }
+
+    private void Report(Exception e)
+    {
+        try { navigator.Say(Failed(e)); }
+        catch (Exception) { status.Text = Failed(e); }
     }
 
     /// <summary>The status line as shown, for the smoke test.</summary>
@@ -71,6 +95,17 @@ internal sealed class BrowseShell : Window
     private void OnKey(object? sender, Key key)
     {
         if (app.TopRunnableView != this) return;
+        try { HandleKey(key); }
+        catch (Exception e) when (started)
+        {
+            // Still taken, so the focused view doesn't act on it too.
+            key.Handled = true;
+            Report(e);
+        }
+    }
+
+    private void HandleKey(Key key)
+    {
         if (prompt.Visible)
         {
             if (key == Key.Enter) { key.Handled = true; ClosePrompt(true); }
@@ -158,6 +193,16 @@ internal sealed class BrowseShell : Window
 
     private void Render()
     {
+        try { RenderCore(); }
+        catch (Exception e) when (started)
+        {
+            built = null;
+            status.Text = Failed(e);
+        }
+    }
+
+    private void RenderCore()
+    {
         var frame = navigator.Current;
         header.Text = $"vm browse  {navigator.Path}  [{(navigator.Tasks.Running is { } task ? $"writing: {task}" : "read-only")}]  {navigator.Session.Folder.Path}";
         note.Text = frame.Error ?? frame.Content?.Note ?? "";
@@ -217,11 +262,21 @@ internal sealed class BrowseShell : Window
     {
         using var app = Application.Create().Init();
         var closed = false;
-        void Post(Action action) { if (!Volatile.Read(ref closed)) app.Invoke(() => { if (!closed) action(); }); }
+        BrowseShell? shell = null;
+        void Post(Action action)
+        {
+            if (Volatile.Read(ref closed)) return;
+            app.Invoke(() =>
+            {
+                if (closed) return;
+                if (shell is { } s) s.Guard(action);
+                else action();
+            });
+        }
         var navigator = new Navigator(ViewRegistry.Default(), session, Post);
         try
         {
-            using var shell = new BrowseShell(app, navigator);
+            using var built = shell = new BrowseShell(app, navigator);
             using var stop = ct.Register(() => Post(app.RequestStop));
             app.Run(shell);
             Volatile.Write(ref closed, true);

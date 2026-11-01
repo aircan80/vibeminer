@@ -158,6 +158,35 @@ public sealed class BrowseShellSmokeTests(ITestOutputHelper output)
         Assert.Contains("line 0029", shots["more"]);
     }
 
+    [Fact]
+    public async Task AFailingKeyIsAStatusLineAndGoingToAViewAfterATaskEndsKeepsTheShellUp()
+    {
+        // #175: after m ended, :tables or :settings crashed the shell (ArgumentOutOfRangeException, CLI_FAILED).
+        var stores = new FakeStores();
+        var session = new BrowseSession(stores, new DataFolder(Data, DataFolderSource.Override), StoreFolder);
+        var keys = new KeysView();
+        keys.ActionList.Add(new('m', "metadata", "metadata", (_, _, _) => Task.FromResult("metadata: stored")));
+        keys.KeyList.Add(new('b', "breaks", _ => throw new InvalidOperationException("boom")));
+        var registry = new ViewRegistry().Add(new("keys", "", () => keys)).Add(new("other", "", () => new KeysView("other")));
+
+        Step[] steps =
+        [
+            new("keys", (s, _) => s.Contains("alpha"), a => a.InjectKey(new Key('m'))),
+            new("ended", (_, sh) => sh.StatusText.Contains("metadata: stored"), a => { Type(a, ":other"); a.InjectKey(Key.Enter); }),
+            new("other", (s, sh) => Line(s, 0).Contains("vm browse  other") && s.Contains("alpha"), a => { Type(a, ":keys"); a.InjectKey(Key.Enter); }),
+            new("back", (s, sh) => Line(s, 0).Contains("vm browse  keys") && s.Contains("alpha"), a => a.InjectKey(new Key('b'))),
+            new("failed", (_, sh) => sh.StatusText.Contains("error: InvalidOperationException: boom"), a => a.InjectKey(new Key('q'))),
+        ];
+        var (shots, failure, stopped, navigator) = Drive(session, registry, "keys", steps);
+
+        await navigator.DisposeAsync().AsTask().WaitAsync(Guard);
+        foreach (var (name, screen) in shots) output.WriteLine($"--- {name}\n{screen}");
+        Assert.Null(failure);
+        Assert.True(stopped);
+        Assert.DoesNotContain("metadata: stored", Line(shots["other"], 23));
+        Assert.Contains("alpha", shots["failed"]);
+    }
+
     private const string VersionsHeader = "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|KeyRing!HEX:16|BuildId!DEC:4|VersionsName!String:0|ProductConfig!HEX:16";
 
     [Fact]
