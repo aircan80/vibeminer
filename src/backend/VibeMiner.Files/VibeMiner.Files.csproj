@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
+  <!-- Layer 4 files: a file system per build and locale. Builds on layer 3 (opened builds, the resolver) and layer 2 (stored state, fetches); never layer 1 (D160). -->
+  <ProjectReference Include="../VibeMiner.Builds/VibeMiner.Builds.csproj" />
+  <ProjectReference Include="../VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
+  <InternalsVisibleTo Include="VibeMiner.Files.Tests" />
+</ItemGroup></Project>

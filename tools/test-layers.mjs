@@ -46,6 +46,13 @@ export const layers = [
     testProject: 'tests/backend/VibeMiner.Builds.Tests',
   },
   {
+    layer: 4, name: 'Files',
+    src: ['src/backend/VibeMiner.Files/'],
+    fakes: ['tests/backend/VibeMiner.Files.Testing/'],
+    paths: ['tests/backend/VibeMiner.Files.Tests/'],
+    testProject: 'tests/backend/VibeMiner.Files.Tests',
+  },
+  {
     layer: 7, name: 'Developer CLI',
     src: ['src/backend/VibeMiner.Cli/'],
     fakes: [],

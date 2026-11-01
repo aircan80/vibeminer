@@ -109,6 +109,18 @@ public sealed class InMemoryObjectSource : IObjectSource
         lock (gate) return Task.FromResult((long)keys.Count(stored.Contains));
     }
 
+    private int hasKeysCalls;
+    /// <summary>How many <see cref="HasKeysAsync"/> calls were made.</summary>
+    public int HasKeysCalls => Volatile.Read(ref hasKeysCalls);
+
+    public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref hasKeysCalls);
+        lock (gate) return Task.FromResult<IReadOnlyList<bool>>(keys.Select(stored.Contains).ToArray());
+    }
+
     public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken cancellationToken)
     {
         lock (gate)

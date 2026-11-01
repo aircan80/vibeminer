@@ -85,6 +85,7 @@ Code: [`src/backend/VibeMiner.ObjectAccess/`](../src/backend/VibeMiner.ObjectAcc
 | `GetRangeAsync(request, offset, destination, cdn, priority)` | A byte range, after making the object present |
 | `ObserveAsync(request)` | One dated build observation, saved in the history log |
 | `CountPresentAsync(keys)` | How many keys the profile's own store holds, for the Downloaded figure |
+| `HasKeysAsync(keys)` | Whether the profile's own store holds each key, in order (index only, no CDN call), for layer 4's stored state ([D161](DECISIONS.md)) |
 | `ReadHistoryAsync(query)` | The history log, for the build list |
 
 A request names the key, its declared length (from EN, an index entry or a config size pair; never a CDN config `*-index-size` hint) and the archive index entries that list it, if any. A loose request with no declared length (a config, say) is charged 4 MiB of the in-flight byte budget and may be at most that; a longer reply is refused as `TooLarge`. `Order` groups requests: lower groups go first, which is how Download all puts DOWNLOAD priority 0 first. Within a group, ranges come in CDN-config archive order, then loose objects. The `CdnContext` is the route from the current `cdns` reply and the CDN config's archive list.
@@ -160,6 +161,16 @@ The opened `IBuild` gives metadata (build name, keys, counts, the ROOT locale un
 The opened build also lists its FileDataIDs per locale: ascending, each once, from a starting ID, walking ROOT in place. A file is listed when any of its variants has that locale bit (all-locales variants included); content flags don't filter.
 
 Layer 3 has its own ports of the config, BLTE (whole objects, for ENCODING and ROOT only), EN, ROOT and index parsers in `VibeMiner.Builds/Formats`. Ranged and keyed BLTE stay in layer 4. `InMemoryBuilds` in `VibeMiner.Builds.Testing` is the fake; `BuildsContractTests` runs one suite against it and `BuildOpener`.
+
+## Layer 4: files
+
+`IFileSystem.ForAsync(build, locale)` opens the build through layer 3 and returns an `IBuildFiles` handle bound to that locale ([D160](DECISIONS.md)). It fetches no file content. A locale the ROOT locale union doesn't name answers `LocaleNotInBuild`; layer 3's failures keep their state and code.
+
+The handle lists files (`ListAsync(filter)`, ascending FileDataID, an async stream) and stats one by FileDataID or path (`StatAsync`, `ExistsAsync`). A filter takes an inclusive FileDataID range, a path prefix, formats, storage states and encrypted; to page, call again from one past the last FileDataID read. A file is `BuildFile`: FileDataID, listfile name (none until #173), decoded size, content key (CKey hex), format (`Unknown` until #173), storage (`Stored`, `NotStored`, `NoEncodedCopy`) and ROOT's encrypted flag. When a locale matches several ROOT variants, the first in ROOT order wins within the best of: encoded, not low violence and not a high-resolution texture; encoded and not low violence; encoded; any. Stored state checks the first EKey ENCODING lists for the CKey. Lookups are `Found`, `UnknownFile`, `NotInLocale` or `NotInEncoding`.
+
+The handle keeps layer 3's opened build, so a file is an in-memory ROOT and ENCODING lookup. Stored state is never cached: listing asks layer 2's `HasKeysAsync` once per 4096 files, a stat once, `ExistsAsync` not at all. A disposed handle throws. `InMemoryFileSystem` in `VibeMiner.Files.Testing` is the fake; `FilesContractTests` runs one suite against it and `FileSystem`.
+
+Measured on a synthetic 1,000,000-file build over the layer 3 and 2 fakes (`FileSystemTests`, tagged slow): open 155 ms, a stat 1.9 µs on the open handle, a full list 376 ms with 245 `HasKeysAsync` calls. The fakes stand in for ROOT and the index, so these are layer 4 costs only.
 
 ## Identity and provenance
 

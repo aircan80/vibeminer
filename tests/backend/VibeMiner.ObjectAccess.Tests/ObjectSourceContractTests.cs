@@ -117,6 +117,19 @@ public abstract class ObjectSourceContract
         await source.GetKeysAsync([new(a.Key), new(b.Key)], Context, FetchPriority.Background, null, None);
         Assert.Equal(2, await source.CountPresentAsync([a.Key, b.Key, c.Key], None));
     }
+
+    [Fact]
+    public async Task HasKeysAnswersEachKeyInOrder()
+    {
+        var a = Synthetic.Config(1); var b = Synthetic.Config(2); var c = Synthetic.Config(3);
+        var source = Arrange([a, b, c]);
+        Assert.Empty(await source.HasKeysAsync([], None));
+        Assert.Equal([false, false, false], await source.HasKeysAsync([a.Key, b.Key, c.Key], None));
+        await source.GetKeysAsync([new(a.Key), new(c.Key)], Context, FetchPriority.Background, null, None);
+        Assert.Equal([true, false, true, true], await source.HasKeysAsync([a.Key, b.Key, c.Key, a.Key], None));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => source.HasKeysAsync(null!, None));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => source.HasKeysAsync([a.Key], new CancellationToken(true)));
+    }
 }
 
 public sealed class RealObjectSourceContractTests : ObjectSourceContract

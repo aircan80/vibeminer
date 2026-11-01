@@ -17,6 +17,8 @@ test('production project dependencies preserve pure engine boundaries and the or
     ObjectAccess: ['Objects', 'Cdn'],
     // Layer 3 builds (D138): builds only on layer 2, with its own table reader and identity.
     Builds: ['ObjectAccess'],
+    // Layer 4 files (D160): a file system per build and locale over layers 3 and 2, never layer 1.
+    Files: ['Builds', 'ObjectAccess'],
     // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
     Cli: ['Objects', 'Cdn', 'ObjectAccess', 'Builds'],
   };
@@ -37,13 +39,13 @@ test('backend projects reference only their own code layer or lower ones', async
   // reference no layer project, so 3 keeps them above the new layer 1-2 projects), Host at 7 (composition).
   const production = {
     Domain: 0, 'Protocols.Tact': 0, 'Formats.Wow': 0,
-    Objects: 1, Cdn: 1, ObjectAccess: 2, Builds: 3,
+    Objects: 1, Cdn: 1, ObjectAccess: 2, Builds: 3, Files: 4,
     Application: 3, Infrastructure: 3, Host: 7, Cli: 7,
   };
-  const layerProjects = new Set(['Objects', 'Cdn', 'ObjectAccess', 'Builds', 'Cli']);
+  const layerProjects = new Set(['Objects', 'Cdn', 'ObjectAccess', 'Builds', 'Files', 'Cli']);
   const legacy = new Set(Object.keys(production).filter(name => !layerProjects.has(name)));
-  const fakes = { 'Cdn.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Objects.CrashWriter': 1 };
-  const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Cli.Tests': 7 };
+  const fakes = { 'Cdn.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Objects.CrashWriter': 1 };
+  const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Files.Tests': 4, 'Cli.Tests': 7 };
   // Cross-layer integration projects drive real lower layers by design (D137), so they have no single layer.
   const exemptTests = new Set(['Backend.Tests', 'Storage.IntegrationTests']);
   const referencesOf = async file => {

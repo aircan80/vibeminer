@@ -41,7 +41,7 @@ Block body is columnar:
 - The same FDID can appear in several blocks with different locale/content flags, and with the same or different CKeys. Every membership is kept with its block and entry ordinal. Nothing is filtered by locale or platform during parsing.
 - Locale bits (from TACTSharp `RootInstance`): enUS `0x2`, esES `0x80`, esMX `0x1000`. enGB is `0x200`; an observed mask of 514 (`0x202`) means enUS plus enGB, not an enUS-only file. esES and esMX are different cultures.
 - OR-ing every block's locale mask does not prove which locales a build supports.
-- Reference content-flag names (HighResTexture `0x1`, LowViolence `0x80`, DoNotLoad `0x100`, Encrypted `0x08000000`, NoNames `0x10000000`) come from public tools. Apart from NoNames, and HighResTexture for geometry textures (D095), we treat content bits as opaque raw facts. Do not infer a Windows/platform selection from them.
+- Reference content-flag names (HighResTexture `0x1`, LowViolence `0x80`, DoNotLoad `0x100`, Encrypted `0x08000000`, NoNames `0x10000000`) come from public tools. Apart from NoNames, and HighResTexture for geometry textures (D095), we treat content bits as opaque raw facts. Layer 4 also uses LowViolence and HighResTexture to pick the one variant a locale reads, and shows Encrypted as a hint (D160). Do not infer a Windows/platform selection from them.
 - HighResTexture: on Classic 5.5.4 each creature texture has a `0x1` membership that is the same art at 2× or 4× the side, part of the optional high-resolution asset download. M2 and SKIN files have one membership.
 - A name hash is not a filename. ROOT has no names.
 

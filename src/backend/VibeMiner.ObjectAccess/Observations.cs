@@ -35,18 +35,22 @@ internal static class Presence
 {
     private const int Lanes = 8;
 
-    public static async Task<long> CountAsync(IObjectReader store, IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
+    public static async Task<long> CountAsync(IObjectReader store, IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) =>
+        (await HasAsync(store, keys, cancellationToken).ConfigureAwait(false)).LongCount(present => present);
+
+    /// <summary>Whether the store holds each key, in key order, checked on up to 8 lanes.</summary>
+    public static async Task<IReadOnlyList<bool>> HasAsync(IObjectReader store, IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(keys);
-        if (keys.Count == 0) return 0;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (keys.Count == 0) return [];
+        var present = new bool[keys.Count];
         var lanes = Math.Min(Lanes, keys.Count);
-        var counts = await Task.WhenAll(Enumerable.Range(0, lanes).Select(lane => Task.Run(async () =>
+        await Task.WhenAll(Enumerable.Range(0, lanes).Select(lane => Task.Run(async () =>
         {
-            long present = 0;
             for (var i = lane; i < keys.Count; i += lanes)
-                if (await store.HasAsync(keys[i], cancellationToken).ConfigureAwait(false)) present++;
-            return present;
+                present[i] = await store.HasAsync(keys[i], cancellationToken).ConfigureAwait(false);
         }, cancellationToken))).ConfigureAwait(false);
-        return counts.Sum();
+        return present;
     }
 }

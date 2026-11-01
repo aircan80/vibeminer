@@ -118,6 +118,9 @@ public interface IObjectSource
     /// </summary>
     Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken);
 
+    /// <summary>Whether the profile's own store holds each key, in key order (index only, no bytes read, no CDN call). A CDN-only source answers false for every key.</summary>
+    Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken);
+
     /// <summary>The history log, oldest first, filtered and paged. Read an entry's reply with <see cref="GetKeyAsync"/> on its document key.</summary>
     Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken cancellationToken);
 }

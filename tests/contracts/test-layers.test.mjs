@@ -10,6 +10,7 @@ const everything = ['npm run contracts:check', 'npm run test:backend', 'npm run 
 const primitives = 'node tools/dotnet.mjs test tests/backend/VibeMiner.Primitives.Tests';
 const objectAccess = 'node tools/dotnet.mjs test tests/backend/VibeMiner.ObjectAccess.Tests';
 const builds = 'node tools/dotnet.mjs test tests/backend/VibeMiner.Builds.Tests';
+const files = 'node tools/dotnet.mjs test tests/backend/VibeMiner.Files.Tests';
 const cli = 'node tools/dotnet.mjs test tests/backend/VibeMiner.Cli.Tests';
 const integration = 'node tools/dotnet.mjs test tests/backend/VibeMiner.Storage.IntegrationTests';
 
@@ -22,13 +23,29 @@ test('a change inside layer 2 runs only layer 2', () => {
 });
 
 test('a layer 1 interface or fake change also runs the callers without slow tests', () => {
-  const callers = [primitives, `${objectAccess} --filter Speed!=Slow`, `${builds} --filter Speed!=Slow`, `${cli} --filter Speed!=Slow`];
+  const callers = [primitives, `${objectAccess} --filter Speed!=Slow`, `${builds} --filter Speed!=Slow`, `${files} --filter Speed!=Slow`, `${cli} --filter Speed!=Slow`];
   assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.Objects/IObjectReader.cs', publicApi: true }]), callers);
   assert.deepEqual(commands(['tests/backend/VibeMiner.Cdn.Testing/FakeCdn.cs']), callers);
 });
 
-test('a layer 2 interface change also runs layer 3 and the CLI', () => {
-  assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.ObjectAccess/IObjectSource.cs', publicApi: true }]), [objectAccess, `${builds} --filter Speed!=Slow`, `${cli} --filter Speed!=Slow`]);
+test('a layer 2 interface change also runs layers 3 and 4 and the CLI', () => {
+  assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.ObjectAccess/IObjectSource.cs', publicApi: true }]), [objectAccess, `${builds} --filter Speed!=Slow`, `${files} --filter Speed!=Slow`, `${cli} --filter Speed!=Slow`]);
+});
+
+test('a change inside layer 4 runs only layer 4', () => {
+  assert.deepEqual(commands(['src/backend/VibeMiner.Files/FileSystem.cs', 'tests/backend/VibeMiner.Files.Tests/FileSystemTests.cs']), [files]);
+});
+
+test('a layer 3 interface or fake change also runs layer 4 and the CLI', () => {
+  const callers = [builds, `${files} --filter Speed!=Slow`, `${cli} --filter Speed!=Slow`];
+  assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.Builds/IBuilds.cs', publicApi: true }]), callers);
+  assert.deepEqual(commands(['tests/backend/VibeMiner.Builds.Testing/InMemoryBuilds.cs']), callers);
+});
+
+test('a layer 4 interface or fake change also runs the CLI', () => {
+  const callers = [files, `${cli} --filter Speed!=Slow`];
+  assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.Files/IFileSystem.cs', publicApi: true }]), callers);
+  assert.deepEqual(commands(['tests/backend/VibeMiner.Files.Testing/InMemoryFileSystem.cs']), callers);
 });
 
 test('a change inside the layer 7 CLI runs only its own tests', () => {

@@ -573,6 +573,7 @@ public sealed class ObjectSourceTests
         Assert.Equal("OBJECT_ACCESS_TOO_LARGE", big.Code);
         var observed = await cdnOnly.ObserveAsync(new(ObservationKind.Versions, "wow", "us"), None);
         Assert.Equal(0, await cdnOnly.CountPresentAsync([members[1].Key], None));
+        Assert.Equal([false, false], await cdnOnly.HasKeysAsync([members[1].Key, members[0].Key], None));
         Assert.Empty(await cdnOnly.ReadHistoryAsync(new(), None));
         Assert.Equal((ObjectState.Present, false), (observed.State, observed.Recorded));
     }

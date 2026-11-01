@@ -66,6 +66,14 @@ public sealed class CdnObjectSource : IObjectSource
     /// <summary>Nothing is stored, so nothing counts as downloaded.</summary>
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) => Task.FromResult(0L);
 
+    /// <summary>Nothing is stored, so no key is held.</summary>
+    public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<IReadOnlyList<bool>>(new bool[keys.Count]);
+    }
+
     /// <summary>No history log: nothing is recorded.</summary>
     public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<HistoryEntry>>([]);
@@ -148,6 +156,9 @@ public sealed class LocalObjectSource(IObjectReader store, IHistoryReader? histo
 
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) =>
         Presence.CountAsync(store, keys, cancellationToken);
+
+    public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) =>
+        Presence.HasAsync(store, keys, cancellationToken);
 
     /// <summary>The own store's history log, so builds stay listed offline.</summary>
     public async Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken cancellationToken) =>

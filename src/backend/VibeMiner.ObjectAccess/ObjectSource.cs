@@ -106,6 +106,9 @@ public sealed class ObjectSource : IObjectSource
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) =>
         Presence.CountAsync(store, keys, cancellationToken);
 
+    public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken) =>
+        Presence.HasAsync(store, keys, cancellationToken);
+
     public async Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken cancellationToken) =>
         await history.ReadHistoryAsync(query, cancellationToken).ConfigureAwait(false);
 

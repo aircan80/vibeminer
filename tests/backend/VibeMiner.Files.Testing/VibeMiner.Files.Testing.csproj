@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable></PropertyGroup><ItemGroup>
+  <!-- The in-memory IFileSystem, the standard test double for layer 5 and up. -->
+  <ProjectReference Include="../../../src/backend/VibeMiner.Files/VibeMiner.Files.csproj" />
+</ItemGroup></Project>

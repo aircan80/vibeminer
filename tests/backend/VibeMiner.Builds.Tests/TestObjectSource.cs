@@ -75,6 +75,9 @@ internal sealed class TestObjectSource(InMemoryObjectSource inner) : IObjectSour
     public Task<long> CountPresentAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
     { Log(nameof(CountPresentAsync)); return Inner.CountPresentAsync(keys, cancellationToken); }
 
+    public Task<IReadOnlyList<bool>> HasKeysAsync(IReadOnlyList<ObjectKey> keys, CancellationToken cancellationToken)
+    { Log(nameof(HasKeysAsync)); return Inner.HasKeysAsync(keys, cancellationToken); }
+
     public Task<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken cancellationToken)
     {
         Log(nameof(ReadHistoryAsync));
