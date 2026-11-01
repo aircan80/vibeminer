@@ -56,24 +56,31 @@ public sealed class ObjectSourceTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task AStoreCheckThatFailsBeforeTheTransferReleasesTheKeyForTheNextCaller(bool canceled)
+    public async Task AStoreCheckThatFailsBeforeTheTransferFailsOnlyThatObjectAndReleasesTheKey(bool canceled)
     {
         var s = new Scenario();
         var config = s.Serve(Synthetic.Config(5));
+        var other = s.Serve(Synthetic.Config(6));
         using var cts = new CancellationTokenSource();
         var calls = 0;
         // The first HasAsync is GetKeys' own; the second is the fetcher's check just before the transfer.
-        s.Store.BeforeHas = (_, token) =>
+        s.Store.BeforeHas = (key, token) =>
         {
-            if (Interlocked.Increment(ref calls) != 2) return ValueTask.CompletedTask;
+            if (key != config.Key || Interlocked.Increment(ref calls) != 2) return ValueTask.CompletedTask;
             if (!canceled) throw new ObjectStoreException(ObjectStoreCodes.Closed, "closed (fake)");
             cts.Cancel();
             token.ThrowIfCancellationRequested();
             return ValueTask.CompletedTask;
         };
-        var first = s.Source.GetKeysAsync([new(config.Key)], s.Context, FetchPriority.Background, null, cts.Token);
+        var first = s.Source.GetKeysAsync([new(config.Key), new(other.Key)], s.Context, FetchPriority.Background, null, cts.Token);
         if (canceled) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
-        else await Assert.ThrowsAsync<ObjectStoreException>(() => first);
+        else
+        {
+            var r = await first;
+            Assert.Equal((ObjectState.StoreFailed, ObjectStoreCodes.Closed), (r[0].State, r[0].Code));
+            Assert.Equal((ObjectState.Present, ServedFrom.Cdn), (r[1].State, r[1].ServedFrom!.Value));
+            Assert.Null(s.Store.OriginOf(config.Key));
+        }
 
         s.Store.BeforeHas = null;
         var second = await s.Source.GetKeysAsync([new(config.Key)], s.Context, FetchPriority.Background, null, None).WaitAsync(TimeSpan.FromSeconds(30));
@@ -134,6 +141,45 @@ public sealed class ObjectSourceTests
         Assert.All(results, r => Assert.Equal((ObjectState.Present, ServedFrom.Cdn), (r.State, r.ServedFrom!.Value)));
         Assert.Equal(members[2].Bytes.ToArray(), (await s.Store.ReadAsync(members[2].Key)).Bytes);
         Assert.Equal([(Scenario.L3, 0L), (Scenario.Us, 800L)], s.Cdn.Requests.Select(r => (r.Host, r.Offset!.Value)));
+
+        // The host that sent bad bytes goes last for a while.
+        var next = s.Serve(Synthetic.Config(9));
+        s.Cdn.ClearRequests();
+        Assert.True((await s.Source.GetKeyAsync(new(next.Key), s.Context, FetchPriority.Interactive, None)).IsPresent);
+        Assert.Equal(Scenario.Us, Assert.Single(s.Cdn.Requests).Host);
+    }
+
+    [Fact]
+    public async Task ALooseObjectWithBadBytesOnOneHostComesFromTheNextHostAndThatHostGoesLast()
+    {
+        var s = new Scenario();
+        var bad = s.Serve(Synthetic.Config(33));
+        s.Cdn.CorruptOn(Scenario.L3, CdnObjectKind.Config, Scenario.KeyOf(bad.Key));   // the client's check fails on L3
+        var r = await s.Source.GetKeyAsync(new(bad.Key), s.Context, FetchPriority.Interactive, None);
+        Assert.Equal((ObjectState.Present, ServedFrom.Cdn), (r.State, r.ServedFrom!.Value));
+        Assert.Equal([Scenario.L3, Scenario.Us], s.Cdn.Requests.Select(q => q.Host));
+
+        var next = s.Serve(Synthetic.Config(34));
+        s.Cdn.ClearRequests();
+        Assert.True((await s.Source.GetKeyAsync(new(next.Key), s.Context, FetchPriority.Interactive, None)).IsPresent);
+        Assert.Equal(Scenario.Us, Assert.Single(s.Cdn.Requests).Host);
+    }
+
+    [Fact]
+    public async Task ALargeObjectWhoseBytesTheStoreRefusedComesFromTheNextHostAndThatHostGoesLast()
+    {
+        var s = new Scenario { Options = new ObjectSourceOptions { InMemoryObjectBytes = 1 << 20 } };
+        var big = s.Serve(Synthetic.Chunked(31, Enumerable.Repeat(256 * 1024, 12).ToArray()));
+        s.Cdn.CorruptOn(Scenario.L3, CdnObjectKind.Data, Scenario.KeyOf(big.Key));     // a byte in a middle chunk: refused at staging
+        var r = await s.Source.GetKeyAsync(new(big.Key, big.DeclaredLength), s.Context, FetchPriority.Background, None);
+        Assert.Equal((ObjectState.Present, ServedFrom.Cdn), (r.State, r.ServedFrom!.Value));
+        Assert.Equal(big.Bytes.ToArray(), (await s.Store.ReadAsync(big.Key)).Bytes);
+        Assert.Equal([Scenario.L3, Scenario.Us], s.Cdn.Requests.Select(q => q.Host));
+
+        var next = s.Serve(Synthetic.Config(32));
+        s.Cdn.ClearRequests();
+        Assert.True((await s.Source.GetKeyAsync(new(next.Key), s.Context, FetchPriority.Background, None)).IsPresent);
+        Assert.Equal(Scenario.Us, Assert.Single(s.Cdn.Requests).Host);
     }
 
     [Fact]

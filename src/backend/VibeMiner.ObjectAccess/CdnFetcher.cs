@@ -292,8 +292,12 @@ internal sealed partial class CdnFetcher
                 }
                 // Claimed before the store check, so a throw or cancellation there still releases the flight in the finally.
                 claimed[key] = (request, flight);
-                // Checked again here: an interactive caller may have stored it since this plan was made.
-                if (await sink.AlreadyHaveAsync(request.Key, cancellationToken).ConfigureAwait(false) is { } have)
+                // Checked again here: an interactive caller may have stored it since this plan was made. A store that fails
+                // the check fails only this object.
+                ObjectResult? have;
+                try { have = await sink.AlreadyHaveAsync(request.Key, cancellationToken).ConfigureAwait(false); }
+                catch (ObjectStoreException ex) { have = new(request.Key, ObjectState.StoreFailed, Code: ex.Code, Message: ex.Message); }
+                if (have is not null)
                 {
                     // Completed before it leaves claimed: if finish throws, the finally still releases the flight.
                     Complete(request.Key, flight, have, finish); claimed.Remove(key);
@@ -421,6 +425,7 @@ internal sealed partial class CdnFetcher
                 else if (kept.Length > 1) retry.Add((m, code));
                 else settle(ekey, new(request.Key, ObjectState.Refused, Code: code, Message: "The bytes the index points at don't pass the key's check."));
             }
+            if (retry.Count > 0) Hosts.SentBadBytes(servedBy);
             foreach (var batch in verified.Chunk(4096))
             {
                 var results = await sink.DeliverAsync(batch, ticket.CurrentPriority == FetchPriority.Interactive, cancellationToken).ConfigureAwait(false);
@@ -459,7 +464,7 @@ internal sealed partial class CdnFetcher
                 var result = await sink.StreamLargeAsync(request, declared, async (offset, into, token) =>
                 {
                     // Called again: the sink refused what the last host sent.
-                    if (streaming is not null) { refused.Add(streaming); streaming = null; }
+                    if (streaming is not null) { refused.Add(streaming); Hosts.SentBadBytes(streaming); streaming = null; }
                     var hosts = Hosts.Order(context.Route, ticket.CurrentPriority).Hosts.Where(h => !refused.Contains(h)).ToArray();
                     if (hosts.Length == 0) return null;
                     var cdnRequest = offset == 0 ? CdnRequest.Whole(kind, key, declared) : CdnRequest.Range(kind, key, offset, declared - offset, declared);

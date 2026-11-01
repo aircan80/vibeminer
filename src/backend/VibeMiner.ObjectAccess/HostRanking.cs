@@ -6,8 +6,8 @@ namespace VibeMiner.ObjectAccess;
 /// <summary>
 /// Orders a route's hosts per request. Background work tries hosts that have answered over HTTP/2 first (one connection
 /// carries many streams); interactive work keeps the advertised order. Either way a host that just failed (offline,
-/// timeout, 5xx, broken connection, a 200 to a range) goes last until its cooldown passes. 404s don't count: a host
-/// can lack one key and have the rest.
+/// timeout, 5xx, broken connection, a 200 to a range, bytes that failed their check) goes last until its cooldown passes.
+/// 404s don't count: a host can lack one key and have the rest.
 /// </summary>
 public sealed class HostRanking(TimeSpan cooldown, TimeProvider time)
 {
@@ -43,9 +43,12 @@ public sealed class HostRanking(TimeSpan cooldown, TimeProvider time)
 
     public void Observe(CdnException failure) { lock (gate) foreach (var attempt in failure.Attempts) Failed(attempt); }
 
+    /// <summary>A host whose reply the client passed but whose bytes failed a check above it (a merged-range member, a staged chunk or commit).</summary>
+    public void SentBadBytes(string host) { lock (gate) failedAt[host] = time.GetUtcNow(); }
+
     private void Failed(CdnAttempt attempt)
     {
-        if (attempt.Failure is CdnFailure.Offline or CdnFailure.Timeout or CdnFailure.Network or CdnFailure.HttpStatus or CdnFailure.RangeIgnored)
+        if (attempt.Failure is CdnFailure.Offline or CdnFailure.Timeout or CdnFailure.Network or CdnFailure.HttpStatus or CdnFailure.RangeIgnored or CdnFailure.VerificationFailed)
             failedAt[attempt.Host] = time.GetUtcNow();
     }
 }
