@@ -137,6 +137,101 @@ public sealed class RangeFetchTests
     }
 
     [Fact]
+    public async Task AProbeClaimingALongerHeaderThanTheRealOneTakesTheWholePath()
+    {
+        var s = new Scenario { Options = Ranged };
+        var o = s.Serve(Big(15));
+        var key = Scenario.KeyOf(o.Key);
+        var lie = o.Bytes.ToArray();
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(lie.AsSpan(4), 100_000);   // past the probe, inside the object
+        // The first host's probe passes its check but claims a header 100 000 bytes long; every later answer is the real object.
+        var first = true;
+        s.Cdn.BeforeAnswer = (q, _) =>
+        {
+            s.Cdn.Add(CdnObjectKind.Data, key, first ? lie : o.Bytes.ToArray());
+            first = false;
+            return Task.CompletedTask;
+        };
+        var offset = ChunkStart(10, 6) + 7;
+        var (r, bytes) = await ReadAsync(s.Source, s.Context, o, offset, 50);
+
+        Assert.Equal((ObjectState.Present, ServedFrom.Cdn), (r.State, r.ServedFrom!.Value));
+        Assert.Equal(o.Bytes.Slice((int)offset, 50).ToArray(), bytes);
+        Assert.Equal([(0L, (long?)CdnFetcher.HeaderProbeBytes), (0L, 100_000L), (0L, 100_000L), (null, null)],
+            s.Cdn.Requests.Select(q => (q.Offset, q.Length)));
+        Assert.Equal(ObjectOrigin.Cdn, s.Store.OriginOf(o.Key));
+    }
+
+    [Fact]
+    public async Task AReadTouchingAChunkOverTheRequestBoundTakesTheWholePath()
+    {
+        var s = new Scenario { Options = Ranged with { InteractiveInFlightBytes = 40 << 10 } };
+        var o = s.Serve(Synthetic.Chunked(16, Chunk, Chunk, 48 << 10, Chunk, Chunk));   // chunk 2 is over the 40 KiB bound
+
+        // A read of the small chunk before it is still a range.
+        var (r, bytes) = await ReadAsync(s.Source, s.Context, o, ChunkStart(5, 1), 10);
+        Assert.True(r.IsPresent);
+        Assert.Equal(o.Bytes.Slice((int)ChunkStart(5, 1), 10).ToArray(), bytes);
+        Assert.All(s.Cdn.Requests, q => Assert.NotNull(q.Offset));
+        Assert.Equal(0, s.Store.Count);
+
+        // From chunk 1 into chunk 2: the proven header is kept, and no range is asked for; the whole object is fetched and stored.
+        s.Cdn.ClearRequests();
+        var offset = ChunkStart(5, 2) - 5;
+        (r, bytes) = await ReadAsync(s.Source, s.Context, o, offset, 10);
+        Assert.True(r.IsPresent);
+        Assert.Equal(o.Bytes.Slice((int)offset, 10).ToArray(), bytes);
+        Assert.Equal([(null, null)], s.Cdn.Requests.Select(q => (q.Offset, q.Length)));
+        Assert.Equal(ObjectOrigin.Cdn, s.Store.OriginOf(o.Key));
+    }
+
+    [Fact]
+    public async Task TheSeventeenthHeaderEvictsTheOldestAndAReReadOfItProbesAgain()
+    {
+        var s = new Scenario { Options = Ranged };
+        var objects = Enumerable.Range(100, 17).Select(seed => s.Serve(Big(seed))).ToArray();
+        foreach (var o in objects) Assert.True((await ReadAsync(s.Source, s.Context, o, ChunkStart(10, 1), 10)).Result.IsPresent);
+
+        // The newest is kept: only its chunk.
+        s.Cdn.ClearRequests();
+        await ReadAsync(s.Source, s.Context, objects[16], ChunkStart(10, 1), 10);
+        Assert.Equal([ChunkStart(10, 1)], s.Cdn.Requests.Select(q => q.Offset!.Value));
+        // The oldest went first: probed again.
+        s.Cdn.ClearRequests();
+        var (_, bytes) = await ReadAsync(s.Source, s.Context, objects[0], ChunkStart(10, 1), 10);
+        Assert.Equal(objects[0].Bytes.Slice((int)ChunkStart(10, 1), 10).ToArray(), bytes);
+        Assert.Equal([0L, ChunkStart(10, 1)], s.Cdn.Requests.Select(q => q.Offset!.Value));
+        // Re-adding it evicted the next oldest.
+        s.Cdn.ClearRequests();
+        await ReadAsync(s.Source, s.Context, objects[1], ChunkStart(10, 1), 10);
+        Assert.Equal([0L, ChunkStart(10, 1)], s.Cdn.Requests.Select(q => q.Offset!.Value));
+    }
+
+    [Fact]
+    public async Task HeadersOverEightMebibytesEvictTheOldest()
+    {
+        // 40 000 chunks: a 960 012-byte header each, so the ninth takes the kept headers past 8 MiB while under 16 tables.
+        const int chunks = 40_000, size = 30;
+        var s = new Scenario { Options = Ranged };
+        var objects = Enumerable.Range(200, 9).Select(seed => s.Serve(Big(seed, chunks, size))).ToArray();
+        Assert.True(9 * Header(chunks) > 8L << 20 && 8 * Header(chunks) <= 8L << 20);
+        var at = ChunkStart(chunks, 5, size);
+        foreach (var o in objects) Assert.True((await ReadAsync(s.Source, s.Context, o, at, 10)).Result.IsPresent);
+
+        s.Cdn.ClearRequests();
+        await ReadAsync(s.Source, s.Context, objects[8], at, 10);
+        Assert.Equal([at], s.Cdn.Requests.Select(q => q.Offset!.Value));
+        s.Cdn.ClearRequests();
+        await ReadAsync(s.Source, s.Context, objects[1], at, 10);
+        Assert.Equal([at], s.Cdn.Requests.Select(q => q.Offset!.Value));
+        s.Cdn.ClearRequests();
+        var (_, bytes) = await ReadAsync(s.Source, s.Context, objects[0], at, 10);
+        Assert.Equal(objects[0].Bytes.Slice((int)at, 10).ToArray(), bytes);
+        Assert.Equal([(0L, (long)CdnFetcher.HeaderProbeBytes), (0L, Header(chunks)), (at, (long)size)],
+            s.Cdn.Requests.Select(q => (q.Offset!.Value, q.Length!.Value)));
+    }
+
+    [Fact]
     public async Task AMissingObjectIsNotFound()
     {
         var s = new Scenario { Options = Ranged };

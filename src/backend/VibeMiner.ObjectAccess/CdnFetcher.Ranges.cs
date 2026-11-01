@@ -23,8 +23,8 @@ internal sealed partial class CdnFetcher
 
     /// <summary>
     /// Fills <paramref name="destination"/> from <paramref name="offset"/> of a loose encoded object that <see cref="CanFetchRange"/>
-    /// admits, with proven bytes only. Null when the object can't be proven by range (headerless, or a chunk larger than one
-    /// range): the caller takes the whole path. A CDN failure is that object's result, mapped as for any other fetch.
+    /// admits, with proven bytes only. Null when the object can't be proven by range (headerless, a chunk larger than one
+    /// range, or a long header that fails its proof everywhere): the caller takes the whole path. A CDN failure is that object's result, mapped as for any other fetch.
     /// </summary>
     internal async Task<ObjectResult?> FetchRangeAsync(ObjectRequest request, long offset, Memory<byte> destination, CdnContext context,
         FetchPriority priority, CancellationToken cancellationToken)
@@ -69,7 +69,10 @@ internal sealed partial class CdnFetcher
 
     private static long SpanOf(BlteChunkTable table, int first, int last) => table.ChunkOffset(last) + table.ChunkLength(last) - table.ChunkOffset(first);
 
-    /// <summary>The proven chunk table, or null for a headerless object. A host whose header fails its proof is passed over.</summary>
+    /// <summary>
+    /// The proven chunk table, or null for a headerless object or a header longer than the probe that no host proves at the
+    /// length the probe claimed. A host whose header fails its proof is passed over.
+    /// </summary>
     private async Task<BlteChunkTable?> FetchHeaderAsync(ObjectKey objectKey, long declared, CdnKey key, FetchPriority priority, CdnContext context,
         CancellationToken cancellationToken)
     {
@@ -85,12 +88,18 @@ internal sealed partial class CdnFetcher
         }, _ => { }, cancellationToken).ConfigureAwait(false);
         if (proven is not null || claimed == 0) return proven;
         // Longer than the probe: the whole header as one range, proven as a unit so no host's bytes mix with another's.
-        await FetchRangeAsync(priority, context, key, 0, claimed, declared, bytes =>
+        // The length came from one host's probe; if no host's header of that length proves, that probe may have lied about it,
+        // so the read takes the whole path rather than refusing an object other hosts may serve.
+        try
         {
-            if (BlteChunkTable.Prove(objectKey, declared, bytes, out var t) is { } refused) return refused.Code;
-            proven = t;
-            return null;
-        }, _ => { }, cancellationToken).ConfigureAwait(false);
+            await FetchRangeAsync(priority, context, key, 0, claimed, declared, bytes =>
+            {
+                if (BlteChunkTable.Prove(objectKey, declared, bytes, out var t) is { } refused) return refused.Code;
+                proven = t;
+                return null;
+            }, _ => { }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CdnException failure) when (failure.Overall == CdnFailure.VerificationFailed) { return null; }
         return proven;
     }
 
