@@ -76,8 +76,10 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
             int version;
             try { version = ObjectIndex.ReadVersion(store.indexPath) ?? 0; }
             catch (Exception e) when (e is SqliteException or OverflowException or InvalidCastException or FormatException) { throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index can't be read.", e); }
-            if (version > ObjectIndex.SchemaVersion) throw NewerFormat($"index schema {version}");
-            if (version < ObjectIndex.SchemaVersion) throw new ObjectStoreException(ObjectStoreCodes.Missing, "The object store was never completely created.");
+            // A flipped user_version on a format 1 index is damage, named like any other; anything else above 1 is a newer index.
+            var damagedVersion = ObjectIndex.IsDamagedVersion(store.indexPath, version);
+            if (!damagedVersion && version > ObjectIndex.SchemaVersion) throw NewerFormat($"index schema {version}");
+            if (!damagedVersion && version < ObjectIndex.SchemaVersion) throw new ObjectStoreException(ObjectStoreCodes.Missing, "The object store was never completely created.");
             store.CheckIndexKind();
             var valid = new List<(int seq, string path)>();
             foreach (var (seq, path) in store.DiskPacks())
@@ -88,6 +90,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
             }
             var packStore = OnePackStore(valid);
             // A read-only store can't rebuild: a damaged index is a named state, for its writer to repair.
+            if (damagedVersion) throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, $"The object index can't be used: its schema version reads {version}. Its writer rebuilds it.");
             var (indexStore, problem, clean, _) = ObjectIndex.Validate(store.indexPath, full: false, ct);
             // Unset also while its writer runs (it clears the marker at open): a reader can't tell that from a crash, so it checks fully.
             // A writer that kept committing leaves it unsettled, which is no evidence of damage: the cheap check stands.

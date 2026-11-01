@@ -70,8 +70,11 @@ public sealed partial class ObjectStore
         int? version = null; var unreadable = false;
         try { version = ObjectIndex.ReadVersion(indexPath); }
         catch (Exception e) when (e is SqliteException or OverflowException or InvalidCastException or FormatException) { unreadable = true; problems.Add("the object index can't be opened; rebuilt from the packs"); }
-        if (version > ObjectIndex.SchemaVersion) throw NewerFormat($"index schema {version}");
-        if (version == ObjectIndex.SchemaVersion) CheckIndexKind();  // an index never committed (user_version 0) records no kind
+        // A flipped user_version on a format 1 index is damage, rebuilt like any other; anything else above 1 is a newer index.
+        var damagedVersion = version is { } v && ObjectIndex.IsDamagedVersion(indexPath, v);
+        if (damagedVersion) { unreadable = true; problems.Add($"the index's schema version reads {version}; rebuilt from the packs"); }
+        else if (version > ObjectIndex.SchemaVersion) throw NewerFormat($"index schema {version}");
+        if (version == ObjectIndex.SchemaVersion || damagedVersion) CheckIndexKind();  // an index never committed (user_version 0) records no kind
         var disk = DiskPacks().OrderBy(p => p.seq).ToList();
         var valid = new List<(int seq, string path)>();
         foreach (var (seq, path) in disk)
@@ -95,7 +98,7 @@ public sealed partial class ObjectStore
         }
 
         var rebuilt = false;
-        if (unreadable || version is null or 0)
+        if (unreadable || version is null or < 1)
         {
             if (valid.Count == 0)
             {

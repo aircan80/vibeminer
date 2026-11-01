@@ -346,7 +346,7 @@ An entry larger than the limit goes alone into a fresh pack.
 
 **Writer open:**
 1. Create `packs/` and `staging/`. Take `writer.lock`, else `OBJECT_STORE_BUSY`.
-2. Read `user_version` without writing. Above 1: `OBJECT_STORE_NEWER_FORMAT`. If it can't be read, the index is unusable. If it is 1, read `application_id`: above 1 is `OBJECT_STORE_NEWER_FORMAT`, the other kind `OBJECT_STORE_KIND_MISMATCH`.
+2. Read `user_version` without writing. If it can't be read, the index is unusable. A value other than 1 is a **damaged version** when it is 1 with one bit flipped (0, 3, 5, 9, ... and -2^31 + 1, the sign bit flipped), or any value below 1, and the rows of `sqlite_master` (`type`, `name`, `tbl_name`, `sql`) are exactly those the DDL of section 5 creates, with nothing extra. A damaged version makes the index unusable. Any other value above 1 is `OBJECT_STORE_NEWER_FORMAT`. A later index format changes the schema as well as `user_version`, so it is never taken for a damaged version. If it is 1 or damaged, read `application_id`: above 1 is `OBJECT_STORE_NEWER_FORMAT`, the other kind `OBJECT_STORE_KIND_MISMATCH`.
 3. Read every `pack-*.vmp` header (2.2):
    - any newer header: `OBJECT_STORE_NEWER_FORMAT`;
    - a valid header of the other kind: `OBJECT_STORE_KIND_MISMATCH`;
@@ -362,7 +362,7 @@ An entry larger than the limit goes alone into a fresh pack.
    - recounting the `objects` rows and recomputing their digest (5.3) disagrees with the store row, or the same for `history`.
 
    The full check costs about 0.8 s per million rows here, the cheap one milliseconds. A writer can also run the full check on request (Scrub, 6.13).
-5. **Unusable index, or none** (`user_version` 0 or missing):
+5. **Unusable index, or none** (`user_version` below 1, or missing):
    - With no readable pack, delete the index files and any pack file of at most 64 bytes, then create a fresh index: a random store id, `next_seq` 1, zero totals.
    - Otherwise rebuild it (6.6) into `objects.sqlite3.rebuild`. Checkpoint it, delete the old index's `-wal`/`-shm`, move the rebuilt file over `objects.sqlite3`, and `fsync` the folder.
 6. If nothing was rebuilt, walk the active pack's tail headers (from `committed_length`) without writing. A newer entry there means `OBJECT_STORE_NEWER_FORMAT`. Then delete leftover `.rebuild` files.
@@ -525,7 +525,7 @@ Cancellation or a failure before the switch deletes the target file and its row.
 ### 6.10 Read-only second store
 
 **Open:**
-1. The index must exist, else `OBJECT_STORE_MISSING`. A `user_version` above 1 is `OBJECT_STORE_NEWER_FORMAT`; below 1 is `OBJECT_STORE_MISSING`. The `application_id` is checked as in 6.3 step 2.
+1. The index must exist, else `OBJECT_STORE_MISSING`. A damaged `user_version` (6.3 step 2) is `OBJECT_STORE_INDEX_UNREADABLE`, after the pack headers of step 2 are checked. Otherwise a `user_version` above 1 is `OBJECT_STORE_NEWER_FORMAT`; below 1 is `OBJECT_STORE_MISSING`. The `application_id` is checked as in 6.3 step 2.
 2. Read every pack header: a newer one is `OBJECT_STORE_NEWER_FORMAT`, the other kind `OBJECT_STORE_KIND_MISMATCH`, two store ids are `OBJECT_STORE_FOREIGN_PACK`.
 3. Validate the index as in 6.3 step 4: the cheap check, and the full one when `clean_close` is 0. A running writer keeps the marker at 0, and a reader can't tell that from a crash, so a reader opening a store whose writer runs pays the full check. Unusable is `OBJECT_STORE_INDEX_UNREADABLE`, since a read-only store can't rebuild.
 

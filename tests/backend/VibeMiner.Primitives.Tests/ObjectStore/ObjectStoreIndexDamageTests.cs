@@ -260,6 +260,88 @@ public sealed class ObjectStoreIndexDamageTests
         }
     }
 
+    private static void SetUserVersion(string index, int version)
+    {
+        // user_version is the big-endian i32 at offset 60 of the database header; a clean close leaves no -wal to override it.
+        var b = new byte[4]; System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(b, version);
+        Write(index, 60, b);
+    }
+
+    [Theory]
+    [InlineData(0)]               // 1 with its low bit flipped
+    [InlineData(3)]
+    [InlineData(0x40000001)]
+    [InlineData(int.MinValue + 1)] // the sign bit flipped
+    [InlineData(-5)]              // below 1, more than one bit off
+    public async Task AFlippedUserVersionOnAFormatOneIndexIsIndexDamage(int version)
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var objects = Fill();
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick with { MaxPackBytes = 60_000 }))
+        {
+            foreach (var o in objects) await store.PutAsync([o]);
+            await store.PutAsync(HistoryRecordFormat.Objects(Synthetic.Observation(1)));
+        }
+        var index = Path.Combine(dir, "objects.sqlite3");
+        SetUserVersion(index, version);
+        var before = HashFolder(dir);
+        var e = await Assert.ThrowsAsync<ObjectStoreException>(() => ObjectStore.OpenReadOnlyAsync(dir));
+        Assert.Equal(ObjectStoreCodes.IndexUnreadable, e.Code);
+        Assert.Equal(before, HashFolder(dir));
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.True(store.OpenReport.IndexRebuilt);
+            Assert.Contains(store.OpenReport.Problems, p => p.Contains("schema version", StringComparison.Ordinal));
+            foreach (var o in objects) Assert.Equal(o.Bytes.ToArray(), (await store.ReadAsync(o.Key)).Bytes);
+            Assert.Single(await store.ReadHistoryAsync(new HistoryQuery()));
+        }
+        await using var reader = await ObjectStore.OpenReadOnlyAsync(dir);
+        Assert.True(await reader.HasAsync(objects[0].Key));
+    }
+
+    [Theory]
+    [InlineData(3, "CREATE TABLE later(x)")]                            // one bit from 1, but the schema isn't format 1's
+    [InlineData(5, "CREATE INDEX objects_pack ON objects(pack)")]
+    [InlineData(3, "ALTER TABLE objects ADD COLUMN extra INTEGER")]
+    [InlineData(2, null)]                                               // two bits from 1: newer even with format 1's schema
+    [InlineData(0x7FFFFFFF, null)]
+    public async Task ANewerIndexIsStillRefusedAndLeftUntouched(int version, string? change)
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick)) await store.PutAsync([Synthetic.Headerless(1)]);
+        var index = Path.Combine(dir, "objects.sqlite3");
+        if (change is not null)
+            using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={index};Pooling=False"))
+            { c.Open(); using var cmd = c.CreateCommand(); cmd.CommandText = change; cmd.ExecuteNonQuery(); }
+        SetUserVersion(index, version);
+        var before = HashFolder(dir);
+        Assert.Equal(ObjectStoreCodes.NewerFormat, (await Assert.ThrowsAsync<ObjectStoreException>(() => ObjectStore.OpenAsync(dir, Quick))).Code);
+        Assert.Equal(ObjectStoreCodes.NewerFormat, (await Assert.ThrowsAsync<ObjectStoreException>(() => ObjectStore.OpenReadOnlyAsync(dir))).Code);
+        Assert.Equal(before, HashFolder(dir));
+    }
+
+    [Theory]
+    [InlineData(null)]                     // an empty database file
+    [InlineData("CREATE TABLE half(x)")]   // a create that stopped before format 1's schema was complete
+    public async Task AnIndexNeverCommittedIsStillMissingToAReader(string? schema)
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick)) await store.PutAsync([Synthetic.Headerless(1)]);
+        var index = Path.Combine(dir, "objects.sqlite3");
+        File.Delete(index);
+        using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={index};Pooling=False"))
+        {
+            c.Open();
+            if (schema is not null) { using var cmd = c.CreateCommand(); cmd.CommandText = schema; cmd.ExecuteNonQuery(); }
+        }
+        var before = HashFolder(dir);
+        Assert.Equal(ObjectStoreCodes.Missing, (await Assert.ThrowsAsync<ObjectStoreException>(() => ObjectStore.OpenReadOnlyAsync(dir))).Code);
+        Assert.Equal(before, HashFolder(dir));
+    }
+
     private static void CopyFolder(string from, string to)
     {
         foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
@@ -305,7 +387,8 @@ public sealed class ObjectStoreIndexDamageTests
 
         ObjectStore writer;
         try { writer = await ObjectStore.OpenAsync(dir, Quick); }
-        catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.NewerFormat) { return; }  // a flip in user_version reads as a newer index: named, nothing changed
+        // A flipped user_version is index damage, rebuilt (6.3 step 2); a flip in application_id reads as a newer kind: named, nothing changed.
+        catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.NewerFormat) { return; }
         await using (writer) await Exercise(writer, writer, () => writer.VerifyAsync(), objects, writer.OpenReport.IndexRebuilt);
         // Whatever it found, a Scan from the packs gives the full answer back.
         await using (var store = await ObjectStore.OpenAsync(dir, Quick))

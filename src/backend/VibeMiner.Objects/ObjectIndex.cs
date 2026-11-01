@@ -69,6 +69,43 @@ internal static class ObjectIndex
         return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
     }
 
+    /// <summary>
+    /// Whether a <c>user_version</c> other than 1 is damage to a format 1 index rather than a newer format: the value is 1 with one bit
+    /// flipped, or below 1, and the schema in sqlite_master is exactly format 1's. A later index format changes the schema too (spec 6.3),
+    /// so this never names a newer index damaged. A schema that can't be read is no evidence either way: false.
+    /// </summary>
+    public static bool IsDamagedVersion(string path, int version)
+    {
+        if (version == SchemaVersion) return false;
+        if (version > SchemaVersion && System.Numerics.BitOperations.PopCount((uint)(version ^ SchemaVersion)) != 1) return false;
+        try
+        {
+            using var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+            c.Open();
+            return SchemaEntries(c).SequenceEqual(FormatOneSchema.Value);
+        }
+        catch (Exception e) when (e is SqliteException or InvalidCastException or InvalidOperationException) { return false; }
+    }
+
+    /// <summary>sqlite_master as SQLite stores format 1's DDL, taken from an in-memory database so it is never written out by hand.</summary>
+    private static readonly Lazy<List<string>> FormatOneSchema = new(() =>
+    {
+        using var c = new SqliteConnection("Data Source=:memory:");
+        c.Open();
+        Exec(c, Schema);
+        return SchemaEntries(c);
+    });
+
+    private static List<string> SchemaEntries(SqliteConnection c)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name";
+        var entries = new List<string>();
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) entries.Add($"{r.GetValue(0)}\0{r.GetValue(1)}\0{r.GetValue(2)}\0{r.GetValue(3)}");
+        return entries;
+    }
+
     public static void Create(SqliteConnection c, byte[] storeId, long createdMs, long nextSeq, ObjectStoreKind kind)
     {
         using var tx = c.BeginTransaction();
