@@ -73,6 +73,7 @@ internal enum StorePoint
     InsideIndexCommit,    // index transaction open, rows written, not committed
     AfterIndexCommit,     // committed, callers not yet told
     WriteErrorCutting,    // write error: pending batch dropped, pack not yet cut back, callers not yet told
+    WriteErrorCut,        // inside the cut back: an IOException thrown here is the cut failing, and the writer stops
     RecoveryTruncated,    // tail truncated, recovery rows not committed
     CompactTargetListed,
     CompactCopied,        // live entries copied and synced, index not switched

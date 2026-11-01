@@ -780,8 +780,13 @@ public sealed partial class ObjectStore
         var owners = pending.Select(p => p.Owner).Append(current).Where(o => o is not null).Distinct().ToList();
         pending.Clear(); pendingKeys.Clear(); pendingBytes = 0;
         At(StorePoint.WriteErrorCutting);
-        try { if (active is not null) { RandomAccess.SetLength(active, committedLength); RandomAccess.FlushToDisk(active); } activeLength = committedLength; }
-        catch (Exception cut) when (cut is IOException or UnauthorizedAccessException) { Fail(error); }
+        try { At(StorePoint.WriteErrorCut); if (active is not null) { RandomAccess.SetLength(active, committedLength); RandomAccess.FlushToDisk(active); } activeLength = committedLength; }
+        catch (Exception cut) when (cut is IOException or UnauthorizedAccessException)
+        {
+            // The uncut tail stays in the pack, and the next open's recovery may adopt it: the usual text would be untrue.
+            error = new(error.Code, "Writing the object store failed and its pack couldn't be cut back to the last commit. It stops writing until reopened; the reopen may keep the failed write.", e);
+            Fail(error);
+        }
         foreach (var o in owners) o!.Done.TrySetException(error);
     }
 

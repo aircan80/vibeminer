@@ -69,6 +69,72 @@ public sealed class ObjectStoreFailureTests
         Assert.Equal(length, seen);
     }
 
+    [Fact]
+    public async Task WhenTheCutBackFailsTooTheWriterStopsAndTheNextOpenRecoversTheTail()
+    {
+        // #184: the cut failing has its own path (the writer stops). The hook holds the failing cut until a Delete is queued behind
+        // it, so the failed Put, the queued Delete and every later call must all hear the same stop, and none of them before it.
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var armed = 0;
+        using var reached = new SemaphoreSlim(0);
+        using var release = new ManualResetEventSlim(false);
+        var options = Quick with
+        {
+            Fault = p =>
+            {
+                if (Volatile.Read(ref armed) == 0) return;
+                if (p == StorePoint.InsideIndexCommit) throw new IOException("injected", 5);
+                if (p == StorePoint.WriteErrorCut && Interlocked.Exchange(ref armed, 0) == 1)
+                {
+                    reached.Release();
+                    release.Wait(TimeSpan.FromSeconds(30));
+                    throw new IOException("cut failed", 5);
+                }
+            },
+        };
+        var a = Synthetic.Headerless(1, 3000); var b = Synthetic.Headerless(2, 3000); var c = Synthetic.Headerless(3, 3000);
+        long committed;
+        await using (var store = await ObjectStore.OpenAsync(dir, options))
+        {
+            await store.PutAsync([a]);
+            committed = new FileInfo(PackFiles(dir).Single()).Length;
+            Volatile.Write(ref armed, 1);
+            var put = store.PutAsync([b]);
+            Assert.True(await reached.WaitAsync(TimeSpan.FromSeconds(30)));
+            var queued = store.DeleteAsync([a.Key]);   // in the channel when DeleteAsync returns
+            await Task.Delay(50);
+            Assert.False(put.IsCompleted);             // not told before the stop
+            Assert.False(queued.IsCompleted);
+            release.Set();
+
+            // Everyone gets the one error, and it doesn't claim the pack was cut back.
+            var error = await Assert.ThrowsAsync<ObjectStoreException>(() => put);
+            Assert.Equal(ObjectStoreCodes.WriteFailed, error.Code);
+            Assert.Contains("couldn't be cut back", error.Message, StringComparison.Ordinal);
+            Assert.Same(error, await Assert.ThrowsAsync<ObjectStoreException>(() => queued));
+            Assert.Same(error, await Assert.ThrowsAsync<ObjectStoreException>(() => store.PutAsync([c])));
+            Assert.Same(error, await Assert.ThrowsAsync<ObjectStoreException>(() => store.DeleteAsync([a.Key])));
+
+            // The cut didn't happen: b's bytes are still in the pack, but nothing past the last commit is served.
+            Assert.True(new FileInfo(PackFiles(dir).Single()).Length > committed);
+            Assert.False(await store.HasAsync(b.Key));
+            Assert.Equal(ReadState.Absent, (await store.ReadAsync(b.Key)).State);
+            Assert.True(await store.HasAsync(a.Key));
+        }
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            // The uncut tail is recovered as after a crash: b's whole, synced entry is adopted; the queued Delete never ran.
+            Assert.False(store.OpenReport.IndexRebuilt, string.Join("; ", store.OpenReport.Problems));
+            Assert.True(store.OpenReport.FullIndexCheck);   // the stopped writer never set clean_close
+            Assert.Equal(1, store.OpenReport.RecoveredEntries);
+            Assert.Equal(0, store.OpenReport.TruncatedBytes);
+            Assert.True(await store.HasAsync(a.Key)); Assert.True(await store.HasAsync(b.Key));
+            Assert.Equal(PutOutcome.Stored, Assert.Single(await store.PutAsync([c])).Outcome);
+            Assert.Equal(0, (await store.VerifyAsync(full: true)).CorruptCount);
+        }
+    }
+
     /// <summary>Holds the writer at its next EntryStarted until released, so the test can queue work behind it.</summary>
     private sealed class Gate : IDisposable
     {
