@@ -81,6 +81,20 @@ public interface IBuildFiles : IAsyncDisposable
     /// The stream outlives the handle, isn't safe for concurrent use, and must be disposed.
     /// </summary>
     Task<FileOpen> OpenReadAsync(FileRef file, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Makes the selected files' encoded copies stored, fetching through layer 2 at <paramref name="priority"/>; decodes nothing.
+    /// Works in batches of <see cref="FileSystemOptions.PresenceBatch"/> files: stored state through layer 2, then one fetch of
+    /// the distinct keys not stored (files sharing an encoded copy fetch it once). A file already stored costs no fetch. A
+    /// later Interactive call for a file a Background call is fetching joins and promotes that transfer in layer 2. Every
+    /// selected file gets exactly one <see cref="FileEnsureState"/>. Canceled, it returns <see cref="EnsureOutcome.Canceled"/>
+    /// rather than throwing: what is stored stays stored, files layer 2 was fetching are checked again and are Stored when the
+    /// store has them, and the rest are Canceled. Any other layer 2 failure throws. Progress is reported at most once per
+    /// <see cref="FileSystemOptions.ProgressInterval"/>, plus a final report equal to <see cref="EnsureResult.Final"/>, all
+    /// delivered before the call returns. A slow subscriber gets fewer reports: a newer report replaces one not yet delivered, so
+    /// at most one is in flight and one waits.
+    /// </summary>
+    Task<EnsureResult> EnsureAsync(EnsureSelection selection, EnsurePriority priority, IProgress<EnsureProgress>? progress, CancellationToken cancellationToken);
 }
 
 /// <summary>

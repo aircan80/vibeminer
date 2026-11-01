@@ -54,6 +54,12 @@ public sealed record FakeReadFailure(FileReadState State, string Code, string? M
 /// the real rules: <see cref="FakeFile.Path"/> is the ROOT name hash side, <see cref="Names"/> the listfile side (off until
 /// set), read once per call. Reads serve <see cref="FakeFile.Content"/> and mark the file stored, as a fetch would;
 /// <paramref name="maxReadBytes"/> is <see cref="FileSystemOptions.MaxReadBytes"/>.
+/// Ensure follows the real rules on the same data: a stored file costs no request; a file with a layer 2
+/// <see cref="FakeFile.ReadFailure"/> that keeps it not stored ends in that state with its code, one without content is
+/// NeedsNetwork, and any other is fetched (decode failures such as Corrupt don't show, as nothing is decoded) and marked
+/// stored. Files are fetched one at a time in selection order; concurrent ensures of one file share one fetch. Every file that
+/// needed a fetch is recorded in <see cref="EnsureRequests"/> with its priority (a joined one too), every fetch that ran in
+/// <see cref="EnsureFetches"/>. Bytes are the content's length, else the listed size.
 /// </summary>
 public sealed class InMemoryFileSystem(long maxReadBytes = 256L << 20) : IFileSystem
 {
@@ -67,6 +73,38 @@ public sealed class InMemoryFileSystem(long maxReadBytes = 256L << 20) : IFileSy
     private readonly Lock gate = new();
     private readonly Dictionary<BuildRef, FakeBuildFiles> builds = [];
     private readonly Dictionary<BuildRef, (FilesOpenState State, string Code)> failures = [];
+    private readonly List<(uint FileDataId, EnsurePriority Priority)> ensureRequests = [];
+    private readonly List<uint> ensureFetches = [];
+
+    /// <summary><see cref="FileSystemOptions.ProgressInterval"/>; positive.</summary>
+    public TimeSpan ProgressInterval
+    {
+        get => progressInterval;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero);
+            progressInterval = value;
+        }
+    }
+    private TimeSpan progressInterval = TimeSpan.FromMilliseconds(100);
+    /// <summary><see cref="FileSystemOptions.Time"/>.</summary>
+    public TimeProvider Time { get; set; } = TimeProvider.System;
+    /// <summary>When set, every ensure fetch waits for this first (a joined one doesn't call it); cancellation ends the wait.</summary>
+    public Func<uint, EnsurePriority, CancellationToken, Task>? BeforeFetch { get; set; }
+    /// <summary>Every file an ensure asked to fetch, with its priority, in order; a call that joined a running fetch included.</summary>
+    public IReadOnlyList<(uint FileDataId, EnsurePriority Priority)> EnsureRequests { get { lock (gate) return ensureRequests.ToArray(); } }
+    /// <summary>Every fetch an ensure ran, in order.</summary>
+    public IReadOnlyList<uint> EnsureFetches { get { lock (gate) return ensureFetches.ToArray(); } }
+
+    /// <summary>When set, called with every request <see cref="EnsureRequests"/> records, after recording it.</summary>
+    public Action<uint, EnsurePriority>? OnRequest { get; set; }
+
+    private void Requested(uint id, EnsurePriority priority)
+    {
+        lock (gate) ensureRequests.Add((id, priority));
+        OnRequest?.Invoke(id, priority);
+    }
+    private void Fetched(uint id) { lock (gate) ensureFetches.Add(id); }
 
     public InMemoryFileSystem Add(BuildRef build, IReadOnlyList<string> locales, IEnumerable<FakeFile> files)
     {
@@ -141,7 +179,7 @@ public sealed class InMemoryFileSystem(long maxReadBytes = 256L << 20) : IFileSy
                 return Task.FromResult(new FilesOpenResult(build, locale, failed.State, null, failed.Code, $"The build is {failed.State} ({failed.Code}).", null));
             if (builds.TryGetValue(build, out var fake))
                 return Task.FromResult(fake.HasLocale(locale)
-                    ? new FilesOpenResult(build, locale, FilesOpenState.Open, new Handle(build, locale, fake, Names, maxRead), null, null, null)
+                    ? new FilesOpenResult(build, locale, FilesOpenState.Open, new Handle(this, build, locale, fake, Names, maxRead), null, null, null)
                     : new FilesOpenResult(build, locale, FilesOpenState.LocaleNotInBuild, null, "FILES_LOCALE_NOT_IN_BUILD",
                         $"The build has no {locale} files.", null));
         }
@@ -189,9 +227,28 @@ public sealed class InMemoryFileSystem(long maxReadBytes = 256L << 20) : IFileSy
         }
 
         public static string Normalize(string path) => path.Replace('/', '\\').ToUpperInvariant();
+
+        // Ensure fetches running, by FileDataID.
+        private readonly Dictionary<uint, Task<(FileEnsureState State, string? Code)>> fetching = [];
+
+        /// <summary>The running fetch of a file to join, or null after claiming it with <paramref name="mine"/>.</summary>
+        public Task<(FileEnsureState State, string? Code)>? JoinOrClaim(uint id, TaskCompletionSource<(FileEnsureState, string?)> mine)
+        {
+            lock (gate)
+            {
+                if (fetching.TryGetValue(id, out var running)) return running;
+                fetching[id] = mine.Task;
+                return null;
+            }
+        }
+
+        public void Release(uint id, TaskCompletionSource<(FileEnsureState, string?)> mine)
+        {
+            lock (gate) if (fetching.TryGetValue(id, out var t) && t == mine.Task) fetching.Remove(id);
+        }
     }
 
-    private sealed class Handle(BuildRef build, string locale, FakeBuildFiles fake, InMemoryFileNames names, long maxReadBytes) : IBuildFiles
+    private sealed class Handle(InMemoryFileSystem owner, BuildRef build, string locale, FakeBuildFiles fake, InMemoryFileNames names, long maxReadBytes) : IBuildFiles
     {
         private int disposed;
         // What a file's first bytes proved, by FileDataID (Unknown: read, nothing proved), as the real handle remembers it.
@@ -257,7 +314,7 @@ public sealed class InMemoryFileSystem(long maxReadBytes = 256L << 20) : IFileSy
             }
             else throw new ArgumentException("An empty file reference.", nameof(file));
             if (found is null) return (new FileStat(FileLookupState.UnknownFile, null), null);
-            if (!FakeBuildFiles.InLocale(found, Locale)) return (new FileStat(FileLookupState.NotInLocale, null), null);
+            if (!FakeBuildFiles.InLocale(found, Locale)) return (new FileStat(FileLookupState.NotInLocale, null), found);
             var (name, source) = index?.NameOf(found.FileDataId) is { } n ? (n, FilePathSource.Listfile)
                 : byRoot ? (file.Path, FilePathSource.RootHash) : (null, FilePathSource.None);
             var stat = WithFormat(found, ToFileWithoutFormat(found, name, source));
@@ -344,6 +401,119 @@ public sealed class InMemoryFileSystem(long maxReadBytes = 256L << 20) : IFileSy
             fake.MarkFetched(found.FileDataId);
             return Task.FromResult(new FileOpen(StateOf(content.Length, holes.Sum(h => h.Length)), new FakeReadStream(content, holes, onRead)));
         }
+
+        public async Task<EnsureResult> EnsureAsync(EnsureSelection selection, EnsurePriority priority, IProgress<EnsureProgress>? progress,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(selection);
+            if (!Enum.IsDefined(priority)) throw new ArgumentOutOfRangeException(nameof(priority));
+            ThrowIfDisposed();
+            var tally = new EnsureTally(progress, owner.Time, owner.ProgressInterval);
+            var toFetch = new List<(int Index, FakeFile File, long Bytes)>();
+            try
+            {
+                if (selection.Kind == EnsureSelectionKind.Matching)
+                {
+                    try
+                    {
+                        await foreach (var listed in ListAsync(selection.Filter!, cancellationToken).ConfigureAwait(false))
+                        {
+                            var file = fake.Find(listed.FileDataId)!;
+                            Select(tally, toFetch, FileRef.Id(listed.FileDataId), file, FileLookupState.Found);
+                            tally.Offer();
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        return await tally.FinishAsync(canceled: true).ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    var ids = new HashSet<uint>();
+                    var unknown = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var file in selection.Files!)
+                    {
+                        var (stat, found) = Lookup(file);
+                        if (found is null) { if (unknown.Add(EnsureTally.UnknownKey(file))) tally.Settle(tally.Add(file, null, 0), FileEnsureState.UnknownFile, null, 0); continue; }
+                        if (ids.Add(found.FileDataId)) Select(tally, toFetch, file, found, stat.State);
+                    }
+                }
+                tally.Listed();
+                tally.Offer();
+                foreach (var (index, file, bytes) in toFetch)
+                {
+                    try
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var (state, code) = await FetchAsync(file, priority, cancellationToken).ConfigureAwait(false);
+                        tally.Settle(index, state, code, bytes);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        return await tally.FinishAsync(canceled: true).ConfigureAwait(false);
+                    }
+                    tally.Offer();
+                }
+                return await tally.FinishAsync(canceled: false).ConfigureAwait(false);
+            }
+            catch { tally.Abandon(); throw; }
+        }
+
+        /// <summary>Counts a found file and settles it unless it needs a fetch.</summary>
+        private void Select(EnsureTally tally, List<(int, FakeFile, long)> toFetch, FileRef asked, FakeFile file, FileLookupState state)
+        {
+            if (state == FileLookupState.NotInLocale) { tally.Settle(tally.Add(asked, file.FileDataId, 0), FileEnsureState.NotInLocale, null, 0); return; }
+            if (file.NotInEncoding) { tally.Settle(tally.Add(asked, file.FileDataId, 0), FileEnsureState.NotInEncoding, null, 0); return; }
+            var bytes = SizeOf(file) ?? 0;
+            var index = tally.Add(asked, file.FileDataId, bytes);
+            if (file.Storage == FileStorage.Stored) tally.Settle(index, FileEnsureState.AlreadyStored, null, bytes);
+            else toFetch.Add((index, file, bytes));
+        }
+
+        /// <summary>Fetches a file not stored when selected, or joins the ensure already fetching it.</summary>
+        private async Task<(FileEnsureState, string?)> FetchAsync(FakeFile selected, EnsurePriority priority, CancellationToken cancellationToken)
+        {
+            var id = selected.FileDataId;
+            owner.Requested(id, priority);
+            while (true)
+            {
+                var mine = new TaskCompletionSource<(FileEnsureState, string?)>(TaskCreationOptions.RunContinuationsAsynchronously);
+                if (fake.JoinOrClaim(id, mine) is { } running)
+                {
+                    try { return await running.WaitAsync(cancellationToken).ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { continue; }
+                }
+                try
+                {
+                    if (owner.BeforeFetch is { } hold) await hold(id, priority, cancellationToken).ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var file = fake.Find(id)!;
+                    (FileEnsureState, string?) result;
+                    if (file.Storage == FileStorage.Stored) result = (FileEnsureState.Stored, null);
+                    else if (file.ReadFailure is { KeepsNotStored: true } failure) result = (StateOf(failure.State), failure.Code);
+                    else if (file.Content is null) result = (FileEnsureState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK");
+                    else { fake.MarkFetched(id); owner.Fetched(id); result = (FileEnsureState.Stored, null); }
+                    mine.TrySetResult(result);
+                    return result;
+                }
+                catch (Exception e)
+                {
+                    if (e is OperationCanceledException) mine.TrySetCanceled(); else mine.TrySetException(e);
+                    throw;
+                }
+                finally { fake.Release(id, mine); }
+            }
+        }
+
+        private static FileEnsureState StateOf(FileReadState state) => state switch
+        {
+            FileReadState.Missing => FileEnsureState.Missing,
+            FileReadState.NeedsNetwork => FileEnsureState.NeedsNetwork,
+            FileReadState.Unavailable => FileEnsureState.Unavailable,
+            FileReadState.StoreFailed => FileEnsureState.StoreFailed,
+            _ => throw new InvalidOperationException($"{state} isn't a layer 2 state."),
+        };
 
         /// <summary>The listed size: the content's length, else the declared size.</summary>
         private static long? SizeOf(FakeFile file) => file.Content?.Length ?? file.Size;

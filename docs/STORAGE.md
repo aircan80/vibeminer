@@ -183,6 +183,8 @@ Names come from the community listfile ([D105](DECISIONS.md), [D221](DECISIONS.m
 
 The handle keeps layer 3's opened build, so a file is an in-memory ROOT and ENCODING lookup. Stored state is never cached: listing asks layer 2's `HasKeysAsync` once per 4096 files, a stat once, `ExistsAsync` not at all (a path ROOT doesn't name may load the stored names once per engine run, or once a minute while the stored copy can't be read, as any first use does). A disposed handle throws. `InMemoryFileSystem` in `VibeMiner.Files.Testing` is the fake; `FilesContractTests` runs one suite against it and `FileSystem`.
 
+`EnsureAsync(selection, priority, progress)` makes files local ([D250](DECISIONS.md)): one file, a list (deduplicated, in order) or every file a filter lists. Per batch of 4096 it asks `HasKeysAsync`, then one `GetKeysAsync` at the mapped priority for the distinct keys not stored, with the same request a read makes. Stored files cost no fetch, and an interactive call joins a background transfer of the same file in layer 2. Each file ends `Stored`, `AlreadyStored`, a lookup state, a layer 2 state or `Canceled`; the call ends `Completed`, `Incomplete` or `Canceled` (cancel returns, keeps what is stored). Progress counts files and ENCODING bytes, at most once per 100 ms, and ends with the final figures.
+
 Measured on a synthetic 1,000,000-file build over the layer 3 and 2 fakes (`FileSystemTests`, tagged slow): open 155 ms, a stat 1.9 µs on the open handle, a full list 376 ms with 245 `HasKeysAsync` calls. The fakes stand in for ROOT and the index, so these are layer 4 costs only.
 
 ## The generated store

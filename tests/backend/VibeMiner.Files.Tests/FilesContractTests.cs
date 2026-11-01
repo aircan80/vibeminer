@@ -1,4 +1,5 @@
 using VibeMiner.Builds;
+using VibeMiner.ObjectAccess;
 using VibeMiner.Files.Testing;
 using Xunit;
 using L3 = VibeMiner.Builds.Testing;
@@ -14,7 +15,8 @@ public abstract class FilesContractTests
     private static CancellationToken Ct => CancellationToken.None;
 
     /// <summary>A file system holding <paramref name="build"/> with exactly these locales and files, and this whole-read limit.</summary>
-    protected abstract IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20);
+    protected abstract IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20,
+        TimeProvider? time = null);
     /// <summary>A file system for which opening <paramref name="build"/> fails with a layer 3 state and code.</summary>
     protected abstract IFileSystem CreateFailing(BuildRef build, FilesOpenState state, string code);
     /// <summary>Makes one file's encoded copy stored, as a download would, on the file system <see cref="Create"/> returned last.</summary>
@@ -29,6 +31,25 @@ public abstract class FilesContractTests
     /// listfile side, apart from <see cref="FakeFile.Path"/>, the ROOT name hash side), or off when null.
     /// </summary>
     protected abstract Task UseNamesAsync(IReadOnlyDictionary<uint, string>? names);
+    /// <summary>On the file system <see cref="Create"/> returned last: how many times the file's encoded copy was fetched.</summary>
+    protected abstract int FetchesOf(uint fileDataId);
+    /// <summary>On the file system <see cref="Create"/> returned last: the priority of every request that asked to fetch the file.</summary>
+    protected abstract IReadOnlyList<EnsurePriority> RequestsOf(uint fileDataId);
+    /// <summary>On the file system <see cref="Create"/> returned last: holds every fetch of the file until released.</summary>
+    protected abstract FetchHold Hold(uint fileDataId);
+
+    /// <summary>A held fetch. <see cref="Seen"/> completes once a request at that priority asked for the file.</summary>
+    protected sealed class FetchHold
+    {
+        private readonly TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource interactive = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource background = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Released => release.Task;
+        public void Release() => release.TrySetResult();
+        public void Saw(EnsurePriority priority) => (priority == EnsurePriority.Interactive ? interactive : background).TrySetResult();
+        public Task Seen(EnsurePriority priority) => (priority == EnsurePriority.Interactive ? interactive : background).Task.WaitAsync(TimeSpan.FromSeconds(30));
+    }
 
     private static readonly IReadOnlyList<string> Locales = ["enUS", "deDE"];
 
@@ -52,9 +73,10 @@ public abstract class FilesContractTests
 
     private static readonly uint[] EnUsIds = [100, 200, 250, 300, 400, 500];
 
-    private async Task<IBuildFiles> OpenAsync(string locale = "enUS", IReadOnlyList<FakeFile>? files = null, long maxReadBytes = 256L << 20)
+    private async Task<IBuildFiles> OpenAsync(string locale = "enUS", IReadOnlyList<FakeFile>? files = null, long maxReadBytes = 256L << 20,
+        TimeProvider? time = null)
     {
-        var result = await Create(FilesFixture.Build, Locales, files ?? Files(), maxReadBytes).ForAsync(FilesFixture.Build, locale, Ct);
+        var result = await Create(FilesFixture.Build, Locales, files ?? Files(), maxReadBytes, time).ForAsync(FilesFixture.Build, locale, Ct);
         Assert.Equal(FilesOpenState.Open, result.State);
         return result.Files!;
     }
@@ -1156,14 +1178,304 @@ public abstract class FilesContractTests
         Assert.Equal(Stored, await ReadToEndAsync(b, 256));
         Assert.Equal(Slice(Stored, 500, 500), await ReadToEndAsync(a, 77));
     }
+
+    // EnsureAsync
+
+    private static EnsureSelection Many(params FileRef[] files) => EnsureSelection.Many(files);
+
+    private static (FileEnsureState, string?)[] StatesOf(EnsureResult result) => [.. result.Files.Select(f => (f.State, f.Code))];
+
+    private static void AssertBounded(EnsureProgress p)
+    {
+        Assert.InRange(p.FilesDone, 0, p.FilesTotal);
+        Assert.InRange(p.BytesDone, 0, p.BytesTotal);
+        Assert.True(p.CdnBytes >= 0);
+    }
+
+    /// <summary>Records every report as it is delivered.</summary>
+    private sealed class Reports : IProgress<EnsureProgress>
+    {
+        private readonly List<EnsureProgress> seen = [];
+        public IReadOnlyList<EnsureProgress> Seen { get { lock (seen) return seen.ToArray(); } }
+        public void Report(EnsureProgress value) { lock (seen) seen.Add(value); }
+    }
+
+    /// <summary>A clock that stands still, or moves a second on every read.</summary>
+    private sealed class StepClock(bool moving) : TimeProvider
+    {
+        private long now;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => moving ? Interlocked.Add(ref now, TimeSpan.TicksPerSecond) : Interlocked.Read(ref now);
+    }
+
+    [Fact]
+    public async Task EnsuresOneFile()
+    {
+        await using var files = await OpenAsync();
+        var result = await files.EnsureAsync(EnsureSelection.One(400), EnsurePriority.Interactive, null, Ct);
+        Assert.Equal(EnsureOutcome.Completed, result.Outcome);
+        Assert.Equal(new FileEnsured(400, 400, FileEnsureState.Stored, null), Assert.Single(result.Files));
+        Assert.Equal(FileStorage.Stored, (await files.StatAsync(400, Ct)).File!.Storage);
+        Assert.Equal(1, FetchesOf(400));
+        Assert.Equal((1, 1, true), (result.Final.FilesDone, result.Final.FilesTotal, result.Final.Listed));
+        Assert.Equal(result.Final.BytesTotal, result.Final.BytesDone);
+        Assert.True(result.Final.BytesTotal > 0);
+
+        // Again: already stored, and no new fetch.
+        var again = await files.EnsureAsync(EnsureSelection.One(400), EnsurePriority.Interactive, null, Ct);
+        Assert.Equal((EnsureOutcome.Completed, FileEnsureState.AlreadyStored), (again.Outcome, Assert.Single(again.Files).State));
+        Assert.Equal(1, FetchesOf(400));
+    }
+
+    [Fact]
+    public async Task EnsuresManyInSelectionOrderWithEveryLookupState()
+    {
+        await using var files = await OpenAsync();
+        var result = await files.EnsureAsync(Many(500, 400, 999, 150, 250, 100, 200, FileRef.ForPath("no/such/file.blp"), 300), EnsurePriority.Background, null, Ct);
+        Assert.Equal(EnsureOutcome.Incomplete, result.Outcome);
+        Assert.Equal((FileRef[])[500, 400, 999, 150, 250, 100, 200, FileRef.ForPath("no/such/file.blp"), 300], result.Files.Select(f => f.File));
+        Assert.Equal((uint?[])[500, 400, null, 150, 250, 100, 200, null, 300], result.Files.Select(f => f.FileDataId));
+        Assert.Equal([
+            (FileEnsureState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK"), (FileEnsureState.Stored, null), (FileEnsureState.UnknownFile, null),
+            (FileEnsureState.NotInLocale, null), (FileEnsureState.NotInEncoding, null), (FileEnsureState.AlreadyStored, null),
+            (FileEnsureState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK"), (FileEnsureState.UnknownFile, null), (FileEnsureState.AlreadyStored, null),
+        ], StatesOf(result));
+        Assert.Equal((9, 9, true), (result.Final.FilesDone, result.Final.FilesTotal, result.Final.Listed));
+        AssertBounded(result.Final);
+        Assert.True(result.Final.BytesDone < result.Final.BytesTotal);
+    }
+
+    [Fact]
+    public async Task DuplicateRefsGiveOneEntry()
+    {
+        await using var files = await OpenAsync();
+        // By id twice and by ROOT path: one file. An unknown path twice: one entry.
+        var result = await files.EnsureAsync(Many(400, FileRef.ForPath("sound/five.ogg"), 400, FileRef.ForPath("x/y.ogg"), FileRef.ForPath("x/y.ogg")),
+            EnsurePriority.Interactive, null, Ct);
+        Assert.Equal([new FileEnsured(400, 400, FileEnsureState.Stored, null), new FileEnsured(FileRef.ForPath("x/y.ogg"), null, FileEnsureState.UnknownFile, null)],
+            result.Files);
+        Assert.Equal(1, FetchesOf(400));
+        Assert.Equal(2, result.Final.FilesTotal);
+    }
+
+    [Fact]
+    public async Task UnknownPathsDedupeByFoldedCaseAndSlashes()
+    {
+        await using var files = await OpenAsync();
+        var result = await files.EnsureAsync(Many(FileRef.ForPath("x/y.ogg"), FileRef.ForPath("X\\Y.OGG"), 999, 999, FileRef.ForPath("x/z.ogg")),
+            EnsurePriority.Interactive, null, Ct);
+        Assert.Equal([FileRef.ForPath("x/y.ogg"), 999, FileRef.ForPath("x/z.ogg")], result.Files.Select(f => f.File));
+        Assert.All(result.Files, f => Assert.Equal(FileEnsureState.UnknownFile, f.State));
+    }
+
+    [Fact]
+    public async Task AnEmptySelectionCompletes()
+    {
+        await using var files = await OpenAsync();
+        var result = await files.EnsureAsync(EnsureSelection.Many([]), EnsurePriority.Background, null, Ct);
+        Assert.Equal((EnsureOutcome.Completed, new EnsureProgress(0, 0, 0, 0, 0, true)), (result.Outcome, result.Final));
+        Assert.Empty(result.Files);
+        Assert.Throws<ArgumentException>(() => EnsureSelection.One(default));
+    }
+
+    [Fact]
+    public async Task EnsuresMatchingInFileDataIdOrder()
+    {
+        await using var files = await OpenAsync();
+        var result = await files.EnsureAsync(EnsureSelection.Matching(FileFilter.All with { FromId = 200, ToId = 450 }), EnsurePriority.Background, null, Ct);
+        Assert.Equal((uint?[])[200, 250, 300, 400], result.Files.Select(f => f.FileDataId));
+        Assert.Equal((FileRef[])[200, 250, 300, 400], result.Files.Select(f => f.File));
+        Assert.Equal([(FileEnsureState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK"), (FileEnsureState.NotInEncoding, null), (FileEnsureState.AlreadyStored, null),
+            (FileEnsureState.Stored, null)], StatesOf(result));
+        Assert.Equal(EnsureOutcome.Incomplete, result.Outcome);
+        Assert.True(result.Final.Listed);
+
+        // The filter's other criteria hold: only what isn't stored now.
+        var rest = await files.EnsureAsync(EnsureSelection.Matching(FileFilter.All with { Storage = new HashSet<FileStorage> { FileStorage.NotStored } }),
+            EnsurePriority.Background, null, Ct);
+        Assert.Equal((uint?[])[200, 500], rest.Files.Select(f => f.FileDataId));
+        Assert.Equal(1, FetchesOf(400));
+    }
+
+    [Fact]
+    public async Task EnsureMatchingFollowsTheLocale()
+    {
+        await using var files = await OpenAsync("deDE");
+        var result = await files.EnsureAsync(EnsureSelection.Matching(FileFilter.All with { ToId = 200 }), EnsurePriority.Background, null, Ct);
+        Assert.Equal((uint?[])[100, 150], result.Files.Select(f => f.FileDataId));
+        Assert.Equal([(FileEnsureState.AlreadyStored, null), (FileEnsureState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK")], StatesOf(result));
+    }
+
+    private static readonly DateTimeOffset At = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>1 Missing, 2 Unavailable, 3 StoreFailed, 4 NeedsNetwork (scripted), 5 fetches; each with its own content.</summary>
+    private static IReadOnlyList<FakeFile> FailingFiles() =>
+    [
+        new(1, Content: BlteBuilder.Bytes(300, 1), ReadFailure: new(FileReadState.Missing, "CDN_NOT_FOUND", ObservedAt: At)),
+        new(2, Content: BlteBuilder.Bytes(300, 2), ReadFailure: new(FileReadState.Unavailable, "CDN_OFFLINE")),
+        new(3, Content: BlteBuilder.Bytes(300, 3), ReadFailure: new(FileReadState.StoreFailed, "OBJECT_STORE_DISK_FULL")),
+        new(4, Content: BlteBuilder.Bytes(300, 4), ReadFailure: new(FileReadState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK")),
+        new(5, Content: BlteBuilder.Bytes(300, 5)),
+    ];
+
+    [Fact]
+    public async Task Layer2FailuresMapPerFile()
+    {
+        await using var files = await OpenAsync(files: FailingFiles());
+        var result = await files.EnsureAsync(Many(1, 2, 3, 4, 5), EnsurePriority.Background, null, Ct);
+        Assert.Equal(EnsureOutcome.Incomplete, result.Outcome);
+        Assert.Equal([(FileEnsureState.Missing, "CDN_NOT_FOUND"), (FileEnsureState.Unavailable, "CDN_OFFLINE"), (FileEnsureState.StoreFailed, "OBJECT_STORE_DISK_FULL"),
+            (FileEnsureState.NeedsNetwork, "OBJECT_ACCESS_NEEDS_NETWORK"), (FileEnsureState.Stored, null)], StatesOf(result));
+        Assert.Equal(5, result.Final.FilesDone);
+        Assert.InRange(result.Final.BytesDone, 1, result.Final.BytesTotal - 1);
+        foreach (var id in (uint[])[1, 2, 3, 4]) Assert.Equal(FileStorage.NotStored, (await files.StatAsync(id, Ct)).File!.Storage);
+        Assert.Equal(FileStorage.Stored, (await files.StatAsync(5, Ct)).File!.Storage);
+    }
+
+    [Fact]
+    public async Task AlreadyStoredFilesCostNoRequests()
+    {
+        await using var files = await OpenAsync();
+        var result = await files.EnsureAsync(Many(100, 300), EnsurePriority.Interactive, null, Ct);
+        Assert.Equal(EnsureOutcome.Completed, result.Outcome);
+        Assert.All(result.Files, f => Assert.Equal(FileEnsureState.AlreadyStored, f.State));
+        var matching = await files.EnsureAsync(EnsureSelection.Matching(FileFilter.All with { Storage = new HashSet<FileStorage> { FileStorage.Stored } }),
+            EnsurePriority.Background, null, Ct);
+        Assert.Equal((uint?[])[100, 300], matching.Files.Select(f => f.FileDataId));
+        Assert.Equal(EnsureOutcome.Completed, matching.Outcome);
+        Assert.Empty(RequestsOf(100));
+        Assert.Empty(RequestsOf(300));
+        Assert.Equal((0, 0), (FetchesOf(100), FetchesOf(300)));
+        Assert.Equal(result.Final.BytesTotal, result.Final.BytesDone);
+    }
+
+    [Fact]
+    public async Task AnInteractiveEnsureJoinsAHeldBackgroundOne()
+    {
+        await using var files = await OpenAsync();
+        var hold = Hold(400);
+        var background = files.EnsureAsync(EnsureSelection.One(400), EnsurePriority.Background, null, Ct);
+        await hold.Seen(EnsurePriority.Background);
+        var interactive = files.EnsureAsync(Many(400, 100), EnsurePriority.Interactive, null, Ct);
+        await hold.Seen(EnsurePriority.Interactive);
+        Assert.False(background.IsCompleted);
+        Assert.False(interactive.IsCompleted);
+        hold.Release();
+
+        var (b, i) = (await background, await interactive);
+        Assert.Equal((EnsureOutcome.Completed, FileEnsureState.Stored), (b.Outcome, Assert.Single(b.Files).State));
+        Assert.Equal(EnsureOutcome.Completed, i.Outcome);
+        Assert.Equal([(FileEnsureState.Stored, null), (FileEnsureState.AlreadyStored, null)], StatesOf(i));
+        Assert.Equal(1, FetchesOf(400));
+        Assert.Contains(EnsurePriority.Interactive, RequestsOf(400));
+        Assert.Contains(EnsurePriority.Background, RequestsOf(400));
+    }
+
+    [Fact]
+    public async Task ProgressIsCoalescedAndEndsWithTheFinal()
+    {
+        await using var files = await OpenAsync(time: new StepClock(moving: false));
+        var reports = new Reports();
+        var result = await files.EnsureAsync(Many(500, 400, 100, 200, 300, 250), EnsurePriority.Background, reports, Ct);
+        var seen = reports.Seen;
+        // The clock stands still: the first report, then only the final.
+        Assert.InRange(seen.Count, 1, 2);
+        Assert.Equal(result.Final, seen[^1]);
+        Assert.All(seen, AssertBounded);
+        Assert.Equal((6, 6, true), (result.Final.FilesDone, result.Final.FilesTotal, result.Final.Listed));
+    }
+
+    [Fact]
+    public async Task ProgressIsBoundedAndNeverGoesBack()
+    {
+        await using var files = await OpenAsync(time: new StepClock(moving: true));
+        var reports = new Reports();
+        var result = await files.EnsureAsync(EnsureSelection.Matching(FileFilter.All), EnsurePriority.Background, reports, Ct);
+        var seen = reports.Seen;
+        // How many arrive depends on how fast the drain runs (a newer report replaces one not yet delivered), not on the clock.
+        Assert.NotEmpty(seen);
+        Assert.Equal(result.Final, seen[^1]);
+        Assert.All(seen, AssertBounded);
+        for (var i = 1; i < seen.Count; i++)
+        {
+            Assert.True(seen[i].FilesDone >= seen[i - 1].FilesDone && seen[i].FilesTotal >= seen[i - 1].FilesTotal);
+            Assert.True(seen[i].BytesDone >= seen[i - 1].BytesDone && seen[i].BytesTotal >= seen[i - 1].BytesTotal);
+            Assert.True(seen[i].CdnBytes >= seen[i - 1].CdnBytes);
+            Assert.True(seen[i].Listed || !seen[i - 1].Listed);
+        }
+        Assert.Equal((6, 6, true), (result.Final.FilesDone, result.Final.FilesTotal, result.Final.Listed));
+    }
+
+    /// <summary>1, 2 and 3 not stored, 4 stored; each with its own content.</summary>
+    private static IReadOnlyList<FakeFile> CancelFiles() =>
+    [
+        new(1, Content: BlteBuilder.Bytes(300, 11)),
+        new(2, Content: BlteBuilder.Bytes(300, 12)),
+        new(3, Content: BlteBuilder.Bytes(300, 13)),
+        new(4, Storage: FileStorage.Stored, Content: BlteBuilder.Bytes(300, 14)),
+    ];
+
+    [Fact]
+    public async Task CancelKeepsStoredFilesAndMarksTheRestCanceled()
+    {
+        await using var files = await OpenAsync(files: CancelFiles());
+        var hold = Hold(2);
+        using var cts = new CancellationTokenSource();
+        var reports = new Reports();
+        var running = files.EnsureAsync(Many(1, 2, 3, 4), EnsurePriority.Background, reports, cts.Token);
+        await hold.Seen(EnsurePriority.Background);
+        await cts.CancelAsync();
+
+        var result = await running;
+        Assert.Equal(EnsureOutcome.Canceled, result.Outcome);
+        Assert.Equal([(FileEnsureState.Stored, null), (FileEnsureState.Canceled, null), (FileEnsureState.Canceled, null), (FileEnsureState.AlreadyStored, null)],
+            StatesOf(result));
+        Assert.Equal((2, 4), (result.Final.FilesDone, result.Final.FilesTotal));
+        Assert.Equal(result.Final, reports.Seen[^1]);
+        Assert.Equal(FileStorage.Stored, (await files.StatAsync(1, Ct)).File!.Storage);
+        Assert.Equal(FileStorage.NotStored, (await files.StatAsync(2, Ct)).File!.Storage);
+        Assert.Equal(FileStorage.NotStored, (await files.StatAsync(3, Ct)).File!.Storage);
+        Assert.Equal(0, FetchesOf(3));
+    }
+
+    [Fact]
+    public async Task CancelBeforeTheStartCancelsEverything()
+    {
+        await using var files = await OpenAsync(files: CancelFiles());
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var result = await files.EnsureAsync(Many(1, 2), EnsurePriority.Interactive, null, cts.Token);
+        Assert.Equal(EnsureOutcome.Canceled, result.Outcome);
+        Assert.Equal([new FileEnsured(1, 1, FileEnsureState.Canceled, null), new FileEnsured(2, 2, FileEnsureState.Canceled, null)], result.Files);
+        Assert.Equal((0, 2), (result.Final.FilesDone, result.Final.FilesTotal));
+        Assert.Equal((0, 0), (FetchesOf(1), FetchesOf(2)));
+    }
+
+    [Fact]
+    public async Task EnsureOnADisposedHandleThrows()
+    {
+        var files = await OpenAsync();
+        await files.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => files.EnsureAsync(EnsureSelection.One(400), EnsurePriority.Interactive, null, Ct));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => files.EnsureAsync(EnsureSelection.Matching(FileFilter.All), EnsurePriority.Background, null, Ct));
+    }
+
+    [Fact]
+    public async Task EnsureChecksItsArguments()
+    {
+        await using var files = await OpenAsync();
+        await Assert.ThrowsAsync<ArgumentNullException>(() => files.EnsureAsync(null!, EnsurePriority.Interactive, null, Ct));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => files.EnsureAsync(EnsureSelection.One(400), (EnsurePriority)7, null, Ct));
+    }
 }
 
 public sealed class InMemoryFilesContractTests : FilesContractTests
 {
     private InMemoryFileSystem? last;
 
-    protected override IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20) =>
-        last = new InMemoryFileSystem(maxReadBytes).Add(build, locales, files);
+    protected override IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20,
+        TimeProvider? time = null) =>
+        last = new InMemoryFileSystem(maxReadBytes) { Time = time ?? TimeProvider.System }.Add(build, locales, files);
 
     protected override IFileSystem CreateFailing(BuildRef build, FilesOpenState state, string code) =>
         new InMemoryFileSystem().Fail(build, state, code);
@@ -1178,6 +1490,20 @@ public sealed class InMemoryFilesContractTests : FilesContractTests
         else last!.Names.Use(names);
         return Task.CompletedTask;
     }
+
+    protected override int FetchesOf(uint fileDataId) => last!.EnsureFetches.Count(id => id == fileDataId);
+
+    protected override IReadOnlyList<EnsurePriority> RequestsOf(uint fileDataId) =>
+        [.. last!.EnsureRequests.Where(r => r.FileDataId == fileDataId).Select(r => r.Priority)];
+
+    protected override FetchHold Hold(uint fileDataId)
+    {
+        var hold = new FetchHold();
+        var fs = last!;
+        fs.OnRequest = (id, priority) => { if (id == fileDataId) hold.Saw(priority); };
+        fs.BeforeFetch = async (id, _, ct) => { if (id == fileDataId) await hold.Released.WaitAsync(ct); };
+        return hold;
+    }
 }
 
 public sealed class RealFilesContractTests : FilesContractTests
@@ -1185,10 +1511,11 @@ public sealed class RealFilesContractTests : FilesContractTests
     private RealFiles? last;
     private RealNames? names;
 
-    protected override IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20)
+    protected override IFileSystem Create(BuildRef build, IReadOnlyList<string> locales, IReadOnlyList<FakeFile> files, long maxReadBytes = 256L << 20,
+        TimeProvider? time = null)
     {
         names = new RealNames();
-        last = FilesFixture.Real(build, locales, files, new FileSystemOptions { MaxReadBytes = maxReadBytes, Names = names });
+        last = FilesFixture.Real(build, locales, files, new FileSystemOptions { MaxReadBytes = maxReadBytes, Names = names, Time = time ?? TimeProvider.System });
         return last.Files;
     }
 
@@ -1206,5 +1533,31 @@ public sealed class RealFilesContractTests : FilesContractTests
     {
         if (use is null) names!.On = false;
         else await names!.UseAsync(last!.Files, last.Objects, use);
+    }
+
+    protected override int FetchesOf(uint fileDataId)
+    {
+        var key = last!.KeyOf(fileDataId);
+        return last.Objects.Fetched.Count(k => k == key);
+    }
+
+    protected override IReadOnlyList<EnsurePriority> RequestsOf(uint fileDataId)
+    {
+        var key = last!.KeyOf(fileDataId);
+        return [.. last.Objects.Asked.Where(a => a.Key == key).Select(a => a.Priority == FetchPriority.Interactive ? EnsurePriority.Interactive : EnsurePriority.Background)];
+    }
+
+    protected override FetchHold Hold(uint fileDataId)
+    {
+        var hold = new FetchHold();
+        var (key, objects) = (last!.KeyOf(fileDataId), last.Objects);
+        objects.BeforeAnswer = async (asked, ct) =>
+        {
+            if (asked != key) return;
+            // Layer 2's fake records the request before it waits here.
+            foreach (var p in RequestsOf(fileDataId)) hold.Saw(p);
+            await hold.Released.WaitAsync(ct);
+        };
+        return hold;
     }
 }

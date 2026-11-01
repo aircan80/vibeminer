@@ -86,7 +86,7 @@ internal sealed class FileReader
         EKey = variant.EKey ?? throw new ArgumentException("The variant has no encoded copy.", nameof(variant));
         Size = variant.DecodedSize ?? throw new ArgumentException("The variant has no declared size.", nameof(variant));
         CKey = variant.CKey;
-        Request = new(Variants.KeyOf(variant), variant.EncodedSize, variant.Location is { } l ? [l] : null);
+        Request = Variants.RequestOf(variant);
         this.objects = objects; this.cdn = cdn; this.keys = keys; this.layouts = layouts; this.maxReadBytes = maxReadBytes; this.decoded = decoded;
     }
 

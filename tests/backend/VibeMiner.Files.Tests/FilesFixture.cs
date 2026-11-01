@@ -175,6 +175,9 @@ internal sealed class RealFiles(FileSystem files, L3.InMemoryBuilds builds, InMe
         if (onStreamRead.TryGetValue(fileDataId, out var pending)) FilesFixture.Script(Objects, pending.Key, pending.Failure);
     }
 
+    /// <summary>The layer 2 key of a file's encoded copy (the placeholder key for a file without content).</summary>
+    public ObjectKey KeyOf(uint fileDataId) => encoded.TryGetValue(fileDataId, out var o) ? o.Key : FilesFixture.ObjectKeyOf(fileDataId);
+
     /// <summary>Puts a file's encoded copy in the store, as a download would (placeholder bytes for a file without content).</summary>
     public void MarkStored(uint fileDataId)
     {

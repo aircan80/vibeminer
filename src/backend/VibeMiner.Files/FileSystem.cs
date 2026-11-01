@@ -10,8 +10,12 @@ namespace VibeMiner.Files;
 
 public sealed record FileSystemOptions
 {
-    /// <summary>Files whose stored state one layer 2 call checks while listing.</summary>
+    /// <summary>Files whose stored state one layer 2 call checks while listing, and files one ensure batch fetches.</summary>
     public int PresenceBatch { get; init; } = 4096;
+    /// <summary>The least time between two <see cref="IBuildFiles.EnsureAsync"/> progress reports (the final one always goes); positive.</summary>
+    public TimeSpan ProgressInterval { get; init; } = TimeSpan.FromMilliseconds(100);
+    /// <summary>Times the progress reports.</summary>
+    public TimeProvider Time { get; init; } = TimeProvider.System;
     /// <summary>The most decoded bytes one <see cref="IBuildFiles.GetAsync"/> or <see cref="IBuildFiles.ReadRangeAsync"/> returns.</summary>
     public long MaxReadBytes { get; init; } = 256L << 20;
     /// <summary>The TACT keys encrypted chunks are decrypted with.</summary>
@@ -40,6 +44,8 @@ public sealed class FileSystem : IFileSystem
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxReadBytes, 0, nameof(options));
         ArgumentOutOfRangeException.ThrowIfGreaterThan(options.MaxReadBytes, Array.MaxLength, nameof(options));
         ArgumentNullException.ThrowIfNull(options.Keys, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.ProgressInterval, TimeSpan.Zero, nameof(options));
+        ArgumentNullException.ThrowIfNull(options.Time, nameof(options));
         this.builds = builds; this.objects = objects; this.options = options;
         names = new FileNames(objects, options.Names);
     }
@@ -101,9 +107,12 @@ internal static class Variants
     }
 
     public static ObjectKey KeyOf(FileVariant variant) => new(ObjectKeyType.Encoded, variant.EKey!.Value.ToBytes());
+
+    /// <summary>The layer 2 request for an encoded variant: its EKey, the encoded size ENCODING declares and its archive location.</summary>
+    public static ObjectRequest RequestOf(FileVariant variant) => new(KeyOf(variant), variant.EncodedSize, variant.Location is { } l ? [l] : null);
 }
 
-internal sealed class BuildFiles : IBuildFiles
+internal sealed partial class BuildFiles : IBuildFiles
 {
     /// <summary>The most files whose byte evidence one handle remembers by default; past it, nothing more is added.</summary>
     internal const int MaxRememberedFormats = 1_000_000;
@@ -149,10 +158,25 @@ internal sealed class BuildFiles : IBuildFiles
 
     private IBuild Opened => Volatile.Read(ref build) ?? throw new ObjectDisposedException(nameof(IBuildFiles), "The file handle is disposed.");
 
-    public async IAsyncEnumerable<BuildFile> ListAsync(FileFilter filter, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public IAsyncEnumerable<BuildFile> ListAsync(FileFilter filter, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(filter);
-        var build = Opened;
+        return ListFilesAsync(filter, cancellationToken);
+    }
+
+    private async IAsyncEnumerable<BuildFile> ListFilesAsync(FileFilter filter, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await foreach (var (file, _) in ListEntriesAsync(Opened, filter, detectFormats: true, cancellationToken).ConfigureAwait(false))
+            yield return file;
+    }
+
+    /// <summary>
+    /// The listing with each file's variant. Without <paramref name="detectFormats"/> and with no format filter, no format is
+    /// detected (every file's format is left Unknown, source None), so no stored bytes are read.
+    /// </summary>
+    private async IAsyncEnumerable<(BuildFile File, FileVariant Variant)> ListEntriesAsync(IBuild build, FileFilter filter, bool detectFormats,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         if (filter.FromId > filter.ToId) yield break;
         if (filter.Formats is { Count: 0 }) yield break;
@@ -193,9 +217,20 @@ internal sealed class BuildFiles : IBuildFiles
             if (pending.Count == 0) continue;
 
             var storage = await StorageOfAsync(pending, cancellationToken).ConfigureAwait(false);
+            if (!detectFormats && filter.Formats is null)
+            {
+                for (var i = 0; i < pending.Count; i++)
+                {
+                    if (filter.Storage is { } wanted && !wanted.Contains(storage[i])) continue;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yield return (ToFile(pending[i].Id, pending[i].Variant, storage[i], pendingNames[i], pendingNames[i] is null ? FilePathSource.None : FilePathSource.Listfile),
+                        pending[i].Variant);
+                }
+                continue;
+            }
             // Formats of the files that pass the other filters, at most DetectionReads ahead of the reader, yielded in order.
             using var detection = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var window = new Queue<(BuildFile File, ValueTask<(FileFormat, FileFormatSource)> Format)>(DetectionReads);
+            var window = new Queue<(BuildFile File, FileVariant Variant, ValueTask<(FileFormat, FileFormatSource)> Format)>(DetectionReads);
             try
             {
                 for (var i = 0; i <= pending.Count; i++)
@@ -204,16 +239,16 @@ internal sealed class BuildFiles : IBuildFiles
                     {
                         if (filter.Storage is { } wanted && !wanted.Contains(storage[i])) continue;
                         var file = ToFile(pending[i].Id, pending[i].Variant, storage[i], pendingNames[i], pendingNames[i] is null ? FilePathSource.None : FilePathSource.Listfile);
-                        window.Enqueue((file, FormatOfAsync(file, pending[i].Variant, detection.Token)));
+                        window.Enqueue((file, pending[i].Variant, FormatOfAsync(file, pending[i].Variant, detection.Token)));
                         if (window.Count < DetectionReads) continue;
                     }
                     while (window.Count > 0 && (i == pending.Count || window.Count >= DetectionReads))
                     {
-                        var (file, format) = window.Dequeue();
+                        var (file, variant, format) = window.Dequeue();
                         var (detected, source) = await format.ConfigureAwait(false);
                         if (filter.Formats is { } formats && !formats.Contains(detected)) continue;
                         cancellationToken.ThrowIfCancellationRequested();
-                        yield return file with { Format = detected, FormatSource = source };
+                        yield return (file with { Format = detected, FormatSource = source }, variant);
                     }
                 }
             }
