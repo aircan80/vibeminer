@@ -18,7 +18,7 @@ const revision = (await execute('git', ['rev-parse', 'HEAD'], { cwd: root })).st
 const dirty = (await execute('git', ['status', '--porcelain'], { cwd: root })).stdout.trim().length > 0;
 if (release && dirty) throw new Error('Release packaging needs a clean checkout; commit or discard local changes.');
 const hostRid = `${process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'osx' : 'linux'}-${process.arch}`;
-if (!['linux-x64', 'win-x64', 'osx-arm64', 'osx-x64'].includes(hostRid)) throw new Error(`Unconfigured native target: ${hostRid}`);
+if (!['linux-x64', 'linux-arm64', 'win-x64', 'osx-arm64', 'osx-x64'].includes(hostRid)) throw new Error(`Unconfigured native target: ${hostRid}`);
 const localDotnet = path.join(root, '.local/toolchains/dotnet', process.platform === 'win32' ? 'dotnet.exe' : 'dotnet');
 const dotnet = process.env.VIBEMINER_DOTNET || (existsSync(localDotnet) ? localDotnet : 'dotnet');
 const stage = path.join(root, '.local/package-stage', hostRid);

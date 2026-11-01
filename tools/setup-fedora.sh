@@ -3,7 +3,7 @@
 # It checks each requirement and installs only what is missing:
 #   - Fedora packages: git, gh, tmux, the .NET runtime libraries and Electron's runtime libraries (e2e fonts come from the dejavu-fonts-ttf npm package)
 #   - the .NET SDK pinned in global.json, into .local/toolchains/dotnet
-#   - Node and npm pinned in .nvmrc and package.json, into .local/toolchains/node-v<version>-linux-x64
+#   - Node and npm pinned in .nvmrc and package.json, into .local/toolchains/node-v<version>-linux-<x64|arm64>
 #   - npm packages and the locked NuGet restore
 # The toolchains live in the checkout (ignored by git), and tools/dev-env.sh picks them up.
 #
@@ -36,7 +36,12 @@ if [[ ! -r /etc/fedora-release ]]; then
   echo "setup-fedora: this script is for Fedora (no /etc/fedora-release)." >&2
   exit 1
 fi
-[[ "$(uname -m)" == x86_64 ]] || { echo "setup-fedora: only x86_64 is supported (the pinned Node download is linux-x64)." >&2; exit 1; }
+# Node names the CPU x64 or arm64; dotnet-install.sh detects it by itself.
+case "$(uname -m)" in
+  x86_64) node_arch=x64 ;;
+  aarch64|arm64) node_arch=arm64 ;;
+  *) echo "setup-fedora: only x86_64 and aarch64 are supported, not $(uname -m)." >&2; exit 1 ;;
+esac
 
 # Versions come from the repo, so the script never drifts from the pins.
 dotnet_version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([0-9.]*\)".*/\1/p' "$root/global.json" | head -1)"
@@ -74,7 +79,7 @@ else
 fi
 
 say "Node $node_version"
-node_dir="$toolchains/node-v$node_version-linux-x64"
+node_dir="$toolchains/node-v$node_version-linux-$node_arch"
 if [[ -x "$node_dir/bin/node" ]] && [[ "$("$node_dir/bin/node" --version)" == "v$node_version" ]]; then
   ok "$node_dir"
 else
@@ -82,7 +87,7 @@ else
   if ! $dry_run; then
     mkdir -p "$toolchains"
     base="https://nodejs.org/dist/v$node_version"
-    tarball="node-v$node_version-linux-x64.tar.xz"
+    tarball="node-v$node_version-linux-$node_arch.tar.xz"
     work="$(mktemp -d)"
     trap 'rm -rf "$work"' EXIT
     curl -fsSL "$base/$tarball" -o "$work/$tarball"
@@ -90,7 +95,7 @@ else
     (cd "$work" && grep " $tarball\$" SHASUMS256.txt | sha256sum -c --quiet) || { echo "setup-fedora: Node download failed its checksum." >&2; exit 1; }
     tar -xJf "$work/$tarball" -C "$toolchains"
   else
-    printf '  would download and verify %s\n' "node-v$node_version-linux-x64.tar.xz"
+    printf '  would download and verify %s\n' "node-v$node_version-linux-$node_arch.tar.xz"
   fi
 fi
 

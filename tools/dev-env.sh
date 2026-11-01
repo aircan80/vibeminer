@@ -25,7 +25,11 @@ _vibeminer_dev_env() {
     fi
   fi
 
-  local node_bin="$tools_root/.local/toolchains/node-v24.22.0-linux-x64/bin"
+  # Node's own name for the CPU (x64 or arm64) and the version pinned in .nvmrc.
+  local node_arch node_version
+  case "$(uname -m)" in aarch64|arm64) node_arch=arm64 ;; *) node_arch=x64 ;; esac
+  node_version="$(tr -d '[:space:]v' < "$root/.nvmrc" 2>/dev/null)"
+  local node_bin="$tools_root/.local/toolchains/node-v${node_version:-24.22.0}-linux-$node_arch/bin"
   if [[ -d "$node_bin" ]]; then
     case ":$PATH:" in *":$node_bin:"*) ;; *) export PATH="$node_bin:$PATH" ;; esac
   fi

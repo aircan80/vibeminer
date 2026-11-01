@@ -9,7 +9,7 @@ VibeMiner now has a runnable Electron/React interface and a C# discovery engine 
 - Electron **44.9.0**, React **19.3.1**, TypeScript **7.0.2**, Vite **8.3.4**; exact dependencies are locked in `package-lock.json` and the NuGet project lockfiles.
 - Git and native desktop libraries required by Electron on the development platform.
 
-On Fedora, `tools/setup-fedora.sh` installs everything above that's missing: the system packages, the pinned .NET SDK and Node in `.local/toolchains/`, npm, and the project dependencies. It's safe to run again, and `--dry-run` only reports.
+On Fedora (x86_64 or aarch64), `tools/setup-fedora.sh` installs everything above that's missing: the system packages, the pinned .NET SDK and Node in `.local/toolchains/`, npm, and the project dependencies. It's safe to run again, and `--dry-run` only reports.
 
 If you have local SDKs under the ignored `.local/toolchains/`, load them with:
 
@@ -74,7 +74,7 @@ Edit `contracts/discovery.schema.json` as the canonical wire schema and run `npm
 npm run package:desktop
 ```
 
-The package helper publishes a self-contained C# engine for the host (`linux-x64`, `win-x64`, `osx-arm64` or `osx-x64`) and bundles it with Electron. There is no cross-compilation: each target is packaged on its own OS. Executables:
+The package helper publishes a self-contained C# engine for the host (`linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64` or `osx-x64`; `linux-arm64` is untested) and bundles it with Electron. There is no cross-compilation: each target is packaged on its own OS. Executables:
 
 | Host | Executable |
 | --- | --- |

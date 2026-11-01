@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const live = process.argv.includes('--live');
 const suppliedPath = process.argv.slice(2).find(value => value !== '--live');
 const defaultPackage = {
-  linux: 'VibeMiner-linux-x64/vibeminer',
+  linux: `VibeMiner-linux-${process.arch}/vibeminer`,
   win32: 'VibeMiner-win32-x64/vibeminer.exe',
   darwin: `VibeMiner-darwin-${process.arch}/VibeMiner.app/Contents/MacOS/vibeminer`,
 }[process.platform];
