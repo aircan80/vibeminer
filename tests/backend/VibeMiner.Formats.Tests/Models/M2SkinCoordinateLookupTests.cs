@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using VibeMiner.Formats.Models;
 using Xunit;
-using static VibeMiner.Formats.Tests.Models.ModelFixtures;
+using static VibeMiner.Formats.Testing.ModelFixtures;
 
 namespace VibeMiner.Formats.Tests.Models;
 

@@ -11,7 +11,7 @@ internal sealed record ModelCase(string Name,byte[] Model,byte[] Skin,params str
     public override string ToString()=>Name;
 }
 
-/// <summary>Authored M2/SKIN bytes only; no game content. The builders are copies of VibeMiner.Formats.Tests/Models/ModelFixtures.cs,
+/// <summary>Authored M2/SKIN bytes only; no game content. The builders are copies of VibeMiner.Formats.Testing/ModelFixtures.cs,
 /// with a header-size switch so the flagged 312-byte combiner header can carry a combiner span.</summary>
 internal static class ModelFixtures
 {

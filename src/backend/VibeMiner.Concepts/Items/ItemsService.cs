@@ -1,7 +1,9 @@
 using VibeMiner.Builds;
+using VibeMiner.Concepts.Tables;
 using VibeMiner.Files;
 using VibeMiner.Formats;
 using VibeMiner.Formats.Images;
+using VibeMiner.Formats.Models;
 using VibeMiner.Formats.Tables;
 
 namespace VibeMiner.Concepts.Items;
@@ -9,6 +11,9 @@ namespace VibeMiner.Concepts.Items;
 /// <summary>
 /// Bounds of <see cref="ItemsService"/>. <see cref="MaxScanRows"/> is the most table rows one list call looks at (at least 1).
 /// <see cref="MaxLabelScanRows"/> is the most rows one class or subclass label's key scan looks at, checked between pages (at least 1).
+/// <see cref="MaxRelationIndexEntries"/> is the most rows a handle's relation indexes hold together (D471);
+/// <see cref="MaxAppearanceRows"/> the most ItemModifiedAppearance rows one detail keeps, <see cref="MaxResourceFiles"/> the most
+/// files one resource ID keeps, and <see cref="MaxModels"/> the most model files one detail reads (D467-D470). All at least 1.
 /// </summary>
 public sealed record ItemsOptions
 {
@@ -16,6 +21,18 @@ public sealed record ItemsOptions
     public const int DefaultMaxLabelScanRows = 200_000;
     private readonly int maxScanRows = DefaultMaxScanRows;
     private readonly int maxLabelScanRows = DefaultMaxLabelScanRows;
+    public const int DefaultMaxRelationIndexEntries = RelationIndexes.DefaultMaxEntries, DefaultMaxAppearanceRows = 16, DefaultMaxResourceFiles = 32, DefaultMaxModels = 8;
+
+    public int MaxRelationIndexEntries { get; init => field = AtLeastOne(value); } = DefaultMaxRelationIndexEntries;
+    public int MaxAppearanceRows { get; init => field = AtLeastOne(value); } = DefaultMaxAppearanceRows;
+    public int MaxResourceFiles { get; init => field = AtLeastOne(value); } = DefaultMaxResourceFiles;
+    public int MaxModels { get; init => field = AtLeastOne(value); } = DefaultMaxModels;
+
+    private static int AtLeastOne(int value)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+        return value;
+    }
 
     public int MaxLabelScanRows
     {
@@ -50,6 +67,8 @@ public sealed record ItemsOptions
 public sealed class ItemsService : IItems
 {
     private const int PageRows = 1000;
+    /// <summary>The item's appearance rows name more distinct model files than <see cref="ItemsOptions.MaxModels"/>.</summary>
+    public const string ModelCapCode = "ITEM_MODEL_CAP";
     private readonly ITables tables;
     private readonly IFileSystem files;
     private readonly BlpImages images;
@@ -77,6 +96,9 @@ public sealed class ItemsService : IItems
         private static readonly TableRef Sparse = TableRef.ForName(ItemLayout.SparseTable);
         private readonly SemaphoreSlim filesGate = new(1, 1);
         private IBuildFiles? buildFiles;
+        private BuildModels? buildModels;
+        // Relation indexes live as long as the tables handle (D471).
+        private readonly RelationIndexes relations = new(tables, owner.options.MaxRelationIndexEntries);
         private int disposed;
 
         public BuildRef Build => tables.Build;
@@ -97,6 +119,7 @@ public sealed class ItemsService : IItems
             {
                 if (buildFiles is not null) await buildFiles.DisposeAsync().ConfigureAwait(false);
                 buildFiles = null;
+                buildModels = null;
             }
             finally { filesGate.Release(); }
             await tables.DisposeAsync().ConfigureAwait(false);
@@ -256,7 +279,14 @@ public sealed class ItemsService : IItems
             catch (ItemsSourceException problem) { return new(ResultState(problem.Code), null, item, sparse, null, problem.Code, problem.Message); }
             var icon = await IconAsync(summary.IconFileDataId, cancellationToken).ConfigureAwait(false);
             var labels = await ItemClassifications.ResolveAsync(tables, summary, owner.options.MaxLabelScanRows, priority, cancellationToken).ConfigureAwait(false);
-            return new(ItemResultState.Found, new ItemDetail(summary, itemRow, sparseRow, icon, facts, labels), item, sparse);
+            var appearances = await new ItemAppearanceReader(tables, relations, owner.options, priority, cancellationToken).ReadAsync(id).ConfigureAwait(false);
+            appearances = appearances with { Models = await ModelsAsync(appearances, cancellationToken).ConfigureAwait(false) };
+            List<ItemIconSourced> icons = [new(ItemLayout.ItemTable, "IconFileDataID", id, icon)];
+            // The default appearance's own icon, next to Item's, each with its field; neither is picked over the other (D469).
+            if (appearances.DefaultIndex is { } at && appearances.Rows[at].Appearance is { State: ItemRefState.Found, Id: { } appearanceId } byDefault)
+                icons.Add(new(ItemAppearanceReader.AppearanceTable, ItemAppearanceReader.IconColumn, appearanceId,
+                    await IconAsync(byDefault.DefaultIconFileDataId, cancellationToken).ConfigureAwait(false)));
+            return new(ItemResultState.Found, new ItemDetail(summary, itemRow, sparseRow, icon, facts, labels) { Icons = icons, Appearances = appearances }, item, sparse);
         }
 
         // The name state already says how the ItemSparse lookup went.
@@ -273,7 +303,7 @@ public sealed class ItemsService : IItems
         {
             if (fileDataId is not { } id) return new(ItemIconState.FieldUnavailable, null);
             if (id == 0) return new(ItemIconState.NoIcon, 0);
-            var (filesOf, failed) = await FilesAsync(cancellationToken).ConfigureAwait(false);
+            var (filesOf, _, failed) = await FilesAsync(cancellationToken).ConfigureAwait(false);
             if (filesOf is null) return new(ItemIconState.FilesNotOpen, id, Code: failed!.Code, Message: failed.Message, ObservedAt: failed.ObservedAt);
             var inspected = await owner.images.InspectAsync(filesOf, FileRef.Id(id), cancellationToken).ConfigureAwait(false);
             // The variant layer 4 picked for this locale (D160): a stat is a lookup, never a fetch.
@@ -293,18 +323,42 @@ public sealed class ItemsService : IItems
             _ => ItemIconState.FileFailed,
         };
 
+        // Every distinct model file the rows' ModelFileData rows name, in first-seen order; past the cap listed, never read (D470).
+        private async Task<ItemModelRefs> ModelsAsync(ItemAppearanceSet set, CancellationToken cancellationToken)
+        {
+            var ids = set.Rows.SelectMany(row => row.Appearance.Display?.Slots ?? []).SelectMany(slot => slot.Model.Files)
+                .Select(file => file.FileDataId).Distinct().ToArray();
+            if (ids.Length == 0) return ItemModelRefs.None;
+            var cap = owner.options.MaxModels;
+            var models = new List<ItemModelRef>(ids.Length);
+            var (_, modelsOf, failed) = await FilesAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var fdid in ids.Take(cap))
+            {
+                if (modelsOf is null) { models.Add(new(fdid, ItemModelRefState.FilesNotOpen, Code: failed!.Code, Message: failed.Message, ObservedAt: failed.ObservedAt)); continue; }
+                var read = await modelsOf.ReadModelAsync(FileRef.Id(fdid), cancellationToken).ConfigureAwait(false);
+                models.Add(new(fdid, ItemModelRefState.Read, read.State,
+                    [.. read.References.Where(r => r.Kind == ModelReferenceKind.Texture).Select(r => new ItemModelTexture(r.Ordinal, r.TextureType, r.FileDataId, r.State))],
+                    read.Model?.SkinFileDataIds.Count ?? 0, read.Code, read.Message, read.ObservedAt, read.KeyNames));
+            }
+            models.AddRange(ids.Skip(cap).Select(fdid => new ItemModelRef(fdid, ItemModelRefState.NotRead)));
+            return ids.Length > cap
+                ? new(ItemModelsState.Capped, models, ModelCapCode, $"The item names {ids.Length} model files; a detail reads at most {cap}.")
+                : new(ItemModelsState.Complete, models);
+        }
+
         // The build's layer 4 handle, opened once and held until dispose. A failed open isn't kept: the next detail tries again.
-        private async Task<(IBuildFiles? Files, FilesOpenResult? Failed)> FilesAsync(CancellationToken cancellationToken)
+        private async Task<(IBuildFiles? Files, BuildModels? Models, FilesOpenResult? Failed)> FilesAsync(CancellationToken cancellationToken)
         {
             await filesGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
-                if (buildFiles is not null) return (buildFiles, null);
+                if (buildFiles is not null) return (buildFiles, buildModels, null);
                 var opened = await owner.files.ForAsync(Build, Locale, cancellationToken).ConfigureAwait(false);
-                if (opened.State != FilesOpenState.Open || opened.Files is null) return (null, opened);
+                if (opened.State != FilesOpenState.Open || opened.Files is null) return (null, null, opened);
                 buildFiles = opened.Files;
-                return (buildFiles, null);
+                buildModels = new BuildModels(buildFiles);
+                return (buildFiles, buildModels, null);
             }
             finally { filesGate.Release(); }
         }

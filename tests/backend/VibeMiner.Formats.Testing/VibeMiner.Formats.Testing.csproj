@@ -1,4 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable></PropertyGroup><ItemGroup>
-  <!-- The in-memory ITables, the standard test double for layer 6 and up. -->
+  <!-- The in-memory ITables, the standard test double for layer 6 and up, and synthetic M2 bytes (ModelFixtures). -->
   <ProjectReference Include="../../../src/backend/VibeMiner.Formats/VibeMiner.Formats.csproj" />
 </ItemGroup></Project>

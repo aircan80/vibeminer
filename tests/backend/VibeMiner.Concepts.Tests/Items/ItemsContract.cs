@@ -183,6 +183,19 @@ public abstract class ItemsContract
     }
 
     [Fact]
+    public async Task A_detail_labels_its_icon_by_source_and_names_missing_appearance_tables()
+    {
+        await using var items = await OpenAsync();
+        var detail = (await items.GetAsync(20, Now, default)).Detail!;
+        var icon = Assert.Single(detail.Icons);
+        Assert.Equal(("Item", "IconFileDataID", 20u, ItemIconState.Ready), (icon.Table, icon.Column, icon.RowId, icon.Icon.State));
+        Assert.Equal((ItemAppearancesState.TableNotReadable, TableState.NoDefinition), (detail.Appearances.State, detail.Appearances.Table!.State));
+        Assert.Equal((ItemDefaultAppearanceState.Unknown, ItemModelsState.Complete), (detail.Appearances.Default, detail.Appearances.Models.State));
+        Assert.Empty(detail.Appearances.Rows);
+        Assert.Empty(detail.Appearances.Models.Models);
+    }
+
+    [Fact]
     public async Task An_id_no_item_row_has_is_absent_even_with_a_sparse_row()
     {
         await using var items = await OpenAsync();

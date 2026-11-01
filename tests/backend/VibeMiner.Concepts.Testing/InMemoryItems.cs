@@ -15,12 +15,15 @@ namespace VibeMiner.Concepts.Testing;
 /// Partial Item can't read: it lists, and its detail is Unknown or Protected (with <see cref="ItemKey"/>). Facts follow
 /// <see cref="ItemFacts.Project"/> on those rows and <see cref="ItemColumns"/> / <see cref="SparseColumns"/> (by default an ID
 /// column, then <c>Cell1</c>... that no fact reads). <see cref="Labels"/> is what a detail finds; when null the item-side key rules
-/// apply and a lookable key reads as a build without the target tables (TableNotReadable, NoDefinition).
+/// apply and a lookable key reads as a build without the target tables (TableNotReadable, NoDefinition). <see cref="Appearances"/>
+/// is what a detail finds; when null it reads as a build without ItemModifiedAppearance (TableNotReadable, NoDefinition, no
+/// models). <see cref="Icons"/> defaults to the item's icon labelled Item.IconFileDataID, plus none from an appearance.
 /// </summary>
 public sealed record FakeItem(uint Id, ItemName Name, IReadOnlyList<ItemSourceValue>? Values = null, uint? IconFileDataId = null,
     ItemIcon? Icon = null, bool IsCopy = false, uint? CopySourceId = null, string? SparseKey = null, TableRow? ItemRow = null,
     TableRow? SparseRow = null, ItemRowState Item = ItemRowState.Found, string? ItemKey = null,
-    IReadOnlyList<Db2Column>? ItemColumns = null, IReadOnlyList<Db2Column>? SparseColumns = null, ItemClassLabels? Labels = null);
+    IReadOnlyList<Db2Column>? ItemColumns = null, IReadOnlyList<Db2Column>? SparseColumns = null, ItemClassLabels? Labels = null,
+    ItemAppearanceSet? Appearances = null, IReadOnlyList<ItemIconSourced>? Icons = null);
 
 /// <summary>
 /// The standard <see cref="IItems"/> test double for layer 7 and up: items are seeded per build and locale, nothing is read. A
@@ -196,7 +199,14 @@ public sealed class InMemoryItems : IItems
                 var sparseColumns = sparseState == ItemSparseState.Unknown ? null : item.SparseColumns ?? DefaultColumns(sparseRow?.Row.Values.Count ?? 1);
                 var facts = ItemFacts.Project(item.ItemColumns ?? DefaultColumns(itemRow.Row.Values.Count), sparseColumns, itemRow.Row, sparseRow?.Row, sparseState);
                 var labels = item.Labels ?? new(DefaultLabel(item, false), DefaultLabel(item, true));
-                return Task.FromResult(new ItemResult(ItemResultState.Found, new ItemDetail(Summary(item), itemRow, sparseRow, icon, facts, labels), null, null));
+                var appearances = item.Appearances ?? new ItemAppearanceSet(ItemAppearancesState.TableNotReadable, [], ItemDefaultAppearanceState.Unknown, null, 0,
+                    new TableEntry(0, "ItemModifiedAppearance", TableState.NoDefinition, true, null, null, null), ItemModelRefs.None);
+                var detail = new ItemDetail(Summary(item), itemRow, sparseRow, icon, facts, labels)
+                {
+                    Icons = item.Icons ?? [new("Item", "IconFileDataID", id, icon)],
+                    Appearances = appearances,
+                };
+                return Task.FromResult(new ItemResult(ItemResultState.Found, detail, null, null));
             }
             return Task.FromResult(new ItemResult(ItemResultState.Absent, null, null, null));
         }

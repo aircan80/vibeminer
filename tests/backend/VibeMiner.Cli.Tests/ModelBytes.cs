@@ -5,7 +5,7 @@ using System.Text;
 namespace VibeMiner.Cli.Tests;
 
 // Synthetic M2 and SKIN bytes for the model section of the file detail, the minimum of
-// tests/backend/VibeMiner.Formats.Tests/Models/ModelFixtures.cs (Cli.Tests can't reference Formats.Tests). Authored, no game data.
+// tests/backend/VibeMiner.Formats.Testing/ModelFixtures.cs (Cli.Tests can't reference Formats.Tests). Authored, no game data.
 internal static class ModelBytes
 {
     /// <summary>A chunked model: MD21 first (as real files are, so the bytes say M2Chunked), then the given chunks.</summary>

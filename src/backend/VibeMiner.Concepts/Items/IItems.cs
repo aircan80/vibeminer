@@ -137,9 +137,15 @@ public sealed record ItemResult(ItemResultState State, ItemDetail? Detail, Table
 /// <summary>
 /// One item's detail: the summary, its source rows exactly as layer 5 read them, its icon, its facts (D454) and its class and
 /// subclass labels (D455). Facts and labels are states of their own and never block the detail. Later slices add effects as
-/// further members.
+/// further members. <see cref="Icons"/> are the icons with the field each came from: <see cref="Icon"/> (Item.IconFileDataID)
+/// first, then the default appearance's DefaultIconFileDataID when there is one (D469); none is picked as "the" icon.
+/// <see cref="Appearances"/> are the item's appearances and model files (D467-D470), never in a list.
 /// </summary>
-public sealed record ItemDetail(ItemSummary Summary, TableRow ItemRow, TableRow? SparseRow, ItemIcon Icon, ItemFactSet Facts, ItemClassLabels Labels);
+public sealed record ItemDetail(ItemSummary Summary, TableRow ItemRow, TableRow? SparseRow, ItemIcon Icon, ItemFactSet Facts, ItemClassLabels Labels)
+{
+    public required IReadOnlyList<ItemIconSourced> Icons { get; init; }
+    public required ItemAppearanceSet Appearances { get; init; }
+}
 
 public enum ItemIconState
 {

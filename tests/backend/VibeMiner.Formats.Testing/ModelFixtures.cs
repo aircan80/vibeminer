@@ -2,21 +2,21 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Text;
 
-namespace VibeMiner.Formats.Tests.Models;
+namespace VibeMiner.Formats.Testing;
 
-// Synthetic model and SKIN builders shared by the reader tests and the layer 4 model tests (moved from M2StaticDecoderTests).
-internal static class ModelFixtures
+/// <summary>Synthetic M2 model and SKIN bytes for the layer 5 reader and model tests and the layers above. Authored, no game content.</summary>
+public static class ModelFixtures
 {
-    internal static byte[] Modern(byte[] body) => Chunks(("SFID", Words32(900, 901)), ("TXID", Words32(700, 0)), ("MD21", body));
-    internal static byte[] Append(byte[] body, int at, byte[] payload, int count)
+    public static byte[] Modern(byte[] body) => Chunks(("SFID", Words32(900, 901)), ("TXID", Words32(700, 0)), ("MD21", body));
+    public static byte[] Append(byte[] body, int at, byte[] payload, int count)
     { var result = body.Concat(payload).ToArray(); U32(result, at, (uint)count); U32(result, at + 4, (uint)body.Length); return result; }
     // Authored files: offsets are explicit native-format facts, with deliberately asymmetric geometry.
-    internal static byte[] Model(uint version = 274, uint firstTextureType = 0, bool activeChannels = false, bool twoCombos = false, int vertices = 4)
+    public static byte[] Model(uint version = 274, uint firstTextureType = 0, bool activeChannels = false, bool twoCombos = false, int vertices = 4)
     {
         var body = Body(version, firstTextureType, activeChannels, twoCombos, vertices);
         return version == 264 ? body : Chunks(("SFID", Words32(900, 901)), ("TXID", Words32(700, 0)), ("MD21", body));
     }
-    internal static byte[] Body(uint version = 274, uint firstTextureType = 0, bool activeChannels = false, bool twoCombos = false, int vertices = 4)
+    public static byte[] Body(uint version = 274, uint firstTextureType = 0, bool activeChannels = false, bool twoCombos = false, int vertices = 4)
     {
         using var output = new MemoryStream(); output.SetLength(304); output.Position = 304; using var w = new BinaryWriter(output, Encoding.UTF8, true);
         var descriptors = new List<(int At, int Count, int Offset)>();
@@ -33,7 +33,7 @@ internal static class ModelFixtures
         var bytes = output.ToArray(); "MD20"u8.CopyTo(bytes); U32(bytes, 4, version); U32(bytes, 68, 1);
         foreach (var d in descriptors) { U32(bytes, d.At, (uint)d.Count); U32(bytes, d.At + 4, (uint)d.Offset); } return bytes;
     }
-    internal static byte[] Skin(uint version = 274, int triangleCount = 3, bool shadows = false, bool twoBatches = false)
+    public static byte[] Skin(uint version = 274, int triangleCount = 3, bool shadows = false, bool twoBatches = false)
     {
         var header = version == 264 ? 48 : 56; using var output = new MemoryStream(); output.SetLength(header); output.Position = header;
         using var w = new BinaryWriter(output, Encoding.UTF8, true); var ds = new List<(int At, int Count, int Offset)>();
@@ -46,9 +46,9 @@ internal static class ModelFixtures
         if (shadows && header == 56) A(48, 1, x => x.Write(new byte[12]));
         var bytes = output.ToArray(); "SKIN"u8.CopyTo(bytes); foreach (var d in ds) { U32(bytes, d.At, (uint)d.Count); U32(bytes, d.At + 4, (uint)d.Offset); } return bytes;
     }
-    internal static byte[] Chunks(params (string Id, byte[] Payload)[] chunks)
+    public static byte[] Chunks(params (string Id, byte[] Payload)[] chunks)
     { using var output = new MemoryStream(); using var w = new BinaryWriter(output); foreach (var c in chunks) { w.Write(Encoding.ASCII.GetBytes(c.Id)); w.Write((uint)c.Payload.Length); w.Write(c.Payload); } return output.ToArray(); }
-    internal static byte[] Words32(params uint[] words) { var bytes = new byte[words.Length * 4]; for (var i = 0; i < words.Length; i++) U32(bytes, i * 4, words[i]); return bytes; }
+    public static byte[] Words32(params uint[] words) { var bytes = new byte[words.Length * 4]; for (var i = 0; i < words.Length; i++) U32(bytes, i * 4, words[i]); return bytes; }
     private static void U32(byte[] bytes, int at, uint value) => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(at), value);
     private static void U16(byte[] bytes, int at, ushort value) => BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(at), value);
 }
