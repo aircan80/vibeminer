@@ -149,6 +149,12 @@
           "VibeMiner.ObjectAccess": "[1.0.0, )"
         }
       },
+      "vibeminer.files.testing": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Files": "[1.0.0, )"
+        }
+      },
       "vibeminer.formats": {
         "type": "Project",
         "dependencies": {

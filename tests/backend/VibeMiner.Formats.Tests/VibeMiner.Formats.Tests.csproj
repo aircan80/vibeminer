@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup>
-  <!-- Layer 5 tests (D137): layer 5 code plus the layer 2 fakes. Synthetic data only; no object store, no sockets. -->
+  <!-- Layer 5 tests (D137): layer 5 code plus the layer 2 and layer 4 fakes. Synthetic data only; no object store, no sockets. -->
   <!-- Source tree root, which the bundled-definition tests use to decode the pinned files independently (PinnedDefinitionFiles). -->
   <AssemblyMetadata Include="VibeMinerRepositoryRoot" Value="$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..'))" />
   <Compile Include="../VibeMiner.Backend.Tests/RepositoryPaths.cs" Link="RepositoryPaths.cs" />
   <ProjectReference Include="../../../src/backend/VibeMiner.Formats/VibeMiner.Formats.csproj" />
   <ProjectReference Include="../VibeMiner.ObjectAccess.Testing/VibeMiner.ObjectAccess.Testing.csproj" />
+  <ProjectReference Include="../VibeMiner.Files.Testing/VibeMiner.Files.Testing.csproj" />
   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
   <PackageReference Include="xunit" Version="2.9.3" />
   <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1"><PrivateAssets>all</PrivateAssets></PackageReference>

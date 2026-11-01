@@ -178,7 +178,7 @@ public sealed class Db2TableTests
     private sealed record Column(short Bits,ushort Position,ushort Offset,ushort Width,int Additional,uint Kind,uint P1,uint P2,uint P3,byte[] Aux);
     private sealed record Part(byte[] Records,uint[] Ids,byte[] Strings,(uint Target,uint Source)[] Copies,ulong Key=0,uint[]? EncryptedIds=null);
     private static DbdDocument Definition(string columns,string fields)=>DbdDefinitionReader.Parse(Encoding.UTF8.GetBytes("COLUMNS\n"+columns+"\n\nLAYOUT 01020304\nBUILD 1.2.3.4\n"+fields+"\n"));
-    private static (byte[] Bytes,DbdDocument Definition) ScalarFixture()
+    internal static (byte[] Bytes,DbdDocument Definition) ScalarFixture()
     {
         var columns=new[]{new Column(24,0,0,8,0,0,0,0,0,[]),new Column(0,1,8,32,0,0,0,0,0,[]),new Column(0,5,40,32,0,0,0,0,0,[]),new Column(-32,9,72,64,0,0,0,0,0,[])};
         var records=new byte[34];records[0]=255;records[17]=128;BinaryPrimitives.WriteSingleLittleEndian(records.AsSpan(1),1.25f);BinaryPrimitives.WriteSingleLittleEndian(records.AsSpan(18),-0.5f);

@@ -132,7 +132,7 @@ public sealed class Db2HoleTests
 
     private static Task<Db2Completion> Read(IDb2ByteSource input,Sink sink,Db2Limits? limits=null,CancellationToken token=default,DbdDocument? definition=null)
         =>Db2Reader.ReadAsync(input,definition??Definition(),"1.2.3.4",limits??new(AllowPartialEncryptedSections:true),sink,token);
-    private static DbdDocument Definition(bool text=false)=>DbdDefinitionReader.Parse(Encoding.UTF8.GetBytes("COLUMNS\nint ID\n"+(text?"string":"int")+" Value\n\nLAYOUT 01020304\nBUILD 1.2.3.4\n$noninline,id$ID<u32>\nValue"+(text?"":"<u32>")+"\n"));
+    internal static DbdDocument Definition(bool text=false)=>DbdDefinitionReader.Parse(Encoding.UTF8.GetBytes("COLUMNS\nint ID\n"+(text?"string":"int")+" Value\n\nLAYOUT 01020304\nBUILD 1.2.3.4\n$noninline,id$ID<u32>\nValue"+(text?"":"<u32>")+"\n"));
     private static Db2Hole Hole(long offset,long length,int ordinal=0)=>new(offset,length,$"chunk{ordinal}:FFFFFFFFFFFFFFFF"); // no universal equality to WDC5 section key.
     private static MemoryByteSource Project(byte[] backing,IReadOnlyList<Db2Hole> holes)=>new(backing,holes);
     private sealed class Sink:IDb2Consumer
@@ -141,8 +141,8 @@ public sealed class Db2HoleTests
         public ValueTask HeaderAsync(Db2TableHeader header,CancellationToken token){Header=header;AfterHeader?.Invoke();return ValueTask.CompletedTask;}
         public ValueTask RowAsync(Db2Row row,CancellationToken token){Rows.Add(row);return ValueTask.CompletedTask;}
     }
-    private sealed record Fixture(byte[] Bytes,int PrefixEnd,int[] Starts,int[] Ends);
-    private static Fixture Build(bool interleaved=false,bool lastKeyed=false,int gap=0,bool zero=false,bool common=false)
+    internal sealed record Fixture(byte[] Bytes,int PrefixEnd,int[] Starts,int[] Ends);
+    internal static Fixture Build(bool interleaved=false,bool lastKeyed=false,int gap=0,bool zero=false,bool common=false)
     {
         var keys=interleaved?new ulong[]{0,123,lastKeyed?456ul:0}:new ulong[]{0,123};
         var ids=interleaved?new uint[]{zero?0u:7u,21,30}:new uint[]{zero?0u:7u,21};

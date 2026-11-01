@@ -32,7 +32,7 @@ public interface IDb2Consumer
     ValueTask RowAsync(Db2Row row,CancellationToken token);
 }
 
-/// <summary>The layer 5 input until layer 4's ranged reads land (#172): an immutable decoded DB2 file of
+/// <summary>The DB2 reader's input: <see cref="Db2FileSource"/> over layer 4, or an in-memory source in tests. An immutable decoded DB2 file of
 /// <see cref="Length"/> bytes with named unreadable ranges. <see cref="ReadRangeAsync"/> fills the whole destination
 /// or throws; the reader never asks for a range that touches a hole.</summary>
 public interface IDb2ByteSource
