@@ -40,7 +40,7 @@ flowchart TB
 - **Outside sources are layer 1 clients**: the CDN, the version service, WoWDBDefs definitions and wow-listfile names, and later the wago.tools build list (#96). Their replies are dated observations in the history log, so a fetched definition or listfile release stays readable offline ([D181](DECISIONS.md), [D220](DECISIONS.md)).
 - **The Files layer hides keys and BLTE.** Formats and game concepts ask for files by FileDataID or path within one build and locale. They get bytes, an honest partial (named holes) or protected, and never handle keys, BLTE or encryption themselves.
 - **One build at a time.** A Files handle is bound to one build and locale, so code above it can't mix builds by accident. Comparing builds sits above layer 6 and combines answers from two handles.
-- **The generated store is private to layers 4–6.** It reuses the pack-store code as a separate instance for prepared data. It never reads the CDN object store directly: the Files layer gets its inputs through layers 3 and 2, and layers 5 and 6 through the Files layer.
+- **The generated store is private to layers 4–6.** It reuses the pack-store code as a separate instance for prepared data, a second store of kind Generated behind `IGeneratedStore` ([D210](DECISIONS.md)). It never reads the CDN object store directly: the Files layer gets its inputs through layers 3 and 2, and layers 5 and 6 through the Files layer.
 - **Async.** Every I/O operation is async and takes a `CancellationToken`. Pure CPU helpers on in-memory bytes, such as key parsing and small-object verification, are synchronous. SQLite's driver is synchronous inside, so the store runs index work on its own reader pool and writer task.
 
 ### Stores

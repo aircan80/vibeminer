@@ -1,10 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup>
-  <!-- Layer 1 (Primitives) tests: the object store and the CDN and version-service clients. Synthetic bytes and recorded reply headers only, never the network. -->
+  <!-- Layer 1 (Primitives) tests: the object store, the generated store and its record files, and the CDN and version-service clients. Synthetic bytes and recorded reply headers only, never the network. -->
   <!-- Source tree root, which the opt-in scale checks use to find the shared scale store (RepositoryPaths). -->
   <AssemblyMetadata Include="VibeMinerRepositoryRoot" Value="$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..'))" />
   <Compile Include="../VibeMiner.Backend.Tests/RepositoryPaths.cs" Link="RepositoryPaths.cs" />
   <ProjectReference Include="../../../src/backend/VibeMiner.Objects/VibeMiner.Objects.csproj" />
   <ProjectReference Include="../../../src/backend/VibeMiner.Cdn/VibeMiner.Cdn.csproj" />
+  <ProjectReference Include="../../../src/backend/VibeMiner.Generated/VibeMiner.Generated.csproj" />
+  <ProjectReference Include="../VibeMiner.Generated.Testing/VibeMiner.Generated.Testing.csproj" />
   <ProjectReference Include="../VibeMiner.Cdn.Testing/VibeMiner.Cdn.Testing.csproj" />
   <ProjectReference Include="../VibeMiner.Objects.CrashWriter/VibeMiner.Objects.CrashWriter.csproj" />
   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />

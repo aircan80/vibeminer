@@ -3,11 +3,16 @@ using System.Security.Cryptography;
 
 namespace VibeMiner.Objects;
 
-/// <summary>Per key type limits and the namespaces format 1 accepts.</summary>
+/// <summary>Per key type limits and the namespaces format 1 accepts. A Cdn store knows types 1..6, a generated store only type 7.</summary>
 internal static class ObjectFormats
 {
     public const long MaxInMemoryBytes = 64L << 20;
-    public static bool Known(ObjectKeyType t) => t is >= ObjectKeyType.Config and <= ObjectKeyType.HistoryRecord;
+    public static bool Known(ObjectStoreKind kind, ObjectKeyType t) => kind switch
+    {
+        ObjectStoreKind.Cdn => t is >= ObjectKeyType.Config and <= ObjectKeyType.HistoryRecord,
+        ObjectStoreKind.Generated => t == ObjectKeyType.Generated,
+        _ => false,
+    };
     public static long MaxBytes(ObjectKeyType t) => t switch
     {
         ObjectKeyType.Config => 16L << 20,
@@ -15,11 +20,12 @@ internal static class ObjectFormats
         ObjectKeyType.Encoded => PackFormat.MaxPayloadBytes,
         ObjectKeyType.HistoryDocument => 16L << 20,
         ObjectKeyType.HistoryRecord => HistoryRecordFormat.MaxBytes,
+        ObjectKeyType.Generated => MaxInMemoryBytes,
         _ => 0,
     };
-    public static string? Refusal(ObjectKey key, long declaredLength)
+    public static string? Refusal(ObjectKey key, long declaredLength, ObjectStoreKind kind = ObjectStoreKind.Cdn)
     {
-        if (!Known(key.Type)) return ObjectRefusalCodes.KeyTypeUnsupported;
+        if (!Known(kind, key.Type)) return ObjectRefusalCodes.KeyTypeUnsupported;
         if (key.Namespace != 0) return ObjectRefusalCodes.NamespaceUnsupported;
         if (declaredLength <= 0 || declaredLength > MaxBytes(key.Type)) return ObjectRefusalCodes.TooLarge;
         return null;
@@ -69,6 +75,7 @@ internal abstract class ObjectVerifier : IDisposable
         ObjectKeyType.FileIndex => new IndexVerifier(key, declared, 0),
         ObjectKeyType.Encoded => new BlteVerifier(key, declared),
         ObjectKeyType.HistoryRecord => new HistoryRecordVerifier(key, declared),
+        ObjectKeyType.Generated => new LengthOnlyVerifier(key, declared),
         _ => throw new VerificationFailure(ObjectRefusalCodes.KeyTypeUnsupported, "Unknown key type."),
     };
 
@@ -213,6 +220,13 @@ internal sealed class BlteVerifier(ObjectKey key, long declared) : ObjectVerifie
         if (chunk != chunkCount) Fail(ObjectRefusalCodes.BlteInvalid, "BLTE is truncated.");
     }
     public override void Dispose() => md5.Dispose();
+}
+
+/// <summary>Generated data: the key is the writer's choice, so only the declared length is checked.</summary>
+internal sealed class LengthOnlyVerifier(ObjectKey key, long declared) : ObjectVerifier(key, declared)
+{
+    protected override void Consume(ReadOnlySpan<byte> data) { }
+    protected override void Finish() { }
 }
 
 internal sealed class HistoryRecordVerifier(ObjectKey key, long declared) : ObjectVerifier(key, declared)

@@ -35,15 +35,16 @@ internal static class PackFormat
     }
 
     // ---- pack header ----
-    // 0 magic "VMPK" | 4 u16 version | 6 u16 header bytes (64) | 8 u32 pack seq | 12 u32 reserved
+    // 0 magic "VMPK" | 4 u16 version | 6 u16 header bytes (64) | 8 u32 pack seq | 12 u32 store kind (0 Cdn, 1 Generated)
     // 16 store id (16) | 32 i64 created unix ms | 40..59 reserved zero | 60 u32 CRC-32C of 0..59
-    public static void WritePackHeader(Span<byte> h, int seq, ReadOnlySpan<byte> storeId, long createdMs)
+    public static void WritePackHeader(Span<byte> h, int seq, ReadOnlySpan<byte> storeId, long createdMs, ObjectStoreKind kind)
     {
         h[..PackHeaderBytes].Clear();
         PackMagic.CopyTo(h);
         BinaryPrimitives.WriteUInt16LittleEndian(h[4..], Version);
         BinaryPrimitives.WriteUInt16LittleEndian(h[6..], PackHeaderBytes);
         BinaryPrimitives.WriteUInt32LittleEndian(h[8..], (uint)seq);
+        BinaryPrimitives.WriteUInt32LittleEndian(h[12..], (uint)kind);
         storeId.CopyTo(h[16..]);
         BinaryPrimitives.WriteInt64LittleEndian(h[32..], createdMs);
         BinaryPrimitives.WriteUInt32LittleEndian(h[60..], Crc32C(h[..60]));
@@ -51,14 +52,16 @@ internal static class PackFormat
 
     public enum HeaderCheck { Valid, Torn, Newer }
 
-    public static HeaderCheck ReadPackHeader(ReadOnlySpan<byte> h, out int seq, out byte[] storeId)
+    /// <summary>A kind other than 0 or 1 at offset 12 is Newer; which of the two it is, the caller checks.</summary>
+    public static HeaderCheck ReadPackHeader(ReadOnlySpan<byte> h, out int seq, out byte[] storeId, out ObjectStoreKind kind)
     {
-        seq = 0; storeId = [];
+        seq = 0; storeId = []; kind = ObjectStoreKind.Cdn;
         if (h.Length < PackHeaderBytes || !h[..4].SequenceEqual(PackMagic) ||
             BinaryPrimitives.ReadUInt32LittleEndian(h[60..]) != Crc32C(h[..60])) return HeaderCheck.Torn;
         if (BinaryPrimitives.ReadUInt16LittleEndian(h[4..]) != Version || BinaryPrimitives.ReadUInt16LittleEndian(h[6..]) != PackHeaderBytes ||
-            BinaryPrimitives.ReadUInt32LittleEndian(h[12..]) != 0 || h[40..60].IndexOfAnyExcept((byte)0) >= 0) return HeaderCheck.Newer;
+            BinaryPrimitives.ReadUInt32LittleEndian(h[12..]) > (uint)ObjectStoreKind.Generated || h[40..60].IndexOfAnyExcept((byte)0) >= 0) return HeaderCheck.Newer;
         seq = (int)BinaryPrimitives.ReadUInt32LittleEndian(h[8..]);
+        kind = (ObjectStoreKind)BinaryPrimitives.ReadUInt32LittleEndian(h[12..]);
         storeId = h.Slice(16, 16).ToArray();
         return HeaderCheck.Valid;
     }
@@ -81,7 +84,8 @@ internal static class PackFormat
         BinaryPrimitives.WriteUInt32LittleEndian(h[92..], Crc32C(h[..92]));
     }
 
-    public static HeaderCheck ReadEntryHeader(ReadOnlySpan<byte> h, out EntryHeader e)
+    /// <summary>A key type the store's kind doesn't hold reads as Newer, so it is never truncated.</summary>
+    public static HeaderCheck ReadEntryHeader(ReadOnlySpan<byte> h, ObjectStoreKind kind, out EntryHeader e)
     {
         e = default;
         if (h.Length < EntryHeaderBytes || !h[..4].SequenceEqual(EntryMagic) ||
@@ -90,7 +94,7 @@ internal static class PackFormat
         var length = BinaryPrimitives.ReadUInt64LittleEndian(h[24..]);
         // A checksummed header this reader doesn't fully understand came from a newer writer: never truncate it.
         if (h[4] != Version || (flags & ~TombstoneFlag) != 0 || h[73] != BlockShift || h[72] > (byte)ObjectOrigin.SharedStore ||
-            !ObjectFormats.Known((ObjectKeyType)h[5]) ||
+            !ObjectFormats.Known(kind, (ObjectKeyType)h[5]) ||
             BinaryPrimitives.ReadUInt16LittleEndian(h[74..]) != 0 || BinaryPrimitives.ReadUInt32LittleEndian(h[76..]) != 0 ||
             BinaryPrimitives.ReadUInt32LittleEndian(h[88..]) != 0) return HeaderCheck.Newer;
         var tombstone = (flags & TombstoneFlag) != 0;

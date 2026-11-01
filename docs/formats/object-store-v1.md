@@ -12,6 +12,12 @@ Conventions:
 
 The store is one folder, `cdn-store-v1/`, inside the data folder. The folder name carries the store generation: a format that can't be read by this specification gets a new folder name.
 
+**Store kind.** A store is one of two kinds, fixed when it is created:
+- **Cdn** (0): CDN bytes, key types 1-6, each checked against its key. This is `cdn-store-v1/`, and everything in this spec applies.
+- **Generated** (1): prepared data the app derives itself, key type 7 only, in its own folder (`generated-v1/`). Same format, with these differences: no history log, no staging, and the type check is the length bound only (4.7).
+
+The kind is in every pack header (offset 12) and in the index (`PRAGMA application_id`). The opener says which kind it expects. A folder whose packs or index are of the other kind is refused with `OBJECT_STORE_KIND_MISMATCH` before anything is written. A Cdn store is byte-identical to one written before kinds existed. An older engine refuses a generated folder with packs as newer format (pack offset 12, type 7 entries), but a generated folder with no packs is marked only by `application_id`, which older engines ignore; only the folder name keeps them apart.
+
 | Path | Role |
 | --- | --- |
 | `writer.lock` | Held with an exclusive OS lock (POSIX `flock(LOCK_EX)`, Windows share-none) for the whole life of the one writer. Its content is unused (empty). |
@@ -47,7 +53,7 @@ A pack is a 64-byte header followed by entries back to back, with no padding and
 | 4 | 2 | u16 LE | Format version, 1 |
 | 6 | 2 | u16 LE | Header length, 64 |
 | 8 | 4 | u32 LE | Pack number; must equal the number in the file name |
-| 12 | 4 | u32 LE | Reserved, 0 |
+| 12 | 4 | u32 LE | Store kind: 0 Cdn, 1 Generated |
 | 16 | 16 | bytes | Store id: 16 random bytes chosen when the store was created, the same in every pack of a store |
 | 32 | 8 | i64 LE | Created, Unix ms: when this pack file was written (a roll, or a compaction target). Informational; nothing checks it |
 | 40 | 20 | bytes | Reserved, all 0 |
@@ -55,8 +61,9 @@ A pack is a 64-byte header followed by entries back to back, with no padding and
 
 Reading a pack header:
 1. Shorter than 64 bytes, wrong magic or wrong CRC: **torn** (unreadable).
-2. Otherwise version ≠ 1, header length ≠ 64, or any reserved byte ≠ 0: **newer format**.
+2. Otherwise version ≠ 1, header length ≠ 64, store kind > 1, or any reserved byte ≠ 0: **newer format**.
 3. Otherwise a pack number different from the file name: unreadable (treated as torn).
+4. Otherwise a store kind other than the one the opener expects: `OBJECT_STORE_KIND_MISMATCH`.
 
 ### 2.3 Entry
 
@@ -91,7 +98,7 @@ An entry is a 96-byte header, the payload (the object's bytes exactly as served)
 
 Reading an entry header, in order:
 1. Fewer than 96 bytes left in the pack, wrong magic or wrong CRC: **torn**.
-2. Otherwise any of these is **newer format**: entry format ≠ 1, a flag bit other than bit 0, block shift ≠ 16, origin > 2, a key type outside 1-6, or any reserved byte ≠ 0.
+2. Otherwise any of these is **newer format**: entry format ≠ 1, a flag bit other than bit 0, block shift ≠ 16, origin > 2, a key type the store's kind doesn't hold (outside 1-6 in a Cdn store, other than 7 in a Generated store), or any reserved byte ≠ 0.
 3. Otherwise any of these is **torn**: L > 512 MiB, a tombstone with L ≠ 0, a non-tombstone with L = 0, or the entry size running past the end of the pack.
 
 The namespace isn't checked when reading; Put refuses namespaces other than 0 (section 4).
@@ -110,8 +117,9 @@ A key is three things: a key type, a namespace byte and a full 16-byte key.
 | 4 | Encoded | The EKey of a BLTE object: MD5 of its BLTE header, or of the whole object when headerless |
 | 5 | HistoryDocument | MD5 of one raw version-service reply |
 | 6 | HistoryRecord | MD5 of a history record (section 4.6) |
+| 7 | Generated | 16 bytes the writer chooses (an identity hash or a content hash). Generated stores only |
 
-Types 0 and 7-255 are spare: Put refuses them, and a reader treats one in an entry header as newer format.
+Types 0 and 8-255 are spare: Put refuses them, and a reader treats one in an entry header as newer format. A Cdn store treats type 7 the same way, and a Generated store types 1-6.
 
 Namespace 0 is the product's CDN path (`config/` and `data/`; patch configs are type 1 in namespace 0). Namespaces 1-255 are reserved, for `patch/` objects and the product-config path, and refused by Put.
 
@@ -124,7 +132,7 @@ Text form, used in logs: `Type/namespace/32 lowercase hex`, for example `Config/
 Before anything is appended, an object is checked against its key and its declared length: the length its source declared (EN, an archive index entry, the received length). A config's `*-index-size` hint is never a declared length. A check returns nothing (valid) or a refusal, a code and a message; refusals are never stored.
 
 Order of checks for a whole object in memory (Put, and `Check` in section 10):
-1. A key type outside 1-6: `OBJECT_KEY_TYPE_UNSUPPORTED`.
+1. A key type the store's kind doesn't hold (outside 1-6 for Cdn, other than 7 for Generated): `OBJECT_KEY_TYPE_UNSUPPORTED`. The public `ObjectVerification.Default` is the Cdn check and refuses type 7.
 2. A namespace ≠ 0: `OBJECT_NAMESPACE_UNSUPPORTED`.
 3. A declared length of 0, or over the type's limit (section 11): `OBJECT_TOO_LARGE`.
 4. Bytes not exactly the declared length: `OBJECT_SIZE_MISMATCH`.
@@ -190,7 +198,7 @@ Chunk modes (`N`, `Z`, `E`, others) are opaque. An encrypted (`E`) chunk is chec
 
 ### 4.5 Spare types
 
-Types outside 1-6 are refused (`OBJECT_KEY_TYPE_UNSUPPORTED`). Adding a type later doesn't change this format; readers that predate it treat it as newer.
+Types the store's kind doesn't hold are refused (`OBJECT_KEY_TYPE_UNSUPPORTED`). Adding a type later doesn't change this format; readers that predate it treat it as newer.
 
 ### 4.6 History record format 1
 
@@ -214,9 +222,13 @@ The record must end exactly after the URL. The shortest is 33 bytes (a summary) 
 
 Product and region bytes outside their character sets fail the grammar.
 
+### 4.7 Generated (7)
+
+No key check: the key is the writer's choice. Only checks 1-5 of section 4 apply, so the length is 1 B to 64 MiB and the whole object is in memory. The entry SHA-256 and block CRCs guard the bytes as for every entry; a full Verify of a generated object is the SHA-256 alone.
+
 ## 5. `objects.sqlite3`
 
-SQLite 3, WAL journal, `PRAGMA user_version = 1`. The writer runs `synchronous=NORMAL` and switches to `FULL` around the commits listed in section 6.12. Exact DDL:
+SQLite 3, WAL journal, `PRAGMA user_version = 1`. `PRAGMA application_id` is the store kind: 0 (never set) Cdn, 1 Generated. The writer runs `synchronous=NORMAL` and switches to `FULL` around the commits listed in section 6.12. Exact DDL:
 
 ```sql
 CREATE TABLE store(id INTEGER PRIMARY KEY CHECK(id = 1), store_id BLOB NOT NULL CHECK(length(store_id) = 16),
@@ -332,9 +344,10 @@ An entry larger than the limit goes alone into a fresh pack.
 
 **Writer open:**
 1. Create `packs/` and `staging/`. Take `writer.lock`, else `OBJECT_STORE_BUSY`.
-2. Read `user_version` without writing. Above 1: `OBJECT_STORE_NEWER_FORMAT`. If it can't be read, the index is unusable.
+2. Read `user_version` without writing. Above 1: `OBJECT_STORE_NEWER_FORMAT`. If it can't be read, the index is unusable. If it is 1, read `application_id`: above 1 is `OBJECT_STORE_NEWER_FORMAT`, the other kind `OBJECT_STORE_KIND_MISMATCH`.
 3. Read every `pack-*.vmp` header (2.2):
    - any newer header: `OBJECT_STORE_NEWER_FORMAT`;
+   - a valid header of the other kind: `OBJECT_STORE_KIND_MISMATCH`;
    - valid headers from two store ids: `OBJECT_STORE_FOREIGN_PACK`.
 4. If `user_version` = 1, **validate** the index on a read-only connection. Every open runs the **cheap check**. The index is unusable when:
    - for any of `store`, `packs`, `objects` and `history`, the column names that `PRAGMA table_info` returns aren't exactly those of section 5, in order (a missing table returns none). Only names are compared: not declared types, constraints, `WITHOUT ROWID` or the two `history` indexes. Extra tables and indexes are allowed;
@@ -490,7 +503,7 @@ Cancellation or a failure before the switch deletes the target file and its row.
 ### 6.9 Staging (large encoded objects)
 
 **Start(key, declared length):**
-1. The key must be Encoded, the namespace 0, and the declared length 1 B to 512 MiB.
+1. The store must be Cdn (a Generated store has no staging), the key Encoded, the namespace 0, and the declared length 1 B to 512 MiB.
 2. At most 16 stagings may be open, with at most 2 GiB declared in all (`OBJECT_STORE_LIMIT`), and one per key.
 3. Open or create the staged file.
 4. Resume: check what is already in the file and keep only its proven length (4.3). The rest, which may be garbage written before a crash, is cut off.
@@ -510,8 +523,8 @@ Cancellation or a failure before the switch deletes the target file and its row.
 ### 6.10 Read-only second store
 
 **Open:**
-1. The index must exist, else `OBJECT_STORE_MISSING`. A `user_version` above 1 is `OBJECT_STORE_NEWER_FORMAT`; below 1 is `OBJECT_STORE_MISSING`.
-2. Read every pack header: a newer one is `OBJECT_STORE_NEWER_FORMAT`, two store ids are `OBJECT_STORE_FOREIGN_PACK`.
+1. The index must exist, else `OBJECT_STORE_MISSING`. A `user_version` above 1 is `OBJECT_STORE_NEWER_FORMAT`; below 1 is `OBJECT_STORE_MISSING`. The `application_id` is checked as in 6.3 step 2.
+2. Read every pack header: a newer one is `OBJECT_STORE_NEWER_FORMAT`, the other kind `OBJECT_STORE_KIND_MISMATCH`, two store ids are `OBJECT_STORE_FOREIGN_PACK`.
 3. Validate the index as in 6.3 step 4: the cheap check, and the full one when `clean_close` is 0. A running writer keeps the marker at 0, and a reader can't tell that from a crash, so a reader opening a store whose writer runs pays the full check. Unusable is `OBJECT_STORE_INDEX_UNREADABLE`, since a read-only store can't rebuild.
 
 **Then:**
@@ -531,7 +544,7 @@ A layered reader asks the profile's own store first and the second store only fo
 **Append(observation):**
 1. Compute the document key `D = MD5(reply)`.
 2. Build the record (4.6) and compute its key `R = MD5(record)`.
-3. Put `[document D, record R]` as one batch with `commitNow`.
+3. Put `[document D, record R]` as one batch with `commitNow`. In a Generated store both are refused (`OBJECT_KEY_TYPE_UNSUPPORTED`), so it has no history.
 
 The same reply observed again is a new record sharing the document. The same observation twice is one entry. History entries are never deleted.
 
@@ -622,6 +635,7 @@ The reference tests cover these by process kill (an in-process fault hook and re
 | --- | --- |
 | `OBJECT_STORE_NEWER_FORMAT` | A pack, entry or index written by a newer format. Nothing is changed |
 | `OBJECT_STORE_FOREIGN_PACK` | Packs from two stores in one folder |
+| `OBJECT_STORE_KIND_MISMATCH` | The folder's packs or index are of the other store kind than the opener expects. Nothing is changed |
 | `OBJECT_STORE_BUSY` | Another writer holds the lock |
 | `OBJECT_STORE_READ_ONLY` | A write reached a store opened read-only (unreachable through the read-only interface) |
 | `OBJECT_STORE_MISSING` | A read-only open found no complete store |
@@ -636,7 +650,7 @@ The reference tests cover these by process kill (an in-process fault hook and re
 
 | Code | When |
 | --- | --- |
-| `OBJECT_KEY_TYPE_UNSUPPORTED` | Key type outside 1-6 |
+| `OBJECT_KEY_TYPE_UNSUPPORTED` | Key type the store's kind doesn't hold (Cdn 1-6, Generated 7) |
 | `OBJECT_NAMESPACE_UNSUPPORTED` | Namespace ≠ 0 |
 | `OBJECT_TOO_LARGE` | Declared length 0 or over the type's limit, or over 64 MiB for a whole Put |
 | `OBJECT_SIZE_MISMATCH` | Bytes not the declared length, or BLTE chunk sizes not adding up |
@@ -698,6 +712,7 @@ The calls are split by role. Each lists its inputs, outputs and guarantees.
 | --- | --- |
 | Payload of one entry | 512 MiB (536,870,912 bytes) |
 | Config / HistoryDocument / indexes / HistoryRecord | 16 MiB / 16 MiB / 64 MiB / 1,136 bytes |
+| Generated | 64 MiB |
 | Whole Put object, whole read, range read | 64 MiB |
 | Put batch | 4,096 objects and 256 MiB |
 | Delete batch | 4,096 keys |
@@ -722,7 +737,7 @@ One Put of a 21-byte config into a new store, with the clock fixed at 2026-10-31
 `packs/pack-000001.vmp` is 185 bytes. The store id (bytes 0x10-0x1F) is random, so it differs in every store:
 
 ```
-00000000  56 4d 50 4b 01 00 40 00 01 00 00 00 00 00 00 00   "VMPK", version 1, header 64, pack 1, reserved
+00000000  56 4d 50 4b 01 00 40 00 01 00 00 00 00 00 00 00   "VMPK", version 1, header 64, pack 1, kind 0 (Cdn)
 00000010  84 81 e6 d6 5d 09 61 c8 d1 de dc 35 a8 4e 5b 91   store id (random)
 00000020  00 8c 41 8f a1 01 00 00 00 00 00 00 00 00 00 00   created (Unix ms, LE), reserved
 00000030  00 00 00 00 00 00 00 00 00 00 00 00 97 02 14 c5   reserved, CRC-32C of bytes 0-59 (depends on the store id)

@@ -98,6 +98,7 @@ public sealed partial class ObjectStore
     public async Task<IObjectStaging> StageAsync(ObjectKey key, long declaredLength, ObjectOrigin origin = ObjectOrigin.Cdn, CancellationToken ct = default)
     {
         EnsureWriter();
+        if (Kind == ObjectStoreKind.Generated) throw new ArgumentException("A generated store has no staging; Put objects whole.", nameof(key));
         if (key.Type != ObjectKeyType.Encoded) throw new ArgumentException("Only encoded objects are staged; Put the others whole.", nameof(key));
         if (ObjectFormats.Refusal(key, declaredLength) is { } refusal) throw new ArgumentException($"Can't stage this object ({refusal}).", nameof(key));
         lock (stagings)

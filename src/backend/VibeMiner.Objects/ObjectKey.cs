@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 
 namespace VibeMiner.Objects;
 
-/// <summary>What a key names and how its bytes are verified before they reach a pack. 0 and 7..255 are spare.</summary>
+/// <summary>What a key names and how its bytes are verified before they reach a pack. 0 and 8..255 are spare.</summary>
 public enum ObjectKeyType : byte
 {
     /// <summary>A CDN config file: key = MD5 of the whole file.</summary>
@@ -17,6 +17,11 @@ public enum ObjectKeyType : byte
     HistoryDocument = 5,
     /// <summary>One dated observation naming a <see cref="HistoryDocument"/>: key = MD5 of the record.</summary>
     HistoryRecord = 6,
+    /// <summary>
+    /// Prepared data in a <see cref="ObjectStoreKind.Generated"/> store: key = 16 bytes the writer chooses (an identity or content hash).
+    /// No key check, only the length bound (1 byte to 64 MiB); the entry SHA-256 and block CRCs still guard the bytes.
+    /// </summary>
+    Generated = 7,
 }
 
 /// <summary>Where an object's bytes came from, as recorded in its entry header.</summary>

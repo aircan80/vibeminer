@@ -71,11 +71,12 @@ public sealed partial class ObjectStore
         try { version = ObjectIndex.ReadVersion(indexPath); }
         catch (Exception e) when (e is SqliteException or OverflowException or InvalidCastException or FormatException) { unreadable = true; problems.Add("the object index can't be opened; rebuilt from the packs"); }
         if (version > ObjectIndex.SchemaVersion) throw NewerFormat($"index schema {version}");
+        if (version == ObjectIndex.SchemaVersion) CheckIndexKind();  // an index never committed (user_version 0) records no kind
         var disk = DiskPacks().OrderBy(p => p.seq).ToList();
         var valid = new List<(int seq, string path)>();
         foreach (var (seq, path) in disk)
         {
-            var check = CheckPackHeader(path, seq, null);
+            var check = CheckPackHeader(path, seq, null, Kind);
             if (check == PackFormat.HeaderCheck.Newer) throw NewerFormat($"pack {seq}");
             if (check == PackFormat.HeaderCheck.Valid) valid.Add((seq, path));
         }
@@ -106,7 +107,7 @@ public sealed partial class ObjectStore
                 }
                 storeId = RandomNumberGenerator.GetBytes(16);
                 using var c = ObjectIndex.Open(indexPath, readOnly: false);
-                ObjectIndex.Create(c, storeId, NowMs, 1);
+                ObjectIndex.Create(c, storeId, NowMs, 1, Kind);
             }
             else
             {
@@ -180,7 +181,7 @@ public sealed partial class ObjectStore
             var path = PackPath(seq);
             if (!File.Exists(path) || new FileInfo(path).Length <= committed) continue;
             using var h = PackFiles.OpenRead(path);
-            var walker = new PackWalker(h, seq, committed, RandomAccess.GetLength(h));
+            var walker = new PackWalker(h, seq, committed, RandomAccess.GetLength(h), Kind);
             WalkStatus status;
             while ((status = await walker.NextAsync(ct)) == WalkStatus.Entry) { }
             if (status == WalkStatus.Newer) throw NewerFormat($"entry at {walker.Offset} in pack {seq}");
@@ -254,7 +255,7 @@ public sealed partial class ObjectStore
     private async Task RecoverTailAsync(long length, CancellationToken ct)
     {
         using var read = PackFiles.OpenRead(PackPath(activeSeq));
-        var walker = new PackWalker(read, activeSeq, committedLength, length);
+        var walker = new PackWalker(read, activeSeq, committedLength, length, Kind);
         var recovered = 0; var end = committedLength;
         var damaged = new List<string>();
         // Keys whose first copy in the tail recovery refused. Scan doesn't run key checks, so a tombstone after the tail makes it
@@ -356,7 +357,7 @@ public sealed partial class ObjectStore
                 var o = batch[i];
                 if (!Enum.IsDefined(o.Origin)) throw new ArgumentOutOfRangeException(nameof(batch), "Unknown object origin.");
                 // The same instance a client can call first (IObjectVerifier), so the two can never disagree.
-                if (ObjectVerification.Default.Check(o.Key, o.Bytes.Span, o.DeclaredLength, out var document) is { } refusal)
+                if (ObjectVerification.For(Kind).Check(o.Key, o.Bytes.Span, o.DeclaredLength, out var document) is { } refusal)
                 { results[i] = new(o.Key, PutOutcome.Refused, refusal.Code, refusal.Message); continue; }
                 items[i] = new Prepared(o.Key, o.Bytes, SHA256.HashData(o.Bytes.Span), PackFormat.BlockTable(o.Bytes.Span), o.Origin, document);
             }
@@ -369,7 +370,7 @@ public sealed partial class ObjectStore
         return results;
     }
 
-    /// <summary>Stores one version-service observation: its reply document and its dated record, in one batch.</summary>
+    /// <summary>Stores one version-service observation: its reply document and its dated record, in one batch. A generated store refuses both.</summary>
     public Task<IReadOnlyList<PutResult>> AppendHistoryAsync(HistoryObservation observation, CancellationToken ct = default) =>
         PutAsync(HistoryRecordFormat.Objects(observation), commitNow: true, ct);
 
@@ -589,7 +590,7 @@ public sealed partial class ObjectStore
         try
         {
             var header = new byte[PackFormat.PackHeaderBytes];
-            PackFormat.WritePackHeader(header, seq, storeId, NowMs);
+            PackFormat.WritePackHeader(header, seq, storeId, NowMs, Kind);
             await RandomAccess.WriteAsync(handle, header, 0);
             At(StorePoint.PackFileWritten);
             RandomAccess.FlushToDisk(handle);

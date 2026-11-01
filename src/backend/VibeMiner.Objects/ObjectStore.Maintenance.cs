@@ -52,7 +52,7 @@ public sealed partial class ObjectStore
         try
         {
             using var c = ObjectIndex.Open(RebuildPath, readOnly: false);
-            ObjectIndex.Create(c, new byte[16], NowMs, 1);
+            ObjectIndex.Create(c, new byte[16], NowMs, 1, Kind);
             using (var tx = c.BeginTransaction())
             {
                 var (_, id) = await ReplayPacksAsync(c, tx, null, ct);
@@ -87,14 +87,14 @@ public sealed partial class ObjectStore
         {
             foreach (var (seq, path) in DiskPacks().OrderBy(p => p.seq))
             {
-                var check = CheckPackHeader(path, seq, null);
+                var check = CheckPackHeader(path, seq, null, Kind);
                 if (check == PackFormat.HeaderCheck.Newer) throw NewerFormat($"pack {seq}");
                 if (check != PackFormat.HeaderCheck.Valid) { found.Add($"pack {seq} has no readable header; skipped"); continue; }
                 var packId = ReadPackStoreId(path);
                 if (id is null) id = packId;
                 else if (!packId.AsSpan().SequenceEqual(id)) throw new ObjectStoreException(ObjectStoreCodes.ForeignPack, $"Pack {seq} belongs to another object store.");
                 var h = PackFiles.OpenRead(path);
-                walkers.Add((new PackWalker(h, seq, PackFormat.PackHeaderBytes, RandomAccess.GetLength(h)), h));
+                walkers.Add((new PackWalker(h, seq, PackFormat.PackHeaderBytes, RandomAccess.GetLength(h), Kind), h));
             }
             var queue = new PriorityQueue<(PackWalker w, SafeFileHandle h), (ulong, int)>();
             var ends = new Dictionary<int, long>();
@@ -278,7 +278,7 @@ public sealed partial class ObjectStore
         {
             var header = new byte[PackFormat.EntryHeaderBytes];
             if (await PackFiles.ReadFullyAsync(lease.Value.Handle, header, row.Offset, ct) != header.Length) return ReadState.Corrupt;
-            if (CheckHeader(header, key, row, out var e) is not null) return ReadState.Corrupt;
+            if (CheckHeader(header, key, row, Kind, out var e) is not null) return ReadState.Corrupt;
             var (check, _) = await EntryIO.CheckPayloadAsync(lease.Value.Handle, row.Offset, e, full, null, ct);
             if (check != PayloadCheck.Valid) return ReadState.Corrupt;
             MarkVerified(row);
@@ -339,9 +339,9 @@ public sealed partial class ObjectStore
         using (var source = PackFiles.OpenRead(PackPath(seq)))
         {
             var header = new byte[PackFormat.PackHeaderBytes];
-            PackFormat.WritePackHeader(header, target, storeId, NowMs);
+            PackFormat.WritePackHeader(header, target, storeId, NowMs, Kind);
             await RandomAccess.WriteAsync(outHandle, header, 0, ct);
-            var walker = new PackWalker(source, seq, PackFormat.PackHeaderBytes, committed);
+            var walker = new PackWalker(source, seq, PackFormat.PackHeaderBytes, committed, Kind);
             var raw = new byte[PackFormat.EntryHeaderBytes];
             while (true)
             {

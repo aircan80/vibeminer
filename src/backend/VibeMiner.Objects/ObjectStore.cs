@@ -37,6 +37,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
     {
         if (!Path.IsPathFullyQualified(directory)) throw new ArgumentException("The store folder must be an absolute path.", nameof(directory));
         this.directory = Path.GetFullPath(directory);
+        if (!Enum.IsDefined(options.Kind)) throw new ArgumentOutOfRangeException(nameof(options), "Unknown object store kind.");
         this.options = options; this.readOnly = readOnly;
         packsDirectory = Path.Combine(this.directory, "packs");
         stagingDirectory = Path.Combine(this.directory, "staging");
@@ -46,6 +47,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
 
     public string Folder => directory;
     public bool IsReadOnly => readOnly;
+    public ObjectStoreKind Kind => options.Kind;
     /// <summary>What opening found and did: entries recovered past the last commit, bytes truncated, problems left alone.</summary>
     public OpenReport OpenReport { get; private set; } = new(0, 0, false, []);
 
@@ -76,10 +78,11 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
             catch (Exception e) when (e is SqliteException or OverflowException or InvalidCastException or FormatException) { throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index can't be read.", e); }
             if (version > ObjectIndex.SchemaVersion) throw NewerFormat($"index schema {version}");
             if (version < ObjectIndex.SchemaVersion) throw new ObjectStoreException(ObjectStoreCodes.Missing, "The object store was never completely created.");
+            store.CheckIndexKind();
             var valid = new List<(int seq, string path)>();
             foreach (var (seq, path) in store.DiskPacks())
             {
-                var check = CheckPackHeader(path, seq, null);
+                var check = CheckPackHeader(path, seq, null, store.Kind);
                 if (check == PackFormat.HeaderCheck.Newer) throw NewerFormat($"pack {seq}");
                 if (check == PackFormat.HeaderCheck.Valid) valid.Add((seq, path));
             }
@@ -126,7 +129,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
                 var entry = new byte[PackFormat.EntryBytes(row.Length)];
                 var got = await PackFiles.ReadFullyAsync(lease.Value.Handle, entry, row.Offset, ct);
                 if (got < PackFormat.EntryHeaderBytes) return new(ReadState.Corrupt, Problem: "entry truncated");
-                if (CheckHeader(entry, key, row, out var e) is { } bad) return new(ReadState.Corrupt, Problem: bad);
+                if (CheckHeader(entry, key, row, Kind, out var e) is { } bad) return new(ReadState.Corrupt, Problem: bad);
                 if (got != entry.Length) return new(ReadState.Corrupt, Info(e), Problem: "entry truncated");
                 var payload = entry.AsSpan(PackFormat.EntryHeaderBytes, (int)row.Length).ToArray();
                 if (CheckBlocks(payload, 0, entry.AsSpan(PackFormat.EntryHeaderBytes + (int)row.Length)) is { } blockProblem) return new(ReadState.Corrupt, Info(e), Problem: blockProblem);
@@ -162,7 +165,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
                 var h = lease.Value.Handle;
                 var header = new byte[PackFormat.EntryHeaderBytes];
                 if (await PackFiles.ReadFullyAsync(h, header, row.Offset, ct) != header.Length) return new(ReadState.Corrupt, Problem: "entry truncated");
-                if (CheckHeader(header, key, row, out var e) is { } bad) return new(ReadState.Corrupt, Problem: bad);
+                if (CheckHeader(header, key, row, Kind, out var e) is { } bad) return new(ReadState.Corrupt, Problem: bad);
                 // Bounds after the header check: the entry agrees with the index row, so this really is the caller's range.
                 if (offset + destination.Length > row.Length) throw new ArgumentOutOfRangeException(nameof(offset), "The range runs past the end of the object.");
                 if (destination.IsEmpty) return new(ReadState.Present, Info(e));
@@ -255,9 +258,9 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
         return await readers.Use(key.ToIndexKey(), static (_, cmd, k) => ObjectIndex.Lookup(cmd, k), ct);
     }
 
-    private static string? CheckHeader(ReadOnlySpan<byte> raw, ObjectKey key, IndexRow row, out EntryHeader e)
+    private static string? CheckHeader(ReadOnlySpan<byte> raw, ObjectKey key, IndexRow row, ObjectStoreKind kind, out EntryHeader e)
     {
-        if (PackFormat.ReadEntryHeader(raw, out e) != PackFormat.HeaderCheck.Valid) return "entry header unreadable";
+        if (PackFormat.ReadEntryHeader(raw, kind, out e) != PackFormat.HeaderCheck.Valid) return "entry header unreadable";
         if (e.Tombstone || e.Key != key || e.Length != row.Length || !e.Sha256.AsSpan().SequenceEqual(row.Sha256)) return "entry header doesn't match the index";
         return null;
     }
@@ -296,16 +299,17 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
             if (PackFiles.TryParse(Path.GetFileName(f), out var seq)) yield return (seq, f);
     }
 
-    /// <summary>Reads a pack header without writing anything. A store id mismatch is refused outright.</summary>
-    private static PackFormat.HeaderCheck CheckPackHeader(string path, int seq, byte[]? expectedStore)
+    /// <summary>Reads a pack header without writing anything. A store id or store kind mismatch is refused outright.</summary>
+    private static PackFormat.HeaderCheck CheckPackHeader(string path, int seq, byte[]? expectedStore, ObjectStoreKind kind)
     {
         var h = new byte[PackFormat.PackHeaderBytes];
         int n;
         using (var f = PackFiles.OpenRead(path)) n = RandomAccess.Read(f, h, 0);
         if (n < h.Length) return PackFormat.HeaderCheck.Torn;
-        var check = PackFormat.ReadPackHeader(h, out var headerSeq, out var id);
+        var check = PackFormat.ReadPackHeader(h, out var headerSeq, out var id, out var packKind);
         if (check != PackFormat.HeaderCheck.Valid) return check;
         if (headerSeq != seq) return PackFormat.HeaderCheck.Torn;
+        if (packKind != kind) throw KindMismatch($"pack {seq}", packKind, kind);
         if (expectedStore is not null && !id.AsSpan().SequenceEqual(expectedStore))
             throw new ObjectStoreException(ObjectStoreCodes.ForeignPack, $"Pack {seq} belongs to another object store.");
         return check;
@@ -315,9 +319,23 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
     {
         var h = new byte[PackFormat.PackHeaderBytes];
         using (var f = PackFiles.OpenRead(path)) RandomAccess.Read(f, h, 0);
-        PackFormat.ReadPackHeader(h, out _, out var id);
+        PackFormat.ReadPackHeader(h, out _, out var id, out _);
         return id;
     }
+
+    /// <summary>Refuses an index that records the other store kind, or one this engine doesn't know, before anything is written.</summary>
+    private void CheckIndexKind()
+    {
+        long? recorded;
+        try { recorded = ObjectIndex.ReadKind(indexPath); }
+        catch (Exception e) when (e is SqliteException or OverflowException or InvalidCastException or FormatException) { return; }  // unreadable: the packs decide
+        if (recorded is not { } k) return;
+        if (k is < 0 or > (long)ObjectStoreKind.Generated) throw NewerFormat($"index kind {k}");
+        if ((ObjectStoreKind)k != Kind) throw KindMismatch("index", (ObjectStoreKind)k, Kind);
+    }
+
+    private static ObjectStoreException KindMismatch(string what, ObjectStoreKind found, ObjectStoreKind asked) =>
+        new(ObjectStoreCodes.KindMismatch, $"The object store's {what} belongs to a {found} store, not a {asked} store. Nothing was changed.");
 
     private static byte[] ReadStoreId(SqliteConnection c)
     {

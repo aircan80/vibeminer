@@ -14,14 +14,16 @@ test('production project dependencies preserve pure engine boundaries and the or
     // Layer 1 CDN and version-service clients (D121): keys, bytes and HTTP only.
     Cdn: [],
     // Layer 2 object access (D135): builds only on layer 1.
+    // Layer 1 generated store (D210): a second pack store over layer 1's code, private to layers 4-6.
+    Generated: ['Objects'],
     ObjectAccess: ['Objects', 'Cdn'],
     // Layer 3 builds (D138): builds only on layer 2, with its own table reader and identity.
     Builds: ['ObjectAccess'],
     // Layer 4 files (D160): a file system per build and locale over layers 3 and 2, never layer 1.
     Files: ['Builds', 'ObjectAccess'],
     // Layer 5 formats: reads files through layer 4 (#177). ObjectAccess is for the table definitions only: fetched
-    // definitions are layer 2 observations and history (D180).
-    Formats: ['Files', 'ObjectAccess'],
+    // definitions are layer 2 observations and history (D180). Generated is the layer 1 generated store for decoded tables (D210, #179).
+    Formats: ['Files', 'ObjectAccess', 'Generated'],
     // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
     Cli: ['Objects', 'Cdn', 'ObjectAccess', 'Builds'],
   };
@@ -30,8 +32,8 @@ test('production project dependencies preserve pure engine boundaries and the or
     const references = [...source.matchAll(/<ProjectReference\s+Include="([^"]+)"/g)].map(match => path.basename(match[1].replaceAll('\\', '/'), '.csproj').replace('VibeMiner.', '')).sort();
     assert.deepEqual(references, [...dependencies].sort(), `${project} references only its declared architecture dependencies`);
     const packages = [...source.matchAll(/<PackageReference\s+Include="([^"]+)"/g)].map(match => match[1]);
-    // Spectre.Console (D151) and Terminal.Gui (D165) are terminal output for the developer CLI only.
-    const expected = project === 'Infrastructure' || project === 'Objects' || project === 'Builds' ? ['Microsoft.Data.Sqlite'] : project === 'Cli' ? ['Spectre.Console', 'Terminal.Gui'] : [];
+    // Spectre.Console (D151) and Terminal.Gui (D165) are terminal output for the developer CLI only; ZstdSharp.Port (D211) is the generated store's zstd.
+    const expected = project === 'Infrastructure' || project === 'Objects' || project === 'Builds' ? ['Microsoft.Data.Sqlite'] : project === 'Cli' ? ['Spectre.Console', 'Terminal.Gui'] : project === 'Generated' ? ['ZstdSharp.Port'] : [];
     assert.deepEqual(packages, expected, `${project} does not acquire a game parsing/download dependency`);
   }
 });
@@ -42,12 +44,12 @@ test('backend projects reference only their own code layer or lower ones', async
   // reference no layer project, so 3 keeps them above the new layer 1-2 projects), Host at 7 (composition).
   const production = {
     Domain: 0, 'Protocols.Tact': 0, 'Formats.Wow': 0,
-    Objects: 1, Cdn: 1, ObjectAccess: 2, Builds: 3, Files: 4, Formats: 5,
+    Objects: 1, Cdn: 1, Generated: 1, ObjectAccess: 2, Builds: 3, Files: 4, Formats: 5,
     Application: 3, Infrastructure: 3, Host: 7, Cli: 7,
   };
-  const layerProjects = new Set(['Objects', 'Cdn', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Cli']);
+  const layerProjects = new Set(['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Cli']);
   const legacy = new Set(Object.keys(production).filter(name => !layerProjects.has(name)));
-  const fakes = { 'Cdn.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Objects.CrashWriter': 1 };
+  const fakes = { 'Cdn.Testing': 1, 'Generated.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Objects.CrashWriter': 1 };
   const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Files.Tests': 4, 'Formats.Tests': 5, 'Cli.Tests': 7 };
   // Cross-layer integration projects drive real lower layers by design (D137), so they have no single layer.
   // Formats.Comparison cross-checks the layer 5 reader against the legacy Formats.Wow one until slice 9 deletes it (#177).

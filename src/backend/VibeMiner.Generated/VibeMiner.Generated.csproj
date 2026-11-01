@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>
+  <!-- Layer 1 generated store (#179, D210): a second pack store of kind Generated in its own folder, private to layers 4-6, plus the
+       zstd record files they keep in it. Callers can't compile against layer 1's object store (PrivateAssets="compile"): they see only
+       IGeneratedStore. Its assembly and its SQLite package still flow to them, since the store needs both at run time. -->
+  <ProjectReference Include="../VibeMiner.Objects/VibeMiner.Objects.csproj" PrivateAssets="compile" />
+  <!-- zstd (D211): ZstdSharp.Port, a managed port of the reference library, MIT. -->
+  <PackageReference Include="ZstdSharp.Port" Version="0.8.6" />
+  <InternalsVisibleTo Include="VibeMiner.Primitives.Tests" />
+</ItemGroup></Project>

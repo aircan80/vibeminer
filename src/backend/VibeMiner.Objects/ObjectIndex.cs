@@ -69,7 +69,7 @@ internal static class ObjectIndex
         return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    public static void Create(SqliteConnection c, byte[] storeId, long createdMs, long nextSeq)
+    public static void Create(SqliteConnection c, byte[] storeId, long createdMs, long nextSeq, ObjectStoreKind kind)
     {
         using var tx = c.BeginTransaction();
         Exec(c, Schema, tx);
@@ -82,7 +82,19 @@ internal static class ObjectIndex
             cmd.ExecuteNonQuery();
         }
         Exec(c, $"PRAGMA user_version={SchemaVersion}", tx);
+        // The store kind lives in SQLite's application_id: 0 (never set) is Cdn, so a Cdn index is what it always was.
+        if (kind != ObjectStoreKind.Cdn) Exec(c, $"PRAGMA application_id={(int)kind}", tx);
         tx.Commit();
+    }
+
+    /// <summary>The store kind an existing index records (its application_id), read without writing anything; null when the file is missing.</summary>
+    public static long? ReadKind(string path)
+    {
+        if (!File.Exists(path)) return null;
+        using var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        c.Open();
+        using var cmd = c.CreateCommand(); cmd.CommandText = "PRAGMA application_id";
+        return Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public static void Exec(SqliteConnection c, string sql, SqliteTransaction? tx = null)

@@ -8,7 +8,7 @@ namespace VibeMiner.Objects;
 internal enum WalkStatus { Entry, End, Torn, Newer }
 
 /// <summary>Reads entry headers one after another from a pack. Never trusts a length that runs past the file's end.</summary>
-internal sealed class PackWalker(SafeFileHandle handle, int pack, long start, long end)
+internal sealed class PackWalker(SafeFileHandle handle, int pack, long start, long end, ObjectStoreKind kind)
 {
     private readonly byte[] header = new byte[PackFormat.EntryHeaderBytes];
     public int Pack { get; } = pack;
@@ -21,7 +21,7 @@ internal sealed class PackWalker(SafeFileHandle handle, int pack, long start, lo
         if (Offset == end) return WalkStatus.End;
         if (end - Offset < PackFormat.EntryHeaderBytes) return WalkStatus.Torn;
         if (await PackFiles.ReadFullyAsync(handle, header, Offset, ct) != header.Length) return WalkStatus.Torn;
-        switch (PackFormat.ReadEntryHeader(header, out var e))
+        switch (PackFormat.ReadEntryHeader(header, kind, out var e))
         {
             case PackFormat.HeaderCheck.Torn: return WalkStatus.Torn;
             case PackFormat.HeaderCheck.Newer: return WalkStatus.Newer;

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>VibeMiner.GeneratedStore.Benchmark</AssemblyName></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/backend/VibeMiner.Generated/VibeMiner.Generated.csproj" />
+    <!-- Layer 5's GeneratedTables, for the "tables" mode. -->
+    <ProjectReference Include="../../../src/backend/VibeMiner.Formats/VibeMiner.Formats.csproj" />
+  </ItemGroup>
+  <!-- The synthetic rows, compiled from the test project so the latency test and the benchmark write the same records. -->
+  <ItemGroup><Compile Include="../../../tests/backend/VibeMiner.Primitives.Tests/Generated/SyntheticRows.cs" Link="SyntheticRows.cs" /></ItemGroup>
+</Project>

@@ -23,6 +23,7 @@ The storage rewrite (#153-#160) splits local data into three layers. Layer 1, th
 - **Stats** ([D150](DECISIONS.md)): `StatsAsync` on the store and the read-only store gives packs, object and history counts and pack bytes from one index read, no pack touched.
 - **Formats** ([D129](DECISIONS.md)): anything newer is refused by name and never truncated.
 - **Second store** ([D130](DECISIONS.md)): a read-only store, such as the shared dev store, can be read alongside the profile's own.
+- **Generated kind**: a second store in `generated-v1/` (`ObjectStoreOptions.Kind = Generated`) holds prepared data under key type 7, whose 16-byte key the writer chooses. Only the length is checked; no history, no staging. The kind is in every pack header and the index, and a folder of the other kind is refused (`OBJECT_STORE_KIND_MISMATCH`). See [the format spec](formats/object-store-v1.md).
 - **Interfaces** ([D131](DECISIONS.md)): the layers above use `IObjectReader`, `IObjectWriter`, `IHistoryReader`/`IHistoryLog`, `IObjectStoreMaintenance` and `IObjectVerifier` (`ObjectVerification.Default`, the one instance Put uses). Tests use `InMemoryObjectStore`, kept in step with the real store by `ObjectStoreContractTests`.
 
 ### Data folder
@@ -180,6 +181,33 @@ Names come from the community listfile ([D105](DECISIONS.md), [D221](DECISIONS.m
 The handle keeps layer 3's opened build, so a file is an in-memory ROOT and ENCODING lookup. Stored state is never cached: listing asks layer 2's `HasKeysAsync` once per 4096 files, a stat once, `ExistsAsync` not at all (a path ROOT doesn't name may load the stored names once per engine run, or once a minute while the stored copy can't be read, as any first use does). A disposed handle throws. `InMemoryFileSystem` in `VibeMiner.Files.Testing` is the fake; `FilesContractTests` runs one suite against it and `FileSystem`.
 
 Measured on a synthetic 1,000,000-file build over the layer 3 and 2 fakes (`FileSystemTests`, tagged slow): open 155 ms, a stat 1.9 µs on the open handle, a full list 376 ms with 245 `HasKeysAsync` calls. The fakes stand in for ROOT and the index, so these are layer 4 costs only.
+
+## The generated store
+
+Code: [`src/backend/VibeMiner.Generated/`](../src/backend/VibeMiner.Generated/), a layer 1 project over `VibeMiner.Objects` that layers 4-6 see only as `IGeneratedStore` ([D210](DECISIONS.md)). `GeneratedStore` opens a second object store of kind Generated in `generated-v1/` in the data folder: the same packs, group commit, recovery and Compact (Scan and Verify run on that store kind but `GeneratedStore` doesn't expose them yet), with key type 7 and keys the writer picks. Reset will wipe it once #155's reset and the composition root open it (nothing does yet); nothing in it is ever downloaded, so it is rebuilt from the object store with CPU only. `GENERATED_STORE_BUSY` means another writer holds it; `GENERATED_STORE_UNUSABLE` (another kind, a newer format) is the one state where wiping the folder is the fix. Tests use `InMemoryGeneratedStore`, kept in step by `GeneratedStoreContractTests`.
+
+**Record files** ([D212](DECISIONS.md)) hold ordered records (uint id, bytes) with a metadata blob, zstd level 9 via ZstdSharp.Port ([D211](DECISIONS.md)):
+- records in about 16 KiB blocks, each one zstd frame with its content size and checksum;
+- an ID index of (id, ordinal) in zstd chunks of 1024 entries, never uncompressed on disk;
+- blocks and chunks in segment objects of at most 8 MiB keyed by the hash of their bytes, so files with the same bytes share them;
+- the manifest at the caller's key, written last: the commit point. A page reads only its blocks, a lookup one chunk.
+
+**Generated tables** (layer 5, `VibeMiner.Formats/Generated/`) keep one DB2 table's decoded rows in one record file, encoded as `rows-v1` ([D214](DECISIONS.md)). Identity ([D213](DECISIONS.md)): product, build and CDN config, locale, content key, definition version, the reader's options, reader revision and row encoding, plus the status of each TACT key the table's decoding used. A chain of small node objects finds the table from the current key statuses, so a late key rebuilds only the tables that used it. Damaged pieces read as a miss and are deleted. Old tables a late key replaced stay until a collector exists.
+
+### Measured
+
+Synthetic table-like rows (25 values as text: ints, floats, short strings; 2% copies), i9-13900K, btrfs on LUKS on NVMe, Release, workstation GC, page cache warm; `tools/benchmarks/GeneratedStore` ([README](../tools/benchmarks/GeneratedStore/README.md), which also has record-level and cold numbers). Random 50-row `GeneratedTable` pages and lookups after a reopen, three runs. The slow test `RecordFilePageLatencyTests` pins a 50-record page's p99 under 1 ms on this machine (best of 3 rounds; 5 ms on CI runners).
+
+| Measure | 200k rows | 1M rows |
+| --- | --- | --- |
+| Store | 108k rows/s | 173k rows/s |
+| Size | 1.94x smaller than the row text (random numbers; real tables compress more); ID index 0.29 B/row | same |
+| Open, first / again | 3.1-4.1 / 0.5-1.3 ms | 7.2-9.0 / 1.2-1.5 ms |
+| 50-row page, 1 caller, p50 / p99 | 98-110 / 357-617 µs | 102-114 / 353-518 µs |
+| 50-row page, 8 callers on one table, p99 | 848-927 µs | 857-1,003 µs |
+| Find by id, 1 / 8 callers, p99 | 97 / 114 µs | 104 / 122 µs |
+
+A page allocates about 48 KiB, mostly its 50 `Db2Row`s and 1,250 value strings. With 8 callers the gen0 collections (about 0.75 ms each, pausing every caller) set the p99, so one run of six went just over 1 ms; one caller is well under.
 
 ## Identity and provenance
 

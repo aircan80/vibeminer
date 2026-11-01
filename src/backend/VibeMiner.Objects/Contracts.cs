@@ -94,11 +94,18 @@ public interface IObjectCheck : IDisposable
     long ProvenLength { get; }
 }
 
-/// <summary>The default and only <see cref="IObjectVerifier"/>: the checks of D122, original code with no parser dependency.</summary>
+/// <summary>
+/// The default and only <see cref="IObjectVerifier"/>: the checks of D122, original code with no parser dependency. It is the CDN
+/// verifier: it refuses <see cref="ObjectKeyType.Generated"/>, which only a generated store's Put accepts.
+/// </summary>
 public sealed class ObjectVerification : IObjectVerifier
 {
-    public static ObjectVerification Default { get; } = new();
-    private ObjectVerification() { }
+    public static ObjectVerification Default { get; } = new(ObjectStoreKind.Cdn);
+    /// <summary>A generated store's Put: type 7 only, length bound only.</summary>
+    internal static ObjectVerification Generated { get; } = new(ObjectStoreKind.Generated);
+    internal static ObjectVerification For(ObjectStoreKind kind) => kind == ObjectStoreKind.Generated ? Generated : Default;
+    private readonly ObjectStoreKind kind;
+    private ObjectVerification(ObjectStoreKind kind) => this.kind = kind;
 
     public ObjectRefusal? Check(ObjectKey key, ReadOnlySpan<byte> bytes, long declaredLength) => Check(key, bytes, declaredLength, out _);
 
@@ -106,7 +113,7 @@ public sealed class ObjectVerification : IObjectVerifier
     internal ObjectRefusal? Check(ObjectKey key, ReadOnlySpan<byte> bytes, long declaredLength, out ObjectKey? document)
     {
         document = null;
-        if (ObjectFormats.Refusal(key, declaredLength) is { } code) return new(code, Explain(code));
+        if (ObjectFormats.Refusal(key, declaredLength, kind) is { } code) return new(code, Explain(code));
         if (bytes.Length != declaredLength) return new(ObjectRefusalCodes.SizeMismatch, "The bytes are not the declared length.");
         if (declaredLength > ObjectFormats.MaxInMemoryBytes) return new(ObjectRefusalCodes.TooLarge, "Over 64 MiB: stage it instead.");
         try { ObjectVerifier.VerifyWhole(key, bytes, out document); return null; }
@@ -115,13 +122,14 @@ public sealed class ObjectVerification : IObjectVerifier
 
     public IObjectCheck Begin(ObjectKey key, long declaredLength)
     {
-        if (ObjectFormats.Refusal(key, declaredLength) is { } code) return new Refused(new(code, Explain(code)));
+        if (ObjectFormats.Refusal(key, declaredLength, kind) is { } code) return new Refused(new(code, Explain(code)));
         return new Incremental(ObjectVerifier.For(key, declaredLength));
     }
 
-    private static string Explain(string code) => code switch
+    private string Explain(string code) => code switch
     {
-        ObjectRefusalCodes.KeyTypeUnsupported => "This key type is not one format 1 stores.",
+        ObjectRefusalCodes.KeyTypeUnsupported => kind == ObjectStoreKind.Generated
+            ? "A generated store holds only generated objects (key type 7)." : "This key type is not one a CDN store holds in format 1.",
         ObjectRefusalCodes.NamespaceUnsupported => "Only namespace 0 is stored in format 1.",
         _ => "The declared length is zero or over this key type's limit.",
     };

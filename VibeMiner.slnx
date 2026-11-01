@@ -8,6 +8,7 @@
     <Project Path="src/backend/VibeMiner.Infrastructure/VibeMiner.Infrastructure.csproj" />
     <Project Path="src/backend/VibeMiner.Host/VibeMiner.Host.csproj" />
     <Project Path="src/backend/VibeMiner.Objects/VibeMiner.Objects.csproj" />
+    <Project Path="src/backend/VibeMiner.Generated/VibeMiner.Generated.csproj" />
     <Project Path="src/backend/VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
     <Project Path="src/backend/VibeMiner.Builds/VibeMiner.Builds.csproj" />
     <Project Path="src/backend/VibeMiner.Files/VibeMiner.Files.csproj" />
@@ -19,6 +20,7 @@
     <Project Path="tests/backend/VibeMiner.Objects.CrashWriter/VibeMiner.Objects.CrashWriter.csproj" />
     <Project Path="tests/backend/VibeMiner.Primitives.Tests/VibeMiner.Primitives.Tests.csproj" />
     <Project Path="tests/backend/VibeMiner.Cdn.Testing/VibeMiner.Cdn.Testing.csproj" />
+    <Project Path="tests/backend/VibeMiner.Generated.Testing/VibeMiner.Generated.Testing.csproj" />
     <Project Path="tests/backend/VibeMiner.ObjectAccess.Tests/VibeMiner.ObjectAccess.Tests.csproj" />
     <Project Path="tests/backend/VibeMiner.ObjectAccess.Testing/VibeMiner.ObjectAccess.Testing.csproj" />
     <Project Path="tests/backend/VibeMiner.Cli.Tests/VibeMiner.Cli.Tests.csproj" />

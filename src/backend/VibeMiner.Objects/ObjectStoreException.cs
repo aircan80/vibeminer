@@ -7,6 +7,8 @@ public static class ObjectStoreCodes
     public const string NewerFormat = "OBJECT_STORE_NEWER_FORMAT";
     /// <summary>A pack belongs to another store (its store id differs). Nothing was changed.</summary>
     public const string ForeignPack = "OBJECT_STORE_FOREIGN_PACK";
+    /// <summary>The folder's packs or index are of the other <see cref="ObjectStoreKind"/> than the one asked for. Nothing was changed.</summary>
+    public const string KindMismatch = "OBJECT_STORE_KIND_MISMATCH";
     /// <summary>Another writer holds the store.</summary>
     public const string Busy = "OBJECT_STORE_BUSY";
     /// <summary>A write was asked of a read-only store.</summary>

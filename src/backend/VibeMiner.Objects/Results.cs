@@ -62,9 +62,18 @@ public sealed record ScanProgress(long Entries, long Bytes);
 /// </summary>
 public sealed record StoreStats(int Packs, long Objects, long HistoryRecords, long PackBytes, long LiveBytes, DateTimeOffset CreatedAt);
 
+/// <summary>
+/// What a store holds. <see cref="Cdn"/>: CDN bytes, key types 1..6, checked against their keys. <see cref="Generated"/>: prepared
+/// data, key type 7 only, no history log and no staging. The kind is written in every pack header and the index; a folder of one
+/// kind never opens as the other.
+/// </summary>
+public enum ObjectStoreKind { Cdn = 0, Generated = 1 }
+
 /// <summary>Bounds and timing. The defaults are the D123 group-commit rule and pack size.</summary>
 public sealed record ObjectStoreOptions
 {
+    /// <summary>The store's kind; opening a folder of the other kind throws OBJECT_STORE_KIND_MISMATCH.</summary>
+    public ObjectStoreKind Kind { get; init; } = ObjectStoreKind.Cdn;
     public long MaxPackBytes { get; init; } = 2L << 30;
     public int CommitObjects { get; init; } = 128;
     public long CommitBytes { get; init; } = 16L << 20;
