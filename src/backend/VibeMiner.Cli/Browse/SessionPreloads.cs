@@ -37,29 +37,24 @@ internal sealed class SessionPreloads(BrowseSession session) : IAsyncDisposable
 
     /// <summary>
     /// The status line's preload part: the last preload started or stopped, while it runs; its end until <see cref="ClearEnded"/>.
-    /// Empty when there is nothing to show.
+    /// Null when there is nothing to show.
     /// </summary>
-    public string Status
+    public PreloadLine? Status
     {
         get
         {
-            lock (gate)
-            {
-                if (shown is null) return "";
-                var line = Line(shown);
-                return shownEnded && !Running(shown) ? "" : line;
-            }
+            lock (gate) return shown is null || (shownEnded && !Running(shown)) ? null : Line(shown);
         }
     }
 
     /// <summary>The line of this build and locale's preload, running or ended; null when this session has none.</summary>
-    public string? LineOf(BuildRef build, string locale)
+    public PreloadLine? LineOf(BuildRef build, string locale)
     {
         lock (gate) return entries.TryGetValue((build, locale), out var e) ? Line(e) : null;
     }
 
     /// <summary>The line of the most recently touched preload of a build in any region and locale; null when none.</summary>
-    public string? LineOf(string product, string buildConfig)
+    public PreloadLine? LineOf(string product, string buildConfig)
     {
         lock (gate) return Latest(product, buildConfig) is { } e ? Line(e) : null;
     }
@@ -106,7 +101,7 @@ internal sealed class SessionPreloads(BrowseSession session) : IAsyncDisposable
                     {
                         // The composition stays read-only until browse restarts; nothing is kept.
                         await leased.DisposeAsync().ConfigureAwait(false);
-                        lock (gate) entry.Note = Says(entry, "not started, the store is read-only (writer busy)");
+                        lock (gate) entry.Note = "not started, the store is read-only (writer busy)";
                         return;
                     }
                     lease = leased;
@@ -126,11 +121,11 @@ internal sealed class SessionPreloads(BrowseSession session) : IAsyncDisposable
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested || closing.IsCancellationRequested)
         {
-            lock (gate) if (entry.Job is null) entry.Note = Says(entry, "not started (canceled)");
+            lock (gate) if (entry.Job is null) entry.Note = "not started (canceled)";
         }
         catch (Exception e)
         {
-            lock (gate) entry.Note = Says(entry, $"not started, {BrowseSession.Explain(e)}");
+            lock (gate) entry.Note = $"not started, {BrowseSession.Explain(e)}";
         }
         finally
         {
@@ -224,48 +219,58 @@ internal sealed class SessionPreloads(BrowseSession session) : IAsyncDisposable
 
     private void Raise() => Changed?.Invoke();
 
-    /// <summary>The line's start: <c>preload</c>, the version and the locale unless it is enUS.</summary>
-    private static string Says(Entry e, string what) => Says(e.Label, e.Locale, what);
-
-    private static string Says(string label, string locale, string what) =>
-        EnsureTask.Clip($"preload {label}{(locale == FilesView.DefaultLocale ? "" : $" {locale}")}: {what}", FilesView.Width);
+    /// <summary>A line saying <paramref name="what"/> of the entry; running while it starts, runs or stops.</summary>
+    private static PreloadLine Says(Entry e, string what) => new(e.Label, e.Locale, what, Running(e));
 
     // Under gate.
-    private static string Line(Entry e) =>
-        e.Note ?? (e.Starting ? Says(e, "starting")
+    private static PreloadLine Line(Entry e) =>
+        e.Note is { } note ? new(e.Label, e.Locale, note, false)
+            : e.Starting ? Says(e, "starting")
             : e.Job is not null ? (e.Stopping ? Says(e, "stopping") : ProgressLine(e.Label, e.Locale, e.Progress))
-            : e.Result is { } r ? ResultLine(e.Label, e.Locale, r) : Says(e, "not started"));
+            : e.Result is { } r ? ResultLine(e.Label, e.Locale, r) : Says(e, "not started");
 
     /// <summary>
-    /// A running preload, e.g. <c>preload 1.2.3.45678: downloading 120 of 900 files, 3.1 MiB of 90.0 MiB</c> or
-    /// <c>preload 1.2.3.45678: preparing 300 of 870 tables</c>; fits 80 columns.
+    /// A running preload in short forms that fit 80 columns, e.g. <c>preload 1.2.3.45678: downloading 120/900 files, 3.1/90.0 MiB</c>
+    /// or <c>preload 1.2.3.45678: preparing 300/870 tables</c>. Downloading before layer 4 has counted anything (a resume
+    /// checking what is stored) says <c>checking stored files</c>, never 0 of 0.
     /// </summary>
-    internal static string ProgressLine(string label, string locale, TablePreloadProgress p) => Says(label, locale, p.Stage switch
+    internal static PreloadLine ProgressLine(string label, string locale, TablePreloadProgress p) => new(label, locale, p.Stage switch
     {
         TablePreloadStage.Opening => "opening the build",
+        TablePreloadStage.Downloading when p.FilesTotal == 0 => "checking stored files",
         TablePreloadStage.Downloading => string.Create(CultureInfo.InvariantCulture,
-            $"downloading {p.FilesDone:N0} of {p.FilesTotal:N0} files, {VmCommands.Size(p.BytesDone)} of {VmCommands.Size(p.BytesTotal)}"),
-        _ => string.Create(CultureInfo.InvariantCulture, $"preparing {p.TablesDone:N0} of {p.TablesTotal:N0} tables"),
-    });
+            $"downloading {p.FilesDone}/{p.FilesTotal} files, {Sizes(p.BytesDone, p.BytesTotal)}"),
+        _ => string.Create(CultureInfo.InvariantCulture, $"preparing {p.TablesDone}/{p.TablesTotal} tables"),
+    }, true);
 
     /// <summary>
-    /// An ended preload, e.g. <c>preload 1.2.3.45678: completed, 870 tables</c> or
-    /// <c>preload 1.2.3.45678: incomplete, 12 of 870 tables and 3 files failed; P retries</c>; fits 80 columns.
+    /// An ended preload, e.g. <c>preload 1.2.3.45678: done, 870 tables</c> or
+    /// <c>preload 1.2.3.45678: incomplete, 12/870 tables, 3 files failed; P retries</c>.
     /// </summary>
-    internal static string ResultLine(string label, string locale, TablePreloadResult r)
+    internal static PreloadLine ResultLine(string label, string locale, TablePreloadResult r)
     {
         var f = r.Final;
-        return Says(label, locale, r.Outcome switch
+        return new(label, locale, r.Outcome switch
         {
             TablePreloadOutcome.Completed => string.Create(CultureInfo.InvariantCulture,
-                $"completed, {f.TablesTotal:N0} tables{(f.TablesFailed > 0 ? $" ({f.TablesFailed:N0} failed)" : "")}"),
+                $"done, {f.TablesTotal} tables{(f.TablesFailed > 0 ? $" ({f.TablesFailed} failed)" : "")}"),
             TablePreloadOutcome.Incomplete => string.Create(CultureInfo.InvariantCulture,
-                $"incomplete, {f.TablesFailed:N0} of {f.TablesTotal:N0} tables and {f.FilesFailed:N0} files failed; P retries"),
+                $"incomplete, {f.TablesFailed}/{f.TablesTotal} tables, {f.FilesFailed} files failed; P retries"),
             TablePreloadOutcome.Canceled => f.Stage == TablePreloadStage.Preparing
-                ? string.Create(CultureInfo.InvariantCulture, $"stopped at {f.TablesDone:N0} of {f.TablesTotal:N0} tables; P resumes")
-                : string.Create(CultureInfo.InvariantCulture, $"stopped at {f.FilesDone:N0} of {f.FilesTotal:N0} files; P resumes"),
+                ? string.Create(CultureInfo.InvariantCulture, $"stopped at {f.TablesDone}/{f.TablesTotal} tables; P resumes")
+                : f.FilesTotal == 0 ? "stopped before downloading; P resumes"
+                : string.Create(CultureInfo.InvariantCulture, $"stopped at {f.FilesDone}/{f.FilesTotal} files; P resumes"),
             _ => $"failed ({r.Code ?? r.OpenState?.ToString() ?? "no code"}); P retries",
-        });
+        }, false);
+    }
+
+    /// <summary><c>3.1/90.0 MiB</c> when both sizes have the same unit, else <c>900 KiB/1.2 MiB</c>.</summary>
+    private static string Sizes(long done, long total)
+    {
+        var d = VmCommands.Size(done);
+        var t = VmCommands.Size(total);
+        var space = d.LastIndexOf(' ');
+        return space > 0 && t.EndsWith(d[space..], StringComparison.Ordinal) ? $"{d[..space]}/{t}" : $"{d}/{t}";
     }
 
     /// <summary>Stops every preload and waits for it, then lets the composition lease go. Call before the composition closes.</summary>

@@ -8,6 +8,7 @@ using VibeMiner.Files.Testing;
 using VibeMiner.Formats.Tables;
 using VibeMiner.ObjectAccess;
 using VibeMiner.Objects;
+using Terminal.Gui.Testing;
 using Xunit;
 
 namespace VibeMiner.Cli.Tests;
@@ -34,7 +35,7 @@ public sealed class PreloadViewTests : IAsyncDisposable
 
     public PreloadViewTests()
     {
-        builds.Add(Build, new BuildsFakeBuild(new BuildMetadata(Version, default, default, default, 3, 2, ["enUS"]), []));
+        builds.Add(Build, new BuildsFakeBuild(new BuildMetadata(Version, default, default, default, 1_402, 159_749, ["enUS"]), []));
         builds.BeforeOpen = (_, _) =>
         {
             memory.Add(Build, ["enUS"], [new FakeFile(5, Size: 1)]);
@@ -95,7 +96,8 @@ public sealed class PreloadViewTests : IAsyncDisposable
 
     private static void Fits(string line) => Assert.True(line.Length <= 80, $"{line.Length} columns: {line}");
 
-    private const string Downloading = "preload 1.15.9.70576: downloading 120 of 900 files, 3.1 MiB of 90.0 MiB";
+    private const string Metadata = "metadata: stored, 159,749 files, 1,402 archives (us).";
+    private const string Downloading = "preload 1.15.9.70576: downloading 120/900 files, 3.1/90.0 MiB";
 
     [Fact]
     public async Task MOpeningTheBuildStartsThePreloadOverTheWriterAndItRunsToTheEnd()
@@ -103,7 +105,7 @@ public sealed class PreloadViewTests : IAsyncDisposable
         await FilesAsync();
         Assert.Equal("", nav.PreloadStatus);
         await MetadataAsync();
-        Assert.Equal("metadata: stored, 2 files, 3 archives (us).", nav.Tasks.Status);
+        Assert.Equal(Metadata, nav.Tasks.Status);
         await Until(() => nav.PreloadStatus == Downloading);
         Fits(nav.PreloadStatus);
         Assert.Equal([(Build, "enUS")], tables.Opened);
@@ -114,7 +116,7 @@ public sealed class PreloadViewTests : IAsyncDisposable
         Assert.Equal(["5"], nav.Current.Visible.Select(r => r.Cells[0]));
 
         tables.Release();
-        await Until(() => nav.PreloadStatus == "preload 1.15.9.70576: completed, 870 tables");
+        await Until(() => nav.PreloadStatus == "preload 1.15.9.70576: done, 870 tables");
     }
 
     [Fact]
@@ -126,7 +128,7 @@ public sealed class PreloadViewTests : IAsyncDisposable
         Assert.Contains(nav.Help().Split('\n'), l => l.StartsWith("  P        preload: stop or resume", StringComparison.Ordinal));
 
         Assert.True(nav.TryAction('P'));
-        await Until(() => nav.PreloadStatus == "preload 1.15.9.70576: stopped at 120 of 900 files; P resumes");
+        await Until(() => nav.PreloadStatus == "preload 1.15.9.70576: stopped at 120/900 files; P resumes");
         await session.Preloads.Pending.WaitAsync(Guard);
         Assert.Equal(1, tables.Canceled);
 
@@ -134,7 +136,7 @@ public sealed class PreloadViewTests : IAsyncDisposable
         await Until(() => nav.PreloadStatus == Downloading);
         Assert.Equal(2, tables.Opened.Count);
         tables.Release();
-        await Until(() => nav.PreloadStatus == "preload 1.15.9.70576: completed, 870 tables");
+        await Until(() => nav.PreloadStatus == "preload 1.15.9.70576: done, 870 tables");
         // One composition for the session: the resume reused it.
         Assert.Equal(1, composed);
     }
@@ -159,7 +161,7 @@ public sealed class PreloadViewTests : IAsyncDisposable
             Assert.Equal(Downloading, buildNav.PreloadStatus);
             Assert.True(buildNav.TryAction('P'));
             Assert.Null(buildNav.Message);
-            await Until(() => buildNav.PreloadStatus.EndsWith("stopped at 120 of 900 files; P resumes", StringComparison.Ordinal));
+            await Until(() => buildNav.PreloadStatus.EndsWith("stopped at 120/900 files; P resumes", StringComparison.Ordinal));
         }
         finally { await buildNav.DisposeAsync().AsTask().WaitAsync(Guard); }
     }
@@ -206,27 +208,115 @@ public sealed class PreloadViewTests : IAsyncDisposable
         TablePreloadProgress P(TablePreloadStage stage) => new(stage, 120, 900, 3, 3_250_000, 94_371_840, 3_250_000, 300, 870, 12);
         TablePreloadResult R(TablePreloadOutcome o, TablePreloadStage stage = TablePreloadStage.Preparing, string? code = null) =>
             new(o, P(stage), [], null, code, null);
-        Assert.Equal("preload 1.2.3.45678: opening the build", SessionPreloads.ProgressLine("1.2.3.45678", "enUS", P(TablePreloadStage.Opening)));
-        Assert.Equal("preload 1.2.3.45678: downloading 120 of 900 files, 3.1 MiB of 90.0 MiB",
-            SessionPreloads.ProgressLine("1.2.3.45678", "enUS", P(TablePreloadStage.Downloading)));
-        Assert.Equal("preload 1.2.3.45678 deDE: preparing 300 of 870 tables", SessionPreloads.ProgressLine("1.2.3.45678", "deDE", P(TablePreloadStage.Preparing)));
-        Assert.Equal("preload 1.2.3.45678: completed, 870 tables (12 failed)", SessionPreloads.ResultLine("1.2.3.45678", "enUS", R(TablePreloadOutcome.Completed)));
-        Assert.Equal("preload 1.2.3.45678: incomplete, 12 of 870 tables and 3 files failed; P retries",
-            SessionPreloads.ResultLine("1.2.3.45678", "enUS", R(TablePreloadOutcome.Incomplete)));
-        Assert.Equal("preload 1.2.3.45678: stopped at 300 of 870 tables; P resumes", SessionPreloads.ResultLine("1.2.3.45678", "enUS", R(TablePreloadOutcome.Canceled)));
+        string Progress(string locale, TablePreloadStage stage) => SessionPreloads.ProgressLine("1.2.3.45678", locale, P(stage)).Text;
+        string Result(TablePreloadResult r) => SessionPreloads.ResultLine("1.2.3.45678", "enUS", r).Text;
+        Assert.Equal("preload 1.2.3.45678: opening the build", Progress("enUS", TablePreloadStage.Opening));
+        Assert.Equal("preload 1.2.3.45678: downloading 120/900 files, 3.1/90.0 MiB", Progress("enUS", TablePreloadStage.Downloading));
+        Assert.Equal("preload 1.2.3.45678 deDE: preparing 300/870 tables", Progress("deDE", TablePreloadStage.Preparing));
+        Assert.Equal("preload 1.2.3.45678: done, 870 tables (12 failed)", Result(R(TablePreloadOutcome.Completed)));
+        Assert.Equal("preload 1.2.3.45678: incomplete, 12/870 tables, 3 files failed; P retries", Result(R(TablePreloadOutcome.Incomplete)));
+        Assert.Equal("preload 1.2.3.45678: stopped at 300/870 tables; P resumes", Result(R(TablePreloadOutcome.Canceled)));
         Assert.Equal("preload 1.2.3.45678: failed (OBJECT_ACCESS_NEEDS_NETWORK); P retries",
-            SessionPreloads.ResultLine("1.2.3.45678", "enUS", R(TablePreloadOutcome.Failed, code: "OBJECT_ACCESS_NEEDS_NETWORK")));
-        var longest = SessionPreloads.ResultLine("11.22.33.444444 zhCN", "zhCN",
+            Result(R(TablePreloadOutcome.Failed, code: "OBJECT_ACCESS_NEEDS_NETWORK")));
+        // A resume's ensure before it has counted anything: never "0 of 0 files".
+        Assert.Equal("preload 1.2.3.45678: checking stored files",
+            SessionPreloads.ProgressLine("1.2.3.45678", "enUS", new(TablePreloadStage.Downloading, 0, 0, 0, 0, 0, 0, 0, 1132, 0)).Text);
+        // Stopped while opening or before layer 4 counted anything: not "0/0 files".
+        Assert.Equal("preload 1.2.3.45678: stopped before downloading; P resumes",
+            Result(new(TablePreloadOutcome.Canceled, new(TablePreloadStage.Opening, 0, 0, 0, 0, 0, 0, 0, 0, 0), [], null, null, null)));
+        Assert.Equal("preload 1.2.3.45678: downloading 3/900 files, 900.0 KiB/90.0 MiB",
+            SessionPreloads.ProgressLine("1.2.3.45678", "enUS", new(TablePreloadStage.Downloading, 3, 900, 0, 921_600, 94_371_840, 0, 0, 0, 0)).Text);
+
+        // Retail's longest end fits 80 columns whole: nothing is cut (QA on #159 saw "P ret...").
+        var retail = SessionPreloads.ResultLine("11.2.5.63906", "enUS",
+            new(TablePreloadOutcome.Incomplete, new(TablePreloadStage.Preparing, 1132, 1132, 12, 0, 0, 0, 1132, 1132, 1132), [], null, null, null));
+        Assert.Equal("preload 11.2.5.63906: incomplete, 1132/1132 tables, 12 files failed; P retries", retail.Fit(80));
+
+        // Too long for the room: the version is cut from its front, then left out; the counts stay.
+        var huge = SessionPreloads.ResultLine("11.22.33.444444", "zhCN",
             new(TablePreloadOutcome.Incomplete, new(TablePreloadStage.Preparing, long.MaxValue, long.MaxValue, long.MaxValue, 0, 0, 0, int.MaxValue, int.MaxValue, int.MaxValue), [], null, null, null));
-        Fits(longest);
-        Assert.EndsWith("...", longest);
+        var body = "incomplete, 2147483647/2147483647 tables, 9223372036854775807 files failed; P retries";
+        Assert.Equal($"preload zhCN: {body}", huge.Fit(80 + 20));
+        Assert.Equal($"preload ...444444 zhCN: {body}", huge.Fit(huge.Shortest.Length + 10));
+        Assert.Equal(huge.Text, huge.Fit(200));
+        Fits(huge.Fit(80));
+        var preparing = SessionPreloads.ProgressLine("1.15.9.70576", "enUS", new(TablePreloadStage.Preparing, 0, 0, 0, 0, 0, 0, 310, 1132, 0));
+        Assert.Equal("preload ...70576: preparing 310/1132 tables", preparing.Fit(43));
+        Assert.Equal("preload: preparing 310/1132 tables", preparing.Fit(35));
+    }
+
+    [Fact]
+    public void TheStatusLinePutsARunningPreloadFirstAndCutsOlderText()
+    {
+        const string metadata = "metadata: stored, 159,749 files, 1,402 archives (us).";
+        var running = SessionPreloads.ProgressLine(Version, "enUS", new(TablePreloadStage.Preparing, 0, 0, 0, 0, 0, 0, 310, 1132, 0));
+        var line = StatusLine.Compose(80, metadata, false, running, []);
+        Fits(line);
+        Assert.StartsWith("preload 1.15.9.70576: preparing 310/1132 tables  |  metadata: stored", line, StringComparison.Ordinal);
+
+        // A running task and a running preload: the preload keeps its counts and the task's line is cut.
+        var ensure = "ensure: 120 of 500 files, 3.1 MiB of 9.0 MiB; x cancels";
+        line = StatusLine.Compose(80, ensure, true, running, ["/dbfiles (3 rows)"]);
+        Fits(line);
+        Assert.StartsWith("preload 1.15.9.70576: preparing 310/1132 tables  |  ensure: ", line, StringComparison.Ordinal);
+
+        // An ended preload comes before the task line that started it; at 200 columns every part shows whole.
+        var ended = SessionPreloads.ResultLine("11.2.5.63906", "enUS",
+            new(TablePreloadOutcome.Incomplete, new(TablePreloadStage.Preparing, 1132, 1132, 12, 0, 0, 0, 1132, 1132, 1132), [], null, null, null));
+        line = StatusLine.Compose(200, metadata, false, ended, []);
+        Assert.Equal($"{ended.Text}  |  {metadata}  |  {StatusLine.KeysHint}", line);
+        Assert.Equal($"? keys  q quit", StatusLine.Compose(80, "", false, null, []));
+    }
+
+    [Fact]
+    public async Task At80x24TheFilesViewShowsTheRunningPreloadsStageAndCountsAfterM()
+    {
+        // QA on #159: the metadata line took the width and "preload 1.15.9.70576:" was cut before its stage and counts.
+        tables.Reports =
+        [
+            new(TablePreloadStage.Downloading, 0, 0, 0, 0, 0, 0, 0, 1132, 0),
+            new(TablePreloadStage.Downloading, 968, 968, 0, 8_283_750, 8_283_750, 8_283_750, 0, 1132, 0),
+            new(TablePreloadStage.Preparing, 968, 968, 0, 8_283_750, 8_283_750, 8_283_750, 310, 1132, 0),
+        ];
+        const string preparing = "preload 1.15.9.70576: preparing 310/1132 tables";
+        static bool Idle(BrowseShell sh) => !sh.StatusText.Contains("loading...");
+        BrowseShellSmokeTests.Step[] steps =
+        [
+            new("files", (s, sh) => Idle(sh) && BrowseShellSmokeTests.Line(s, 0).Contains("files"), a => a.InjectKey(new Terminal.Gui.Input.Key('m'))),
+            new("preparing", (s, sh) => Idle(sh) && BrowseShellSmokeTests.Line(s, 23).Contains("preparing 310/1132 tables")
+                && sh.StatusText.Contains("metadata: stored"), a => a.InjectKey(new Terminal.Gui.Input.Key('P'))),
+            new("stopped", (s, _) => BrowseShellSmokeTests.Line(s, 23).Contains("stopped at 310/1132 tables; P resumes"),
+                a => a.InjectKey(new Terminal.Gui.Input.Key('q'))),
+        ];
+        var wide = new List<string>();
+        steps = [.. steps.Select(st => st with
+        {
+            Ready = (s, sh) =>
+            {
+                if (!st.Ready(s, sh)) return false;
+                wide.AddRange(sh.ShownLines.Where(l => l.Length > 80).Select(l => $"{st.Name}: {l}"));
+                return true;
+            },
+        })];
+        var registry = new ViewRegistry().Add(new("files", "", () => new FilesView(new(Build, "enUS"), Version)));
+        var (shots, failure, stopped, shown) = BrowseShellSmokeTests.Drive(session, registry, "files", steps);
+        await shown.DisposeAsync().AsTask().WaitAsync(Guard);
+
+        Assert.True(failure is null, failure);
+        Assert.True(stopped);
+        Assert.Empty(wide);
+        var status = BrowseShellSmokeTests.Line(shots["preparing"], 23);
+        Assert.StartsWith($"{preparing}  |  metadata: stored, 159,749", status, StringComparison.Ordinal);
+        Assert.Equal(80, status.Length);
+        Assert.StartsWith("preload 1.15.9.70576: stopped at 310/1132 tables; P resumes", BrowseShellSmokeTests.Line(shots["stopped"], 23),
+            StringComparison.Ordinal);
     }
 
     /// <summary>
     /// Opens <see cref="Build"/>'s tables; a handle's preload reports Downloading 120 of 900 files, then waits for
     /// <see cref="Release"/> (ending Completed with 870 tables) or its cancellation (ending Canceled).
     /// </summary>
-    private sealed class ScriptedTables : ITables
+    internal sealed class ScriptedTables : ITables
     {
         private readonly Lock gate = new();
         private readonly List<(BuildRef, string)> opened = [];
@@ -237,6 +327,8 @@ public sealed class PreloadViewTests : IAsyncDisposable
         public int Canceled => Volatile.Read(ref canceled);
         public int Disposed => Volatile.Read(ref disposed);
         public Action? OnCanceled { get; set; }
+        /// <summary>What a preload reports before it waits; the last one is its end when stopped. Null: Downloading 120 of 900.</summary>
+        public TablePreloadProgress[]? Reports { get; set; }
         public Exception? CanceledFailure { get; private set; }
 
         public void Release() => release.TrySetResult();
@@ -256,7 +348,11 @@ public sealed class PreloadViewTests : IAsyncDisposable
             public async Task<TablePreloadResult> PreloadAsync(IProgress<TablePreloadProgress>? progress, CancellationToken cancellationToken)
             {
                 var downloading = new TablePreloadProgress(TablePreloadStage.Downloading, 120, 900, 0, 3_250_000, 94_371_840, 3_250_000, 0, 0, 0);
-                progress?.Report(downloading);
+                foreach (var report in owner.Reports ?? [downloading])
+                {
+                    progress?.Report(report);
+                    downloading = report;
+                }
                 try { await owner.release.Task.WaitAsync(cancellationToken); }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {

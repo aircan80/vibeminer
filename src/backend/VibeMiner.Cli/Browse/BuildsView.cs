@@ -164,7 +164,7 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
     /// <summary><c>P</c>: stops or resumes the build's latest table preload of this session, in any region and locale.</summary>
     private KeyOutcome TogglePreload() => new(Act: session => session.Preloads.Toggle(build.Product, build.BuildConfig) ? null : NoPreload);
 
-    public override string? PreloadLine(SessionPreloads preloads) => preloads.LineOf(build.Product, build.BuildConfig);
+    public override PreloadLine? PreloadLine(SessionPreloads preloads) => preloads.LineOf(build.Product, build.BuildConfig);
 
     /// <summary>
     /// <c>d</c>: opens the build read-only from the store (its ENCODING, ROOT and every archive index, so not on every load) and

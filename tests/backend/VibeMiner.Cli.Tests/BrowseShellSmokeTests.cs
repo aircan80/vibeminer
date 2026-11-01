@@ -30,7 +30,7 @@ public sealed class BrowseShellSmokeTests(ITestOutputHelper output)
     // Without this the ANSI driver opens /dev/tty even with testhost's output redirected, and draws in the developer's terminal.
     static BrowseShellSmokeTests() => Environment.SetEnvironmentVariable("DisableRealDriverIO", "1");
 
-    private sealed record Step(string Name, Func<string, BrowseShell, bool> Ready, Action<IApplication> Act);
+    internal sealed record Step(string Name, Func<string, BrowseShell, bool> Ready, Action<IApplication> Act);
 
     [Fact]
     public async Task TheShellBrowsesHistoryFiltersShowsHelpAndQuits()
@@ -78,7 +78,7 @@ public sealed class BrowseShellSmokeTests(ITestOutputHelper output)
     /// Runs the shell at 80x24 over <paramref name="registry"/> from <paramref name="start"/>, taking each step once its screen is
     /// ready, until the last step quits it or one never becomes ready.
     /// </summary>
-    private static (Dictionary<string, string> Shots, string? Failure, bool Stopped, Navigator Navigator) Drive(
+    internal static (Dictionary<string, string> Shots, string? Failure, bool Stopped, Navigator Navigator) Drive(
         BrowseSession session, ViewRegistry registry, string start, Step[] steps)
     {
         var shots = new Dictionary<string, string>();
@@ -278,12 +278,12 @@ public sealed class BrowseShellSmokeTests(ITestOutputHelper output)
         if (error is not null) throw new AggregateException(error);
     }
 
-    private static void Type(IApplication app, string text)
+    internal static void Type(IApplication app, string text)
     {
         foreach (var c in text) app.InjectKey(new Key(c));
     }
 
-    private static string Line(string screen, int row) => screen.Split('\n')[row];
+    internal static string Line(string screen, int row) => screen.Split('\n')[row];
 
     private static string Screen(IApplication app)
     {

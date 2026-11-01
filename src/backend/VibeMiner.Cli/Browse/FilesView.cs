@@ -106,7 +106,7 @@ internal sealed class FilesView : BrowseView
         });
     }
 
-    public override string? PreloadLine(SessionPreloads preloads) =>
+    public override PreloadLine? PreloadLine(SessionPreloads preloads) =>
         Snapshot.Opened is { } opened ? preloads.LineOf(opened.Target.Build, opened.Target.Locale) : null;
 
     /// <summary>The <c>l</c> help: every locale, wrapped under the help's key column onto lines that fit <see cref="HelpWidth"/>.</summary>

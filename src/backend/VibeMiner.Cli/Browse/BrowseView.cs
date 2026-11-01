@@ -82,7 +82,7 @@ internal abstract class BrowseView
     /// The table preload line this view is about (its build's), which the status line shows instead of the session's latest;
     /// null for none. Called on the UI thread on every redraw: no I/O.
     /// </summary>
-    public virtual string? PreloadLine(SessionPreloads preloads) => null;
+    public virtual PreloadLine? PreloadLine(SessionPreloads preloads) => null;
 }
 
 /// <summary>A top view the <c>:</c> line can jump to.</summary>

@@ -83,6 +83,9 @@ internal sealed class BrowseShell : Window
         catch (Exception) { status.Text = Failed(e); }
     }
 
+    /// <summary>The screen's columns, which the status line is composed in; 80 before the first layout.</summary>
+    private int Columns => app.Screen.Width > 0 ? app.Screen.Width : FilesView.Width;
+
     /// <summary>The status line as shown, for the smoke test.</summary>
     public string StatusText => status.Text;
 
@@ -239,10 +242,7 @@ internal sealed class BrowseShell : Window
         else if (frame.Filter.Length > 0) parts.Add($"/{frame.Filter} ({frame.Visible.Count} of {frame.Content?.Rows.Count ?? 0})");
         if (frame.Loading) parts.Add("loading...");
         if (navigator.Message is { } message) parts.Add(message);
-        if (navigator.Tasks.Status.Length > 0) parts.Add(navigator.Tasks.Status);
-        if (navigator.PreloadStatus is { Length: > 0 } preload) parts.Add(preload);
-        parts.Add("? keys  q quit");
-        status.Text = string.Join("  |  ", parts);
+        status.Text = StatusLine.Compose(Columns, navigator.Tasks.Status, navigator.Tasks.Running is not null, navigator.Preload, parts);
     }
 
     protected override void Dispose(bool disposing)

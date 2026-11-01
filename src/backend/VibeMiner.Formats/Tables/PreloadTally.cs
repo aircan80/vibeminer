@@ -5,9 +5,10 @@ namespace VibeMiner.Formats.Tables;
 /// <summary>
 /// The counters, failed tables and coalesced progress of one table preload (D360), shared by the real handle and the fake. Thread
 /// safe. Every figure only goes up and the stage only forward, whatever order layer 4's reports arrive in. Progress is offered at
-/// most once per interval (the first offer always goes) into one pending slot that a newer offer overwrites, and delivered in
-/// order on a pool thread, never under the lock, as layer 4's ensure does: at most one report in flight and one pending. The final
-/// report always goes, last, and <see cref="FinishAsync"/> returns once it has been delivered.
+/// most once per interval (the first offer, the ensure's final figures and the stage change always go) into one pending slot that
+/// a newer offer overwrites, and delivered in order on a pool thread, never under the lock, as layer 4's ensure does: at most one
+/// report in flight and one pending. The final report always goes, last, and <see cref="FinishAsync"/> returns once it has been
+/// delivered.
 /// </summary>
 internal sealed class PreloadTally(IProgress<TablePreloadProgress>? progress, TimeProvider time, TimeSpan interval) : IProgress<EnsureProgress>
 {
@@ -43,13 +44,14 @@ internal sealed class PreloadTally(IProgress<TablePreloadProgress>? progress, Ti
     public void Downloaded(EnsureProgress final, long failed)
     {
         lock (gate) current = Merge(current, final, Math.Max(current.FilesFailed, failed));
-        Offer();
+        Offer(force: true);
     }
 
+    /// <summary>Downloads are over: the stage change is always offered, whatever the interval.</summary>
     public void Preparing()
     {
         lock (gate) current = current with { Stage = TablePreloadStage.Preparing };
-        Offer();
+        Offer(force: true);
     }
 
     /// <summary>A table's end state: done, and failed (kept for the result) unless it is Ready, Partial or Encrypted.</summary>
@@ -77,14 +79,14 @@ internal sealed class PreloadTally(IProgress<TablePreloadProgress>? progress, Ti
         CdnBytes = Math.Max(at.CdnBytes, value.CdnBytes),
     };
 
-    /// <summary>Offers the current figures unless one was offered less than the interval ago.</summary>
-    public void Offer()
+    /// <summary>Offers the current figures unless one was offered less than the interval ago and <paramref name="force"/> is false.</summary>
+    public void Offer(bool force = false)
     {
         lock (gate)
         {
             if (progress is null || finished) return;
             var now = time.GetTimestamp();
-            if (delivered && time.GetElapsedTime(lastDelivered, now) < interval) return;
+            if (!force && delivered && time.GetElapsedTime(lastDelivered, now) < interval) return;
             delivered = true; lastDelivered = now;
             Queue(current);
         }

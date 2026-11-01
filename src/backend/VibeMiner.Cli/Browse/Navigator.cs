@@ -65,8 +65,11 @@ internal sealed class Navigator : IAsyncDisposable
         });
     }
 
-    /// <summary>The status line's preload part: the current view's build, else the session's latest; empty for none.</summary>
-    public string PreloadStatus => (frames.Count > 0 ? Current.View.PreloadLine(session.Preloads) : null) ?? session.Preloads.Status;
+    /// <summary>The status line's preload part: the current view's build, else the session's latest; null for none.</summary>
+    public PreloadLine? Preload => (frames.Count > 0 ? Current.View.PreloadLine(session.Preloads) : null) ?? session.Preloads.Status;
+
+    /// <summary>The preload part's whole line; empty for none.</summary>
+    public string PreloadStatus => Preload?.Text ?? "";
 
     /// <summary>Raised on the UI thread after anything shown changes.</summary>
     public event Action? Changed;

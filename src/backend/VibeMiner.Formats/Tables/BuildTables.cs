@@ -697,7 +697,6 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
     /// in the scheduler's Background queue and never fills it.
     /// </summary>
     internal const int PreloadChecks = 2;
-    internal static readonly TimeSpan PreloadInterval = TimeSpan.FromMilliseconds(100);
     /// <summary>The first and the longest wait before a check the full Background queue refused (TABLES_BUSY) is asked again.</summary>
     private static readonly TimeSpan BusyFirst = TimeSpan.FromMilliseconds(50), BusyMost = TimeSpan.FromSeconds(1);
 
@@ -709,7 +708,9 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
     {
         // Canceled before it starts is a Canceled result, not a throw: the token is looked at inside.
         Enter(TablePriority.Background, CancellationToken.None);
-        var tally = new PreloadTally(progress, TimeProvider.System, PreloadInterval);
+        // No interval here: the job over this handle (TablePreloads) coalesces by its options' interval and clock; the tally only
+        // keeps one report pending, so a slow subscriber still never queues more.
+        var tally = new PreloadTally(progress, TimeProvider.System, TimeSpan.Zero);
         try { return await PreloadCoreAsync(tally, cancellationToken).ConfigureAwait(false); }
         finally { await ExitAsync().ConfigureAwait(false); }
     }
