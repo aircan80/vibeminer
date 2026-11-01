@@ -1,17 +1,17 @@
 # M2 and SKIN
 
-Our original static model readers in [`src/backend/VibeMiner.Formats.Wow/Models/`](../../src/backend/VibeMiner.Formats.Wow/Models/). They parse geometry and declarations. They do not fetch dependencies, evaluate animation or pick an appearance. The application proves source and dependency identity separately.
+Our original static model readers, in layer 5 at [`src/backend/VibeMiner.Formats/Models/`](../../src/backend/VibeMiner.Formats/Models/) (#200, D400). The legacy copy in `src/backend/VibeMiner.Formats.Wow/Models/` stays until slice 9 (#158) and is checked against the new one by `tests/backend/VibeMiner.Formats.Comparison`. They parse geometry and declarations. They do not fetch dependencies, evaluate animation or pick an appearance. The application proves source and dependency identity separately.
 
 | Reader | Revision | Output |
 | --- | --- | --- |
 | `M2ModelReader` | `m2-static-native-v1` | `M2Model`: vertices, textures, materials, bones, lookups, dependency IDs, chunk list, bounds |
-| `M2SkinReader` | `m2-skin-native-v2` | `M2Skin`: geometry plus parsed batches and shadow batches, all references checked |
+| `M2SkinReader` | `m2-skin-native-v3` | `M2Skin`: geometry plus parsed batches and shadow batches, all references checked |
 | `M2GeometrySkinReader` | `m2-skin-geometry-v1` | `M2GeometrySkin`: geometry only; batches kept as uninterpreted array declarations |
 | `M2StaticGeometry.Create` | `native-m2-position-normal-uv-winding-v1` | Resolved triangle indices and section-referenced bounds |
 | `M2StaticMaterials.AdmitOpaque` | `m2-opaque-shader0-flags0-uv0-absent-channels-v1` | Draw list for the narrow opaque profile, or `MODEL_MATERIAL_UNSUPPORTED` |
 | `M2Appearance.ReadModelAsync` / `AdmitAsync` | `m2-appearance-batches-v1`, `m2-one-or-two-stage-combiners-v1` | Texture-weight proofs, SKIN batch records and the textured draw plan (one or two stages per batch), or the first refused batch |
 
-Input streams must be readable, seekable, start at 0 and be complete. A BLTE projection with holes is unsupported. Every read is asynchronous and bounded; nothing is published until EOF and length checks pass.
+Input streams must be readable, seekable, start at 0 and be complete. A layer 4 `FileReadStream` with holes is unsupported (`MODEL_UNSUPPORTED`). Every read is asynchronous and bounded; nothing is published until EOF and length checks pass.
 
 ## Supported profiles
 
@@ -99,13 +99,27 @@ The bounding box and the collision box must each have minimum ≤ maximum on eve
 
 Section, 48 bytes: u16 ID (geoset), u16 level, u16 vertex start, u16 vertex count, u16 triangle start, u16 triangle count, u16 bone count, u16 bone start, u16 bone influences, u16 center bone, center (3 f32), sort center (3 f32), f32 sort radius (≥0). **The effective triangle start is `start + (level << 16)`**; start and count must be multiples of 3.
 
-Batch, 24 bytes: u8 flags, i8 priority, u16 shader ID, u16 section index, u16 second raw field, i16 color index, u16 material index, u16 material layer, u16 texture count, u16 texture-lookup index, u16 texture-coordinate-lookup index, u16 texture-weight-lookup index, u16 texture-transform-lookup index. The strict reader checks section/material/color indices and every lookup range; `0xFFFF` in the weight and transform lookups means "no channel". The second raw field keeps its exact bytes; no general flag meaning is assigned.
+Batch, 24 bytes: u8 flags, i8 priority, u16 shader ID, u16 section index, u16 second raw field, i16 color index, u16 material index, u16 material layer, u16 texture count, u16 texture-lookup index, u16 texture-coordinate-lookup index, u16 texture-weight-lookup index, u16 texture-transform-lookup index. The strict reader checks section/material/color indices and every lookup range; `0xFFFF` in the weight and transform lookups means "no channel". One exception (D401, `m2-skin-native-v3`): on chunked 272 or 274 with an empty texture-coordinate lookup (MD20 136), the coordinate range isn't checked. After Cataclysm that lookup is unused and the shader ID and texture count pick each stage's coordinates; real modern models ship it empty while their batches name index 0 or 1 with one or two textures. A non-empty lookup is still range-checked, and 264 stays strict. The second raw field keeps its exact bytes; no general flag meaning is assigned.
 
 ### Bone-palette rule
 
 With a positive header maximum (≤256), each section's bone count must be ≤ it, influences ≤4, and `boneStart + boneCount` must fit the M2 bone lookup.
 
-**Chunked 272 or 274 with a header maximum of 0**, revision `m2-skin-native-v2`. This is the normal value in modern SKINs, not a rare case: a Retail 274 model (33,915 vertices, 178 bone-lookup entries) has header 0 while nine sections each declare 60 bones, and every live chunked 272 SKIN checked has 0 too (D097). The raw 0 is kept (no inferred maximum), each section palette is capped at 256, influences at 4, and spans must still fit the actual bone lookup. This rule does not apply to 264, where 0 is still checked as a maximum. It does not mean 0 is "unlimited" in general.
+**Chunked 272 or 274 with a header maximum of 0**, since revision `m2-skin-native-v2`. This is the normal value in modern SKINs, not a rare case: a Retail 274 model (33,915 vertices, 178 bone-lookup entries) has header 0 while nine sections each declare 60 bones, and every live chunked 272 SKIN checked has 0 too (D097). The raw 0 is kept (no inferred maximum), each section palette is capped at 256, influences at 4, and spans must still fit the actual bone lookup. This rule does not apply to 264, where 0 is still checked as a maximum. It does not mean 0 is "unlimited" in general.
+
+**Chunked 272 or 274 with a header maximum of `0xCDCDCDCD`**, revision `m2-skin-native-v3` (D401). That is an uninitialised-memory fill, seen in Classic Era 1.15.9 SKIN 492993 (model 166385). It reads exactly like 0: the raw value is kept in `MaximumBones`, no maximum is inferred, and the same palette rules apply. Only that exact value; any other header above 256 (`0xCDCDCDCC`, 257) is still `MODEL_LIMIT`, and 264 gets no exception.
+
+## Reading through layer 4
+
+`BuildModels` (in `Models/Files/`) reads a model from one build and locale's `IBuildFiles` (D400):
+
+- `ReadModelAsync` stats the model, then opens it by FileDataID. A file with holes is `Partial` or `Protected` with the TACT key names; a lookup state or a failed read keeps layer 4's state (a layer 2 failure to check the model's own stored state throws, as layer 4's stat does); a reader refusal is `Rejected` with its `MODEL_*` code. Nothing is ever returned as empty geometry.
+- Every declared reference is listed with its kind and ordinal: `SFID` main skins and LOD skins apart, `TXID`, `SKID`, `BFID`, `AFID` (with animation id and variation), and `PFID`, `RPID`, `GPID` read from their chunks (PFID exactly 4 bytes, the others whole u32s). Nonzero ids are looked up by FileDataID through layer 4, at most 8 at a time: found, not in encoding, unknown file, not in locale, or check failed.
+- A zero id is never looked up. On `SKID`, `BFID`, `AFID`, `PFID`, `RPID`, `GPID` it means no external file. On an `SFID` entry or a type-0 texture it is "no file declared". On any other texture type it is "resolved elsewhere" (11-13 from the creature display, 15-17 guild emblem and banner, others from character or item data), never missing.
+- A legacy MD20 has no `SFID`: its skins are "not declared" and never guessed. Its named type-0 textures are looked up by path; whether ROOT's name hash or the community listfile named the file is kept, and a miss is "unresolved by name".
+- `ReadSkinAsync` and `ReadGeometrySkinAsync` read one main profile through `M2SkinReader` or `M2GeometrySkinReader`; a profile the model doesn't declare is `NotDeclared`, and a skin file that can't be read keeps its own state.
+
+`vm browse` shows a stored model's counts, its first skin's counts and these references in the file detail.
 
 ## Static geometry
 
@@ -119,7 +133,7 @@ The geometry-only reader exists for models whose materials fail the strict profi
 
 - model global flags 0; no external skeleton or bone files; no billboard bones (flags `0x78`); no lights, ribbons or particles; only `MD21`, `SFID`, `TXID`, `SKID`, `AFID`, `BFID` chunks; no shadow batches; at least one batch;
 - per batch: flags, priority, shader, second raw field and material layer 0; color index −1; exactly one texture; material flags 0 and blend 0; one batch per section;
-- texture-coordinate lookup resolves to 0 (UV0); weight and transform lookups resolve to `0xFFFF`. An empty lookup or out-of-range index is not a default;
+- texture-coordinate lookup resolves to 0 (UV0); weight and transform lookups resolve to `0xFFFF`. An empty lookup or out-of-range index is not a default: a batch with no lookup entry, which D401 now lets through the strict reader, is `MODEL_MATERIAL_UNSUPPORTED`;
 - texture flags only `0x1`/`0x2` (wrap U/V);
 - texture type 0 with a positive TXID, or types **11, 12, 13**: creature replacement slots, returned unresolved for the application to bind from the selected display. Type 14 is a different replacement (not creature slot 4); it and every other type are unsupported;
 - usable lit normals: finite squared length > 0 (a finite tiny vector can underflow to 0).

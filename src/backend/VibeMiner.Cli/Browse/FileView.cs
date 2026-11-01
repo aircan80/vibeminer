@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using VibeMiner.Files;
 using VibeMiner.Formats.Images;
+using VibeMiner.Formats.Models;
 
 namespace VibeMiner.Cli.Browse;
 
@@ -13,6 +14,8 @@ namespace VibeMiner.Cli.Browse;
 /// the whole file as a background task; <c>g</c> fetches it as the store's writer (<see cref="EnsureTask"/>). A BLP file also gets an
 /// Image line from layer 5's header inspection (#199): its 148-byte header read through the same read-only handle, so a file that
 /// isn't stored says so and nothing is fetched. A Ready inspection is kept for the content key; any other is read again next load.
+/// An M2 model also gets a model section between the stat and the hex (<see cref="ModelLines"/>), read with the same handle and
+/// never fetched.
 /// </summary>
 internal sealed class FileView(FilesTarget target, BuildFile file) : BrowseView
 {
@@ -39,6 +42,10 @@ internal sealed class FileView(FilesTarget target, BuildFile file) : BrowseView
     /// <summary>How many hex bytes the view shows at most (<see cref="MaxShown"/>); a test seam, a multiple of <see cref="Window"/>.</summary>
     internal int ShownLimit { get; init; } = MaxShown;
     private int MaxWindows => ShownLimit / Window;
+
+    /// <summary>How many referenced files the model section lists at most; a test seam.</summary>
+    internal int ReferenceLimit { get; init; } = MaxReferenceLines;
+    public const int MaxReferenceLines = 200;
 
     /// <summary>A test seam: runs after the export's temp file is written, before it is moved into place.</summary>
     internal Func<string, CancellationToken, Task>? AfterTempWritten { get; set; }
@@ -131,6 +138,13 @@ internal sealed class FileView(FilesTarget target, BuildFile file) : BrowseView
             return ViewContent.OfText(string.Join('\n', lines), note);
         }
         lock (gate) { found = true; current = stated; }
+        if (stated.Format is FileFormat.M2 or FileFormat.M2Chunked or FileFormat.M2Legacy)
+        {
+            // Read again on every load, the next window's too: a load can't tell it apart from the reload after an ensure, and
+            // a kept section would show references' stored state from before it.
+            lines.AddRange(await ModelLines(files, ct).ConfigureAwait(false));
+            lines.Add("");
+        }
         if (stated.Size == 0)
         {
             lines.Add("The file is empty (0 bytes).");
@@ -271,6 +285,143 @@ internal sealed class FileView(FilesTarget target, BuildFile file) : BrowseView
         Blp2Encoding.Bc3 => "BC3 (DXT5)",
         Blp2Encoding.Bgra8 => "BGRA8 (uncompressed)",
         _ => encoding.ToString(),
+    };
+
+    /// <summary>
+    /// The model section: one line when the model doesn't read, else its counts, main skin profile 0 and the files it refers to
+    /// (at most <see cref="ReferenceLimit"/> lines, then how many were cut). Reads only what is stored: not stored is a line.
+    /// </summary>
+    private async Task<List<string>> ModelLines(IBuildFiles files, CancellationToken ct)
+    {
+        var models = new BuildModels(files);
+        var read = await models.ReadModelAsync(FileRef.Id(id), ct).ConfigureAwait(false);
+        if (read.State != ModelReadState.Read || read.Model is not { } m2)
+            return [Fit("Model        not read: " + Failure(read.State, read.Code, read.Message, read.ObservedAt, read.KeyNames, "g fetches it"))];
+        var lines = new List<string>
+        {
+            $"Model        version {m2.Version}, {(m2.IsChunked ? "chunked (MD21)" : "legacy (MD20)")}",
+            Fit($"Name         {(m2.Name.Length == 0 ? "none" : m2.Name)}"),
+            $"Vertices     {m2.Vertices.Count:N0}",
+            $"Textures     {m2.Textures.Count:N0}",
+            $"Materials    {m2.Materials.Count:N0}",
+            $"Bones        {m2.Bones.Count:N0}",
+            Fit("Skins        " + (!m2.IsChunked
+                ? $"{Count(read.MainSkinCount, "profile", "profiles")} in the header; legacy MD20 declares no skin FileDataIDs"
+                : read.LodSkinCount == 0 ? $"{Count(read.MainSkinCount, "main profile", "main profiles")}"
+                : $"{read.MainSkinCount} main, {read.LodSkinCount} LOD (SFID lists {read.MainSkinCount + read.LodSkinCount}, the header {read.MainSkinCount})")),
+            Fit($"Animations   {Count(m2.AnimationFiles.Count, "AFID entry", "AFID entries")}, {Count(m2.AnimationFiles.Where(a => a.FileDataId != 0).Select(a => a.FileDataId).Distinct().Count(), "distinct file", "distinct files")}, {m2.AnimationFiles.Count(a => a.FileDataId == 0):N0} inline in the M2 (id 0)"),
+            $"Bone files   {Count(m2.BoneFileDataIds.Count, "BFID entry", "BFID entries")}",
+            "Skeleton     " + Single(read.References, ModelReferenceKind.Skeleton, "SKID"),
+            "Physics      " + Single(read.References, ModelReferenceKind.PhysicsFile, "PFID"),
+            Fit($"Bounds       min {V(m2.DeclaredBounds.Minimum)} max {V(m2.DeclaredBounds.Maximum)} radius {F(m2.DeclaredBounds.Radius)} (declared)"),
+        };
+        if (read.MainSkinCount == 0) lines.Add("Skin 0       none: the model has no skin profiles");
+        else
+        {
+            var skin = await models.ReadSkinAsync(read, 0, ct).ConfigureAwait(false);
+            if (skin.State == ModelReadState.Read && skin.Skin is { } s)
+                lines.Add(Fit($"Skin 0       {s.VertexLookup.Count:N0} vertex lookup, {Count(s.TriangleLookup.Count, "triangle index", "triangle indices")}, {Count(s.Sections.Count, "submesh", "submeshes")}, {Count(s.Batches.Count, "batch", "batches")}"));
+            else if (skin.State == ModelReadState.NotDeclared)
+                lines.Add(Fit("Skin 0       not declared: " + (m2.IsChunked ? "no file for profile 0 in SFID" : "legacy model, no SFID; no name is guessed")));
+            else if (skin.State == ModelReadState.NeedsNetwork)
+                lines.Add($"Skin 0       {skin.FileDataId} not stored; g on that file fetches it");
+            else
+                lines.Add(Fit($"Skin 0       {skin.FileDataId} not read: " + Failure(skin.State, skin.Code, skin.Message, skin.ObservedAt, skin.KeyNames, "g on that file fetches it")));
+        }
+        var references = read.References.OrderBy(r => r.Kind).ToList();
+        lines.Add(references.Count == 0 ? "References   none" : $"References   {references.Count:N0} declared, by kind");
+        var shown = references.Take(ReferenceLimit).ToList();
+        // The label column fits the longest shown label (13 at least, as the stat labels), so the FileDataIDs line up.
+        var width = shown.Count == 0 ? 13 : Math.Max(13, shown.Max(r => Label(r).Length));
+        foreach (var reference in shown) lines.Add(ReferenceLine(reference, width));
+        if (references.Count > ReferenceLimit)
+            lines.Add($"{references.Count - ReferenceLimit:N0} more not shown (first {ReferenceLimit:N0} of {references.Count:N0}).");
+        return lines;
+    }
+
+    private static string Count(int n, string one, string many) => n == 1 ? $"1 {one}" : $"{n:N0} {many}";
+
+    private static string Single(IReadOnlyList<ModelReference> references, ModelReferenceKind kind, string chunk) =>
+        references.FirstOrDefault(r => r.Kind == kind) switch
+        {
+            null => $"none (no {chunk})",
+            { FileDataId: 0 or null } => $"none ({chunk} declares no external file)",
+            { } r => $"FileDataID {r.FileDataId}",
+        };
+
+    private static string V(System.Numerics.Vector3 v) => $"({F(v.X)}, {F(v.Y)}, {F(v.Z)})";
+
+    private static string F(float value) => value.ToString("G6", CultureInfo.InvariantCulture);
+
+    private static string Label(ModelReference r) => r.Kind switch
+    {
+        ModelReferenceKind.Skin => $"Skin {r.Ordinal}",
+        ModelReferenceKind.LodSkin => $"LOD skin {r.Ordinal}",
+        ModelReferenceKind.Texture => $"Texture {r.Ordinal}",
+        ModelReferenceKind.Skeleton => "Skeleton",
+        ModelReferenceKind.BoneFile => $"Bone file {r.Ordinal}",
+        ModelReferenceKind.AnimationFile => $"Anim {r.Ordinal} {r.AnimationId}.{r.Variation}",
+        ModelReferenceKind.PhysicsFile => "Physics",
+        ModelReferenceKind.RecursiveParticleModel => $"RPID {r.Ordinal}",
+        ModelReferenceKind.GeometryParticleModel => $"GPID {r.Ordinal}",
+        _ => $"{r.Kind} {r.Ordinal}",
+    };
+
+    /// <summary>One referenced file: kind and ordinal, FileDataID (or name), its state, and for a found one stored and its name.</summary>
+    internal static string ReferenceLine(ModelReference r, int width = 13)
+    {
+        var before = $"{Label(r).PadRight(width)} {(r.FileDataId is { } fid ? fid.ToString(CultureInfo.InvariantCulture) : "-"),-9} ";
+        if (r.FileDataId is null && r.Name is { } name && r.State != ModelReferenceState.Found)
+            return Fit(Line(before + "name ", name, $": {State(r)}"));
+        var state = State(r);
+        if (r.State != ModelReferenceState.Found || r.File is not { } f) return Fit(before + state);
+        var stored = f.Storage == FileStorage.Stored ? "found, stored yes" : "found, stored no";
+        return f.PathSource switch
+        {
+            FilePathSource.Listfile when f.Path is { } p => Fit(Line(before + stored + ", ", p, " (community name)")),
+            FilePathSource.RootHash when f.Path is { } p => Fit(Line(before + stored + ", ", p, " (ROOT name hash)")),
+            _ => Fit(before + stored + ", no name"),
+        };
+    }
+
+    private static string State(ModelReference r) => r.State switch
+    {
+        // A typed texture's TXID id is only a default the game replaces at run time: never a missing texture.
+        ModelReferenceState.UnknownFile when r.Kind == ModelReferenceKind.Texture && r.TextureType is { } t and not 0 =>
+            $"not in this build (type {t} default; game sets it)",
+        ModelReferenceState.NotInEncoding when r.Kind == ModelReferenceKind.Texture && r.TextureType is { } t and not 0 =>
+            $"not in encoding (type {t} default; game sets it)",
+        ModelReferenceState.Found => "found",
+        ModelReferenceState.NotInEncoding => "not in encoding",
+        ModelReferenceState.UnknownFile => "unknown file",
+        ModelReferenceState.NotInLocale => "not in locale",
+        ModelReferenceState.NoExternalFile => "no external file",
+        ModelReferenceState.NoFileDeclared => "no file declared",
+        ModelReferenceState.ResolvedElsewhere => $"resolved elsewhere (type {r.TextureType}: {r.TextureType switch
+        {
+            >= 11 and <= 13 => "creature display",
+            >= 15 and <= 17 => "guild emblem/banner",
+            _ => "character or item data",
+        }})",
+        ModelReferenceState.NotDeclared => "not declared (legacy model, never guessed)",
+        ModelReferenceState.UnresolvedByName => "unresolved by name",
+        ModelReferenceState.CheckFailed => $"check failed{Message(r.Message)}",
+        _ => r.State.ToString(),
+    };
+
+    /// <summary>
+    /// A model or skin read that didn't end in Read: the states layer 4 also has in the words of <see cref="ReadFailure(FileRead)"/>,
+    /// with the model's own for not stored (which file g fetches), holes and a reader refusal.
+    /// </summary>
+    private static string Failure(ModelReadState state, string? code, string? message, DateTimeOffset? observedAt, IReadOnlyList<string> keys, string fetch) => state switch
+    {
+        ModelReadState.NeedsNetwork => $"not stored{Code(code)}; {fetch}",
+        ModelReadState.Protected => $"every byte needs TACT key {string.Join(", ", keys)}",
+        ModelReadState.Partial => $"part needs TACT key {string.Join(", ", keys)}; never read with holes",
+        ModelReadState.Rejected => $"rejected{Code(code)}{Message(message)}",
+        // Every other model state is layer 4's read state of the same name.
+        _ when Enum.TryParse<FileReadState>(state.ToString(), out var read) => ReadFailure(read, code, message, observedAt),
+        _ => $"{state}{Code(code)}{Message(message)}",
     };
 
     /// <summary>The windows as hex lines and hole lines: adjacent bytes run on across windows, adjacent holes of one key merge.</summary>
