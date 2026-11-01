@@ -336,6 +336,7 @@ public sealed class BuildTactKeysTests
         public Task<TableRowResult> GetAsync(TableRef table, uint id, TablePriority priority, CancellationToken ct) => inner.GetAsync(table, id, priority, ct);
         public Task<TableFollowResult> FollowAsync(TableFollowRequest request, TablePriority priority, CancellationToken ct) => inner.FollowAsync(request, priority, ct);
         public Task<TableReferencesResult> ReferencedByAsync(TableReferencesRequest request, TablePriority priority, CancellationToken ct) => inner.ReferencedByAsync(request, priority, ct);
+        public Task<TablePreloadResult> PreloadAsync(IProgress<TablePreloadProgress>? progress, CancellationToken ct) => inner.PreloadAsync(progress, ct);
 
         public async Task<TablePage> PageAsync(TablePageRequest request, TablePriority priority, CancellationToken ct)
         {

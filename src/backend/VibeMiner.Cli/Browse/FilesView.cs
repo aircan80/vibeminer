@@ -79,6 +79,7 @@ internal sealed class FilesView : BrowseView
         new('g', "ensure: fetch the selected file so it is stored (writer lock)", EnsureOne),
         new('G', "ensure all: fetch every file the filters match (asks first)", _ => AskEnsureAll()),
         new('m', "metadata: fetch configs, ENCODING, ROOT, indexes (writer lock)", _ => FetchMetadata()),
+        new('P', "preload: stop or resume the tables preload (m starts it)", _ => TogglePreload()),
     ];
 
     /// <summary><c>m</c>: the build's metadata as the store's writer (<see cref="MetadataTask"/>); the view reloads when it ends.</summary>
@@ -89,8 +90,24 @@ internal sealed class FilesView : BrowseView
         if (opened is null) return new(Say: waiting ? "Still loading this build." : NoTarget);
         // No region has a usable route: nothing could fetch it, so the writer lock isn't taken.
         if (!hasRoute) return new(Say: BuildView.NoRoute("metadata"));
-        return new(Start: MetadataTask.Start(opened.Target.Build));
+        return new(Start: MetadataTask.Start(opened.Target, opened.Label));
     }
+
+    /// <summary><c>P</c>: stops this build and locale's table preload, or starts it again (<see cref="SessionPreloads.Toggle(BuildRef, string, string)"/>).</summary>
+    private KeyOutcome TogglePreload()
+    {
+        OpenedFiles? opened; bool waiting;
+        lock (gate) { opened = state.Opened; waiting = pending is not null; }
+        if (opened is null) return new(Say: waiting ? "Still loading this build." : NoTarget);
+        return new(Act: session =>
+        {
+            session.Preloads.Toggle(opened.Target.Build, opened.Target.Locale, opened.Label);
+            return null;
+        });
+    }
+
+    public override string? PreloadLine(SessionPreloads preloads) =>
+        Snapshot.Opened is { } opened ? preloads.LineOf(opened.Target.Build, opened.Target.Locale) : null;
 
     /// <summary>The <c>l</c> help: every locale, wrapped under the help's key column onto lines that fit <see cref="HelpWidth"/>.</summary>
     internal static string LocaleHelp

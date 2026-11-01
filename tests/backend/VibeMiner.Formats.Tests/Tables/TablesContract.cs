@@ -930,6 +930,81 @@ public abstract class TablesContract
         await Assert.ThrowsAnyAsync<ArgumentException>(() => ListAsync(tables, new() { States = new HashSet<TableState> { (TableState)99 } }));
     }
 
+    // PreloadAsync
+
+    /// <summary>Every report a preload delivered, in delivery order.</summary>
+    private sealed class Reports : IProgress<TablePreloadProgress>
+    {
+        private readonly List<TablePreloadProgress> seen = [];
+        public void Report(TablePreloadProgress value) { lock (seen) seen.Add(value); }
+        public TablePreloadProgress[] All { get { lock (seen) return [.. seen]; } }
+    }
+
+    private static void AssertMonotone(IReadOnlyList<TablePreloadProgress> reports)
+    {
+        for (var i = 1; i < reports.Count; i++)
+        {
+            var (a, b) = (reports[i - 1], reports[i]);
+            Assert.True(b.Stage >= a.Stage && b.FilesDone >= a.FilesDone && b.FilesTotal >= a.FilesTotal && b.FilesFailed >= a.FilesFailed
+                && b.BytesDone >= a.BytesDone && b.BytesTotal >= a.BytesTotal && b.CdnBytes >= a.CdnBytes && b.TablesDone >= a.TablesDone
+                && b.TablesTotal >= a.TablesTotal && b.TablesFailed >= a.TablesFailed, $"Report {i} went back: {a} then {b}.");
+            Assert.True(b.FilesDone <= b.FilesTotal && b.TablesDone <= b.TablesTotal && b.BytesDone <= b.BytesTotal);
+        }
+    }
+
+    [Fact]
+    public async Task PreloadPreparesEveryReadableTable()
+    {
+        await using var tables = await OpenAsync();
+        var reports = new Reports();
+        var result = await tables.PreloadAsync(reports, Ct);
+        Assert.Equal(TablePreloadOutcome.Completed, result.Outcome);
+        Assert.Empty(result.Tables);
+        Assert.Null(result.OpenState);
+        // Files: every table in the build, 400 (no definition) too, not 500. Tables: every one a definition reads, 800 already done.
+        var final = result.Final;
+        Assert.Equal((TablePreloadStage.Preparing, 8L, 8L, 0L, 7, 7, 0),
+            (final.Stage, final.FilesDone, final.FilesTotal, final.FilesFailed, final.TablesDone, final.TablesTotal, final.TablesFailed));
+        var all = reports.All;
+        Assert.Equal(final, all[^1]);
+        AssertMonotone(all);
+        var listed = await ListAsync(tables, TableListFilter.All);
+        Assert.All(listed.Where(e => e.FileDataId is not (400 or 500)), e => Assert.True(e.Checked, $"{e.FileDataId} isn't checked."));
+        Assert.Equal(TableState.Ready, listed.Single(e => e.FileDataId == 200).State);
+        Assert.Equal(TableState.Partial, listed.Single(e => e.FileDataId == 600).State);
+    }
+
+    [Fact]
+    public async Task SecondPreloadFindsEverythingDone()
+    {
+        await using var tables = await OpenAsync();
+        Assert.Equal(TablePreloadOutcome.Completed, (await tables.PreloadAsync(null, Ct)).Outcome);
+        var again = await tables.PreloadAsync(null, Ct);
+        Assert.Equal(TablePreloadOutcome.Completed, again.Outcome);
+        Assert.Equal((7, 7), (again.Final.TablesDone, again.Final.TablesTotal));
+    }
+
+    [Fact]
+    public async Task PreloadCanceledBeforeStartReturnsCanceled()
+    {
+        await using var tables = await OpenAsync();
+        var reports = new Reports();
+        var result = await tables.PreloadAsync(reports, new CancellationToken(true));
+        Assert.Equal(TablePreloadOutcome.Canceled, result.Outcome);
+        Assert.Equal(result.Final, reports.All[^1]);
+        Assert.Equal(0, result.Final.TablesDone);
+        // Nothing was prepared.
+        Assert.False((await ListAsync(tables, new() { Name = "Alpha" })).Single().Checked);
+    }
+
+    [Fact]
+    public async Task PreloadOnDisposedHandleThrows()
+    {
+        var tables = await OpenAsync();
+        await tables.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => tables.PreloadAsync(null, Ct));
+    }
+
     [Fact]
     public async Task CanceledCallsThrow()
     {

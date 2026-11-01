@@ -36,9 +36,11 @@ internal sealed record ViewKey(char Key, string Help, Func<BrowseRow?, KeyOutcom
 /// What a <see cref="ViewKey"/> (or a <see cref="KeyAsk"/> answer) does, any mix of: <see cref="Say"/> a message line,
 /// <see cref="Start"/> a background task (the view showing when it ends reloads, as after a <see cref="ViewAction"/>),
 /// <see cref="Reload"/> the current view, <see cref="Open"/> a view on top of it (like Enter on a row), and <see cref="Ask"/> a
-/// question on the status line. Reload with Open reloads the current view when Esc comes back to it.
+/// question on the status line, and <see cref="Act"/> on the session on the UI thread, whose non-null return is said (it must
+/// not block: the table preload's stop and resume start their work and return). Reload with Open reloads the current view when Esc comes back to it.
 /// </summary>
-internal sealed record KeyOutcome(BrowseView? Open = null, bool Reload = false, string? Say = null, KeyAsk? Ask = null, KeyTask? Start = null)
+internal sealed record KeyOutcome(BrowseView? Open = null, bool Reload = false, string? Say = null, KeyAsk? Ask = null, KeyTask? Start = null,
+    Func<BrowseSession, string?>? Act = null)
 {
     public static readonly KeyOutcome None = new();
 }
@@ -75,6 +77,12 @@ internal abstract class BrowseView
     public virtual void More() { }
 
     public abstract Task<ViewContent> LoadAsync(BrowseSession session, CancellationToken ct);
+
+    /// <summary>
+    /// The table preload line this view is about (its build's), which the status line shows instead of the session's latest;
+    /// null for none. Called on the UI thread on every redraw: no I/O.
+    /// </summary>
+    public virtual string? PreloadLine(SessionPreloads preloads) => null;
 }
 
 /// <summary>A top view the <c>:</c> line can jump to.</summary>

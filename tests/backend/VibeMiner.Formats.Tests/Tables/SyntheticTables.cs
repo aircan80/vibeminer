@@ -285,6 +285,9 @@ public sealed class CountingFileSystem(IFileSystem inner) : IFileSystem
     /// <summary>Streams opened and not yet disposed.</summary>
     public int OpenStreams => Volatile.Read(ref streams);
     public IReadOnlyList<FileFilter> Lists { get { lock (lists) return [.. lists]; } }
+    private readonly List<(EnsureSelection Selection, EnsurePriority Priority)> ensures = [];
+    /// <summary>Every ensure asked, with its selection and priority, in order.</summary>
+    public IReadOnlyList<(EnsureSelection Selection, EnsurePriority Priority)> Ensures { get { lock (ensures) return [.. ensures]; } }
     public Exception? StatFailure { get; set; }
     public Exception? ListFailure { get; set; }
     public VibeMiner.Files.Names.IFileNames Names => inner.Names;
@@ -311,8 +314,11 @@ public sealed class CountingFileSystem(IFileSystem inner) : IFileSystem
         public Task<FileStat> StatAsync(FileRef file, CancellationToken cancellationToken) =>
             owner.StatFailure is { } failure ? Task.FromException<FileStat>(failure) : inner.StatAsync(file, cancellationToken);
         public Task<bool> ExistsAsync(FileRef file, CancellationToken cancellationToken) => inner.ExistsAsync(file, cancellationToken);
-        public Task<EnsureResult> EnsureAsync(EnsureSelection selection, EnsurePriority priority, IProgress<EnsureProgress>? progress, CancellationToken cancellationToken) =>
-            inner.EnsureAsync(selection, priority, progress, cancellationToken);
+        public Task<EnsureResult> EnsureAsync(EnsureSelection selection, EnsurePriority priority, IProgress<EnsureProgress>? progress, CancellationToken cancellationToken)
+        {
+            lock (owner.ensures) owner.ensures.Add((selection, priority));
+            return inner.EnsureAsync(selection, priority, progress, cancellationToken);
+        }
         public Task<FileRead> GetAsync(FileRef file, CancellationToken cancellationToken) { Interlocked.Increment(ref owner.reads); return inner.GetAsync(file, cancellationToken); }
         public Task<FileRead> ReadRangeAsync(FileRef file, long offset, int length, CancellationToken cancellationToken)
         { Interlocked.Increment(ref owner.reads); return inner.ReadRangeAsync(file, offset, length, cancellationToken); }

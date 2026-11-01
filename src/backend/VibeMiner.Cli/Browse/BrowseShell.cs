@@ -240,6 +240,7 @@ internal sealed class BrowseShell : Window
         if (frame.Loading) parts.Add("loading...");
         if (navigator.Message is { } message) parts.Add(message);
         if (navigator.Tasks.Status.Length > 0) parts.Add(navigator.Tasks.Status);
+        if (navigator.PreloadStatus is { Length: > 0 } preload) parts.Add(preload);
         parts.Add("? keys  q quit");
         status.Text = string.Join("  |  ", parts);
     }

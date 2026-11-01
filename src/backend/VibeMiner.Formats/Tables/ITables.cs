@@ -69,4 +69,15 @@ public interface IBuildTables : IAsyncDisposable
 
     /// <summary>The rows of other tables whose declared foreign keys point at this row. See <see cref="TableReferencesRequest"/>.</summary>
     Task<TableReferencesResult> ReferencedByAsync(TableReferencesRequest request, TablePriority priority, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Preloads every table (D360): the DB2 files of every listed table in one layer 4 Ensure at Background priority (files
+    /// already stored cost no fetch), then a Background check of each table a definition reads that isn't in the generated store
+    /// yet, which builds its rows. Starts at <see cref="TablePreloadStage.Downloading"/>; the handle is already open. An
+    /// Interactive call on the same tables meanwhile never waits behind it: layer 2 promotes a file it is fetching, and the work
+    /// scheduler serves Interactive slots first. Canceled, it returns <see cref="TablePreloadOutcome.Canceled"/> rather than
+    /// throwing. Progress is coalesced and never goes backwards; the final report equals <see cref="TablePreloadResult.Final"/>
+    /// and is delivered before the call returns.
+    /// </summary>
+    Task<TablePreloadResult> PreloadAsync(IProgress<TablePreloadProgress>? progress, CancellationToken cancellationToken);
 }

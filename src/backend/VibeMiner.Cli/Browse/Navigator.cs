@@ -49,7 +49,24 @@ internal sealed class Navigator : IAsyncDisposable
         this.post = post;
         Tasks = new BackgroundTasks(post);
         Tasks.Changed += Raise;
+        session.Preloads.Changed += OnPreload;
     }
+
+    // Set while a preload redraw is posted and not yet run: progress arrives off the UI thread, many times a second.
+    private int preloadPosted;
+
+    private void OnPreload()
+    {
+        if (Interlocked.Exchange(ref preloadPosted, 1) != 0) return;
+        post(() =>
+        {
+            Volatile.Write(ref preloadPosted, 0);
+            if (frames.Count > 0) Raise();
+        });
+    }
+
+    /// <summary>The status line's preload part: the current view's build, else the session's latest; empty for none.</summary>
+    public string PreloadStatus => (frames.Count > 0 ? Current.View.PreloadLine(session.Preloads) : null) ?? session.Preloads.Status;
 
     /// <summary>Raised on the UI thread after anything shown changes.</summary>
     public event Action? Changed;
@@ -87,6 +104,7 @@ internal sealed class Navigator : IAsyncDisposable
         Asking = null;
         // Before the stack empties: clearing an ended task's line raises Changed, and a listener reads Current.
         Tasks.ClearEnded();
+        session.Preloads.ClearEnded();
         frames.Clear();
         Open(view);
         return true;
@@ -102,6 +120,7 @@ internal sealed class Navigator : IAsyncDisposable
         Message = null;
         Asking = null;
         Tasks.ClearEnded();
+        session.Preloads.ClearEnded();
         Open(drill());
         return true;
     }
@@ -116,6 +135,7 @@ internal sealed class Navigator : IAsyncDisposable
         frames.RemoveAt(frames.Count - 1);
         Message = null;
         Tasks.ClearEnded();
+        session.Preloads.ClearEnded();
         // The view below may have been left mid-load, or a key asked for its reload; it loads again.
         if (Current.Stale || (Current.Content is null && Current.Error is null)) Load(Current);
         else Raise();
@@ -199,6 +219,7 @@ internal sealed class Navigator : IAsyncDisposable
     private void Apply(KeyOutcome outcome)
     {
         if (outcome.Say is { } say) Message = say;
+        if (outcome.Act?.Invoke(session) is { } said) Message = said;
         if (outcome.Start is { } task) StartTask(task.Name, task.Run);
         if (outcome.Ask is { } ask) Asking = ask;
         if (outcome.Open is { } view)
@@ -310,6 +331,7 @@ internal sealed class Navigator : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        session.Preloads.Changed -= OnPreload;
         CancelLoad();
         Task[] loads;
         lock (running) loads = [.. running, Loading];

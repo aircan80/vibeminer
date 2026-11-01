@@ -39,7 +39,11 @@ internal sealed class BrowseSession : IAsyncDisposable
         // The seams are read when the store opens, so a test may set them after construction.
         FileSystem = DefaultFileSystemAsync;
         files = new FilesCache(OpenReadAsync, (objects, ct) => FileSystem(objects, Builds(objects), NameSwitch, ct));
+        Preloads = new SessionPreloads(this);
     }
+
+    /// <summary>The session's table preloads (#159), over the tables composition; stopped and awaited before it closes.</summary>
+    public SessionPreloads Preloads { get; }
 
     public DataFolder Folder { get; }
     public string StoreFolder { get; }
@@ -154,13 +158,17 @@ internal sealed class BrowseSession : IAsyncDisposable
     /// <summary>Drops the session's store, file system and open build: the next <see cref="OpenFilesAsync"/> opens them again.</summary>
     public ValueTask InvalidateFilesAsync() => files.InvalidateAsync();
 
-    /// <summary>Closes the tables composition and the session's files (each once no lease holds it), then the generated store. Call
-    /// after every load has ended.</summary>
+    /// <summary>Stops and awaits the table preloads, then closes the tables composition and the session's files (each once no lease
+    /// holds it), then the generated store. Call after every load has ended.</summary>
     public async ValueTask DisposeAsync()
     {
         try
         {
-            try { if (tables is not null) await tables.DisposeAsync().ConfigureAwait(false); }
+            try
+            {
+                try { await Preloads.DisposeAsync().ConfigureAwait(false); }
+                finally { if (tables is not null) await tables.DisposeAsync().ConfigureAwait(false); }
+            }
             finally { await files.DisposeAsync().ConfigureAwait(false); }
         }
         finally

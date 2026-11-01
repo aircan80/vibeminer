@@ -304,6 +304,49 @@ public sealed class InMemoryTables : ITables
             return TableQueries.ReferencedByAsync(this, request, owner.MaxScanRows, owner.MaxReferenceSources, owner.MaxReferenceScanRows, cancellationToken);
         }
 
+        /// <summary>
+        /// The real preload's observable contract over the seeds: every table whose file is in the build and locale counts as a file
+        /// (failed when its checked state is NeedsNetwork, Missing or Unavailable, the ones that list NotStored), with no bytes; each
+        /// table listed NotChecked or NotStored is checked, so an opened state is remembered, and one already checked counts as done.
+        /// Reports go synchronously, the last one equal to the result's Final. Canceled before or between tables, it answers Canceled.
+        /// </summary>
+        public Task<TablePreloadResult> PreloadAsync(IProgress<TablePreloadProgress>? progress, CancellationToken cancellationToken)
+        {
+            Enter(nameof(PreloadAsync), TablePriority.Background, CancellationToken.None);
+            var at = new TablePreloadProgress(TablePreloadStage.Downloading, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            var failedTables = new List<TableEntry>();
+            TablePreloadResult Finish(TablePreloadOutcome? outcome)
+            {
+                progress?.Report(at);
+                var decided = outcome ?? (at.FilesFailed == 0 && at.TablesFailed == 0 && at.TablesDone == at.TablesTotal
+                    ? TablePreloadOutcome.Completed : TablePreloadOutcome.Incomplete);
+                return new(decided, at, failedTables, null, null, null);
+            }
+            if (cancellationToken.IsCancellationRequested) return Task.FromResult(Finish(TablePreloadOutcome.Canceled));
+
+            var listed = Tables().Values.ToArray().Select(table => (Table: table, Entry: Entry(table, IsChecked(table.FileDataId))))
+                .Where(item => item.Entry.State is not (TableState.NotInBuild or TableState.NotInLocale or TableState.NotInEncoding)).ToArray();
+            var targets = listed.Where(item => !item.Entry.Checked && item.Entry.State is TableState.NotChecked or TableState.NotStored).ToArray();
+            var already = listed.Count(item => item.Entry.Checked);
+            var filesFailed = listed.Count(item => item.Table.State is TableState.NeedsNetwork or TableState.Missing or TableState.Unavailable);
+            at = at with { FilesTotal = listed.Length, TablesTotal = already + targets.Length, TablesDone = already };
+            progress?.Report(at);
+            at = at with { FilesDone = listed.Length, FilesFailed = filesFailed };
+            progress?.Report(at);
+            if (cancellationToken.IsCancellationRequested) return Task.FromResult(Finish(TablePreloadOutcome.Canceled));
+            at = at with { Stage = TablePreloadStage.Preparing };
+            foreach (var (table, _) in targets)
+            {
+                if (cancellationToken.IsCancellationRequested || Volatile.Read(ref disposed) != 0) return Task.FromResult(Finish(TablePreloadOutcome.Canceled));
+                var entry = Check(TableRef.Id(table.FileDataId)).Entry;
+                var failed = !Opened(entry.State);
+                if (failed) failedTables.Add(entry);
+                at = at with { TablesDone = at.TablesDone + 1, TablesFailed = at.TablesFailed + (failed ? 1 : 0) };
+                progress?.Report(at);
+            }
+            return Task.FromResult(Finish(null));
+        }
+
         Task<RelationTable> ITableRelationSource.OpenAsync(TableRef table, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();

@@ -589,6 +589,12 @@ public sealed class TablesViewTests : IAsyncDisposable
                 owner.Record(nameof(ReferencedByAsync), priority);
                 return owner.ReferencedBy is { } refs ? Task.FromResult(refs(request, priority)) : inner.ReferencedByAsync(request, priority, cancellationToken);
             }
+
+            public Task<TablePreloadResult> PreloadAsync(IProgress<TablePreloadProgress>? progress, CancellationToken cancellationToken)
+            {
+                owner.Record(nameof(PreloadAsync), TablePriority.Background);
+                return inner.PreloadAsync(progress, cancellationToken);
+            }
         }
     }
 }

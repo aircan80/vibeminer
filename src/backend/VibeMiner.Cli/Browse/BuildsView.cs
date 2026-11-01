@@ -152,7 +152,19 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
 {
     public override string Title => build.VersionsName;
     public override IReadOnlyList<ViewAction> Actions => [Downloaded, DownloadAll];
-    public override IReadOnlyList<ViewKey> Keys => [new('f', "files: list this build's files (enUS)", _ => FilesView.Open(build))];
+    public override IReadOnlyList<ViewKey> Keys =>
+    [
+        new('f', "files: list this build's files (enUS)", _ => FilesView.Open(build)),
+        new('P', "preload: stop or resume this build's tables preload", _ => TogglePreload()),
+    ];
+
+    /// <summary>Said by <c>P</c> on a build this session has no tables preload of.</summary>
+    internal const string NoPreload = "No tables preload of this build yet; m in its files view (f) starts one.";
+
+    /// <summary><c>P</c>: stops or resumes the build's latest table preload of this session, in any region and locale.</summary>
+    private KeyOutcome TogglePreload() => new(Act: session => session.Preloads.Toggle(build.Product, build.BuildConfig) ? null : NoPreload);
+
+    public override string? PreloadLine(SessionPreloads preloads) => preloads.LineOf(build.Product, build.BuildConfig);
 
     /// <summary>
     /// <c>d</c>: opens the build read-only from the store (its ENCODING, ROOT and every archive index, so not on every load) and
@@ -302,6 +314,7 @@ internal sealed class BuildView(CatalogBuild build) : BrowseView
             new(["Downloaded", "d measures (opens the build read-only)"]),
             new(["Download all", "a fetches every object (takes the writer lock)"]),
             new(["Files", "f lists the files (enUS)"]),
+            new(["Preload", "P stops or resumes the tables preload (m in files starts it)"]),
         };
         rows.AddRange(build.Fields.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => new BrowseRow([$"field {f.Key}", f.Value])));
         rows.AddRange(build.Regions.Select(g => new BrowseRow([$"region {g.Region}",

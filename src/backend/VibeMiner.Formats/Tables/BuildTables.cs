@@ -648,6 +648,154 @@ internal sealed class BuildTables(IBuildFiles files, string version, WowLocale l
         return new(entry, stored.Header.Columns, schema, stored.RowCount, Scheduled(read, priority));
     }
 
+    // PreloadAsync
+
+    /// <summary>
+    /// Preparing checks this many tables at a time: the default Background lane, so the preload holds at most this many places
+    /// in the scheduler's Background queue and never fills it.
+    /// </summary>
+    internal const int PreloadChecks = 2;
+    internal static readonly TimeSpan PreloadInterval = TimeSpan.FromMilliseconds(100);
+    /// <summary>The first and the longest wait before a check the full Background queue refused (TABLES_BUSY) is asked again.</summary>
+    private static readonly TimeSpan BusyFirst = TimeSpan.FromMilliseconds(50), BusyMost = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// The preload (D360). Holds the handle's files open to its end like any call. A dispose of the handle while it runs ends
+    /// it as Canceled at the next table. A layer 2 failure the ensure throws is Failed with layer 2's code.
+    /// </summary>
+    public async Task<TablePreloadResult> PreloadAsync(IProgress<TablePreloadProgress>? progress, CancellationToken cancellationToken)
+    {
+        // Canceled before it starts is a Canceled result, not a throw: the token is looked at inside.
+        Enter(TablePriority.Background, CancellationToken.None);
+        var tally = new PreloadTally(progress, TimeProvider.System, PreloadInterval);
+        try { return await PreloadCoreAsync(tally, cancellationToken).ConfigureAwait(false); }
+        finally { await ExitAsync().ConfigureAwait(false); }
+    }
+
+    private async Task<TablePreloadResult> PreloadCoreAsync(PreloadTally tally, CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            // Every listed table whose file the build holds in this locale; the targets are the ones a definition may read and
+            // the generated store doesn't hold yet. Both are bounded by the build's table count.
+            var selected = new List<FileRef>();
+            var targets = new List<TableEntry>();
+            var already = 0;
+            await foreach (var entry in ListCoreAsync(TableListFilter.All, cancellationToken).ConfigureAwait(false))
+            {
+                if (entry.State is TableState.NotInBuild or TableState.NotInLocale or TableState.NotInEncoding) continue;
+                selected.Add(FileRef.Id(entry.FileDataId));
+                if (entry.Checked)
+                {
+                    already++;
+                    if (!PreloadTally.IsPrepared(entry.State)) tally.Table(entry, countDone: false);
+                }
+                else if (entry.State is TableState.NotChecked or TableState.NotStored or TableState.StoreFailed) targets.Add(entry);
+            }
+            tally.Tables(already + targets.Count, already);
+
+            EnsureResult ensured;
+            try
+            {
+                ensured = await files.EnsureAsync(EnsureSelection.Many(selected), EnsurePriority.Background, tally, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ObjectStoreException failure) { return await tally.FinishAsync(TablePreloadOutcome.Failed, null, failure.Code, failure.Message).ConfigureAwait(false); }
+            var failedFiles = ensured.Files.Count(file => file.State is not (FileEnsureState.Stored or FileEnsureState.AlreadyStored or FileEnsureState.Canceled));
+            tally.Downloaded(ensured.Final, failedFiles);
+            if (ensured.Outcome == EnsureOutcome.Canceled) return await tally.FinishAsync(TablePreloadOutcome.Canceled).ConfigureAwait(false);
+            var stored = new Dictionary<uint, FileEnsured>(ensured.Files.Count);
+            foreach (var file in ensured.Files) if (file.FileDataId is { } id) stored[id] = file;
+            selected.Clear();
+
+            // Downloads end before preparation starts (D360).
+            tally.Preparing();
+            await PrepareAsync(targets, stored, tally, cancellationToken).ConfigureAwait(false);
+            return await tally.FinishAsync(null).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || Volatile.Read(ref disposed) != 0)
+        {
+            return await tally.FinishAsync(TablePreloadOutcome.Canceled).ConfigureAwait(false);
+        }
+        catch (Exception unexpected)
+        {
+            return await tally.FinishAsync(TablePreloadOutcome.Failed, null, "TABLE_PRELOAD_FAILED", unexpected.Message).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Checks the targets <see cref="PreloadChecks"/> at a time in Background slots. A table whose file didn't store isn't opened (it
+    /// would fetch outside the preload's Background ensure): it ends in the state its ensure gave, as a check would answer it.
+    /// The first worker that throws stops the others.
+    /// </summary>
+    private async Task PrepareAsync(List<TableEntry> targets, Dictionary<uint, FileEnsured> stored, PreloadTally tally, CancellationToken cancellationToken)
+    {
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var next = -1;
+        var workers = new Task[Math.Min(PreloadChecks, targets.Count)];
+        for (var i = 0; i < workers.Length; i++) workers[i] = WorkAsync();
+        // A worker's failure faults the whole wait (a fault outranks the others' cancellation), so it is what comes out.
+        await Task.WhenAll(workers).ConfigureAwait(false);
+
+        async Task WorkAsync()
+        {
+            await Task.Yield();
+            try
+            {
+                while (Interlocked.Increment(ref next) is var at && at < targets.Count)
+                {
+                    stop.Token.ThrowIfCancellationRequested();
+                    if (Volatile.Read(ref disposed) != 0) throw new OperationCanceledException("The handle was disposed.");
+                    var target = targets[at];
+                    tally.Table(stored.TryGetValue(target.FileDataId, out var file) && file.State is FileEnsureState.Stored or FileEnsureState.AlreadyStored
+                        ? await PreloadCheckAsync(target, stop.Token).ConfigureAwait(false)
+                        : NotFetched(target, file));
+                }
+            }
+            catch
+            {
+                await stop.CancelAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+    }
+
+    /// <summary>A Background check; a full Background queue is asked again after a growing wait instead of failing the preload.</summary>
+    private async Task<TableEntry> PreloadCheckAsync(TableEntry target, CancellationToken cancellationToken)
+    {
+        var wait = BusyFirst;
+        while (true)
+        {
+            try { return (await OpenAsync(TableRef.Id(target.FileDataId), TablePriority.Background, cancellationToken).ConfigureAwait(false)).Entry; }
+            catch (TablesBusyException) { }
+            catch (ObjectStoreException failure) { return target with { State = TableState.StoreFailed, Checked = true, Reason = StoreFailure(failure), Counts = null }; }
+            await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
+            wait = TimeSpan.FromTicks(Math.Min(wait.Ticks * 2, BusyMost.Ticks));
+        }
+    }
+
+    /// <summary>The table whose file the ensure didn't store, in the state a check would give it.</summary>
+    private static TableEntry NotFetched(TableEntry target, FileEnsured file)
+    {
+        var state = file.State switch
+        {
+            FileEnsureState.NotInLocale => TableState.NotInLocale,
+            FileEnsureState.NotInEncoding => TableState.NotInEncoding,
+            FileEnsureState.Missing => TableState.Missing,
+            FileEnsureState.NeedsNetwork => TableState.NeedsNetwork,
+            FileEnsureState.Unavailable => TableState.Unavailable,
+            FileEnsureState.Refused => TableState.Corrupt,
+            FileEnsureState.Unsupported => TableState.Unsupported,
+            FileEnsureState.StoreFailed => TableState.StoreFailed,
+            _ => TableState.NotInBuild,
+        };
+        return target with
+        {
+            State = state, Checked = true, Counts = null,
+            Reason = new(file.Code, $"The DB2 file didn't store ({file.State}).", null, null, null, []),
+        };
+    }
+
     /// <summary>
     /// From the definitions alone, no byte read: a checked table by its stored layout, else the build's block from a local
     /// lookup. A table that only its layout could resolve (not found locally yet), or whose definition is unusable, is
