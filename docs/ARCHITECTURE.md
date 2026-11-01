@@ -1,6 +1,54 @@
 # VibeMiner architecture
 
-VibeMiner has a browser-based desktop interface and one application-owned C# engine. The engine is a modular monolith: use cases and pure parsers remain testable independently of Electron and concrete storage. Do not add a service framework, network server, event bus, or plugin framework without an actual need.
+VibeMiner has a browser-based desktop interface and one application-owned C# engine. The engine is a modular monolith. Do not add a service framework, network server, event bus or plugin framework without an actual need.
+
+The engine is being rebuilt in five code layers by the storage rewrite ([#153](https://github.com/aircan80/vibeminer/issues/153)–[#160](https://github.com/aircan80/vibeminer/issues/160)). In the target design, each layer depends only on the layers below it and every layer boundary is an interface. [Code layers](#code-layers) describes that target, and the slice column says where each part lands. None of it is on `main` yet. Sections marked **Current** describe today's code, which those slices replace.
+
+## Code layers
+
+**Planned.** This is the target structure; each row lands with the slice named.
+
+```mermaid
+flowchart TB
+  L5["5 · Features and UI<br/>screens, activity panel"]
+  L4["4 · Generated data<br/>tables, items, creatures, icons, models, Files list"]
+  L3["3 · Builds<br/>catalog, open build, resolver, Downloaded figure"]
+  L2["2 · Object access<br/>GetKey / GetKeys / GetRange: local or CDN"]
+  L1["1 · Primitives<br/>object store · CDN client · version client · verifier"]
+  L5 --> L4 --> L3 --> L2 --> L1
+  L1 --- CDN[(Official CDN)]
+```
+
+| Layer | Owns | Typical calls | Knows about | Interfaces | Slice |
+| --- | --- | --- | --- | --- | --- |
+| 1 · Primitives | The object store (packs, index, history log; a full portable spec, `docs/formats/object-store-v1.md`, arrives with #153); the CDN client (fetch one key or byte range, check the reply); the version-service client; per-key-type verification | `HasAsync`, `ReadAsync`, `ReadRangeAsync`, `PutAsync`, `FetchRange` | Keys, bytes, HTTP. Nothing about builds, and no choice between local and CDN | `IObjectReader`, `IObjectWriter`, `IHistoryLog`, `IObjectStoreMaintenance`, `IObjectVerifier`, `ICdnClient`, `IVersionClient` | #153, #154 |
+| 2 · Object access | The only place that decides local or CDN. Checks the store (and the shared dev store for QA), plans merged ranges for what is missing, calls the CDN client, stores verified results and returns them | `GetKey`, `GetKeys`, `GetRange` | Keys plus a CDN context (hosts, path, CDN config) | `IObjectSource` | #154 |
+| 3 · Builds | The catalog built from the history log, opened builds, build metadata, the FileDataID → EKey resolver, the Downloaded figure | `ListBuilds`, `OpenBuild`, `ResolveFile(build, id)`, `Downloaded(build)` | Builds, products, regions, locales | Defined in #155 | #155 |
+| 4 · Generated data | Prepared data: table rows, Items, Creatures, item effects, icons, models, the Files list | `GetItem(build, id)`, `GetTablePage(build, …)` | One build and one locale per call | Defined in #156–#158 | #156–#159 |
+| 5 · Features and UI | The engine's request handlers and the Electron renderer | none | What the user sees | n/a | #160 |
+
+### Rules
+
+- **Downward only.** A layer calls only layers below it, through their interfaces. Today `tests/contracts/architecture.test.mjs` checks a fixed list of allowed project references and knows nothing about layers. #154 adds the layer check.
+- **Interfaces at every boundary.** A boundary consumed by the layer above has a real implementation, an in-memory fake in the tests, and a shared contract test suite that runs against both, so a fake cannot drift. Layers above test against the fakes. #153 does this for the object store and #154 for the CDN clients and `IObjectSource`. Slices 3 and 4 follow the same rule.
+- **One way to get bytes.** Only layer 2 talks to the CDN, through layer 1's clients. No screen, table provider, generator or export action creates its own cache or downloader.
+- **Swappable object access.** `IObjectSource` has a real implementation (local, then shared dev store, then CDN), and can also run CDN-only, local-only (offline) or as a fake. Nothing above it changes. The Downloaded figure reads the object store's index directly, so it reads 0% with a CDN-only source.
+- **Layer 4 works on one build at a time.** Comparing builds sits above it and combines two one-build answers.
+- **Async.** Every I/O operation is async and takes a `CancellationToken`. Pure CPU helpers on in-memory bytes, such as key parsing and small-object verification, are synchronous. SQLite's driver is synchronous inside, so the store runs index work on its own reader pool and writer task.
+
+### Stores
+
+**Planned.** Today there is one SQLite catalog, the `objects-v1` object store and `settings-v1.json` ([STORAGE](STORAGE.md)). The three stores below arrive with #153, #155 and #156. They are named by what they hold. Reset wipes the catalog store and the generated store, Settings included, and keeps the object store.
+
+| Store | Holds | Written by | Reset |
+| --- | --- | --- | --- |
+| Object store | Configs, archive and loose-file indexes and EKey objects exactly as served, plus the dated history log of version-service replies | Layer 1, through layer 2 | Kept |
+| Catalog store | Builds, opened builds, admissions, jobs, problems, Settings | Layer 3 | Wiped |
+| Generated store | Everything layer 4 prepares, rebuilt from the object store | Layer 4 | Wiped |
+
+### Testing by layer
+
+**Planned (#154).** A change runs the tests of its own layer and of every layer above it. A change to shared foundations (toolchain, packages, shared fixtures, build configuration) or to a layer's public interface runs everything. Slow layer 1 tests (real crash runs, large objects, scale) run in the full gate and CI only. See [TESTING](TESTING.md); the tooling lands in #154.
 
 ## Process ownership
 
@@ -9,46 +57,44 @@ flowchart LR
   UI[React interface and Three.js] --> Bridge[Electron preload bridge]
   Bridge --> Main[Electron main process]
   Main <-->|Versioned bounded messages| Host[C# local engine host]
-  Host --> App[Application use cases and jobs]
-  App --> Ports[Application owned ports]
-  Infra[Infrastructure adapters] -. implement .-> Ports
-  Host --> Infra
-  Infra --> SQLite[(SQLite)]
-  Infra --> CAS[Verified object store]
-  Infra --> CDN[Official CDN]
-  Infra --> Parsers[Original pure parsers]
+  Host --> Layers[Engine code layers 1-5]
+  Layers --> Stores[(Object, catalog and generated stores)]
+  Layers --> CDN[Official CDN]
 ```
 
-Electron main owns windows, native dialogs, engine launch, exit handling, and IPC routing. After an invalid engine reply it stops the engine and restarts it only when the user asks; a restart replaces the process and everything bound to it, and the renderer reloads what was open ([D119](DECISIONS.md)). The renderer owns presentation, navigation, and GPU rendering; it has no general Node/filesystem access. Preload exposes narrow operations through context isolation, not arbitrary IPC, SQL, HTTP, or path access.
+Electron main owns windows, native dialogs, engine launch, exit handling, IPC routing and choosing the data folder. After an invalid engine reply it stops the engine and restarts it only when the user asks. A restart replaces the process and everything bound to it, and the renderer reloads what was open ([D119](DECISIONS.md)). The renderer owns presentation, navigation and GPU rendering; it has no general Node or filesystem access. Preload exposes narrow operations through context isolation, not arbitrary IPC, SQL, HTTP or path access.
 
-C# owns source discovery, acquisition, exact build contexts, parsing, job scheduling, SQLite, shared object publication, indexes, comparisons, and asset preparation. It returns bounded projections and approved asset handles, not live database connections or arbitrary local paths.
+C# owns source discovery, acquisition, exact build contexts, parsing, job scheduling, storage, comparisons and asset preparation. It returns bounded projections and approved asset handles, not live database connections or arbitrary local paths.
 
-## Backend locations and dependencies
+## Backend projects
 
-| Location | Responsibility | Allowed production dependencies |
-| --- | --- | --- |
-| `VibeMiner.Domain` | Identities, invariants, provenance, readiness/capability values | Platform base types only |
-| `VibeMiner.Application` | Use cases, jobs, policies, query projections, outbound ports | Domain |
-| `VibeMiner.Protocols.Tact` | Original bounded configuration, BLTE, EN, IN, DL, DS, and locator parsing | Domain where shared identities are needed |
-| `VibeMiner.Formats.Wow` | Original WoW ROOT, DB2, schema interpretation, and staged asset decoding | Domain and pure protocol primitives when justified |
-| `VibeMiner.Infrastructure` | HTTP, SQLite, CAS, schema resources, and orchestration adapters | Application, Domain, pure parser modules |
-| `VibeMiner.Host` | Local process entry, protocol translation, dependency composition, resource lifetime | Application and concrete adapters |
+| Project | Code layer | Responsibility | Allowed production dependencies |
+| --- | --- | --- | --- |
+| `VibeMiner.Objects` | 1 (planned, #153) | Object store: packs, its own index, per-key-type verification, history log ([STORAGE](STORAGE.md)) | None (SQLite only) |
+| `VibeMiner.Domain` | shared | Identities, invariants, provenance, readiness and capability values | None |
+| `VibeMiner.Protocols.Tact` | shared, pure | Original bounded configuration, BLTE, EN, IN, DL, DS and locator parsing | Domain |
+| `VibeMiner.Formats.Wow` | shared, pure | Original WoW ROOT, DB2, schema interpretation and staged asset decoding | Protocols.Tact |
+| `VibeMiner.Application` | 3–4 (**Current**) | Use cases, jobs, policies, query projections, outbound ports | Domain |
+| `VibeMiner.Infrastructure` | 1–4 (**Current**) | HTTP, SQLite, the old object store, schema resources and orchestration adapters | Application, Protocols.Tact, Formats.Wow |
+| `VibeMiner.Host` | 5 / composition | Process entry, protocol translation, dependency composition, resource lifetime. The only place that composes concrete implementations | Application, Infrastructure |
 
-Keep responsibilities cohesive; split a DB2 or asset project only when a concrete boundary merits it. `tests/contracts/architecture.test.mjs` enforces the project dependencies above.
+The dependency column lists the direct project references `tests/contracts/architecture.test.mjs` allows.
 
-Pure parsers consume bounded caller-provided bytes or streams and return records/completion facts. They never fetch dependencies, discover paths, perform SQL, decide retention, or claim acquisition provenance. Transport-independent application results contain no Electron, HTTP response, SQLite, or parser implementation types.
+New code goes into a project for its layer. #154 splits the backend tests into one test project per layer. `Application` and `Infrastructure` shrink as slices 2–6 move their parts into layer projects, and #158 removes the old object store.
+
+Pure parsers consume bounded caller-provided bytes or streams and return records and completion facts. They never fetch dependencies, discover paths, run SQL, decide retention or claim acquisition provenance. Results that cross a layer boundary contain no Electron, HTTP response, SQLite or parser implementation types.
 
 ## Async execution
 
-Network and file I/O use asynchronous APIs with propagated cancellation. CPU parsing and synchronous SQLite operations execute outside renderer, main-process orchestration, and engine request dispatch. Use bounded execution resources and buffered/batched outputs; avoid one task, database connection, or message per file/row. See [async and jobs](ASYNC-AND-JOBS.md).
+Network and file I/O use asynchronous APIs with propagated cancellation. CPU parsing and synchronous SQLite work run outside the renderer, main-process orchestration and engine request dispatch. Use bounded execution resources and batched outputs; avoid one task, database connection or message per file or row. See [async and jobs](ASYNC-AND-JOBS.md).
 
-Shared downloads have independent consumers. View cancellation withdraws that consumer; the underlying operation stops only when its ownership policy permits. Stale completions cannot mutate a different product/build/locale or navigate a detached view.
+Shared downloads have independent consumers. Cancelling a view withdraws that consumer; the underlying operation stops only when its ownership policy permits. Stale completions cannot change a different product, build or locale, or navigate a detached view.
 
 ## Communication
 
-The engine speaks versioned, bounded NDJSON over stdin/stdout ([contracts](../contracts/README.md)): version negotiation, requests/replies, staged progress, cancellation, typed errors and shutdown. C# stdout is protocol-only; logs go to stderr. The Electron client validates payloads against the canonical schema even though TypeScript types are generated from it.
+The engine speaks versioned, bounded NDJSON over stdin/stdout ([contracts](../contracts/README.md)): version negotiation, requests and replies, staged progress, cancellation, typed errors and shutdown. C# stdout is protocol-only; logs go to stderr. The Electron client validates payloads against the canonical schema even though TypeScript types are generated from it.
 
-Never stream large binary assets as JSON/base64 or send whole catalogs to the UI. Small metadata uses IPC. Binary payloads (icon PNGs, VMG1 geometry, VMA1 appearance) go through main-owned custom protocols backed by short-lived engine leases; see [Electron boundary](#electron-boundary). Neither process exposes arbitrary filesystem access.
+Never stream large binary assets as JSON or base64, and never send whole catalogs to the UI. Small metadata uses IPC. Binary payloads (icon PNGs, VMG1 geometry, VMA1 appearance) go through main-owned custom protocols backed by short-lived engine leases; see [Electron boundary](#electron-boundary). Neither process exposes arbitrary filesystem access.
 
 Host frame budgets (1 MiB general; 512 KiB for classifications, creatures and effects; 64 KiB for geometry) must count the worst-case JSON-escaped request ID (128 characters × 6 bytes), the envelope and the trailing newline, not just the payload.
 
@@ -56,47 +102,34 @@ Host frame budgets (1 MiB general; 512 KiB for classifications, creatures and ef
 
 ## Model rendering
 
-Original C# decoders resolve supported model dependencies and produce renderer-oriented data. Three.js renders in the Electron browser renderer. WoW materials, appearance choices, animations and missing dependencies stay explicit; glTF export is not assumed to preserve all game effects.
+Original C# decoders resolve supported model dependencies and produce renderer-oriented data. Three.js renders in the Electron renderer. WoW materials, appearance choices, animations and missing dependencies stay explicit; glTF export is not assumed to preserve all game effects.
 
-Creature source geometry is published as a verified VMG1 artifact ([geometry contract](../contracts/creature-geometry-v1.md), [VMG1 format](../contracts/geometry-vmg1-v1.md)). Pose and visibility are unevaluated. When a display's texture chain is ready, the same Prepare also publishes a verified VMA1 textured appearance ([VMA1 format](../contracts/geometry-vma1-v2.md), D088–D091, D094; one- and two-stage combiners, blended layers not drawn), drawn instead of the lines; otherwise the lines stay drawn with the named texture state. Memory budgets: an 80 MiB C# geometry payload ledger (64 MiB per producer: 32 MiB for original model/SKIN sources, 16 MiB for captured context, 16 MiB for decoded textures; 8 MiB per reader); model and SKIN sources at most 4 MiB encoded and 8 MiB decoded, textures 16 MiB; a 16 MiB desktop envelope per VMG1 presentation, 48 MiB per VMA1 presentation; VMG1 at most 2 MiB, VMA1 at most 10 MiB. The 16 MiB envelope counts reachable app buffers, graphics reservations and active responses, not Chromium/driver RSS. The Creatures area offers it as a Geometry step on resolved slot metadata (D083).
+Creature source geometry is published as a verified VMG1 artifact ([geometry contract](../contracts/creature-geometry-v1.md), [VMG1 format](../contracts/geometry-vmg1-v1.md)). Pose and visibility are unevaluated. When a display's texture chain is ready, the same Prepare also publishes a verified VMA1 textured appearance ([VMA1 format](../contracts/geometry-vma1-v2.md), D088–D091, D094; one- and two-stage combiners, blended layers not drawn), which is drawn instead of the lines. Otherwise the lines stay drawn with the named texture state.
 
-## Storage and composition
+Memory budgets:
+- an 80 MiB C# geometry payload ledger: 64 MiB per producer (32 MiB for original model/SKIN sources, 16 MiB for captured context, 16 MiB for decoded textures) and 8 MiB per reader;
+- model and SKIN sources at most 4 MiB encoded and 8 MiB decoded, textures 16 MiB;
+- a 16 MiB desktop envelope per VMG1 presentation and 48 MiB per VMA1 presentation;
+- VMG1 at most 2 MiB, VMA1 at most 10 MiB.
 
-One runtime owns the SQLite catalog and immutable object store. Multiple builds retain references to shared physical content. Only bootstrap composes concrete adapters; no second cache or downloader is created by a screen, table provider, portrait generator, or export action.
+The envelope counts reachable app buffers, graphics reservations and active responses, not Chromium or driver RSS. The Creatures area offers geometry as a Geometry step on resolved slot metadata (D083).
 
-Keep database commits and filesystem publication as separate recoverable resources. Revalidate retained evidence before reporting readiness. Persist long-lived retention intent; reconstruct resumable work from validated checkpoints rather than saved UI percentages.
+## Current storage, acquisition and tables (replaced by #153–#159)
 
-## Size-first opening and targeted lookup
+**Current.** These paragraphs describe the code the storage rewrite replaces. Slices remove or rewrite them as they land.
 
-Production opening uses [home-download-v1](../contracts/download-v1.md): authenticated configurations plus DL scope sizing, with conditional native EN bootstrap. An original bounded external sorter publishes an immutable full-EKey/size ledger; SQLite retains its source association, descriptor and dated reuse assessment. It does not expand ROOT/IN/DS or wait for legacy staging cleanup. Existing complete research catalogs retain their original readiness semantics.
-
-EN native page lookup and bounded targeted ROOT scans are independent pure parser capabilities. Retained decoded EN artifacts authenticate their source binding before use. A pure bounded 128-ID batch helper preserves every requested membership through complete ROOT grammar/EOF; caller policy and authenticated source association stay separate. Feature dependencies resolve through these without a whole-game SQL graph.
-
-## Shared acquisition and durable retention
-
-Host composes one acquisition coordinator, pinned source-plan registry and resource gates. Physical identity is full EKey/exact length/verifier; source authority and feature CKey/locale interpretation stay separate. Authenticated archive footer/TOC/page proofs share bounded caches and in-flight requests. A sealed DL-scoped compact map amortizes bulk location; a nonmember never inherits that map's negative result. Source leases pin original observation/configuration evidence across refreshes.
-
-SQLite stores bounded durable intents, receipt aliases, native-source checkpoints, generation-fenced presence/problem state and compact historical ledger coverage bit pages. One feeder holds at most 32 subscriptions, one validated ledger and one map session; it never hashes or parses full maps per object. Pause/On demand withdraw only that job's consumers, while shutdown preserves intent. Read/list return local snapshots without driving work. Historical receipt credit, dated stat presence, actual current cryptographic verification and decoded readability remain different evidence.
-
-Actual corruption is recorded centrally while serialized with same-SHA repair; publication can atomically replace an existing bad encoded object only after independent complete incoming encoded/SHA verification. A monotonic durable epoch prevents an earlier successful proof from clearing a newer corruption observation. CAS replacement and receipt/credit commits remain separate resources. Progress callbacks coalesce; reliable subscription payload counters provide accounting independently of presentation delivery. See [retention wire](../contracts/retention-v1.md) and [async and jobs](ASYNC-AND-JOBS.md#background-retention-worker).
-
-## Table records on demand
-
-`tables.prepare` uses the shared acquisition/CAS primitives to resolve the selected provider FileDataID through authenticated EN and targeted ROOT, preserving exact enUS memberships. Required archive location authenticates small native index proofs with four bounded workers and reuses successful proofs. It does not build a whole-game SQL graph. An original bounded WDC5 reader matches actual table/layout headers to the exact build-selected pinned definition before admitting records.
-
-Rows stream into one immutable artifact with a sorted ID directory. SQLite stores small content/locator/interpretation registrations and exact source-context/locale admissions. Bounded pages preserve exact string values and may filter a raw record ID. A shared producer separates presentation navigation from explicit cancellation; last-consumer cancellation and shutdown await cleanup. An authenticated BLTE projection can expose readable chunks while refusing every read across encrypted holes. WDC5 admits it only when required metadata is readable and holes lie wholly inside excluded protected sections. Complete encoded retention and partial decoded/readable coverage have distinct proof identities; full decoded CKey verification is never claimed. Unverified wider integer columns retain explicit whole-column physical interpretation and suppress inferred references. Partial exclusions remain distinct from absent memberships, unsupported structures and corruption. See [the table-data contract](../contracts/table-data-v1.md).
-
-Reference text ([contract](../contracts/table-reference-text-v1.md)) is a local, batched read for one row page: the engine reads the page, resolves allowlisted references against already admitted text tables through up to four dedicated verified readers, and reports an unprepared text table instead of acquiring it. The desktop prepares that table through `tables.prepare`, automatically when it is at most 1 MiB encoded and otherwise on Load text, and asks again.
-
-Follow ([contract](../contracts/table-follow-v1.md), [D072](DECISIONS.md)) lists the target rows of one declared reference by exact target column value. The engine checks the declaration and the target table, reads only admitted rows (the record ID through the ID directory, another column through a bounded scan of at most 4,096 rows) and never acquires. The desktop opens the target's Data, lets the ordinary table flow prepare it, then asks; the request carries a request ID so leaving the view cancels it.
+- **Storage and composition.** One runtime owns the SQLite catalog and the immutable object store (`objects-v1`, one file per object). Multiple builds keep references to shared physical content. Database commits and filesystem publication are separate recoverable resources. Retained evidence is revalidated before readiness is reported, and resumable work is rebuilt from validated checkpoints rather than saved UI percentages.
+- **Opening.** Production opening uses [home-download-v1](../contracts/download-v1.md): authenticated configurations plus DL scope sizing, with conditional native EN bootstrap. A bounded external sorter publishes an immutable full-EKey/size ledger. EN page lookup and bounded targeted ROOT scans (128-ID batches) are pure parser capabilities, so features resolve dependencies without a whole-game SQL graph.
+- **Shared acquisition and retention.** Host composes one acquisition coordinator, a pinned source-plan registry and resource gates. Physical identity is full EKey, exact length and verifier. Archive footer, TOC and page proofs share bounded caches. A sealed DL-scoped map speeds up bulk location. SQLite stores durable intents, receipt aliases, checkpoints, presence and problem state, and ledger coverage pages. Corruption is recorded centrally, and a durable epoch stops an older proof from clearing a newer corruption observation. See [retention wire](../contracts/retention-v1.md).
+- **Table records on demand.** `tables.prepare` resolves a table's FileDataID through EN and targeted ROOT, locates it in an archive with bounded index-proof workers, matches the WDC5 layout against the pinned definition, and streams rows into one immutable artifact with a sorted ID directory. Reference text and Follow read only admitted rows and never acquire. See the [table-data](../contracts/table-data-v1.md), [reference text](../contracts/table-reference-text-v1.md) and [follow](../contracts/table-follow-v1.md) contracts.
 
 ## Electron boundary
 
 Main never trusts renderer-supplied build data, paths or URLs. The renderer names an exact saved identity; C# resolves and pins the observation, routes and receipts itself.
 
-The app window uses context isolation, sandbox and no Node integration, in the default session. Custom protocol handlers are registered on that session only.
+The app window uses context isolation, sandbox and no Node integration, in the default session. Custom protocol handlers are registered on that session only. #157 moves icons and models into generated packs. Main then reads each body as a byte range from a pack internally, and the protocols still serve whole bodies over plain `GET`.
 
-**Icons (`vibeminer-image://icon/<id>`).** Registered with `standard` and `secure` privileges only: no fetch API, no service workers, no CSP bypass. C# reauthorizes the exact Item/source admission; main copies the approved PNG into a private snapshot, checks its SHA-256 and streams the snapshot. Bounds ([icon-image-protocol.ts](../apps/desktop/src/main/icon-image-protocol.ts)):
+**Icons (`vibeminer-image://icon/<id>`).** Registered with `standard` and `secure` privileges only: no fetch API, no service workers, no CSP bypass. C# reauthorizes the exact Item and source admission; main copies the approved PNG into a private snapshot, checks its SHA-256 and streams the snapshot. Bounds ([icon-image-protocol.ts](../apps/desktop/src/main/icon-image-protocol.ts)):
 
 | Bound | Value |
 | --- | --- |
@@ -105,6 +138,9 @@ The app window uses context isolation, sandbox and no Node integration, in the d
 | Body deadline | 10 s per request |
 | PNG size | 5 MiB |
 
-All grants are revoked when the main-frame document changes, the renderer process goes away or the engine becomes unavailable. Revocation stops future delivery; it cannot erase pixels Chromium already has. Within a view, main reuses an Item's URL for 90 s and reissues it once less than a third is left. The renderer asks for a visible icon again when its URL expires and keeps showing the old image (up to 15 s) until the new URL arrives, so a shown icon never drops to "not loaded" on its own. Chromium keeps its own copy of delivered images (encoded and decoded) in addition to main's snapshot, so count both when sizing memory. Load only visible images and unmount offscreen ones.
+All grants are revoked when the main-frame document changes, the renderer process goes away or the engine becomes unavailable. Revocation stops future delivery; it cannot erase pixels Chromium already has.
+- **URL reuse.** Within a view, main reuses an Item's URL for 90 s and reissues it once less than a third of its life is left.
+- **Expired URLs.** The renderer asks for a visible icon again when its URL expires, and keeps showing the old image (up to 15 s) until the new URL arrives, so a shown icon never drops to "not loaded" on its own.
+- **Memory.** Chromium keeps its own copy of delivered images (encoded and decoded) in addition to main's snapshot, so count both when sizing memory. Load only visible images and unmount offscreen ones.
 
-**Geometry (`vibeminer-geometry://body/<capability>`).** Registered with `standard`, `secure`, fetch and CORS support. Each URL is a single-use capability for one verified VMG1 or VMA1 body, valid 30 s; at most 2 bodies may be opening or retiring and 1 active. Only plain `GET` is served: no range, cookies or authorization headers. See the [geometry contract](../contracts/creature-geometry-v1.md).
+**Geometry (`vibeminer-geometry://body/<capability>`).** Registered with `standard`, `secure`, fetch and CORS support. Each URL is a single-use capability for one verified VMG1 or VMA1 body, valid 30 s. At most 2 bodies may be opening or retiring, and 1 active. Only plain `GET` is served: no range, cookies or authorization headers. See the [geometry contract](../contracts/creature-geometry-v1.md).
