@@ -2,7 +2,7 @@
 
 VibeMiner has a browser-based desktop interface and one application-owned C# engine. The engine is a modular monolith. Do not add a service framework, network server, event bus or plugin framework without an actual need.
 
-The engine is being rebuilt in five code layers by the storage rewrite ([#153](https://github.com/aircan80/vibeminer/issues/153)–[#160](https://github.com/aircan80/vibeminer/issues/160)). In the target design, each layer depends only on the layers below it and every layer boundary is an interface. [Code layers](#code-layers) describes that target, and the slice column says where each part lands. None of it is on `main` yet. Sections marked **Current** describe today's code, which those slices replace.
+The storage rewrite ([#153](https://github.com/aircan80/vibeminer/issues/153)–[#160](https://github.com/aircan80/vibeminer/issues/160), [#162](https://github.com/aircan80/vibeminer/issues/162)) is rebuilding the engine in seven code layers. In the target design, each layer depends only on the layers below it and every layer boundary is an interface. [Code layers](#code-layers) describes that target, and the slice column says where each part lands. None of it is on `main` yet. Sections marked **Current** describe today's code, which those slices replace.
 
 ## Code layers
 
@@ -10,12 +10,14 @@ The engine is being rebuilt in five code layers by the storage rewrite ([#153](h
 
 ```mermaid
 flowchart TB
-  L5["5 · Features and UI<br/>screens, activity panel"]
-  L4["4 · Generated data<br/>tables, items, creatures, icons, models, Files list"]
+  L7["7 · Features and UI<br/>screens, activity panel"]
+  L6["6 · Game concepts<br/>Items, Creatures, item effects"]
+  L5["5 · Formats<br/>tables (DB2), textures, models, maps, audio, UI"]
+  L4["4 · Files<br/>a file system per build and locale: list, open, read"]
   L3["3 · Builds<br/>catalog, open build, resolver, Downloaded figure"]
   L2["2 · Object access<br/>GetKey / GetKeys / GetRange: local or CDN"]
   L1["1 · Primitives<br/>object store · CDN client · version client · verifier"]
-  L5 --> L4 --> L3 --> L2 --> L1
+  L7 --> L6 --> L5 --> L4 --> L3 --> L2 --> L1
   L1 --- CDN[(Official CDN)]
 ```
 
@@ -24,29 +26,32 @@ flowchart TB
 | 1 · Primitives | The object store (packs, index, history log; a full portable spec, `docs/formats/object-store-v1.md`, arrives with #153); the CDN client (fetch one key or byte range, check the reply); the version-service client; per-key-type verification | `HasAsync`, `ReadAsync`, `ReadRangeAsync`, `PutAsync`, `FetchRange` | Keys, bytes, HTTP. Nothing about builds, and no choice between local and CDN | `IObjectReader`, `IObjectWriter`, `IHistoryLog`, `IObjectStoreMaintenance`, `IObjectVerifier`, `ICdnClient`, `IVersionClient` | #153, #154 |
 | 2 · Object access | The only place that decides local or CDN. Checks the store (and the shared dev store for QA), plans merged ranges for what is missing, calls the CDN client, stores verified results and returns them | `GetKey`, `GetKeys`, `GetRange` | Keys plus a CDN context (hosts, path, CDN config) | `IObjectSource` | #154 |
 | 3 · Builds | The catalog built from the history log, opened builds, build metadata, the FileDataID → EKey resolver, the Downloaded figure | `ListBuilds`, `OpenBuild`, `ResolveFile(build, id)`, `Downloaded(build)` | Builds, products, regions, locales | Defined in #155 | #155 |
-| 4 · Generated data | Prepared data: table rows, Items, Creatures, item effects, icons, models, the Files list | `GetItem(build, id)`, `GetTablePage(build, …)` | One build and one locale per call | Defined in #156–#158 | #156–#159 |
-| 5 · Features and UI | The engine's request handlers and the Electron renderer | none | What the user sees | n/a | #160 |
+| 4 · Files | A file system per build and locale. It resolves each file through layer 3 and fetches it through layer 2. It decodes BLTE (only the chunks a range needs), applies known TACT keys and marks holes, reports readability, and detects each file's format from its magic bytes. It also owns the file catalog (the Files list) and wow-listfile names. Every listed file says whether its bytes are stored locally, using layer 2's `CountPresent` | `For(build, locale)` → `List(filter)`, `Get(fileId \| path)`, `ReadRange(fileId, offset, length)`, `Exists(fileId)` | Files, FileDataIDs, paths, locales, readability. Exposes no keys | Defined in #162 | #162 |
+| 5 · Formats | Decoders over file bytes: DB2 tables, BLP textures, M2/SKIN models; later maps, audio and UI files. Results are cached in the generated store | `GetTablePage(build, table, …)`, `GetTexture(…)`, `GetModel(…)` | One file format at a time | Defined in #156, #157 | #156, #157, #159 |
+| 6 · Game concepts | Items, Creatures and item effects, built by joining formats | `GetItem(build, 19019)`, `GetCreature(build, id)` | Game meaning | Defined in #157 | #157 |
+| 7 · Features and UI | The engine's request handlers and the Electron renderer | none | What the user sees | n/a | #160 |
 
 ### Rules
 
 - **Downward only.** A layer calls only layers below it, through their interfaces. Today `tests/contracts/architecture.test.mjs` checks a fixed list of allowed project references and knows nothing about layers. #154 adds the layer check.
-- **Interfaces at every boundary.** A boundary consumed by the layer above has a real implementation, an in-memory fake in the tests, and a shared contract test suite that runs against both, so a fake cannot drift. Layers above test against the fakes. #153 does this for the object store and #154 for the CDN clients and `IObjectSource`. Slices 3 and 4 follow the same rule.
+- **Interfaces at every boundary.** A boundary consumed by the layer above has a real implementation, an in-memory fake in the tests, and a shared contract test suite that runs against both, so a fake cannot drift. Layers above test against the fakes. #153 does this for the object store and #154 for the CDN clients and `IObjectSource`. The later slices follow the same rule.
 - **Everything outside comes in through layer 2.** Nothing above layer 2 touches layer 1. The only exception is the composition root, which builds and wires the pieces. Layer 2 serves keyed CDN objects (`IObjectSource`), the read-only paths layer 3 needs (`CountPresent` for the Downloaded figure, history reads for the build list), and dated build observations saved in the history log. Those come from the version service today, and from the wago.tools build list later (#96). No screen, table provider, generator or export action creates its own cache or downloader.
 - **Swappable object access.** `IObjectSource` has a real implementation (local, then shared dev store, then CDN), and can also run CDN-only, local-only (offline) or as a fake. Nothing above it changes: a CDN-only source reports 0% downloaded, and a fake answers from its own data.
 - **Outside sources are layer 1 clients** (planned): the CDN, the version service, the wago.tools build list, WoWDBDefs definitions and wow-listfile names. Pinned definitions and tagged listfile releases never change, so layer 2 can cache them in the object store under their own namespace, and a reset keeps them.
-- **Layer 4 has its own store.** The generated store reuses the pack-store code as a private instance for prepared data. It never reads the CDN object store directly; its inputs come through layers 3 and 2.
-- **Layer 4 works on one build at a time.** Comparing builds sits above it and combines two one-build answers.
+- **The Files layer hides keys and BLTE.** Formats and game concepts ask for files by FileDataID or path within one build and locale. They get bytes, an honest partial (named holes) or protected, and never handle keys, BLTE or encryption themselves.
+- **One build at a time.** A Files handle is bound to one build and locale, so code above it can't mix builds by accident. Comparing builds sits above layer 6 and combines answers from two handles.
+- **The generated store is private to layers 4–6.** It reuses the pack-store code as a separate instance for prepared data. It never reads the CDN object store directly: the Files layer gets its inputs through layers 3 and 2, and layers 5 and 6 through the Files layer.
 - **Async.** Every I/O operation is async and takes a `CancellationToken`. Pure CPU helpers on in-memory bytes, such as key parsing and small-object verification, are synchronous. SQLite's driver is synchronous inside, so the store runs index work on its own reader pool and writer task.
 
 ### Stores
 
-**Planned.** Today there is one SQLite catalog, the `objects-v1` object store and `settings-v1.json` ([STORAGE](STORAGE.md)). The three stores below arrive with #153, #155 and #156. They are named by what they hold. Reset wipes the catalog store and the generated store, Settings included, and keeps the object store.
+**Planned.** Today there is one SQLite catalog, the `objects-v1` object store and `settings-v1.json` ([STORAGE](STORAGE.md)). The three stores below arrive with #153, #155 and #156 (generated store). They are named by what they hold. Reset wipes the catalog store and the generated store, Settings included, and keeps the object store.
 
 | Store | Holds | Written by | Reset |
 | --- | --- | --- | --- |
 | Object store | Configs, archive and loose-file indexes and EKey objects exactly as served, plus the dated history log of version-service replies | Layer 1, through layer 2 | Kept |
 | Catalog store | Builds, opened builds, admissions, jobs, problems, Settings | Layer 3 | Wiped |
-| Generated store | Everything layer 4 prepares, rebuilt from the object store | Layer 4 | Wiped |
+| Generated store | Everything layers 4–6 prepare: the Files list, table rows, textures, models, Items, Creatures. All of it is rebuilt from the object store | Layers 4–6 | Wiped |
 
 ### Testing by layer
 
@@ -59,7 +64,7 @@ flowchart LR
   UI[React interface and Three.js] --> Bridge[Electron preload bridge]
   Bridge --> Main[Electron main process]
   Main <-->|Versioned bounded messages| Host[C# local engine host]
-  Host --> Layers[Engine code layers 1-5]
+  Host --> Layers[Engine code layers 1-7]
   Layers --> Stores[(Object, catalog and generated stores)]
   Layers --> CDN[Official CDN]
 ```
@@ -76,13 +81,13 @@ C# owns source discovery, acquisition, exact build contexts, parsing, job schedu
 | `VibeMiner.Domain` | shared | Identities, invariants, provenance, readiness and capability values | None |
 | `VibeMiner.Protocols.Tact` | shared, pure | Original bounded configuration, BLTE, EN, IN, DL, DS and locator parsing | Domain |
 | `VibeMiner.Formats.Wow` | shared, pure | Original WoW ROOT, DB2, schema interpretation and staged asset decoding | Protocols.Tact |
-| `VibeMiner.Application` | 3–4 (**Current**) | Use cases, jobs, policies, query projections, outbound ports | Domain |
-| `VibeMiner.Infrastructure` | 1–4 (**Current**) | HTTP, SQLite, the old object store, schema resources and orchestration adapters | Application, Protocols.Tact, Formats.Wow |
-| `VibeMiner.Host` | 5 / composition | Process entry, protocol translation, dependency composition, resource lifetime. The only place that composes concrete implementations | Application, Infrastructure |
+| `VibeMiner.Application` | 3–6 (**Current**) | Use cases, jobs, policies, query projections, outbound ports | Domain |
+| `VibeMiner.Infrastructure` | 1–6 (**Current**) | HTTP, SQLite, the old object store, schema resources and orchestration adapters | Application, Protocols.Tact, Formats.Wow |
+| `VibeMiner.Host` | 7 / composition | Process entry, protocol translation, dependency composition, resource lifetime. The only place that composes concrete implementations | Application, Infrastructure |
 
 The dependency column lists the direct project references `tests/contracts/architecture.test.mjs` allows.
 
-New code goes into a project for its layer. #154 splits the backend tests into one test project per layer. `Application` and `Infrastructure` shrink as slices 2–6 move their parts into layer projects, and #158 removes the old object store.
+New code goes into a project for its layer. #154 splits the backend tests into one test project per layer. `Application` and `Infrastructure` shrink as the slices move their parts into layer projects, and #158 removes the old object store.
 
 Pure parsers consume bounded caller-provided bytes or streams and return records and completion facts. They never fetch dependencies, discover paths, run SQL, decide retention or claim acquisition provenance. Results that cross a layer boundary contain no Electron, HTTP response, SQLite or parser implementation types.
 
@@ -116,7 +121,7 @@ Memory budgets:
 
 The envelope counts reachable app buffers, graphics reservations and active responses, not Chromium or driver RSS. The Creatures area offers geometry as a Geometry step on resolved slot metadata (D083).
 
-## Current storage, acquisition and tables (replaced by #153–#159)
+## Current storage, acquisition and tables (replaced by the storage rewrite)
 
 **Current.** These paragraphs describe the code the storage rewrite replaces. Slices remove or rewrite them as they land.
 
