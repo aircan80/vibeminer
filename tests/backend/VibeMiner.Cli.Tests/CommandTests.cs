@@ -17,15 +17,7 @@ public sealed class CommandTests
     private readonly StringWriter output = new(), error = new(), json = new();
 
     /// <summary>A plain, non-interactive console over a writer: no ANSI codes, wide enough that no cell wraps.</summary>
-    private static IAnsiConsole Plain(TextWriter writer)
-    {
-        var console = AnsiConsole.Create(new AnsiConsoleSettings
-        {
-            Out = new AnsiConsoleOutput(writer), Ansi = AnsiSupport.No, ColorSystem = ColorSystemSupport.NoColors, Interactive = InteractionSupport.No,
-        });
-        console.Profile.Width = 250;
-        return console;
-    }
+    private static IAnsiConsole Plain(TextWriter writer) => Consoles.Plain(writer, 250);
 
     private static CliEnvironment Env(params (string, string)[] variables) =>
         new("linux", name => variables.FirstOrDefault(v => v.Item1 == name).Item2, "/home/nobody-cli-test");
@@ -40,6 +32,29 @@ public sealed class CommandTests
     private static List<string[]> Rows(StringWriter writer) => writer.ToString().Split('\n')
         .Select(line => line.Split('│').Select(cell => cell.Trim()).ToArray())
         .Where(cells => cells.Length > 2).Select(cells => cells[1..^1]).ToList();
+
+    [Fact]
+    public void APlainConsoleStaysPlainOnACiRunner()
+    {
+        // #183: on GitHub runners Spectre's enrichers turned ANSI back on and table cells came back bold-coded.
+        var ci = new Dictionary<string, string> { ["GITHUB_ACTIONS"] = "true", ["CI"] = "true", ["TERM"] = "xterm-256color" };
+        var bold = new Text("Data folder", new Style(Color.Red, decoration: Decoration.Bold));
+
+        // The environment really is ANSI-capable for a console that keeps the default enrichers.
+        var enriched = new StringWriter();
+        var withEnrichers = AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Out = new AnsiConsoleOutput(enriched), Ansi = AnsiSupport.No, ColorSystem = ColorSystemSupport.NoColors, EnvironmentVariables = ci,
+        });
+        withEnrichers.Write(bold);
+        Assert.Contains('\u001b', enriched.ToString());
+
+        var plain = new StringWriter();
+        var console = Consoles.Plain(plain, 250, ci);
+        console.Write(bold);
+        Assert.Equal("Data folder", plain.ToString());
+        Assert.False(console.Profile.Capabilities.Ansi);
+    }
 
     [Fact]
     public async Task InfoOpensReadOnlyAndShowsTheStoreFigures()
