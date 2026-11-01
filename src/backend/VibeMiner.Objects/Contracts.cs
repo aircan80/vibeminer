@@ -171,6 +171,11 @@ public sealed class ReadOnlyObjectStore : IObjectReader, IHistoryReader, IAsyncD
     private readonly ObjectStore inner;
     internal ReadOnlyObjectStore(ObjectStore inner) => this.inner = inner;
     public string Folder => inner.Folder;
+    /// <summary>
+    /// What opening did: <see cref="OpenReport.FullIndexCheck"/> when the store wasn't cleanly closed (or its writer runs). The rest is
+    /// always 0, false and empty: a read-only open never recovers, truncates or rebuilds, and fails on a problem instead of reporting it.
+    /// </summary>
+    public OpenReport OpenReport => inner.OpenReport;
     public ValueTask<bool> HasAsync(ObjectKey key, CancellationToken ct = default) => inner.HasAsync(key, ct);
     public ValueTask<ObjectRead> ReadAsync(ObjectKey key, CancellationToken ct = default) => inner.ReadAsync(key, ct);
     public ValueTask<RangeRead> ReadRangeAsync(ObjectKey key, long offset, Memory<byte> destination, CancellationToken ct = default) => inner.ReadRangeAsync(key, offset, destination, ct);

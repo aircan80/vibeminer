@@ -531,6 +531,7 @@ Cancellation or a failure before the switch deletes the target file and its row.
 1. The index must exist, else `OBJECT_STORE_MISSING`. A damaged `user_version` (6.3 step 2) is `OBJECT_STORE_INDEX_UNREADABLE`, after the pack headers of step 2 are checked. Otherwise a `user_version` above 1 is `OBJECT_STORE_NEWER_FORMAT`; below 1 is `OBJECT_STORE_MISSING`. The `application_id` is checked as in 6.3 step 2.
 2. Read every pack header: a newer one is `OBJECT_STORE_NEWER_FORMAT`, the other kind `OBJECT_STORE_KIND_MISMATCH`, two store ids are `OBJECT_STORE_FOREIGN_PACK`.
 3. Validate the index as in 6.3 step 4: the cheap check, and the full one when `clean_close` is 0. A running writer keeps the marker at 0, and a reader can't tell that from a crash, so a reader opening a store whose writer runs pays the full check. Unusable is `OBJECT_STORE_INDEX_UNREADABLE`, since a read-only store can't rebuild.
+4. Report the open: `FullIndexCheck` says whether step 3 ran the full check. Recovered entries and truncated bytes are 0, `IndexRebuilt` is false and there are no problems, since the open never writes and fails rather than reporting a problem.
 
 **Then:**
 - It offers Has, Read, ReadRange, the history read and Verify, and nothing that writes.

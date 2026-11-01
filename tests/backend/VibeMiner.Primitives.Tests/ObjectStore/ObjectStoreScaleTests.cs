@@ -55,6 +55,7 @@ public sealed class ObjectStoreScaleTests(ITestOutputHelper output)
         sw.Restart();
         await using var s = await ObjectStore.OpenReadOnlyAsync(dir);
         output.WriteLine($"open after a clean close (cheap check only) {sw.Elapsed.TotalSeconds * 1000:F0} ms");
+        Assert.False(s.OpenReport.FullIndexCheck);
         // After an unclean shutdown the open runs the full check: measured on a copy whose writer was killed.
         using (var t = new TempDirectory())
         {

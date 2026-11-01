@@ -37,6 +37,7 @@ public sealed class ObjectStoreReadOnlyMediaTests
             MakeReadOnly(dir);
             await using (var shared = await ObjectStore.OpenReadOnlyAsync(dir))
             {
+                Assert.False(shared.OpenReport.FullIndexCheck);  // the immutable open runs only the cheap check: an unclean index is refused
                 foreach (var o in objects) Assert.Equal(o.Bytes.ToArray(), (await shared.ReadAsync(o.Key)).Bytes);
                 Assert.Equal(ReadState.Absent, (await shared.ReadAsync(Synthetic.Headerless(99).Key)).State);
                 Assert.Single(await shared.ReadHistoryAsync(new HistoryQuery()));

@@ -179,10 +179,20 @@ public sealed class ObjectStoreIndexDamageTests
             await store.PutAsync([Synthetic.Headerless(1)]);
         }
         await using (var store = await ObjectStore.OpenAsync(dir, Quick)) Assert.False(store.OpenReport.FullIndexCheck);
-        await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir)) Assert.True(await reader.HasAsync(Synthetic.Headerless(1).Key));
+        await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir))
+        {
+            Assert.True(await reader.HasAsync(Synthetic.Headerless(1).Key));
+            Assert.False(reader.OpenReport.FullIndexCheck);  // closed cleanly: the cheap check only
+        }
         var killed = await ObjectStore.OpenAsync(dir, Quick);
         await killed.PutAsync([Synthetic.Headerless(2)]);
         killed.Kill();  // as a crash: the marker the open cleared stays cleared
+        await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir))  // a reader pays the full check too, and says so
+        {
+            Assert.True(reader.OpenReport.FullIndexCheck);
+            Assert.Equal((0, 0L, false), (reader.OpenReport.RecoveredEntries, reader.OpenReport.TruncatedBytes, reader.OpenReport.IndexRebuilt));
+            Assert.Empty(reader.OpenReport.Problems);
+        }
         await using (var store = await ObjectStore.OpenAsync(dir, Quick))
         {
             Assert.True(store.OpenReport.FullIndexCheck);
@@ -190,6 +200,7 @@ public sealed class ObjectStoreIndexDamageTests
             Assert.True(await store.HasAsync(Synthetic.Headerless(2).Key));
         }
         await using (var store = await ObjectStore.OpenAsync(dir, Quick)) Assert.False(store.OpenReport.FullIndexCheck);
+        await using (var reader = await ObjectStore.OpenReadOnlyAsync(dir)) Assert.False(reader.OpenReport.FullIndexCheck);
     }
 
     /// <summary>An index that is structurally sound but no longer says what the packs say: found by the next scrub after a clean close, by the open after a crash.</summary>

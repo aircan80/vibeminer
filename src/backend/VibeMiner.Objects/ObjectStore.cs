@@ -98,11 +98,14 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
             // Immutable ignores the -wal: only a cleanly closed index, whose writer checkpointed everything into the main file, is read that way.
             if (problem is null && !clean && store.immutableIndex)
                 throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index is on read-only media but wasn't cleanly closed. Its writer opens and closes it to settle it.");
-            if (problem is null && !clean) (indexStore, problem, _, _) = ObjectIndex.Validate(store.indexPath, full: true, ct, () => store.At(StorePoint.IndexMeasuring), store.immutableIndex);
+            var fullCheck = problem is null && !clean;
+            if (fullCheck) (indexStore, problem, _, _) = ObjectIndex.Validate(store.indexPath, full: true, ct, () => store.At(StorePoint.IndexMeasuring), store.immutableIndex);
             if (problem is not null) throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, $"The object index can't be used: {problem}. Its writer rebuilds it.");
             if (packStore is not null && !packStore.AsSpan().SequenceEqual(indexStore))
                 throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index names another store than its packs. Its writer rebuilds it.");
             store.storeId = indexStore!;
+            // It never writes, so nothing is recovered, truncated or rebuilt, and a problem fails the open rather than being reported.
+            store.OpenReport = new(0, 0, false, [], fullCheck);
             store.readers = new IndexReaders(store.indexPath, store.options.ReadConnections, store.immutableIndex);
             return Task.FromResult(store);
         }
