@@ -17,10 +17,14 @@ The store is one folder, `cdn-store-v1/`, inside the data folder. The folder nam
 | `writer.lock` | Held with an exclusive OS lock (POSIX `flock(LOCK_EX)`, Windows share-none) for the whole life of the one writer. Its content is unused (empty). |
 | `objects.sqlite3` | The index (section 5), with SQLite's `objects.sqlite3-wal` and `objects.sqlite3-shm`. A cache of the packs: everything in it except `last_read` can be rebuilt from them. |
 | `objects.sqlite3.rebuild` | Present only while an open rebuilds a missing or damaged index (plus its `-wal`/`-shm`). Deleted at the next open if left behind. |
-| `packs/pack-NNNNNN.vmp` | Pack files. `NNNNNN` is the pack number, 6 decimal digits, 000001 upwards, never reused. |
+| `packs/pack-NNNNNN.vmp` | Pack files. `NNNNNN` is the pack number, 6 decimal digits, 000001 upwards. Only that exact 15-character name, with a number of at least 1, counts as a pack; anything else in `packs/` is ignored. |
 | `staging/TTNNKKKK….part` | One large object arriving in pieces: `TT` key type and `NN` namespace as 2 lowercase hex digits each, then the 32 lowercase hex digits of the key. |
 
 Nothing else is written there. A reader that finds other files ignores them.
+
+**Pack numbers.** The writer keeps one counter for new packs. At open it starts at one more than the highest of: every pack number in a `packs/` file name (unreadable packs included) and every `packs.seq` row, both taken before open deletes anything. Each pack roll (6.2) and each compaction target (6.8) takes the next number, so a compaction target is numbered above the active pack, and the active pack isn't always the highest. A number taken by a compaction that then failed isn't handed out again in that session. Over 999,999 is `OBJECT_STORE_LIMIT`.
+
+Numbers are not reserved across sessions: when the highest-numbered pack's file and row are both gone (a failed compaction target, an unlisted 64-byte pack deleted at open), the next session can use that number again. Nothing refers to a pack whose file and row are gone, so this is harmless.
 
 ## 2. Packs and entries
 
@@ -45,7 +49,7 @@ A pack is a 64-byte header followed by entries back to back, with no padding and
 | 8 | 4 | u32 LE | Pack number; must equal the number in the file name |
 | 12 | 4 | u32 LE | Reserved, 0 |
 | 16 | 16 | bytes | Store id: 16 random bytes chosen when the store was created, the same in every pack of a store |
-| 32 | 8 | i64 LE | Created, Unix ms |
+| 32 | 8 | i64 LE | Created, Unix ms: when this pack file was written (a roll, or a compaction target). Informational; nothing checks it |
 | 40 | 20 | bytes | Reserved, all 0 |
 | 60 | 4 | u32 LE | `CRC(bytes 0..59)` |
 
@@ -145,7 +149,11 @@ The offset width W is 4 for ArchiveIndex and 0 for FileIndex. With `F` the last 
    - entries per page `P = floor(4096 / R)`: 170 for W = 4, 204 for W = 0;
    - pages `G = ceil(E / P)`;
    - `N` must equal `G × 4096 + G × 24 + 28`, else `OBJECT_INDEX_INVALID`.
-6. TOC: the `G × 24` bytes at offset `G × 4096`. The first 8 bytes of `MD5(TOC)` must equal `F[0..7]`, else `OBJECT_INDEX_INVALID`.
+6. TOC: the `G × 24` bytes at offset `G × 4096`, in two halves:
+   - first `G × 16` bytes: the last key of each page, in page order (not checked here);
+   - then `G × 8` bytes: the first 8 bytes of `MD5(page)` for each page, in page order.
+
+   The first 8 bytes of `MD5(whole TOC)` must equal `F[0..7]`, else `OBJECT_INDEX_INVALID`.
 7. Every page p (4,096 bytes at `p × 4096`): the first 8 bytes of `MD5(page)` must equal the 8 bytes at TOC offset `G × 16 + p × 8`, else `OBJECT_INDEX_INVALID`.
 
 An index with 0 entries is exactly its 28-byte footer and is valid. Entry ordering inside pages is not checked here; the hashes prove the bytes are the ones served.
@@ -202,6 +210,10 @@ Types outside 1-6 are refused (`OBJECT_KEY_TYPE_UNSUPPORTED`). Adding a type lat
 
 The record must end exactly after the URL. The shortest is 34 bytes and the longest 1,136.
 
+`u` counts bytes, not characters. **Strict UTF-8** means well-formed UTF-8 as Unicode defines it: no overlong forms, no surrogates (U+D800-U+DFFF), nothing above U+10FFFF, no truncated sequence. Anything well-formed is accepted, including NUL, other control characters and a leading BOM (EF BB BF), which is kept as U+FEFF, not stripped. The URL is never checked as a URL. The reference writer encodes a URL string with unpaired surrogates as U+FFFD instead of refusing it.
+
+Product and region bytes outside their character sets fail the grammar.
+
 ## 5. `objects.sqlite3`
 
 SQLite 3, WAL journal, `PRAGMA user_version = 1`. The writer runs `synchronous=NORMAL` and switches to `FULL` around the commits listed in section 6.12. Exact DDL:
@@ -228,7 +240,7 @@ CREATE INDEX history_time ON history(observed_at, record);
 | `store.id` | Always 1: the table has exactly one row |
 | `store.store_id` | The store id in every pack header |
 | `store.format` | 1 |
-| `store.created_at` | Unix ms |
+| `store.created_at` | Unix ms when this index was created: the store's creation for a new store, the rebuild time after a rebuild at open (6.3 step 5); a Scan on a running store (6.6) keeps it. Informational: only `row_check` covers it, and it is never compared with a pack header's Created, which differs anyway |
 | `store.next_seq` | The sequence number the next entry gets: at least one more than any committed entry's |
 | `store.object_count`, `object_digest` | The number of `objects` rows, and the XOR of their row values (5.3) |
 | `store.history_count`, `history_digest` | The same over `history` rows |
@@ -311,7 +323,7 @@ Only now are the objects visible to Has and Read, and their Puts complete.
 
 There is no active pack, or the next entry would take the pack past its limit (2 GiB by default) while the pack already holds an entry. Then:
 1. Close the pending batch, if any.
-2. Create the next pack file with its header, `fsync` it, and `fsync` the `packs/` folder.
+2. Create the pack file with the next pack number (section 1) and its header, `fsync` it, and `fsync` the `packs/` folder.
 3. One transaction with `synchronous=FULL`: mark the old active pack sealed, and insert the new pack as active with `committed_length` 64. Both rows get their row checks.
 
 An entry larger than the limit goes alone into a fresh pack.
@@ -325,9 +337,9 @@ An entry larger than the limit goes alone into a fresh pack.
    - any newer header: `OBJECT_STORE_NEWER_FORMAT`;
    - valid headers from two store ids: `OBJECT_STORE_FOREIGN_PACK`.
 4. If `user_version` = 1, **validate** the index on a read-only connection. Every open runs the **cheap check**. The index is unusable when:
-   - the four tables don't have exactly the columns of section 5, in order;
-   - there isn't exactly one store row, or that row has a wrong type, `id` ≠ 1, a `store_id` that isn't 16 bytes, `format` ≠ 1, `next_seq` < 1, `clean_close` outside 0-1, or a bad `row_check`;
-   - a pack row has `seq` < 1, a state outside 0-3, `committed_length` < 64, or a bad `row_check`, or more than one pack is active;
+   - for any of `store`, `packs`, `objects` and `history`, the column names that `PRAGMA table_info` returns aren't exactly those of section 5, in order (a missing table returns none). Only names are compared: not declared types, constraints, `WITHOUT ROWID` or the two `history` indexes. Extra tables and indexes are allowed;
+   - there isn't exactly one store row, or that row has a wrong type (every column INTEGER except `store_id`, a BLOB), `id` ≠ 1, a `store_id` that isn't 16 bytes, `format` ≠ 1, `next_seq` < 1, `clean_close` outside 0-1, or a bad `row_check`;
+   - a pack row has a column that isn't INTEGER, `seq` < 1, a state outside 0-3, `committed_length` < 64, or a bad `row_check`, or more than one pack is active (`live_bytes` must be an INTEGER, any value);
    - its store id differs from the one the packs carry.
 
    When the cheap check passes but `clean_close` is 0 (the last writer didn't close cleanly), the open also runs the **full check**. The index is then also unusable when:
@@ -352,8 +364,8 @@ An entry larger than the limit goes alone into a fresh pack.
 
 **Tail recovery** walks the active pack from `committed_length`, entry by entry:
 1. A newer header: `OBJECT_STORE_NEWER_FORMAT`. A torn header: stop.
-2. Check the entry in full: SHA-256, block table and its key type's check (section 4). A tombstone has no bytes to check.
-3. If the header is sound but the bytes fail (SHA-256 or blocks), skip the entry and remember it. When a later sound entry follows, the damaged ones stay in the pack, reported and not indexed.
+2. Check the entry in full: SHA-256, block table and its key type's check (section 4). A tombstone has no bytes, but its SHA-256 must still be that of zero bytes.
+3. If the header is sound but the bytes fail (SHA-256 or blocks), skip the entry and remember it. It doesn't count towards `next_seq`. When a later sound entry follows, the damaged ones stay in the pack, reported and not indexed.
 4. An entry that fails its key type's check, or a history record whose document isn't stored, is **refused**. It stays in the pack unindexed; after the walk it gets a tombstone (see "after the walk").
 5. A tombstone:
    - if its key has a copy earlier in this tail, that copy is dropped;
@@ -363,7 +375,7 @@ An entry larger than the limit goes alone into a fresh pack.
 7. Anything else is recovered.
 
 After the walk:
-- **Cut.** The pack is cut after the last sound entry, so only a torn end goes. The cut is `fsync`ed.
+- **Cut.** The pack is cut after the last sound entry: one whose header reads valid, fits in the file, and whose SHA-256 and blocks pass. An entry refused in step 4 counts as sound. So a torn end goes, and so do damaged entries that no sound entry follows. The cut is `fsync`ed. `next_seq` becomes at least one more than the highest sequence number of a sound entry.
 - **Refused keys.** Each refused key gets a tombstone appended. If a sound later copy of that key was recovered, it is taken out of the batch and appended again after the tombstone: payload at most 64 MiB, origin kept. This way a Scan, which runs no key checks, rebuilds the same index.
 - **Commit.** The recovered rows commit as one batch (6.1).
 
@@ -413,19 +425,30 @@ Readers in every process see the old index until the commit.
 At open, the replay runs into a new file instead (6.3, step 5).
 
 **Replay:**
-1. Open every pack with a valid header (all with one store id, else `OBJECT_STORE_FOREIGN_PACK`) and walk each from offset 64.
+1. Open every pack file with a valid header, listed in `packs` or not (all with one store id, else `OBJECT_STORE_FOREIGN_PACK`), and walk each from offset 64 to the file's length. `committed_length` isn't used, so whole entries past it in a sealed pack are replayed too.
 2. Merge the walks by `(sequence number, pack number)`, ascending.
-3. For each entry, check its SHA-256 and block table; no key type check. One that fails is left out and reported.
+3. For each entry, check its SHA-256 and block table; no key type check. A tombstone's SHA-256 must be that of zero bytes. One that fails is left out and reported, but still counts for `next_seq` and for its pack's `committed_length`.
 4. A tombstone removes its key's row and history row, and counts 96 kept bytes for its pack.
 5. A key that already has a row is a duplicate, skipped.
 6. Anything else inserts its row. A history record also inserts its history row; one that doesn't parse is left out and reported.
 7. A newer header refuses the Scan (`OBJECT_STORE_NEWER_FORMAT`). A torn header ends that pack's walk; the rest of that pack is unreachable.
-8. Insert every pack as sealed, with `committed_length` at the end of its last whole entry. Then:
+8. Insert every walked pack as sealed. Its `committed_length` is where its walk stopped: the end of the last entry whose header read valid and whose size fit in the file, whether or not its bytes passed step 3, or 64 when there is none. Bytes past a torn header stay in the file, so that pack is longer than `committed_length`, which the next open reports (6.3 step 8). Then:
    - set `live_bytes` from its rows' entry sizes plus its tombstones;
-   - set `next_seq` to the highest sequence number + 1;
+   - set `next_seq` to the highest sequence number of any walked entry + 1 (1 with none);
    - measure the totals from the rows written.
 
-Afterwards the next Put opens a new pack. Scan rebuilds exactly the index the writer kept: the same object and history rows, apart from `last_read`.
+Scan keeps the store row's `store_id` and `created_at`; a rebuild at open takes `store_id` from the packs.
+
+**Problems Scan reports**, as text in its report:
+- a pack file whose header isn't valid: skipped (it gets no row);
+- a torn entry header: the rest of that pack is unreachable;
+- an entry that fails step 3: left out. Only these stop being listed once the list holds 100 problems; they are always counted;
+- a history record that doesn't parse: left out, counted as unverifiable;
+- the number of history rows whose document has no `objects` row. These rows stay.
+
+Its counts: packs walked, entries, live rows, duplicates, tombstones, corrupt and unverifiable entries.
+
+Afterwards the next Put opens a new pack. Scan rebuilds the index the writer kept: the same object and history rows, apart from `last_read`. That holds while every whole entry sits within a listed pack's `committed_length`. Entries the writer never indexed (past `committed_length` in a sealed pack, or in an unlisted pack) are indexed by Scan without a key type check.
 
 ### 6.7 Verify (full)
 
@@ -445,7 +468,7 @@ The most dead bytes go first, up to a maximum number of packs.
 
 For each pack:
 1. Close the pending batch.
-2. Insert the target pack (the next pack number) as compacting, in a `synchronous=FULL` transaction.
+2. Insert the target pack (the next pack number, section 1, so above the active pack) as compacting, in a `synchronous=FULL` transaction.
 3. Create the target with its header.
 4. Walk the source up to `committed_length`:
    - every tombstone is copied;
@@ -496,6 +519,10 @@ Cancellation or a failure before the switch deletes the target file and its row.
 - It never takes the lock, recovers, records reads or writes a byte.
 - It sees exactly what that store's writer has committed.
 - SQLite may create the index's `-wal` and `-shm`.
+
+**Read-only media.** The reference opens the index with SQLite `mode=ro` and never with `immutable=1`. A WAL database opened that way needs its `-wal` and `-shm` to exist already or to be creatable. After a clean close, SQLite deletes both files when the last connection closes, so on read-only media a cleanly closed store fails to open (`OBJECT_STORE_INDEX_UNREADABLE`). It opens when both files were copied along.
+
+Another implementation may open with `immutable=1` only when no writer can change the store while it is open (read-only media, or a copy no writer opens), `clean_close` is 1 and `-wal` is missing or empty. `immutable=1` ignores the WAL, so with a non-empty `-wal` it would read an older index.
 
 A layered reader asks the profile's own store first and the second store only for keys the first reports Absent.
 
