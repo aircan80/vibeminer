@@ -1084,6 +1084,50 @@ public sealed class ObjectStoreTests
     }
 
     [Fact]
+    public async Task ScanAndRebuildKeepAndReportAHistoryRecordWhoseDocumentIsCorrupt()
+    {
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var a = Synthetic.Observation(1, "wow", "us"); var b = Synthetic.Observation(2, "wow", "eu");
+        ObjectKey docA, recA, docB;
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            var ra = await store.AppendHistoryAsync(a); var rb = await store.AppendHistoryAsync(b);
+            (docA, recA, docB) = (ra[0].Key, ra[1].Key, rb[0].Key);
+            Assert.Equal(ObjectKeyType.HistoryDocument, docA.Type);
+            // Damage A's document entry so no copy of it survives a replay; the index row alone isn't touched.
+            var (pack, offset, _) = Row(dir, docA);
+            Flip(PackPath(dir, pack), offset + 96);
+
+            var report = await store.ScanAsync();
+            Assert.Equal(1, report.Corrupt);
+            Assert.Contains(report.Problems, p => p.StartsWith($"{docA} at {offset} in pack {pack}:", StringComparison.Ordinal) && p.EndsWith("left out", StringComparison.Ordinal));
+            Assert.Contains("1 history records name a document the store doesn't have", report.Problems);
+            await AssertDanglingAsync(store);
+        }
+        foreach (var f in Directory.GetFiles(dir, "objects.sqlite3*")) File.Delete(f);
+        await using (var store = await ObjectStore.OpenAsync(dir, Quick))
+        {
+            Assert.True(store.OpenReport.IndexRebuilt);
+            Assert.Contains(store.OpenReport.Problems, p => p.StartsWith($"{docA} at ", StringComparison.Ordinal) && p.EndsWith("left out", StringComparison.Ordinal));
+            Assert.Contains("1 history records name a document the store doesn't have", store.OpenReport.Problems);
+            await AssertDanglingAsync(store);
+        }
+
+        async Task AssertDanglingAsync(ObjectStore store)
+        {
+            // The record stays as stored and still names its document; the document reads Absent, not Corrupt.
+            var history = await store.ReadHistoryAsync(new HistoryQuery());
+            Assert.Equal(2, history.Count);
+            Assert.Equal(docA, Assert.Single(history, h => h.Record == recA).Document);
+            Assert.Equal(ReadState.Present, (await store.ReadAsync(recA)).State);
+            Assert.False(await store.HasAsync(docA));
+            Assert.Equal(ReadState.Absent, (await store.ReadAsync(docA)).State);
+            Assert.Equal(ReadState.Present, (await store.ReadAsync(docB)).State);
+        }
+    }
+
+    [Fact]
     public async Task ReadsRecordTheirDayInTheIndex()
     {
         using var t = new TempDirectory();
