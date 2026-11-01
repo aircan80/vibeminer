@@ -230,6 +230,27 @@ public abstract class TablesContract
         Assert.Equal((TableState.NotInBuild, null), (absent.Table.State, absent.Columns));
     }
 
+    /// <summary>A deDE build with 100 Names: a 3-element locstring array between two ints (D320).</summary>
+    public static TableScenario LocStringScenario() => new(Build, "deDE",
+    [
+        new(100, "Names", [ScenarioColumn.Id(), ScenarioColumn.Int("Rank"), ScenarioColumn.LocText("Name_lang", 3), ScenarioColumn.Int("Flags")],
+            [Row(1, "4", "Erste", "", "Dritte", "5"), Row(2, "-1", "a", "b", "c", "6")]),
+    ]);
+
+    [Fact]
+    public async Task LocStringArrayReadsEachElementInTheHandleLocale()
+    {
+        await using var tables = (await (await CreateAsync(LocStringScenario())).ForAsync(Build, "deDE", Ct)).Tables!;
+        Assert.Equal(TableState.Ready, (await tables.CheckAsync(100, Now, Ct)).State);
+        var schema = await tables.SchemaAsync(100, Now, Ct);
+        Assert.Equal(["ID", "Rank", "Name_lang[0]", "Name_lang[1]", "Name_lang[2]", "Flags"], schema.Columns!.Select(c => c.Name));
+        var name = schema.Schema!.Columns.Single(c => c.Name == "Name_lang");
+        Assert.Equal((ColumnKind.LocString, 3, WowLocale.DeDE), (name.Kind, name.ArrayLength, name.Locale));
+        Assert.Equal(WowLocale.DeDE, schema.Schema.Locale);
+        var rows = await AllPagesAsync(tables, 100, 10);
+        Assert.Equal([["1", "4", "Erste", "", "Dritte", "5"], ["2", "-1", "a", "b", "c", "6"]], rows.Select(r => r.Row.Values));
+    }
+
     // PageAsync
 
     [Theory]

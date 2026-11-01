@@ -246,11 +246,13 @@ public sealed class TableSchemaTests
     }
 
     [Fact]
-    public void Refuses_a_locstring_array()
+    public void Admits_a_locstring_array_in_the_handle_locale()
     {
-        var error = Refused("locstring Name_lang", "Name_lang[2]");
-        Assert.Contains("'Name_lang'", error.Message);
-        Assert.Contains("locstring can't be an array", error.Message);
+        // D320: a WDC locstring is one 32-bit string offset, so an array is that many strings, all in the handle's locale.
+        var column = TableSchema.FromBlock(Block(Single("locstring Name_lang", "Name_lang[3]"), "1.0.0.1"), SchemaMatch.Build, WowLocale.FrFR).Columns.Single();
+        Assert.Equal(new SchemaColumn("Name_lang", ColumnKind.LocString, null, null, 3, null, KeyStorage.None, KeyStorage.None, true,
+            WowLocale.FrFR, null, null), column);
+        Assert.True(column.IsArray);
     }
 
     [Fact]

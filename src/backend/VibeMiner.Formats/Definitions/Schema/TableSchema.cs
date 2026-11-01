@@ -16,7 +16,8 @@ public sealed record ForeignKey(string Table, string Column);
 
 /// <summary>One typed column of a selected block. <see cref="Bits"/> and <see cref="Unsigned"/> are set only for
 /// <see cref="ColumnKind.Int"/>. <see cref="ArrayLength"/> 1 is a scalar. <see cref="Locale"/> is set only for a
-/// <see cref="ColumnKind.LocString"/>: the string is read from that locale's file, never from per-locale slots.
+/// <see cref="ColumnKind.LocString"/>: the string is read from that locale's file, never from per-locale slots. A locstring
+/// array (D320) is that many such strings, every element in the same locale.
 /// <see cref="VerifiedName"/> false is the DBD <c>?</c> suffix (an unconfirmed name, not a nullable value).
 /// <see cref="ColumnComment"/> is the COLUMNS line comment, <see cref="FieldComment"/> the block line comment.</summary>
 public sealed record SchemaColumn(string Name, ColumnKind Kind, int? Bits, bool? Unsigned, int ArrayLength,
@@ -80,7 +81,6 @@ public sealed record TableSchema
             if (field.ArrayLength != 1) throw Refuse(column.Name, $"{role} can't be an array");
         }
         else if (field.NonInline) throw Refuse(column.Name, "noninline needs id or relation");
-        if (kind == ColumnKind.LocString && field.ArrayLength != 1) throw Refuse(column.Name, "a locstring can't be an array");
         var storage = field.NonInline ? KeyStorage.NonInline : KeyStorage.Inline;
         return new(column.Name, kind, field.IntegerBits, field.Unsigned, field.ArrayLength,
             column.Reference is { } reference ? new ForeignKey(reference.Table, reference.Column) : null,

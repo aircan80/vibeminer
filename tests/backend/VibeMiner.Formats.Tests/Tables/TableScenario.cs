@@ -21,6 +21,7 @@ public sealed record ScenarioColumn(string Name, ColumnKind Kind, int? Bits = nu
     public static ScenarioColumn Int(string name, int bits = 32, bool unsigned = false, int arrayLength = 1, ForeignKey? foreignKey = null) =>
         new(name, ColumnKind.Int, bits, unsigned, arrayLength, ForeignKey: foreignKey);
     public static ScenarioColumn Text(string name) => new(name, ColumnKind.String);
+    public static ScenarioColumn LocText(string name, int arrayLength = 1) => new(name, ColumnKind.LocString, ArrayLength: arrayLength);
     public static ScenarioColumn Float(string name, int arrayLength = 1) => new(name, ColumnKind.Float, ArrayLength: arrayLength);
 
     /// <summary>The flattened header column names this column gives.</summary>

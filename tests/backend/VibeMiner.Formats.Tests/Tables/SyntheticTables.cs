@@ -85,7 +85,7 @@ public static class SyntheticTables
         var text = new StringBuilder("COLUMNS\n");
         foreach (var c in columns)
         {
-            var kind = c.Kind switch { ColumnKind.Int => "int", ColumnKind.Float => "float", _ => "string" };
+            var kind = c.Kind switch { ColumnKind.Int => "int", ColumnKind.Float => "float", ColumnKind.LocString => "locstring", _ => "string" };
             var reference = c.ForeignKey is { } fk ? $"<{fk.Table}::{fk.Column}>" : "";
             text.Append(CultureInfo.InvariantCulture, $"{kind}{reference} {c.Name}\n");
         }
@@ -138,13 +138,14 @@ public static class SyntheticTables
                     for (var e = 0; e < fields[f].ArrayLength; e++, v++)
                     {
                         var at = r * recordSize + offsets[f] + e * bits[f] / 8;
-                        if (fields[f].Kind == ColumnKind.String)
+                        if (fields[f].Kind is ColumnKind.String or ColumnKind.LocString)
                         {
                             if (values[v].Length == 0) continue;
                             var global = strings.Length;
                             strings.Write(Encoding.UTF8.GetBytes(values[v])); strings.WriteByte(0);
-                            // The reader adds the field's offset and (row - declared rows) records to the stored displacement.
-                            var raw = global - offsets[f] - (long)(r - declared) * recordSize;
+                            // The reader adds the element's offset (field offset + 4 per element, D295) and (row - declared rows)
+                            // records to the stored displacement.
+                            var raw = global - (offsets[f] + e * 4) - (long)(r - declared) * recordSize;
                             BinaryPrimitives.WriteUInt32LittleEndian(records.AsSpan(at), checked((uint)raw));
                         }
                         else Number(fields[f], bits[f], values[v]).CopyTo(records.AsSpan(at));
@@ -219,7 +220,7 @@ public static class SyntheticTables
                 for (var e = 0; e < fields[f].ArrayLength; e++, v++)
                 {
                     // Flattened indexes count the ID column first.
-                    if (fields[f].Kind != ColumnKind.String) { records.Write(Number(fields[f], bits[f], rows[r].Values[v + 1])); continue; }
+                    if (fields[f].Kind is not (ColumnKind.String or ColumnKind.LocString)) { records.Write(Number(fields[f], bits[f], rows[r].Values[v + 1])); continue; }
                     records.Write(rows[r].BadText?.Contains(v + 1) == true ? BadUtf8 : Encoding.UTF8.GetBytes(rows[r].Values[v + 1]));
                     records.WriteByte(0);
                 }
