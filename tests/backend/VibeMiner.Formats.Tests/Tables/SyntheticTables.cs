@@ -37,17 +37,19 @@ public static class SyntheticTables
     /// <summary>
     /// The world over <paramref name="tables"/>. Every listed file has a listfile name (<c>dbfilesclient/{name}.db2</c>, unnamed
     /// ones by FileDataID) unless <paramref name="names"/> is false. <paramref name="fetched"/> turns fetching on over that
-    /// object source. <paramref name="options"/> adjusts the service's options last.
+    /// object source. <paramref name="options"/> adjusts the service's options last. <paramref name="wrap"/> puts another layer 4 between
+    /// the fake and the counter.
     /// </summary>
     public static async Task<SyntheticWorld> CreateAsync(BuildRef build, IReadOnlyList<SyntheticTable> tables, Db2Limits? limits = null,
         IReadOnlyList<string>? locales = null, Func<BuildRef, ITactKeyStatus>? keys = null, int maxScanRows = TableQueries.DefaultMaxScanRows,
-        bool names = true, InMemoryObjectSource? fetched = null, Func<TablesOptions, TablesOptions>? options = null)
+        bool names = true, InMemoryObjectSource? fetched = null, Func<TablesOptions, TablesOptions>? options = null,
+        Func<IFileSystem, IFileSystem>? wrap = null)
     {
         var files = new InMemoryFileSystem().Add(build, locales ?? ["enUS", "deDE"], tables.Where(t => t.File is not null).Select(t => t.File!));
         if (names)
             files.Names.Use(tables.Where(t => t.File is not null).ToDictionary(t => t.FileDataId,
                 t => $"dbfilesclient/{(t.Name ?? t.FileDataId.ToString(CultureInfo.InvariantCulture)).ToLowerInvariant()}.db2"));
-        var counted = new CountingFileSystem(files);
+        var counted = new CountingFileSystem(wrap is null ? files : wrap(files));
         var store = new InMemoryGeneratedStore();
         var generated = new CountingGeneratedTables(new GeneratedTables(store));
         var provider = await ProviderAsync(tables.Where(t => t.Name is not null).ToArray());

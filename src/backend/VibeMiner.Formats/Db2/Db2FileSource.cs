@@ -42,14 +42,30 @@ public sealed class Db2SourceException(Db2OpenState state,string? code,string? m
 /// <summary>
 /// An <see cref="IDb2ByteSource"/> over one file of a layer 4 handle: <see cref="Length"/> and <see cref="Holes"/> come from
 /// <see cref="IBuildFiles.OpenReadAsync"/>, which decodes nothing, and each layer 4 hole becomes a <see cref="Db2Hole"/> named
-/// by its TACT key. Reads go through that one stream, one at a time, so concurrent table reads are safe; it holds at most one
-/// decoded chunk. A read that fails throws <see cref="Db2SourceException"/>, never a layer 4 exception. The source outlives the
-/// handle; dispose it when done with every table opened over it.
+/// by its TACT key. Reads go through that one stream, one at a time, so concurrent table reads are safe. A read that fails throws
+/// <see cref="Db2SourceException"/>, never a layer 4 exception. The source outlives the handle; dispose it when done with every
+/// table opened over it.
+/// <para>
+/// The stream keeps only its last decoded BLTE chunk, and a row read touches the record and then its string, which usually lie
+/// in different chunks: read straight through, every row decoded two chunks (#192). So a read shorter than <see cref="BlockSize"/>
+/// is served from the last <see cref="MaxBlocks"/> aligned blocks of the file, each read through the stream once. A block that
+/// overlaps a hole, or whose read failed, isn't kept: such reads go straight to the stream for exactly their range, so a failure
+/// is the same one, at the same row, as without blocks. Dispose clears the blocks.
+/// </para>
 /// </summary>
 public sealed class Db2FileSource:IDb2ByteSource,IAsyncDisposable
 {
+    /// <summary>The size of one kept block of the file.</summary>
+    public const int BlockSize=256<<10;
+    /// <summary>The most blocks kept at once (least recently used goes first).</summary>
+    public const int MaxBlocks=4;
+
     private readonly FileReadStream stream;
     private readonly SemaphoreSlim gate=new(1,1);
+    // Most recently used first. Guarded by the gate.
+    private readonly List<(long Index,byte[] Bytes,int Length)> blocks=new(MaxBlocks);
+    private readonly HashSet<long> unkept=[];
+    private bool disposed;
 
     private Db2FileSource(FileReadStream stream,IReadOnlyList<Db2Hole> holes)
     {this.stream=stream;Holes=holes;Length=stream.Length;}
@@ -82,26 +98,82 @@ public sealed class Db2FileSource:IDb2ByteSource,IAsyncDisposable
         await gate.WaitAsync(token).ConfigureAwait(false);
         try
         {
-            stream.Position=offset;
-            for(var filled=0;filled<destination.Length;)
-            {
-                int read;
-                try{read=await stream.ReadAsync(destination[filled..],token).ConfigureAwait(false);}
-                catch(FileHoleException hole)
-                {throw new Db2SourceException(Db2OpenState.Protected,"DB2_SOURCE_PROTECTED",hole.Message);}
-                catch(FileReadException failed)
-                {throw new Db2SourceException(StateOf(failed.State),failed.Code,failed.Message,failed.ObservedAt);}
-                if(read==0)throw new Db2SourceException(Db2OpenState.Corrupt,"DB2_SOURCE_SHORT","The file ended before its declared length.");
-                filled+=read;
-            }
+            ObjectDisposedException.ThrowIf(disposed,this);
+            if(destination.Length==0)return;
+            if(destination.Length<BlockSize&&await FromBlocksAsync(offset,destination,token).ConfigureAwait(false))return;
+            await ReadStreamAsync(offset,destination,token).ConfigureAwait(false);
         }
         finally{gate.Release();}
+    }
+
+    /// <summary>Copies the range out of its blocks (at most two), reading the ones not kept. False when one can't be kept.</summary>
+    private async ValueTask<bool> FromBlocksAsync(long offset,Memory<byte> destination,CancellationToken token)
+    {
+        var end=offset+destination.Length;
+        for(var index=offset/BlockSize;index*BlockSize<end;index++)
+            if(await BlockAsync(index,token).ConfigureAwait(false) is null)return false;
+        for(long at=offset;at<end;)
+        {
+            var block=(await BlockAsync(at/BlockSize,token).ConfigureAwait(false))!.Value;
+            var from=(int)(at-block.Index*BlockSize);var count=(int)Math.Min(block.Length-from,end-at);
+            block.Bytes.AsMemory(from,count).CopyTo(destination[(int)(at-offset)..]);
+            at+=count;
+        }
+        return true;
+    }
+
+    /// <summary>The kept block, read now when it isn't kept; null when it overlaps a hole or its read failed.</summary>
+    private async ValueTask<(long Index,byte[] Bytes,int Length)?> BlockAsync(long index,CancellationToken token)
+    {
+        for(var i=0;i<blocks.Count;i++)
+        {
+            if(blocks[i].Index!=index)continue;
+            var hit=blocks[i];
+            if(i>0){blocks.RemoveAt(i);blocks.Insert(0,hit);}
+            return hit;
+        }
+        if(unkept.Contains(index))return null;
+        var start=index*BlockSize;var length=(int)Math.Min(BlockSize,Length-start);
+        if(Holes.Any(hole=>hole.Offset<start+length&&hole.Offset+hole.Length>start)){unkept.Add(index);return null;}
+        byte[] bytes;
+        if(blocks.Count==MaxBlocks){bytes=blocks[^1].Bytes;blocks.RemoveAt(blocks.Count-1);}
+        else bytes=new byte[BlockSize];
+        try{await ReadStreamAsync(start,bytes.AsMemory(0,length),token).ConfigureAwait(false);}
+        catch(Db2SourceException){Array.Clear(bytes);unkept.Add(index);return null;}
+        catch{Array.Clear(bytes);throw;}
+        var block=(index,bytes,length);
+        blocks.Insert(0,block);
+        return block;
+    }
+
+    private async ValueTask ReadStreamAsync(long offset,Memory<byte> destination,CancellationToken token)
+    {
+        stream.Position=offset;
+        for(var filled=0;filled<destination.Length;)
+        {
+            int read;
+            try{read=await stream.ReadAsync(destination[filled..],token).ConfigureAwait(false);}
+            catch(FileHoleException hole)
+            {throw new Db2SourceException(Db2OpenState.Protected,"DB2_SOURCE_PROTECTED",hole.Message);}
+            catch(FileReadException failed)
+            {throw new Db2SourceException(StateOf(failed.State),failed.Code,failed.Message,failed.ObservedAt);}
+            if(read==0)throw new Db2SourceException(Db2OpenState.Corrupt,"DB2_SOURCE_SHORT","The file ended before its declared length.");
+            filled+=read;
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
         await gate.WaitAsync().ConfigureAwait(false);
-        try{await stream.DisposeAsync().ConfigureAwait(false);}
+        try
+        {
+            if(disposed)return;
+            disposed=true;
+            // The blocks can hold decrypted bytes.
+            foreach(var block in blocks)Array.Clear(block.Bytes);
+            blocks.Clear();
+            await stream.DisposeAsync().ConfigureAwait(false);
+        }
         finally{gate.Release();}
     }
 
