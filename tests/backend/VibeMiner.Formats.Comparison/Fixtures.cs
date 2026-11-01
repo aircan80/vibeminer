@@ -37,6 +37,7 @@ internal static class Fixtures
         list.Add(Numeric("raw-unverified-name",0,32,511,"<u8>","complete",unverified:true));
         list.Add(InlineIdArrays());
         list.Add(MultiSectionStrings());
+        list.AddRange(StringArrays());
         var (chain,chainDbd)=Scalar([(8,1),(9,8),(10,9)]);
         list.Add(new("fixed-copy-chain",chain,chainDbd,"complete"));
         var (cycle,cycleDbd)=Scalar([(8,9),(9,8)]);
@@ -166,6 +167,19 @@ internal static class Fixtures
     {
         var bytes=BuildFixed([new(0,0,0,32,0,0,0,0,0,[])],4,[new(U32(9),[1],"\0one\0"u8.ToArray(),[]),new(U32(10),[2],"\0two\0"u8.ToArray(),[(3,1)])]);
         return new("fixed-strings-across-sections",bytes,FixedDbd("int ID\nstring Name","$noninline,id$ID<u32>\nName"),"complete");
+    }
+    // D295: fixed string arrays. The legacy reader refuses every one; the new reader reads 32-bit uncompressed ones.
+    private static IEnumerable<Fixture> StringArrays()
+    {
+        var three=FixedDbd("int ID\nstring Names\nint Value","$noninline,id$ID<u32>\nNames[3]\nValue<u32>");
+        yield return new("D295-fixed-string-array",BuildFixed([new(0,0,0,96,0,0,0,0,0,[]),new(0,12,96,32,0,0,0,0,0,[])],16,
+            [new(U32(33,35,0,100,28,30,9,200),[1,2],"\0alpha\0beta\0gamma\0delta\0"u8.ToArray(),[(3,2)])]),three,"complete",StringArray:0);
+        yield return new("D295-fixed-string-array-across-sections",BuildFixed([new(0,0,0,64,0,0,0,0,0,[])],8,
+            [new(U32(17,17),[1],"\0one\0uno\0"u8.ToArray(),[]),new(U32(18,18),[2],"\0two\0dos\0"u8.ToArray(),[(3,1)])]),
+            FixedDbd("int ID\nstring Names","$noninline,id$ID<u32>\nNames[2]"),"complete",StringArray:0);
+        var refused=FixedDbd("int ID\nstring Names","$noninline,id$ID<u32>\nNames[3]");
+        yield return new("D295-pallet-array-string-array-refused",BuildFixed([new(32,0,0,1,12,4,0,1,3,U32(1,2,3))],1,[new([0],[1],"\0a\0"u8.ToArray(),[])]),refused,"DB2_UNSUPPORTED",StringArray:0);
+        yield return new("D295-16-bit-string-array-refused",BuildFixed([new(16,0,0,48,0,0,0,0,0,[])],6,[new(new byte[6],[1],[],[])]),refused,"DB2_UNSUPPORTED",StringArray:0);
     }
     private static IEnumerable<Fixture> FixedKeyed()
     {

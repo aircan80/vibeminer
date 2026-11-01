@@ -80,7 +80,7 @@ public static partial class TableQueries
     /// build, no definition), or whose schema has no integer column of that name (<see cref="RelationTargetColumnCode"/>): Unknown
     /// with the target entry.</item>
     /// <item>The cell is parsed exactly (<see cref="TryParseInteger"/>); 0 is a real value. A cell that isn't a canonical integer
-    /// (invalid text, or no cell): Unknown with <see cref="RelationValueCode"/>. Outside the target column's declared width and
+    /// (invalid text, an absent external parent (D291, never 0), or no cell): Unknown with <see cref="RelationValueCode"/>. Outside the target column's declared width and
     /// sign (an ID target: 0 to uint32 max): KeyOutOfRange, never wrapped.</item>
     /// <item>An ID target is looked up by ID: Found, Absent (target Ready), Unknown (partial or unreadable target), and Protected
     /// as Unknown with <see cref="RelationProtectedCode"/> and <see cref="TableFollowResult.ProtectedKey"/>.</item>
@@ -130,7 +130,9 @@ public static partial class TableQueries
 
         var cell = row.Row!.Row;
         if (index < 0 || index >= cell.Values.Count || HasTextIssue(cell, index) || !TryParseInteger(cell.Values[index], out var value))
-            return Result(TableFollowOutcome.Unknown, reference, to.Entry, RelationValueCode, $"Column {request.Column} holds no integer.");
+            return Result(TableFollowOutcome.Unknown, reference, to.Entry, RelationValueCode,
+                cell.TextIssues?.Any(i => i.ColumnIndex == index && i.Code == Db2Reader.RelationAbsent) == true
+                    ? $"Column {request.Column} has no parent for this row." : $"Column {request.Column} holds no integer.");
         var header = to.Columns?.FirstOrDefault(c => c.Name == reference.Column);
         var (min, max) = header is not null ? Domain(to.Schema, header) : isId ? ((Int128)0, (Int128)uint.MaxValue) : Domain(targetColumn);
         if (value < min || value > max)

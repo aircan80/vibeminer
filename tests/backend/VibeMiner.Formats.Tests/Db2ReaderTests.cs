@@ -98,6 +98,45 @@ public sealed class Db2ReaderTests
         var sink=new Sink();await Read(new MemoryByteSource(bytes),definition,sink);Assert.Equal(["one","two"],sink.Rows.Select(row=>row.Values[1]));
     }
 
+    // D295: each element of a fixed string array holds an offset relative to its own position in the record.
+    // String table: alpha@1 beta@7 gamma@12 delta@18; record g's element i sits at (g-2)*16+4i in that coordinate system.
+    [Fact]
+    public async Task Fixed_string_array_elements_resolve_relative_to_their_own_position_and_copies_resolve_the_same_way()
+    {
+        var definition=Definition("int ID\nstring Names\nint Value","$noninline,id$ID<u32>\nNames[3]\nValue<u32>");
+        var bytes=Build([new(0,0,0,96,0,0,0,0,0,[]),new(0,12,96,32,0,0,0,0,0,[])],16,[new(U32(33,35,0,100,28,30,9,200),[1,2],"\0alpha\0beta\0gamma\0delta\0"u8.ToArray(),[(3,2)])]);
+        var sink=new Sink();await Read(new MemoryByteSource(bytes),definition,sink);
+        Assert.Equal(["ID","Names[0]","Names[1]","Names[2]","Value"],sink.Header!.Columns.Select(column=>column.Name));
+        Assert.All(sink.Header.Columns.Skip(1).Take(3),column=>Assert.Equal("string",column.Kind));
+        Assert.Equal(["1","alpha","beta","","100"],sink.Rows[0].Values);
+        Assert.Equal(["2","gamma","delta","alpha","200"],sink.Rows[1].Values);
+        Assert.Equal(["3","gamma","delta","alpha","200"],sink.Rows[2].Values);Assert.True(sink.Rows[2].IsCopy);
+        var table=await Db2Reader.OpenAsync(new MemoryByteSource(bytes),definition,"1.2.3.4",new());
+        Assert.Equal(["3","gamma","delta","alpha","200"],Assert.IsType<Db2Lookup.Found>(await table.FindAsync(3)).Row.Values);
+    }
+
+    [Fact]
+    public async Task Fixed_string_array_offsets_span_sections_like_scalar_strings()
+    {
+        // Both elements of a row carry the same raw value but name different strings, since each is relative to itself.
+        var definition=Definition("int ID\nstring Names","$noninline,id$ID<u32>\nNames[2]");
+        var bytes=Build([new(0,0,0,64,0,0,0,0,0,[])],8,[new(U32(17,17),[1],"\0one\0uno\0"u8.ToArray(),[]),new(U32(18,18),[2],"\0two\0dos\0"u8.ToArray(),[])]);
+        var sink=new Sink();await Read(new MemoryByteSource(bytes),definition,sink);
+        Assert.Equal([["1","one","uno"],["2","two","dos"]],sink.Rows.Select(row=>row.Values.ToArray()));
+    }
+
+    [Theory]
+    [InlineData("palletArray")][InlineData("width16")]
+    public async Task Fixed_string_arrays_outside_uncompressed_32_bit_offsets_stay_unsupported(string kind)
+    {
+        var definition=Definition("int ID\nstring Names","$noninline,id$ID<u32>\nNames[3]");
+        var bytes=kind=="palletArray"
+            ?Build([new(32,0,0,1,12,4,0,1,3,U32(1,2,3))],1,[new([0],[1],"\0a\0"u8.ToArray(),[])])
+            :Build([new(16,0,0,48,0,0,0,0,0,[])],6,[new(new byte[6],[1],[],[])]);
+        var error=await Assert.ThrowsAsync<Db2FormatException>(()=>Read(new MemoryByteSource(bytes),definition,new Sink()));
+        Assert.Equal("DB2_UNSUPPORTED",error.Code);Assert.Equal("Only scalar uncompressed relative strings are admitted.",error.Message);
+    }
+
     [Fact]
     public async Task Zero_record_ID_is_retained_but_zero_filled_duplicate_IDs_are_not_repaired()
     {

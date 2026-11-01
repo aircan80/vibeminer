@@ -12,7 +12,7 @@ public sealed class Db2RelationshipTests
     public async Task Exact_section_keys_external_middle_field_zero_parent_and_cross_section_copy_identity_are_preserved(ushort flags)
     {
         var f=Build(flags,[new([900,0],[7,0],Copies:[(100,901)]),new([901],[8],Copies:[(101,100)])]);var sink=new Sink();
-        var done=await Read(f,sink);Assert.Equal("db2-values-v1",Db2Reader.Revision);
+        var done=await Read(f,sink);Assert.Equal("db2-values-v2",Db2Reader.Revision);
         Assert.Equal(new[]{"ID","Before","Parent","After"},sink.Header!.Columns.Select(c=>c.Name));
         Assert.Equal(new[]{"7","0","8","8","8"},sink.Rows.Select(r=>r.Values[2]));
         Assert.Equal(new uint[]{900,0,901,100,101},sink.Rows.Select(r=>r.Id));
@@ -59,14 +59,68 @@ public sealed class Db2RelationshipTests
     public async Task Narrow_inline_relation_does_not_remove_its_physical_field(string type,uint value,string expected)
     {var sink=new Sink();await Read(Build(4,[new([9],[value])],external:false,parentType:type),sink);Assert.Equal(expected,sink.Rows[0].Values[2]);Assert.Equal("2000",sink.Rows[0].Values[3]);}
 
+    // D291: a row without a pair, or in a section with no block, has no parent: "" with a DB2_RELATION_ABSENT issue, never 0.
+    // A copy inherits its terminal row's state. Parent 0 from a pair stays "0".
+    [Theory]
+    [InlineData(0)][InlineData(4)][InlineData(5)][InlineData(6)][InlineData(7)]
+    public async Task Missing_external_pairs_and_blocks_read_as_absent_parents_not_zero(ushort flags)
+    {
+        uint Key(uint id,uint ordinal)=>(flags&2)!=0?id:ordinal;
+        var f=Build(flags,[new([900,901,902],[0,0,5],Pairs:[(0,Key(900,0)),(5,Key(902,2))],Copies:[(950,901),(951,902)]),new([910],[0],Native:false,Copies:[(960,910)])]);
+        var sink=new Sink();var done=await Read(f,sink);
+        Assert.Equal(new uint[]{900,901,902,910,950,951,960},sink.Rows.Select(r=>r.Id));
+        Assert.Equal(new[]{"0","","5","","","5",""},sink.Rows.Select(r=>r.Values[2]));
+        var absent=new Db2TextIssue(2,Db2Reader.RelationAbsent,"");
+        Assert.Equal(new[]{false,true,false,true,true,false,true},sink.Rows.Select(r=>r.TextIssues is not null));
+        foreach(var row in sink.Rows.Where(r=>r.TextIssues is not null))Assert.Equal(new[]{absent},row.TextIssues!);
+        Assert.Equal(4,done.TextIssueCount);Assert.Equal("1001",sink.Rows[1].Values[1]);Assert.Equal("2001",sink.Rows[1].Values[3]);
+        var table=await Db2Reader.OpenAsync(new CountedSource(f.Bytes),f.Definition,"1.2.3.4",new());
+        var found=Assert.IsType<Db2Lookup.Found>(await table.FindAsync(950));Assert.Equal("",found.Row.Values[2]);Assert.Equal(new[]{absent},found.Row.TextIssues!);
+        found=Assert.IsType<Db2Lookup.Found>(await table.FindAsync(900));Assert.Equal("0",found.Row.Values[2]);Assert.Null(found.Row.TextIssues);
+        // D290's raw-evidence scan ignores absent rows: an unverified <8> column whose readable parents fit stays uninterpreted.
+        var narrow=Build(flags,[new([900,901],[5,0],Pairs:[(5,Key(900,0))])],parentType:"<8>");sink=new();
+        await Read(narrow with{Definition=UnverifiedParent(narrow.Definition)},sink);
+        Assert.Null(sink.Header!.Columns[2].Interpretation);Assert.Equal(new[]{"5",""},sink.Rows.Select(r=>r.Values[2]));
+    }
+
     [Theory]
     [InlineData(4)][InlineData(5)]
-    public async Task Missing_external_mapping_is_unsupported_and_duplicates_are_not_dictionary_overwrites(ushort flags)
+    public async Task Duplicate_and_out_of_range_external_keys_still_refuse_and_lookup_count_is_still_required(ushort flags)
     {
-        Assert.Equal("DB2_UNSUPPORTED",(await Error(Build(flags,[new([9],[0],Native:false)]))).Code);
-        Assert.Equal("DB2_UNSUPPORTED",(await Error(Build(flags,[new([9,10],[0,1],Pairs:[(0,0)])]))).Code);
         Assert.Equal("DB2_INVALID",(await Error(Build(flags,[new([9,10],[0,1],Pairs:[(0,0),(0,0)])]))).Code);
         Assert.Equal("DB2_INVALID",(await Error(Build(flags,[new([9,10],[0,1],Pairs:[(0,0),(1,0)])]))).Code);
+        Assert.Equal("DB2_INVALID",(await Error(Build(flags,[new([9,10],[0,1],Pairs:[(0,2)])]))).Code);
+        Assert.Equal("DB2_UNSUPPORTED",(await Error(Build(flags,[new([9],[0],Native:false)],lookup:0))).Code);
+    }
+
+    // D292: Blizzard writes one extra pair per copy row, keyed by the copy's terminal row (its source row for a direct copy)
+    // with the same parent. A key may repeat once per readable copy whose terminal row it is (a copy of a copy counts),
+    // always with equal parents.
+    [Theory]
+    [InlineData(0,true)][InlineData(4,true)][InlineData(5,true)][InlineData(6,true)][InlineData(7,true)]
+    [InlineData(4,false)][InlineData(5,false)][InlineData(6,false)]
+    public async Task Extra_pairs_for_copied_rows_are_admitted_only_with_equal_parents_and_readable_copies(ushort flags,bool external)
+    {
+        uint K(int row)=>(flags&2)!=0?900u+(uint)row:(uint)row;(uint,uint)[] copies=[(950,900),(951,950)];
+        Fixture Make(params (uint,uint)[] pairs)=>Build(flags,[new([900,901],[7,8],Pairs:pairs,Copies:copies)],external:external);
+        var f=Make((7,K(0)),(7,K(0)),(8,K(1)),(7,K(0)));var sink=new Sink();await Read(f,sink);
+        Assert.Equal(new uint[]{900,901,950,951},sink.Rows.Select(r=>r.Id));
+        Assert.Equal(new[]{"7","8","7","7"},sink.Rows.Select(r=>r.Values[2]));Assert.All(sink.Rows,r=>Assert.Null(r.TextIssues));
+        var error=await Error(Make((7,K(0)),(9,K(0)),(8,K(1))));Assert.Equal("DB2_SCHEMA_MISMATCH",error.Code);Assert.Contains("disagree on the parent",error.Message);
+        error=await Error(Make((7,K(0)),(7,K(0)),(7,K(0)),(7,K(0))));Assert.Equal("DB2_INVALID",error.Code);Assert.Contains("repeat a physical key",error.Message);
+        error=await Error(Make((7,K(0)),(8,K(1)),(8,K(1))));Assert.Equal("DB2_INVALID",error.Code);Assert.Contains("repeat a physical key",error.Message);
+        error=await Error(Make((7,K(0)),(7,K(0)),(7,K(0)),(8,K(1)),(8,K(1))));Assert.Equal("DB2_INVALID",error.Code);Assert.Contains("rows plus copies",error.Message);
+        error=await Error(Build(flags,[new([900,901],[7,8],Pairs:[(7,K(0)),(7,K(0))])],external:external));Assert.Equal("DB2_INVALID",error.Code);Assert.Contains("repeat a physical key",error.Message);
+        // A copy whose chain is broken has no terminal row and allows no extra pair.
+        error=await Error(Build(flags,[new([900,901],[7,8],Pairs:[(7,K(0)),(7,K(0)),(8,K(1))],Copies:[(950,999)])],external:external));
+        Assert.Equal("DB2_INVALID",error.Code);Assert.Contains("repeat a physical key",error.Message);
+        // A protected copy (its chain ends in a keyed-section ID) has no readable terminal row and allows no extra pair.
+        error=await Error(Build(flags,[new([900,901],[7,8],Pairs:[(7,K(0)),(7,K(0))],Copies:[(950,951),(951,800)]),new([800],[9],Key:123,Protected:[800])],external:external),
+            new(AllowPartialEncryptedSections:true));
+        Assert.Equal("DB2_INVALID",error.Code);Assert.Contains("repeat a physical key",error.Message);
+        // A copy whose terminal row is in another section allows no extra pair for a key of this section.
+        error=await Error(Build(flags,[new([900,901],[7,8],Pairs:[(7,K(0)),(7,K(0))],Copies:[(950,910)]),new([910],[9])],external:external));
+        Assert.Equal("DB2_INVALID",error.Code);Assert.Contains("repeat a physical key",error.Message);
     }
 
     [Theory]
@@ -203,7 +257,7 @@ public sealed class Db2RelationshipTests
     }
 
     [Fact]
-    public async Task Duplicate_relation_fields_and_noninteger_or_unverified_external_shapes_remain_unsupported()
+    public async Task Duplicate_relation_fields_and_noninteger_external_shapes_remain_unsupported()
     {
         var f=Build(4,[new([900],[1])]);
         foreach(var family in new[]{"float","string"})
@@ -213,8 +267,59 @@ public sealed class Db2RelationshipTests
         }
         var duplicate=f.Definition with{Blocks=f.Definition.Blocks.Select(b=>b with{Fields=b.Fields.Select(v=>v.Column.Name=="Before"?v with{RelationStorage=true}:v).ToArray()}).ToArray()};
         Assert.Equal("DB2_UNSUPPORTED",(await Error(f with{Definition=duplicate})).Code);
-        var unverified=f.Definition with{Blocks=f.Definition.Blocks.Select(b=>b with{Fields=b.Fields.Select(v=>v.Column.Name=="Parent"?v with{Column=v.Column with{VerifiedName=false}}:v).ToArray()}).ToArray()};
-        Assert.Equal("DB2_UNSUPPORTED",(await Error(f with{Definition=unverified})).Code);
+    }
+
+    private static DbdDocument UnverifiedParent(DbdDocument d)=>d with{Blocks=d.Blocks.Select(b=>b with{Fields=b.Fields.Select(v=>v.Column.Name=="Parent"?v with{Column=v.Column with{VerifiedName=false}}:v).ToArray()}).ToArray()};
+
+    // D290: an unverified external relation reads its u32 parents. All fitting the DBD width and sign: no interpretation.
+    // Any parent outside it: the whole column keeps raw physical evidence, so no reference is followed from it.
+    [Theory]
+    [InlineData("<16>",32767u,false)][InlineData("<16>",70000u,true)][InlineData("<16>",32768u,true)]
+    [InlineData("<u16>",65535u,false)][InlineData("<u16>",65536u,true)]
+    [InlineData("<32>",2147483647u,false)][InlineData("<32>",2147483648u,true)][InlineData("<u32>",uint.MaxValue,false)]
+    public async Task Unverified_external_relation_reads_u32_parents_and_keeps_raw_evidence_when_one_does_not_fit(string parentType,uint parent,bool raw)
+    {
+        var f=Build(4,[new([900,901],[5,parent],Copies:[(902,901)])],parentType:parentType);var sink=new Sink();
+        await Read(f with{Definition=UnverifiedParent(f.Definition)},sink);
+        Assert.Equal(new[]{"5",parent.ToString(System.Globalization.CultureInfo.InvariantCulture),parent.ToString(System.Globalization.CultureInfo.InvariantCulture)},sink.Rows.Select(r=>r.Values[2]));
+        var interpretation=sink.Header!.Columns[2].Interpretation;
+        if(!raw){Assert.Null(interpretation);return;}
+        Assert.NotNull(interpretation);
+        Assert.Equal(("raw-physical-integer-v1",32,false),(interpretation.Policy,interpretation.PhysicalBits,interpretation.PhysicalSigned));
+        Assert.Equal((parentType.Contains("16")?16:32,parentType.Contains('u')),(interpretation.CandidateBits,interpretation.CandidateUnsigned));
+        Assert.StartsWith("Unverified provider field",interpretation.Warning,StringComparison.Ordinal);
+        Assert.All(sink.Header.Columns.Where(c=>c.Name!="Parent"),c=>Assert.Null(c.Interpretation));
+        // The same file with a verified name stays strict: a parent above the DBD's 16 bits is refused there. (A verified
+        // signed name reads 32768 as -32768, the DBD's text; the unverified name doesn't guess the sign and stays raw.)
+        if(parentType.Contains("16")&&parent>ushort.MaxValue)Assert.Equal("DB2_SCHEMA_MISMATCH",(await Error(f)).Code);
+    }
+
+    [Fact]
+    public async Task Unverified_external_relation_checks_parents_of_every_readable_section_before_header()
+    {
+        var f=Build(4,[new([900],[5]),new([901],[70000])],parentType:"<16>");var sink=new Sink(collect:false);
+        await Read(f with{Definition=UnverifiedParent(f.Definition)},sink);
+        Assert.Equal("raw-physical-integer-v1",sink.Header!.Columns[2].Interpretation!.Policy);
+    }
+
+    // D290: an unverified inline relation compares each pair's u32 parent with the physical value P. Kind 5 is
+    // (uint)Signed(raw, width): stored 0xFFFF in 16 signed bits is -1, so parent 0xFFFFFFFF agrees. Off by one fails that row.
+    [Theory]
+    [InlineData(0xFFFFFFFFu,true)][InlineData(0xFFFFFFFEu,false)][InlineData(0x0000FFFFu,false)]
+    public async Task Unverified_inline_signed_bitpacked_relation_compares_the_physical_value(uint parent,bool agrees)
+    {
+        var f=Build(4,[new([900,901],[7,0xFFFF],Pairs:[(7,0),(parent,1)])],external:false,parentType:"<16>");
+        var at=204+40+3*4+1*24;Put(f.Bytes,at+8,5);Put(f.Bytes,at+12,32);Put(f.Bytes,at+16,16);Put(f.Bytes,at+20,0);
+        var unverified=f with{Definition=UnverifiedParent(f.Definition)};var sink=new Sink();
+        if(agrees)
+        {
+            await Read(unverified,sink);Assert.Equal(new[]{"7","-1"},sink.Rows.Select(r=>r.Values[2]));
+            Assert.Null(sink.Header!.Columns[2].Interpretation);return;
+        }
+        var exception=await Assert.ThrowsAsync<Db2FormatException>(()=>Read(unverified,sink));
+        Assert.Equal("DB2_SCHEMA_MISMATCH",exception.Code);
+        // The table opened and the agreeing first row was read; only the disagreeing row fails (D171).
+        Assert.NotNull(sink.Header);Assert.Equal(new[]{"7"},sink.Rows.Select(r=>r.Values[2]));
     }
 
     [Fact]
@@ -228,7 +333,7 @@ public sealed class Db2RelationshipTests
 
     [Theory]
     [InlineData(false)][InlineData(true)]
-    public async Task Unverified_inline_narrow_and_widened_raw_fields_keep_values_but_acceleration_requires_explicit_policy(bool widened)
+    public async Task Unverified_inline_narrow_and_widened_raw_fields_keep_values_and_acceleration_compares_emitted_values(bool widened)
     {
         DbdDocument Unverified(DbdDocument d)=>d with{Blocks=d.Blocks.Select(b=>b with{Fields=b.Fields.Select(v=>v.Column.Name=="Parent"?v with{Column=v.Column with{VerifiedName=false},IntegerBits=8,Unsigned=widened}:v).ToArray()}).ToArray()};
         var f=Build(4,[new([900],[widened?511u:255u],Native:false)],external:false,parentType:widened?"<u32>":"<8>",lookup:0);
@@ -236,8 +341,46 @@ public sealed class Db2RelationshipTests
         Assert.Equal(widened?"511":"-1",sink.Rows[0].Values[2]);
         if(widened){Assert.Equal("raw-physical-integer-v1",sink.Header!.Columns[2].Interpretation!.Policy);Assert.Equal(32,sink.Header.Columns[2].Interpretation!.PhysicalBits);}
         else Assert.Null(sink.Header!.Columns[2].Interpretation);
+        // D290: the pair is compared with what the row emits, as a u32. The raw column emits its stored 511. The narrow
+        // signed column emits -1 from its stored 0xFF, so its pair is 0xFFFFFFFF; a pair of 255 would let a wrong value pass.
         var accelerated=Build(4,[new([900],[widened?511u:255u],Pairs:[(widened?511u:uint.MaxValue,0)])],external:false,parentType:widened?"<u32>":"<8>");
-        Assert.Equal("DB2_UNSUPPORTED",(await Error(accelerated with{Definition=Unverified(accelerated.Definition)})).Code);
+        sink=new Sink();await Read(accelerated with{Definition=Unverified(accelerated.Definition)},sink);
+        Assert.Equal(widened?"511":"-1",sink.Rows[0].Values[2]);
+        var wrong=Build(4,[new([900],[widened?511u:255u],Pairs:[(widened?512u:255u,0)])],external:false,parentType:widened?"<u32>":"<8>");
+        Assert.Equal("DB2_SCHEMA_MISMATCH",(await Error(wrong with{Definition=Unverified(wrong.Definition)})).Code);
+    }
+
+    // D290: kind 5 under an unsigned DBD emits the value at the DBD width (0xFFFF reads 65535), so that is what a pair must hold.
+    [Theory]
+    [InlineData(0x0000FFFFu,true)][InlineData(0xFFFFFFFFu,false)]
+    public async Task Unverified_inline_signed_bitpacked_relation_under_an_unsigned_definition_compares_the_emitted_value(uint parent,bool agrees)
+    {
+        var f=Build(4,[new([900],[0xFFFF],Pairs:[(parent,0)])],external:false,parentType:"<u16>");
+        var at=204+40+3*4+1*24;Put(f.Bytes,at+8,5);Put(f.Bytes,at+12,32);Put(f.Bytes,at+16,16);Put(f.Bytes,at+20,0);
+        var unverified=f with{Definition=UnverifiedParent(f.Definition)};var sink=new Sink();
+        if(!agrees){Assert.Equal("DB2_SCHEMA_MISMATCH",(await Error(unverified)).Code);return;}
+        await Read(unverified,sink);Assert.Equal("65535",sink.Rows[0].Values[2]);
+    }
+
+    // D290 on pallet (3), pallet array of one (4) and common (2) storage: the column emits the stored u32. Narrower than
+    // 32 bits it is raw evidence (70000 doesn't fit <16>); at <32> it is not raw and 0xFFFFFFFF emits -1. Either way a
+    // pair must hold the stored u32, and one off fails that row.
+    [Theory]
+    [InlineData(2u,"<16>",70000u)][InlineData(3u,"<16>",70000u)][InlineData(4u,"<16>",70000u)]
+    [InlineData(2u,"<32>",0xFFFFFFFFu)][InlineData(3u,"<32>",0xFFFFFFFFu)][InlineData(4u,"<32>",0xFFFFFFFFu)]
+    public async Task Unverified_inline_pallet_and_common_relations_compare_the_stored_u32(uint kind,string parentType,uint stored)
+    {
+        Fixture Make(uint second)=>kind==2
+            ?Build(4,[new([900,901],[7,0],Pairs:[(7,0),(second,1)])],external:false,parentType:parentType,commonOverride:(901,stored))
+            :Build(4,[new([900,901],[0,1],Pairs:[(7,0),(second,1)])],external:false,parentType:parentType,pallet:[7,stored],palletKind:kind);
+        var good=Make(stored);var sink=new Sink();
+        await Read(good with{Definition=UnverifiedParent(good.Definition)},sink);
+        var text=parentType=="<32>"?"-1":stored.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(new[]{"7",text},sink.Rows.Select(r=>r.Values[2]));
+        Assert.Equal(parentType=="<16>",sink.Header!.Columns[2].Interpretation is not null);
+        var bad=Make(stored-1);sink=new Sink();
+        Assert.Equal("DB2_SCHEMA_MISMATCH",(await Assert.ThrowsAsync<Db2FormatException>(()=>Read(bad with{Definition=UnverifiedParent(bad.Definition)},sink))).Code);
+        Assert.Equal(new[]{"7"},sink.Rows.Select(r=>r.Values[2]));
     }
 
     [Fact]
@@ -251,11 +394,11 @@ public sealed class Db2RelationshipTests
     private sealed record Tail(int Start,int Relations,int MapIds);
     private sealed record Fixture(byte[] Bytes,DbdDocument Definition,Tail[]? Layouts=null)
     {public Tail[] Tails=>Layouts??[];}
-    private static Fixture Build(ushort flags,Spec[] sections,bool external=true,string parentType="<u32>",uint lookup=1,bool names=false,(uint Id,uint Value)? commonOverride=null)
+    private static Fixture Build(ushort flags,Spec[] sections,bool external=true,string parentType="<u32>",uint lookup=1,bool names=false,(uint Id,uint Value)? commonOverride=null,uint[]? pallet=null,uint palletKind=3)
     {
         var sparse=(flags&1)!=0;var indexed=(flags&4)!=0;var secondary=(flags&2)!=0;var parentWidth=parentType.Contains("8>")?1:parentType.Contains("16>")?2:4;
         var physical=new List<(int Width,bool Name,bool Common)>();if(!indexed)physical.Add((4,false,false));physical.Add((4,names,false));if(!external)physical.Add((parentWidth,false,commonOverride is not null));physical.Add((4,false,false));
-        var recordSize=physical.Where(p=>!p.Common).Sum(p=>p.Width);var fields=physical.Count;var aux=commonOverride is null?0:8;
+        var recordSize=physical.Where(p=>!p.Common).Sum(p=>p.Width);var fields=physical.Count;var aux=commonOverride is not null?8:(pallet?.Length??0)*4;
         var prefixBytes=sections.Where(s=>s.Key!=0).Sum(s=>4+(s.Protected?.Length??0)*4);var start=204+sections.Length*40+fields*28+aux+prefixBytes;
         var bodies=new List<byte[]>();var tails=new List<Tail>();var headers=new List<byte[]>();var totalRecords=sections.Sum(s=>s.Ids.Length);var global=0;var allStrings=0;
         foreach(var section in sections)
@@ -286,13 +429,17 @@ public sealed class Db2RelationshipTests
             if(sparse&&!secondary){mapIdsAt=start+(int)body.Position;foreach(var id in section.Ids)w.Write(id);}
             var sh=new byte[40];BinaryPrimitives.WriteUInt64LittleEndian(sh,section.Key);Put(sh,8,(uint)start);Put(sh,12,(uint)section.Ids.Length);Put(sh,16,(uint)stringBytes.Length);Put(sh,20,sparse?(uint)recordsEnd:0);Put(sh,24,indexed?(uint)section.Ids.Length*4:0);Put(sh,28,(uint)pairBytes);Put(sh,32,sparse?(uint)section.Ids.Length:0);Put(sh,36,(uint)(section.Copies?.Length??0));headers.Add(sh);tails.Add(new(start,relationsAt,mapIdsAt));bodies.Add(body.ToArray());start+=(int)body.Length;global+=section.Ids.Length;
         }
-        var bytes=new byte[start];"WDC5"u8.CopyTo(bytes);Put(bytes,4,5);Put(bytes,136,(uint)totalRecords);Put(bytes,140,(uint)fields);Put(bytes,144,(uint)recordSize);Put(bytes,148,(uint)allStrings);Put(bytes,152,0x11223344);Put(bytes,156,0x01020304);Set16(bytes,172,flags);Put(bytes,176,(uint)fields);Put(bytes,184,lookup);Put(bytes,188,(uint)fields*24);Put(bytes,192,(uint)aux);Put(bytes,200,(uint)sections.Length);
+        var bytes=new byte[start];"WDC5"u8.CopyTo(bytes);Put(bytes,4,5);Put(bytes,136,(uint)totalRecords);Put(bytes,140,(uint)fields);Put(bytes,144,(uint)recordSize);Put(bytes,148,(uint)allStrings);Put(bytes,152,0x11223344);Put(bytes,156,0x01020304);Set16(bytes,172,flags);Put(bytes,176,(uint)fields);Put(bytes,184,lookup);Put(bytes,188,(uint)fields*24);Put(bytes,pallet is null?192:196,(uint)aux);Put(bytes,200,(uint)sections.Length);
         for(var i=0;i<headers.Count;i++)headers[i].CopyTo(bytes,204+i*40);
         var metadata=204+sections.Length*40;var offset=0;for(var i=0;i<fields;i++)
         {
-            var p=physical[i];Set16(bytes,metadata+i*4,(ushort)(32-p.Width*8));Set16(bytes,metadata+i*4+2,(ushort)offset);var at=metadata+fields*4+i*24;Set16(bytes,at,(ushort)(offset*8));Set16(bytes,at+2,(ushort)(p.Common?0:p.Width*8));Put(bytes,at+4,p.Common?8u:0);Put(bytes,at+8,p.Common?2u:0);Put(bytes,at+12,p.Common?sections[0].Parents[0]:0);if(!p.Common)offset+=p.Width;
+            var p=physical[i];Set16(bytes,metadata+i*4,(ushort)(32-p.Width*8));Set16(bytes,metadata+i*4+2,(ushort)offset);var at=metadata+fields*4+i*24;Set16(bytes,at,(ushort)(offset*8));Set16(bytes,at+2,(ushort)(p.Common?0:p.Width*8));Put(bytes,at+4,p.Common?8u:0);Put(bytes,at+8,p.Common?2u:0);Put(bytes,at+12,p.Common?sections[0].Parents[0]:0);
+            // The parent as a pallet: its record bits are the index, P1 its bit offset, P2 its width, P3 the cardinality.
+            if(pallet is not null&&!external&&i==fields-2){Put(bytes,at+4,(uint)aux);Put(bytes,at+8,palletKind);Put(bytes,at+12,(uint)offset*8);Put(bytes,at+16,(uint)p.Width*8);Put(bytes,at+20,palletKind==4?1u:0);}
+            if(!p.Common)offset+=p.Width;
         }
         var position=metadata+fields*28;if(commonOverride is{}co){Put(bytes,position,co.Id);Put(bytes,position+4,co.Value);position+=8;}
+        foreach(var value in pallet??[]){Put(bytes,position,value);position+=4;}
         foreach(var section in sections.Where(s=>s.Key!=0)){Put(bytes,position,(uint)(section.Protected?.Length??0));position+=4;foreach(var id in section.Protected??[]){Put(bytes,position,id);position+=4;}}
         for(var i=0;i<bodies.Count;i++)bodies[i].CopyTo(bytes,tails[i].Start);
         var fieldsText=(indexed?"$noninline,id$ID<u32>":"$id$ID<u32>")+"\nBefore"+(names?"":"<u32>")+"\n"+(external?"$noninline,relation$":"$relation$")+"Parent"+parentType+"\nAfter<u32>";

@@ -100,8 +100,9 @@ public static partial class Db2Reader
             ChargeText(issues,budget,state.Limits,token);
             return new(id,isCopy,copySource,values,issues);
         }
-        var fixedValues=await DecodeValues(state.Bytes,location,id,state.Fields,state.Storage,state.Sections,state.RecordSize,state.DeclaredRecords,state.Limits,token,state.Relationships,!isCopy);
-        return new(id,isCopy,copySource,fixedValues);
+        var (fixedValues,fixedIssues)=await DecodeValues(state.Bytes,location,id,state.Fields,state.Storage,state.Sections,state.RecordSize,state.DeclaredRecords,state.Limits,token,state.Relationships,!isCopy);
+        ChargeText(fixedIssues,budget,state.Limits,token);
+        return new(id,isCopy,copySource,fixedValues,fixedIssues);
     }
     internal static Task<Db2Row> DecodeCopy(TableState state,int copy,TextBudget budget,CancellationToken token)
     {

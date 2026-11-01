@@ -6,7 +6,7 @@ The reader needs a readable, seekable, caller-owned decoded stream, the DBD docu
 
 ## Layer 5 reader
 
-[`src/backend/VibeMiner.Formats/Db2/`](../../src/backend/VibeMiner.Formats/Db2/) and [`Definitions/`](../../src/backend/VibeMiner.Formats/Definitions/) hold the layer 5 port (#177, D170-D174), revision `db2-values-v1`. It reads bytes through `IDb2ByteSource`, an immutable decoded file with named `Db2Hole` ranges; `Db2FileSource` builds one over a layer 4 file, and `Db2Reader.OpenAsync(IBuildFiles, ...)` opens a table straight from a handle with a typed `Db2OpenState` (D191). A read touching a hole throws `BLTE_RANGE_UNAVAILABLE`.
+[`src/backend/VibeMiner.Formats/Db2/`](../../src/backend/VibeMiner.Formats/Db2/) and [`Definitions/`](../../src/backend/VibeMiner.Formats/Definitions/) hold the layer 5 port (#177, D170-D174), revision `db2-values-v2` ([D293](../DECISIONS.md)). It reads bytes through `IDb2ByteSource`, an immutable decoded file with named `Db2Hole` ranges; `Db2FileSource` builds one over a layer 4 file, and `Db2Reader.OpenAsync(IBuildFiles, ...)` opens a table straight from a handle with a typed `Db2OpenState` (D191). A read touching a hole throws `BLTE_RANGE_UNAVAILABLE`.
 
 `Db2Reader.OpenAsync` checks the structure and builds the ID, copy and relationship indexes without reading record bodies. The `Db2Table` it returns decodes rows on demand: `ReadSectionAsync`, `ReadAllAsync` and `FindAsync`, which answers `Found`, `Protected`, `Absent` or `NotInReadableSections`. Broken copy chains are counted at open (`UnresolvedCopies`) and throw when read. `Db2Reader.ReadAsync` keeps the legacy single-pass output. It also reads [WDC3 and WDC4](#wdc3-and-wdc4-layer-5-reader-only).
 
@@ -90,7 +90,7 @@ Compute all tail offsets once per section. Relationship bytes must not move fixe
 | 4 | Pallet array | Index into a 32-bit pallet of `arrayLength` values | Cardinality = array length |
 | 5 | Bitpacked signed | Signed, width 1–64 | Same offset rule |
 
-Pallet blocks are laid out kind 3 first, then kind 4, in field order; common data follows. Every block must be consumed exactly. Arrays are allowed only for None and Pallet array. Strings must be scalar None fields.
+Pallet blocks are laid out kind 3 first, then kind 4, in field order; common data follows. Every block must be consumed exactly. Arrays are allowed only for None and Pallet array. Strings must be None fields; a string array is admitted only in a fixed table with 32-bit elements, by the layer 5 reader ([D295](../DECISIONS.md)).
 
 ## Numbers
 
@@ -103,7 +103,7 @@ Pallet blocks are laid out kind 3 first, then kind 4, in field order; common dat
 - Fitting values must not merge either ([D117](../DECISIONS.md)). A signed column whose values all fit is checked the same way, since a zero-extended `0x0000FFFF` and its sign extension `0xFFFFFFFF` both read -1 as int16. Such a column keeps its physical 32-bit values as `raw-physical-integer-v1` evidence with no reference, and an ItemEffect rule keeps its raw evidence. An unsigned column whose values all fit has no upper bits, so it can't collide. Inline storage isn't checked: its width is the record's own, and finding a collision there would mean reading every row.
 - Examples: None8 `0xff` read as DBD signed32 is 255; as DBD signed8 it is −1. None32 `0x100` into unsigned8 fails. Kind 5 2-bit −1 into DBD unsigned8 is 255. Pallet `0x780107` into verified unsigned8 is 7; pallet `0x2ff` into verified signed8 is −1; pallet `0xffffffff` into signed8 is −1 with no marker, since it fits as a sign extension. Pallet `0x780107` and `0x790105` together into unsigned8 fail (patterns `0x780100`, `0x790100`).
 - Floats need exactly 32 physical bits and must be finite.
-- Fixed-record strings are 32-bit relative offsets into the concatenated string tables. 0 is the empty string. A string in a keyed section is `DB2_ENCRYPTED`. Strings are strict UTF-8, bounded at 65,536 bytes.
+- Fixed-record strings are 32-bit relative offsets into the concatenated string tables, relative to the offset's own position in the record. 0 is the empty string. In a string array each element's offset is relative to that element, so element i resolves at `(globalRow - declaredRecords) × recordSize + fieldOffset + 4i + raw` ([D295](../DECISIONS.md)); pallet, common and Sparse string arrays and other element widths are `DB2_UNSUPPORTED`. The legacy reader refuses every string array. A string in a keyed section is `DB2_ENCRYPTED`. Strings are strict UTF-8, bounded at 65,536 bytes.
 
 ### Raw integer evidence
 
@@ -162,23 +162,23 @@ Supported Sparse profile: flags 5 or 7, external IDs, no separate string table, 
 
 ### Invalid text
 
-Default is strict. Sparse callers can opt in with `AllowRawTextEvidence`: an invalid string becomes an empty placeholder paired with a `Db2TextIssue` (`DB2_TEXT_ENCODING_INVALID`, flattened column index, lowercase hex of the exact pre-NUL bytes). The placeholder must never be shown or searched as real empty text. Aggregate evidence is capped at 16 MiB. Known case: Retail 12.1.5.70448 ItemSparse, physical ordinal 173535, `Description_lang`, 121 bytes with one invalid byte; every other name and description in the clear scope is valid.
+Default is strict. Sparse callers can opt in with `AllowRawTextEvidence`: an invalid string becomes an empty placeholder paired with a `Db2TextIssue` (`DB2_TEXT_ENCODING_INVALID`, flattened column index, lowercase hex of the exact pre-NUL bytes). The placeholder must never be shown or searched as real empty text. An absent external parent uses the same mechanism with `DB2_RELATION_ABSENT` (below). Aggregate evidence is capped at 16 MiB. Known case: Retail 12.1.5.70448 ItemSparse, physical ordinal 173535, `Description_lang`, 121 bytes with one invalid byte; every other name and description in the clear scope is valid.
 
 ## Relationships
 
-A section's relationship block is `12 + 8 × n` bytes: u32 count, u32 min, u32 max, then n pairs of (u32 parent value, u32 key). Count and size must agree exactly.
+A section's relationship block is `12 + 8 × n` bytes: u32 count, u32 min, u32 max, then n pairs of (u32 parent value, u32 key). Count and size must agree exactly, and n is at most the section's rows plus its copies, else malformed ([D292](../DECISIONS.md)).
 
 - **Key meaning:** without `0x2`, the key is the zero-based physical ordinal **inside this section**. With `0x2` (flags 6/7), it is a physical record ID in this section. Never a global ordinal, sorted position or copy target.
 - min and max are kept as raw evidence. They are not bounds or completeness proof.
-- Duplicate keys are rejected, even with equal parents. Parent 0 is real data; a missing pair is not 0.
+- A key may repeat once for each readable copy in its section whose terminal row is that key's row (a copy of a copy counts; a protected or broken copy doesn't). Blizzard writes these extra pairs, keyed by the copy's terminal row (its source row for a direct copy) ([D292](../DECISIONS.md)). More repeats are malformed, and every pair for one key must carry the same parent, else `SCHEMA_MISMATCH`. The extra pairs add nothing: a copy still takes its terminal row's value. Parent 0 is real data; a missing pair is not 0.
 - At most one relation field: a scalar non-ID integer with DBD width 8, 16 or 32.
-- `$relation$` alone is a normal physical field. The block is an optional accelerator; any pair present must agree with the decoded field. A present accelerator on an **unverified** inline relation is unsupported.
-- `$noninline,relation$` takes its value only from the block and consumes no record bits. It needs lookup count 1 and exactly one pair per readable physical row; missing coverage is unsupported, never a default.
+- `$relation$` alone is a normal physical field. The block is an optional accelerator; any pair present must agree with the decoded field. For a verified name the pair's parent, read at the DBD width, must equal the emitted text. For an **unverified** name ([D290](../DECISIONS.md)) the emitted value is unchanged and the pair's u32 parent is compared with that emitted integer as a u32, never by text. A column with raw evidence emits its physical value: kind 5 gives `(uint)Signed(raw, width)`, kinds 0/1 the raw value (above u32 is a mismatch), kinds 2/3/4 the stored u32. Any other column emits the value at the DBD width and sign (kind 5 sign-extended first), so stored `0xFF` under `<8>` emits -1 and needs parent `0xFFFFFFFF`. Relation columns never narrow to low bits, and an unverified pallet/common column narrower than 32 bits is always raw, so kinds 2/3/4 always compare the stored u32. A disagreement is `SCHEMA_MISMATCH` when that row is read. Copies are not checked.
+- `$noninline,relation$` takes its value only from the block and consumes no record bits. It needs lookup count 1 and at most one pair per readable physical row, plus the copy pairs above; an over-repeated or out-of-range key is malformed. A row with no pair, and every row of a readable section with no block, has no parent ([D291](../DECISIONS.md)): the cell is `""` with a `Db2TextIssue` (`DB2_RELATION_ABSENT`, the column index, empty hex), never a default. A copy inherits its terminal row's state. The issue counts in `TextIssueCount` and is emitted whatever `AllowRawTextEvidence` says; follow, references and filters treat the cell as no value. With an **unverified** name ([D290](../DECISIONS.md)) the value is the pair's u32 parent in decimal. Before Header every readable parent is checked against the DBD width and sign (signed N: at most 2^(N-1)-1; unsigned N: at most 2^N-1). All fit: no interpretation, the same text the DBD would give. Any one outside: the whole column gets `raw-physical-integer-v1` (32 physical bits, unsigned, the DBD width and sign as the candidate) with the unverified warning, and no reference is followed from it. It never refuses the table.
 - Copies inherit the external parent of their terminal physical row.
 - A noninline relation before an inline ID is unsupported.
 - Positive relationship bytes with lookup count 0 are malformed. A lookup column with no relation field selected is unsupported.
 - Empty-table writer form: 0 records, 0 sections, storage info size 0, no pallet/common, only field structures, ending exactly there. It produces columns and no rows, with lookup count 0 or 1.
-- Limits: 16 MiB of relationship bytes and 1 M entries across all sections, also charged to the 128 MiB index budget before allocation.
+- Limits: 16 MiB of relationship bytes and 1 M entries across all sections (2 M in the layer 5 reader, [D293](../DECISIONS.md)), also charged to the 128 MiB index budget (256 MiB in the layer 5 reader) before allocation.
 
 ## Keyed (encrypted) sections
 
@@ -196,19 +196,21 @@ Observed, not a format law: in Classic beta and Retail Item files, all global me
 
 ## Limits
 
+The legacy reader's defaults; the layer 5 reader raises three of them ([D293](../DECISIONS.md)), so Retail SoundKitEntry (1,312,714 records, 1,112 copies, 1,313,826 relationship pairs, about 157 MiB of index work) opens.
+
 | Limit | Default |
 | --- | --- |
 | Decoded source | 256 MiB |
-| Physical + copy rows | 1 M |
+| Physical + copy rows | 1 M (layer 5: 2 M) |
 | Fields / flattened columns | 256 / 512 |
 | Sections | 128 |
 | Record (or Sparse map span) | 65,536 bytes |
 | Pallet + common data | 32 MiB |
 | String | 65,536 bytes |
-| ID/copy/auxiliary/relationship index budget | 128 MiB |
+| ID/copy/auxiliary/relationship index budget | 128 MiB (layer 5: 256 MiB) |
 | Copy chain depth | 64 |
 | Raw text evidence | 16 MiB |
-| Relationship bytes / entries | 16 MiB / 1 M |
+| Relationship bytes / entries | 16 MiB / 1 M (layer 5: 2 M) |
 
 ## DBD definitions
 

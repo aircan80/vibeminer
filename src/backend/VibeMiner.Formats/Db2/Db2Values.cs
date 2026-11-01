@@ -66,15 +66,15 @@ public static partial class Db2Reader
         }
         return field.Unsigned==true?raw.ToString(CultureInfo.InvariantCulture):Signed(raw,width).ToString(CultureInfo.InvariantCulture);
     }
-    private static async Task<IReadOnlyList<string>> DecodeValues(Db2Bytes input,Location location,uint id,IReadOnlyList<BoundField> fields,
+    private static async Task<(IReadOnlyList<string> Values,IReadOnlyList<Db2TextIssue>? Issues)> DecodeValues(Db2Bytes input,Location location,uint id,IReadOnlyList<BoundField> fields,
         Storage[] storage,IReadOnlyList<Section> sections,int recordSize,int declaredRecords,Db2Limits limits,CancellationToken token,RelationshipData?[] relationships,bool validateRelation)
     {
-        var record=await input.ReadAt(location.Offset,recordSize,token);var values=new List<string>();
+        var record=await input.ReadAt(location.Offset,recordSize,token);var values=new List<string>();List<Db2TextIssue>? issues=null;
         foreach(var binding in fields)
         {
             token.ThrowIfCancellationRequested();var field=binding.Field;
             if(binding.Source==FieldSource.RecordId){values.Add(id.ToString(CultureInfo.InvariantCulture));continue;}
-            if(binding.Source==FieldSource.Relationship){values.Add(ExternalRelationship(relationships,location.Section,location.LocalIndex,field));continue;}
+            if(binding.Source==FieldSource.Relationship){AddExternalRelationship(values,ref issues,relationships,location.Section,location.LocalIndex,field);continue;}
             var column=storage[binding.StorageIndex];
             for(var i=0;i<field.ArrayLength;i++)
             {
@@ -83,18 +83,19 @@ public static partial class Db2Reader
                 {
                     if(NoneWidth(column)!=32)throw Fail("UNSUPPORTED","A relative string requires a32-bit displacement.");
                     if(raw==0){values.Add("");continue;}
-                    var global=checked((location.GlobalIndex-(long)declaredRecords)*recordSize+column.FieldOffset+unchecked((int)(uint)raw));
+                    // Each offset is relative to its own element's position in the record (D295); element 0 is the scalar case.
+                    var global=checked((location.GlobalIndex-(long)declaredRecords)*recordSize+column.FieldOffset+4L*i+unchecked((int)(uint)raw));
                     values.Add(await StringAt(input,sections,global,limits.MaxStringBytes,recordSize,token));
                 }
                 else
                 {
                     var value=field.IsId?id.ToString(CultureInfo.InvariantCulture):Number(raw,column,field);
-                    if(validateRelation&&field.RelationStorage)CheckInlineRelationship(relationships,location.Section,location.LocalIndex,field,value);
+                    if(validateRelation&&field.RelationStorage)CheckInlineRelationship(relationships,location.Section,location.LocalIndex,field,column,raw,value);
                     values.Add(value);
                 }
             }
         }
-        return values.AsReadOnly();
+        return (values.AsReadOnly(),issues?.AsReadOnly());
     }
     private static async Task<string> StringAt(Db2Bytes input,IReadOnlyList<Section> sections,long offset,int maximum,int recordSize,CancellationToken token)
     {

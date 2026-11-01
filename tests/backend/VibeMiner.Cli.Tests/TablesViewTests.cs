@@ -445,6 +445,28 @@ public sealed class TablesViewTests : IAsyncDisposable
         Assert.Equal(leases, closed);
     }
 
+    // D291: an absent external parent is "" with DB2_RELATION_ABSENT; the grids and the row view show it as (no parent), and 0 stays 0.
+    [Fact]
+    public async Task AnAbsentParentShowsAsNoParentInThePageFollowAndRowViews()
+    {
+        Wire();
+        var schema = TableSchema.FromBlock(new DbdBlock(["00000000"], [],
+            [Field("ID", "int", 32, false, isId: true), Field("ParentID", "int", 32, true, reference: new("Tree", "ID"))], null), SchemaMatch.Build, WowLocale.EnUS);
+        var absent = new Db2TextIssue(1, Db2Reader.RelationAbsent, "");
+        var tree = new FakeTable(700, "Tree", TableState.Ready, [new("ID", "integer", true), new("ParentID", "integer", false)],
+            [new(1, false, null, ["1", ""], [absent]), new(2, false, null, ["2", "1"]), new(3, false, null, ["3", "0"])], schema);
+        fake.Add(Other, "enUS", [tree]);
+        var entry = new TableEntry(700, "Tree", TableState.Ready, true, null, null, null);
+        var page = await new TableRowsView(Other, "enUS", entry).LoadAsync(session, default);
+        Assert.Equal([["1", TablesAccess.NoParent], ["2", "1"], ["3", "0"]], page.Rows.Skip(1).Select(r => r.Cells.ToArray()));
+        var follow = await new TableFollowView(Other, "enUS", entry, 2, "ParentID", new("Tree", "ID")).LoadAsync(session, default);
+        Assert.Equal([["1", TablesAccess.NoParent]], follow.Rows.Select(r => r.Cells.ToArray()));
+        var row = await new TableRowView(Other, "enUS", entry, 1).LoadAsync(session, default);
+        Assert.Contains(row.Rows, r => r.Cells.SequenceEqual(["ParentID", TablesAccess.NoParent, "Tree.ID; Enter follows"]));
+        Assert.Contains(row.Rows, r => r.Cells.SequenceEqual(["(text issue)", "ParentID: DB2_RELATION_ABSENT", "no parent (not 0)"]));
+        Assert.Equal(leases, closed);
+    }
+
     [Fact]
     public async Task APartialTableSaysSoAndItsMissingRowsAreUnknownNotAbsent()
     {

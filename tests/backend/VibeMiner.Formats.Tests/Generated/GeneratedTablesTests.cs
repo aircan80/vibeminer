@@ -128,7 +128,7 @@ public sealed class GeneratedTablesTests
             Assert.Equal("def-sha256+01020304", identity.GetProperty("DefinitionVersion").GetString());
             Assert.Equal(Source().ReaderOptions, identity.GetProperty("ReaderOptions").GetString());
             Assert.Matches("^[0-9a-f]{64}$", identity.GetProperty("ReaderOptions").GetString());
-            Assert.Equal("db2-values-v1", identity.GetProperty("Reader").GetString());
+            Assert.Equal("db2-values-v2", identity.GetProperty("Reader").GetString());
             Assert.Equal("rows-v1", identity.GetProperty("Rows").GetString());
             Assert.DoesNotContain("eu", identity.GetRawText());
         }

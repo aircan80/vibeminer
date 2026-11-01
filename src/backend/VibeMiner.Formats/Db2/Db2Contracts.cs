@@ -1,9 +1,9 @@
 namespace VibeMiner.Formats;
 
-public sealed record Db2Limits(long MaxDecodedBytes=256L<<20,long MaxRows=1_000_000,int MaxFields=256,
+public sealed record Db2Limits(long MaxDecodedBytes=256L<<20,long MaxRows=2_000_000,int MaxFields=256,
     int MaxSections=128,int MaxRecordBytes=65536,int MaxAuxiliaryBytes=32<<20,int MaxStringBytes=65536,
-    long MaxIndexBytes=128L<<20,int MaxColumns=512,int MaxCopyDepth=64,bool AllowPartialEncryptedSections=false,
-    bool AllowRawTextEvidence=false,long MaxRawTextEvidenceBytes=16L<<20,long MaxRelationshipBytes=16L<<20,int MaxRelationshipEntries=1_000_000,string? DefinitionSha256=null,IReadOnlyList<Db2RawIntegerRule>? VerifiedRawIntegerRules=null);
+    long MaxIndexBytes=256L<<20,int MaxColumns=512,int MaxCopyDepth=64,bool AllowPartialEncryptedSections=false,
+    bool AllowRawTextEvidence=false,long MaxRawTextEvidenceBytes=16L<<20,long MaxRelationshipBytes=16L<<20,int MaxRelationshipEntries=2_000_000,string? DefinitionSha256=null,IReadOnlyList<Db2RawIntegerRule>? VerifiedRawIntegerRules=null);
 /// <summary>Trusted adapter scope for one exact provider column. The caller verifies the original definition bytes.
 /// <see cref="NarrowsWhenConstant"/> (D108): when the column's values that don't fit the definition width all share one upper-bit
 /// pattern, it narrows like any D087 column instead; with two or more it keeps the raw evidence and is never refused.</summary>

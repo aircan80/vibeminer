@@ -17,7 +17,11 @@ public static partial class Db2Reader
                 ?"Candidate integer width is narrower than the physical value width. Explicit raw evidence preserves this entire column without narrowing; semantic references and calculations are not admitted."
                 :storage.RawBecauseLowBitsCollide
                 ?"Candidate integer width is narrower than the physical value width. Keeping only the low bits would give different stored values the same number, so this entire column keeps its physical integers; semantic references and calculations are not admitted."
-                :"Unverified provider field: values preserve the physical integer without narrowing to the candidate schema. Names, relationships and semantic meaning are unverified.");
+                :UnverifiedRawWarning);
+    private const string UnverifiedRawWarning="Unverified provider field: values preserve the physical integer without narrowing to the candidate schema. Names, relationships and semantic meaning are unverified.";
+    // D290: an unverified external relation whose stored u32 parents don't all fit the DBD width keeps them as unsigned 32-bit.
+    private static Db2ValueInterpretation RawExternalRelationInterpretation(DbdField field)=>
+        new("raw-physical-integer-v1",32,false,field.IntegerBits??32,field.Unsigned==true,UnverifiedRawWarning);
 
     // D079: pallet and common values are always stored as 32 bits. When a verified integer field is narrower and some stored
     // value doesn't fit it (not even as a sign extension), the whole column keeps the low bits at the definition's width.

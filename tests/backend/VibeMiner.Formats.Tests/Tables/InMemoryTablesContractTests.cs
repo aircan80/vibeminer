@@ -147,6 +147,29 @@ public sealed class InMemoryTablesContractTests : TablesContract
         Assert.Equal((TableReferenceScope.NotChecked, TableQueries.RelationValueCode), (code.Scope, code.Code));
     }
 
+    // D291: an absent external parent is "" with DB2_RELATION_ABSENT. It is no value: follow says no parent, it never
+    // matches parent 0 in referenced-by or a filter.
+    [Fact]
+    public async Task AnAbsentParentIsNoValueAndNeverZero()
+    {
+        var absent = new Db2TextIssue(1, Db2Reader.RelationAbsent, "");
+        var source = new FakeTable(2, "Source", TableState.Ready, RefColumns,
+            [new Db2Row(1, false, null, ["1", ""], [absent]), new Db2Row(2, false, null, ["2", "0"]), new Db2Row(3, true, 1, ["3", ""], [absent])],
+            Schema(Field("ID", true), Field("TargetID", reference: new("Target", "ID"))));
+        var target = new FakeTable(1, "Target", TableState.Ready, RefColumns, [new Db2Row(0, false, null, ["0", "0"])], Schema(Field("ID", true), Field("TargetID")));
+        await using var tables = await OpenAsync(new InMemoryTables().Add(Build, "enUS", [target, source]));
+        foreach (var id in new uint[] { 1, 3 })
+        {
+            var result = await tables.FollowAsync(new(2, id, "TargetID"), TablePriority.Interactive, Ct);
+            Assert.Equal((TableFollowOutcome.Unknown, TableQueries.RelationValueCode, "Column TargetID has no parent for this row."), (result.Outcome, result.Code, result.Message));
+        }
+        Assert.Equal(TableFollowOutcome.Found, (await tables.FollowAsync(new(2, 2, "TargetID"), TablePriority.Interactive, Ct)).Outcome);
+        var references = await tables.ReferencedByAsync(new(1, 0), TablePriority.Interactive, Ct);
+        Assert.Equal([2u], references.Sources.Single(s => s.Table.FileDataId == 2).RowIds);
+        var zero = TableQueries.CompileFilters(RefColumns, null, [new("TargetID", TableFilterOp.Equals, "0")]).Matches!;
+        Assert.Equal([false, true, false], source.Rows!.Select(zero));
+    }
+
     [Fact]
     public async Task OnlyTablesThatCantDeclareOrHoldRowsAreLeftOut()
     {

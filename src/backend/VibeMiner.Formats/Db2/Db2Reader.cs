@@ -14,7 +14,7 @@ namespace VibeMiner.Formats;
 // Duplicate geometry checks define a conservative supported subset, not a universal wire rule.
 public static partial class Db2Reader
 {
-    public const string Revision="db2-values-v1";
+    public const string Revision="db2-values-v2";
     internal sealed record Section(ulong Key,long Offset,int Count,int Strings,long RecordsEnd,int IdBytes,int Relations,int MapCount,int Copies,long End);
     internal sealed record Storage(int Offset,int Width,int Additional,uint Kind,uint P1,uint P2,uint P3,short FieldBits,ushort FieldOffset)
     {
@@ -247,9 +247,8 @@ public static partial class Db2Reader
         var index=sparse
             ?await IndexSparse(decoded,sections,limits,encryptedIds,recordSize,flags,token)
             :await IndexFixed(decoded,sections,fields,storage,encryptedIds,recordSize,flags,token);
-        var relationships=await ReadRelationships(decoded,sections,sparse,flags,recordSize,fields,
-            (key,section)=>index.RowIndex.TryGetValue(key,out var row)&&index.Rows[row].Section==section?index.Rows[row].LocalIndex:-1,token);
         // Copy chains resolve here, in memory; a broken chain still fails only when that copy is read, as it always did.
+        // They resolve before the relationship blocks, which admit one extra pair per readable copy of a row (D292).
         var resolutions=new CopyResolution[index.Copies.Length];long copyRows=0;
         var protectedCopies=new int[sections.Count];var unresolvedCopies=new int[sections.Count];
         for(var i=0;i<resolutions.Length;i++)
@@ -259,6 +258,9 @@ public static partial class Db2Reader
             else if(resolution.Row>=0)copyRows++;
             else{excludedCopies++;protectedCopies[index.Copies[i].Section]++;}
         }
+        var relationships=await ReadRelationships(decoded,sections,sparse,flags,recordSize,fields,index,resolutions,
+            (key,section)=>index.RowIndex.TryGetValue(key,out var row)&&index.Rows[row].Section==section?index.Rows[row].LocalIndex:-1,token);
+        if(ExternalRelationNeedsRaw(fields,relationships,token))columns=Columns(fields,storage,limits,rawExternalRelation:true);
         var state=new TableState(decoded,sparse,sparseAlignment,sections.AsReadOnly(),fields,storage,recordSize,records,limits,relationships,
             index.Rows,index.RowIndex,index.RowStart,index.Copies,resolutions,index.CopyIndex,index.CopyStart,encryptedIds,excludedSections>0);
         var sectionInfo=sections.Select((section,i)=>new Db2Section(i,section.Count,section.Copies,section.Key.ToString("X16",CultureInfo.InvariantCulture),section.Key!=0,
@@ -406,7 +408,6 @@ public static partial class Db2Reader
                 throw Fail("UNSUPPORTED","The selected definition and physical ID storage disagree.");
             if(field.NonInline)
             {
-                if(field.RelationStorage&&!field.Column.VerifiedName)throw Fail("UNSUPPORTED","Unverified external relationship interpretation has no admitted numeric policy.");
                 result.Add(new(field,-1,field.IsId?FieldSource.RecordId:FieldSource.Relationship));continue;
             }
             if(emptyPhysicalCount is not null){result.Add(new(field,-1));physical++;continue;}
@@ -423,20 +424,25 @@ public static partial class Db2Reader
             if(column.Kind==4&&column.P3!=field.ArrayLength||column.Kind==3&&column.P3!=0&&column.P3!=1)
                 throw Fail("SCHEMA_MISMATCH","Pallet cardinality differs from the selected array definition.");
             if(field.Column.Family is "string" or "locstring")
-            {if(column.Kind!=0||field.ArrayLength>1)throw Fail("UNSUPPORTED","Only scalar uncompressed relative strings are admitted.");}
+            {
+                // D295: a fixed-table string array is admitted only as uncompressed 32-bit offsets, one per element.
+                if(column.Kind!=0||field.ArrayLength>1&&((flags&1)!=0||NoneWidth(column)!=32))
+                    throw Fail("UNSUPPORTED","Only scalar uncompressed relative strings are admitted.");
+            }
             if(field.IsId&&column.Kind==2)throw Fail("UNSUPPORTED","An inline ID cannot depend on ID-keyed common storage.");
             result.Add(new(field,physical++));
         }
         if(physical!=(emptyPhysicalCount??storage.Length))throw Fail("SCHEMA_MISMATCH","The selected definition does not cover every actual physical field.");
         return result;
     }
-    private static IReadOnlyList<Db2Column> Columns(IReadOnlyList<BoundField> fields,Storage[] storage,Db2Limits limits)
+    private static IReadOnlyList<Db2Column> Columns(IReadOnlyList<BoundField> fields,Storage[] storage,Db2Limits limits,bool rawExternalRelation=false)
     {
         var columns=new List<Db2Column>();
         foreach(var binding in fields)
         {
             var field=binding.Field;var kind=field.Column.Family switch{"int"=>"integer","float"=>"float","string" or "locstring"=>"string",_=>throw Fail("UNSUPPORTED","Unknown scalar definition family.")};
-            var interpretation=binding.StorageIndex<0?null:RawInterpretation(storage[binding.StorageIndex],field);
+            var interpretation=binding.StorageIndex>=0?RawInterpretation(storage[binding.StorageIndex],field)
+                :rawExternalRelation&&binding.Source==FieldSource.Relationship?RawExternalRelationInterpretation(field):null;
             var narrowing=binding.StorageIndex<0?null:LowBitNarrowing(storage[binding.StorageIndex],field);
             for(var i=0;i<field.ArrayLength;i++)
             {if(columns.Count>=limits.MaxColumns)throw Fail("LIMIT","Flattened columns exceed policy.");columns.Add(new(field.ArrayLength==1?field.Column.Name:field.Column.Name+"["+i.ToString(CultureInfo.InvariantCulture)+"]",kind,field.IsId,interpretation,narrowing));}

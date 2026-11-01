@@ -97,6 +97,34 @@ public sealed class GeneratedRowsTests
         Assert.Null(await table.FindAsync(uint.MaxValue - 1));
     }
 
+    // D291: an absent external parent ("" with DB2_RELATION_ABSENT, empty hex) survives the codec and the store, on a
+    // physical row and on its copy, and parent 0 stays "0" with no issue.
+    [Fact]
+    public async Task Absent_relation_parents_round_trip_with_their_issue()
+    {
+        var absent = new Db2TextIssue(2, Db2Reader.RelationAbsent, "");
+        Db2Row[] rows =
+        [
+            new(900, false, null, ["900", "1000", "0", "2000"]),
+            new(901, false, null, ["901", "1001", "", "2001"], [absent]),
+            new(950, true, 901, ["950", "1001", "", "2001"], [absent]),
+        ];
+        var buffer = new ArrayBufferWriter<byte>();
+        foreach (var row in rows)
+        {
+            buffer.Clear(); RowCodec.Encode(row, buffer);
+            var decoded = RowCodec.Decode(row.Id, buffer.WrittenSpan);
+            SameRow(row, decoded); Assert.Equal(row.TextIssues, decoded.TextIssues);
+        }
+        var tables = new GeneratedTables(new InMemoryGeneratedStore());
+        var table = await tables.StoreAsync(Source(), TactKeyStatus.None, Content(rows));
+        var page = await table.ReadPageAsync(0, 10);
+        SameRows(rows, page);
+        Assert.Equal([null, [absent], [absent]], page.Select(r => r.TextIssues?.ToArray()));
+        Assert.Equal([absent], (await table.FindAsync(950))!.TextIssues!);
+        Assert.Null((await table.FindAsync(900))!.TextIssues);
+    }
+
     [Fact]
     public async Task Header_sections_completion_and_an_empty_table_read_back()
     {

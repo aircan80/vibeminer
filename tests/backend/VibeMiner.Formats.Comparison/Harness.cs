@@ -17,13 +17,17 @@ internal sealed record Lim(bool Partial=false,bool RawText=false,long MaxRawText
     public L.Wdc5Limits Legacy(string sha)=>new(AllowPartialEncryptedSections:Partial,AllowRawTextEvidence:RawText,MaxRawTextEvidenceBytes:MaxRawText,
         MaxCopyDepth:MaxCopyDepth,DefinitionSha256:Sha?sha:null,
         VerifiedRawIntegerRules:Rules?.Select(r=>new L.Wdc5RawIntegerRule(sha,"11223344","01020304",r.FieldOrdinal,r.FieldName,r.StorageKind,r.PhysicalBits,r.CandidateBits,r.CandidateUnsigned,r.NarrowsWhenConstant)).ToArray());
-    public N.Db2Limits New(string sha)=>new(AllowPartialEncryptedSections:Partial,AllowRawTextEvidence:RawText,MaxRawTextEvidenceBytes:MaxRawText,
+    // D293 raised the new reader's row, relationship-entry and index defaults; both readers run with the legacy values.
+    private static readonly L.Wdc5Limits LegacyDefaults=new();
+    public N.Db2Limits New(string sha)=>new(MaxRows:LegacyDefaults.MaxRows,MaxIndexBytes:LegacyDefaults.MaxIndexBytes,MaxRelationshipEntries:LegacyDefaults.MaxRelationshipEntries,
+        AllowPartialEncryptedSections:Partial,AllowRawTextEvidence:RawText,MaxRawTextEvidenceBytes:MaxRawText,
         MaxCopyDepth:MaxCopyDepth,DefinitionSha256:Sha?sha:null,
         VerifiedRawIntegerRules:Rules?.Select(r=>new N.Db2RawIntegerRule(sha,"11223344","01020304",r.FieldOrdinal,r.FieldName,r.StorageKind,r.PhysicalBits,r.CandidateBits,r.CandidateUnsigned,r.NarrowsWhenConstant)).ToArray());
 }
 
-/// <summary>A synthetic base fixture. <see cref="Expect"/> is the base outcome both readers must give: a completion scope or an error code.</summary>
-internal sealed record Fixture(string Name,byte[] Bytes,string Dbd,string Expect,Lim? Limits=null,(long Offset,long Length)[]? Holes=null,string Build="1.2.3.4")
+/// <summary>A synthetic base fixture. <see cref="Expect"/> is the base outcome both readers must give: a completion scope or an error code,
+/// or for a D295 string array the new reader gives. <see cref="StringArray"/> is the physical field ordinal of a fixed string array (D295).</summary>
+internal sealed record Fixture(string Name,byte[] Bytes,string Dbd,string Expect,Lim? Limits=null,(long Offset,long Length)[]? Holes=null,string Build="1.2.3.4",int? StringArray=null)
 {
     public override string ToString()=>Name;
 }

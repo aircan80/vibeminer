@@ -24,6 +24,12 @@ internal static class TablesAccess
 {
     public const string Locale = "enUS";
     public const string NotWired = "Tables aren't available in vm browse yet: layer 5 isn't wired into the CLI.";
+    /// <summary>What a grid shows for an absent external parent (D291) instead of its "" placeholder: no parent, never 0.</summary>
+    public const string NoParent = "(no parent)";
+
+    /// <summary>The row's cells as shown: an absent external parent reads <see cref="NoParent"/>, every other cell as is.</summary>
+    public static IReadOnlyList<string> Shown(Db2Row row) => row.TextIssues is not { Count: > 0 } issues ? row.Values
+        : [.. row.Values.Select((value, i) => issues.Any(t => t.ColumnIndex == i && t.Code == Db2Reader.RelationAbsent) ? NoParent : value)];
 
     /// <summary>
     /// Opens the build's tables through <see cref="BrowseSession.OpenTables"/>, runs <paramref name="load"/> on them and closes
@@ -216,7 +222,7 @@ internal sealed class TableRowsView(BuildRef build, string locale, TableEntry en
             foreach (var row in page.Rows)
             {
                 var id = row.Row.Id;
-                rows.Add(new(Pad(row.Row.Values, width), () => new TableRowView(build, locale, schema.Table, id)));
+                rows.Add(new(Pad(TablesAccess.Shown(row.Row), width), () => new TableRowView(build, locale, schema.Table, id)));
             }
             if (page.NextAfter is { } next)
                 rows.Add(new(Pad(["(more)", $"Enter shows rows {TablesAccess.Range(next, schema.Table.Counts?.ReadableRows)}"], width),
@@ -295,10 +301,11 @@ internal sealed class TableRowView(BuildRef build, string locale, TableEntry tab
                 new(["(ordinal)", found.Ordinal.ToString(CultureInfo.InvariantCulture), ""]),
                 new(["(copy)", row.IsCopy ? $"copy of {row.CopySourceId?.ToString(CultureInfo.InvariantCulture) ?? "?"}" : "no", ""]),
             };
+            var shown = TablesAccess.Shown(row);
             for (var i = 0; i < row.Values.Count; i++)
             {
                 var name = i < names.Count ? names[i] : $"#{i}";
-                var value = row.Values[i];
+                var value = shown[i];
                 if (TablesAccess.SchemaColumnOf(schema.Schema, name)?.ForeignKey is { } fk)
                 {
                     var column = name;
@@ -307,7 +314,8 @@ internal sealed class TableRowView(BuildRef build, string locale, TableEntry tab
                 else list.Add(new([name, value, ""]));
             }
             foreach (var issue in row.TextIssues ?? [])
-                list.Add(new(["(text issue)", $"{(issue.ColumnIndex < names.Count ? names[issue.ColumnIndex] : $"#{issue.ColumnIndex}")}: {issue.Code}", $"raw {issue.RawBytesHex}"]));
+                list.Add(new(["(text issue)", $"{(issue.ColumnIndex < names.Count ? names[issue.ColumnIndex] : $"#{issue.ColumnIndex}")}: {issue.Code}",
+                    issue.Code == Db2Reader.RelationAbsent ? "no parent (not 0)" : $"raw {issue.RawBytesHex}"]));
             list.Add(new(["(referenced by)", "rows of other tables that point here", "Enter searches"], () => new TableReferencedByView(build, locale, table, id)));
             var note = $"{TablesAccess.Title(got.Table)} row {id}." + (row.TextIssues is { Count: > 0 } issues ? $" {issues.Count} text issue(s)." : "")
                 + (schema.Schema is null ? " No definition resolves, so no references." : "");
@@ -363,7 +371,7 @@ internal sealed class TableFollowView(BuildRef build, string locale, TableEntry 
             foreach (var row in result.Rows)
             {
                 var targetId = row.Row.Id;
-                list.Add(new(Pad(row.Row.Values, width), targetEntry is null ? null : () => new TableRowView(build, locale, targetEntry, targetId)));
+                list.Add(new(Pad(TablesAccess.Shown(row.Row), width), targetEntry is null ? null : () => new TableRowView(build, locale, targetEntry, targetId)));
             }
             if (result.NextAfter is { } next)
                 list.Add(new(Pad(["(more)", "Enter shows the next matches"], width), () => new TableFollowView(build, locale, table, id, column, reference, next, targetEntry?.Counts?.ReadableRows)));

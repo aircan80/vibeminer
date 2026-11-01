@@ -105,7 +105,7 @@ public static partial class Db2Reader
         {
             token.ThrowIfCancellationRequested();var field=binding.Field;
             if(binding.Source==FieldSource.RecordId){values.Add(id.ToString(CultureInfo.InvariantCulture));continue;}
-            if(binding.Source==FieldSource.Relationship){values.Add(ExternalRelationship(relationships,location.Section,location.LocalIndex,field));continue;}
+            if(binding.Source==FieldSource.Relationship){AddExternalRelationship(values,ref issues,relationships,location.Section,location.LocalIndex,field);continue;}
             var column=storage[binding.StorageIndex];var width=NoneWidth(column);
             for(var element=0;element<field.ArrayLength;element++)
             {
@@ -135,7 +135,7 @@ public static partial class Db2Reader
                     var bytes=width/8;
                     if(bytes>record.Length-cursor)throw Fail("INVALID","A sparse trailing field exceeds its own variable record.");
                     var raw=Bits(record,cursor*8L,width);cursor+=bytes;var value=Number(raw,column,field);
-                    if(validateRelation&&field.RelationStorage)CheckInlineRelationship(relationships,location.Section,location.LocalIndex,field,value);values.Add(value);
+                    if(validateRelation&&field.RelationStorage)CheckInlineRelationship(relationships,location.Section,location.LocalIndex,field,column,raw,value);values.Add(value);
                 }
             }
         }

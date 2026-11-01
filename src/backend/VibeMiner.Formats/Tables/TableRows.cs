@@ -3,7 +3,8 @@ namespace VibeMiner.Formats.Tables;
 /// <summary>
 /// A row and its place. <see cref="Ordinal"/> is its 0-based position in the generated table's order (physical rows, then copies).
 /// Values are the reader's exact strings: exact decimal integers of any width and sign, floats round-trip ("R"), arrays flattened
-/// as <c>Name[i]</c>, and invalid text as "" with a <see cref="Db2TextIssue"/>.
+/// as <c>Name[i]</c>, and invalid text or an absent external parent (<see cref="Db2Reader.RelationAbsent"/>, never 0) as "" with a
+/// <see cref="Db2TextIssue"/>.
 /// </summary>
 public sealed record TableRow(long Ordinal, Db2Row Row);
 

@@ -20,6 +20,19 @@ public sealed class Db2SparseTests
         Assert.Equal("raw-physical-integer-v1",sink.Header.Columns[6].Interpretation!.Policy);
     }
 
+    // D295 admits fixed string arrays only. A Sparse string array, here two inline strings with every later field
+    // moved along, stays unsupported even though the cursor could walk it.
+    [Fact]
+    public async Task Sparse_string_arrays_stay_unsupported()
+    {
+        var fixture=Build([new([[.."a\0"u8.ToArray(),..Record("b"),0,0,0]],[7],[])]);var bytes=fixture.Bytes;var fields=204+40;
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(fields+5*4+2),64);
+        for(var i=1;i<5;i++){var position=BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(fields+i*4+2))+4;Half(bytes,fields+i*4+2,(ushort)position);Half(bytes,fields+5*4+i*24,(ushort)(position*8));}
+        var definition=DbdDefinitionReader.Parse(Encoding.UTF8.GetBytes("COLUMNS\nint ID\nstring Name\nint Quality\nfloat Ratio\nint Budget\nint Unknown?\n\nLAYOUT 01020304\nBUILD 1.2.3.4\n$noninline,id$ID<u32>\nName[2]\nQuality<u8>\nRatio\nBudget<16>[2]\nUnknown<u8>\n"));
+        var sink=new Sink();var error=await Assert.ThrowsAsync<Db2FormatException>(()=>Db2Reader.ReadAsync(new MemoryByteSource(bytes),definition,"1.2.3.4",new(),sink));
+        Assert.Equal("DB2_UNSUPPORTED",error.Code);Assert.Equal("Only scalar uncompressed relative strings are admitted.",error.Message);Assert.Null(sink.Header);
+    }
+
     [Fact]
     public async Task Clear_sections_cross_section_copy_chains_and_unsigned_zero_identity_remain_exact()
     {
