@@ -24,8 +24,8 @@ test('production project dependencies preserve pure engine boundaries and the or
     // Layer 5 formats: reads files through layer 4 (#177). ObjectAccess is for the table definitions only: fetched
     // definitions are layer 2 observations and history (D180). Generated is the layer 1 generated store for decoded tables (D210, #179).
     Formats: ['Files', 'ObjectAccess', 'Generated'],
-    // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects (layers 1-4 so far), never the legacy ones.
-    Cli: ['Objects', 'Cdn', 'ObjectAccess', 'Builds', 'Files'],
+    // Layer 7 developer CLI (#170, D150): its own composition root over the layer projects, never the legacy ones.
+    Cli: ['Objects', 'Cdn', 'ObjectAccess', 'Builds', 'Files', 'Formats'],
   };
   for (const [project, dependencies] of Object.entries(allowed)) {
     const source = await readFile(path.join(root, `src/backend/VibeMiner.${project}/VibeMiner.${project}.csproj`), 'utf8');
@@ -49,7 +49,7 @@ test('backend projects reference only their own code layer or lower ones', async
   };
   const layerProjects = new Set(['Objects', 'Cdn', 'Generated', 'ObjectAccess', 'Builds', 'Files', 'Formats', 'Cli']);
   const legacy = new Set(Object.keys(production).filter(name => !layerProjects.has(name)));
-  const fakes = { 'Cdn.Testing': 1, 'Generated.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Objects.CrashWriter': 1 };
+  const fakes = { 'Cdn.Testing': 1, 'Generated.Testing': 1, 'ObjectAccess.Testing': 2, 'Builds.Testing': 3, 'Files.Testing': 4, 'Formats.Testing': 5, 'Objects.CrashWriter': 1 };
   const layerTests = { 'Primitives.Tests': 1, 'ObjectAccess.Tests': 2, 'Builds.Tests': 3, 'Files.Tests': 4, 'Formats.Tests': 5, 'Cli.Tests': 7 };
   // Cross-layer integration projects drive real lower layers by design (D137), so they have no single layer.
   // Formats.Comparison cross-checks the layer 5 reader against the legacy Formats.Wow one until slice 9 deletes it (#177).

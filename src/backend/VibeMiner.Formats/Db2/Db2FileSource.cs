@@ -137,14 +137,17 @@ public sealed class Db2Open:IAsyncDisposable
 {
     private readonly Db2FileSource? source;
 
-    internal Db2Open(Db2OpenState state,Db2Table? table,Db2FileSource? source,string? code,string? message,DateTimeOffset? observedAt)
-    {State=state;Table=table;this.source=source;Code=code;Message=message;ObservedAt=observedAt;}
+    internal Db2Open(Db2OpenState state,Db2Table? table,Db2FileSource? source,string? code,string? message,DateTimeOffset? observedAt,
+        IReadOnlyList<Db2Hole>? holes=null)
+    {State=state;Table=table;this.source=source;Code=code;Message=message;ObservedAt=observedAt;Holes=holes??[];}
 
     public Db2OpenState State{get;}
     public Db2Table? Table{get;}
     public string? Code{get;}
     public string? Message{get;}
     public DateTimeOffset? ObservedAt{get;}
+    /// <summary>The file's holes, as layer 4 listed them, whenever its stream opened (also when the open then failed); else empty.</summary>
+    public IReadOnlyList<Db2Hole> Holes{get;}
 
     public ValueTask DisposeAsync()=>source?.DisposeAsync()??ValueTask.CompletedTask;
 }
@@ -168,17 +171,17 @@ public static partial class Db2Reader
             {
                 await source.DisposeAsync().ConfigureAwait(false);
                 return new(Db2OpenState.Protected,null,null,"DB2_SOURCE_PROTECTED",
-                    "Every byte of the file needs TACT key "+string.Join(", ",source.Holes.Select(hole=>hole.Name).Distinct())+".",null);
+                    "Every byte of the file needs TACT key "+string.Join(", ",source.Holes.Select(hole=>hole.Name).Distinct())+".",null,source.Holes);
             }
             var table=await OpenCoreAsync(source,definition,buildVersion,limits,token).ConfigureAwait(false);
-            return new(Db2OpenState.Open,table,source,null,null,null);
+            return new(Db2OpenState.Open,table,source,null,null,null,source.Holes);
         }
         catch(Exception failure) when(failure is Db2FormatException or Db2SourceException)
         {
             await source.DisposeAsync().ConfigureAwait(false);
             return failure is Db2SourceException read
-                ?new(read.State,null,null,read.Code,read.Message,read.ObservedAt)
-                :new(Db2OpenState.Rejected,null,null,((Db2FormatException)failure).Code,failure.Message,null);
+                ?new(read.State,null,null,read.Code,read.Message,read.ObservedAt,source.Holes)
+                :new(Db2OpenState.Rejected,null,null,((Db2FormatException)failure).Code,failure.Message,null,source.Holes);
         }
         catch{await source.DisposeAsync().ConfigureAwait(false);throw;}
     }

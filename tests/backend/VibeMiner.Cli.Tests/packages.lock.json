@@ -326,6 +326,11 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "ZstdSharp.Port": {
+        "type": "Transitive",
+        "resolved": "0.8.6",
+        "contentHash": "iP4jVLQoQmUjMU88g1WObiNr6YKZGvh4aOXn3yOJsHqZsflwRsxZPcIBvNXgjXO3vQKSLctXGLTpcBPLnWPS8A=="
+      },
       "vibeminer.builds": {
         "type": "Project",
         "dependencies": {
@@ -355,6 +360,27 @@
           "VibeMiner.Files": "[1.0.0, )"
         }
       },
+      "vibeminer.formats": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Files": "[1.0.0, )",
+          "VibeMiner.Generated": "[1.0.0, )",
+          "VibeMiner.ObjectAccess": "[1.0.0, )"
+        }
+      },
+      "vibeminer.formats.testing": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Formats": "[1.0.0, )"
+        }
+      },
+      "vibeminer.generated": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Objects": "[1.0.0, )",
+          "ZstdSharp.Port": "[0.8.6, )"
+        }
+      },
       "vibeminer.objectaccess": {
         "type": "Project",
         "dependencies": {
@@ -382,6 +408,7 @@
           "VibeMiner.Builds": "[1.0.0, )",
           "VibeMiner.Cdn": "[1.0.0, )",
           "VibeMiner.Files": "[1.0.0, )",
+          "VibeMiner.Formats": "[1.0.0, )",
           "VibeMiner.ObjectAccess": "[1.0.0, )",
           "VibeMiner.Objects": "[1.0.0, )"
         }

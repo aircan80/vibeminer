@@ -55,6 +55,23 @@ public sealed class Db2Table
         return state.Partial?new Db2Lookup.NotInReadableSections():new Db2Lookup.Absent();
     }
 
+    /// <summary>Every ID <see cref="FindAsync"/> answers Protected for, with its keyed section's key: the encrypted-ID lists and
+    /// the readable copies whose chain ends at one. Null when there are more than <paramref name="max"/>.</summary>
+    internal IReadOnlyDictionary<uint,string>? ProtectedIds(int max)
+    {
+        if(state.EncryptedIds.Count>max)return null;
+        var ids=new Dictionary<uint,string>(state.EncryptedIds.Count);
+        foreach(var (id,section) in state.EncryptedIds)ids[id]=Sections[section].Key;
+        foreach(var (target,copy) in state.CopyIndex)
+        {
+            var resolution=state.Resolutions[copy];
+            if(!resolution.IsProtected)continue;
+            if(ids.Count>=max)return null;
+            ids[target]=Sections[state.EncryptedIds[resolution.ProtectedId]].Key;
+        }
+        return ids;
+    }
+
     private Db2Lookup.Protected Protected(uint protectedId)
     {var section=state.EncryptedIds[protectedId];return new(section,Sections[section].Key,protectedId);}
 

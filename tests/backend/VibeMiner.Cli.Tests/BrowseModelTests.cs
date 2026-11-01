@@ -93,7 +93,7 @@ public sealed class BrowseModelTests : IAsyncDisposable
     public void TheRegistryFindsExactNamesAndUniquePrefixes()
     {
         var registry = ViewRegistry.Default();
-        Assert.Equal(["store", "history", "builds", "settings", "files"], registry.Entries.Select(e => e.Name));
+        Assert.Equal(["store", "history", "builds", "settings", "files", "tables"], registry.Entries.Select(e => e.Name));
         // :s is store or settings, so it names neither; :st and :se do.
         Assert.Null(registry.Find(":s"));
         Assert.Equal("settings", registry.Find(":se")?.Name);
@@ -116,7 +116,7 @@ public sealed class BrowseModelTests : IAsyncDisposable
         await GoAsync(":st");
         Assert.IsType<StoreView>(navigator.Current.View);
         Assert.False(navigator.Go(":nope"));
-        Assert.Equal("No view :nope. Views: store, history, builds, settings, files.", navigator.Message);
+        Assert.Equal("No view :nope. Views: store, history, builds, settings, files, tables.", navigator.Message);
         Assert.IsType<StoreView>(navigator.Current.View);
         Assert.Single(navigator.Frames);
 

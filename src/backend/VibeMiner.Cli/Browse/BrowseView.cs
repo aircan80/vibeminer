@@ -112,11 +112,12 @@ internal sealed class ViewRegistry
         return entries.Where(e => e.Name.StartsWith(name, StringComparison.Ordinal)).ToList();
     }
 
-    /// <summary>The views <c>vm browse</c> has today; files and tables come with their layers.</summary>
+    /// <summary>The views <c>vm browse</c> has today.</summary>
     public static ViewRegistry Default() => new ViewRegistry()
         .Add(new("store", "the object store: packs, objects, bytes", () => new StoreView()))
         .Add(new("history", "version-service replies per product; Enter shows the raw reply", () => new HistoryView()))
         .Add(new("builds", "builds per product from the history log; r refreshes", () => new BuildsView()))
         .Add(new("settings", "the data folder, its sizes, the last scrub and measured builds (read-only)", () => new SettingsView()))
-        .Add(new("files", "a build's files; f in :builds opens one", () => new FilesView()));
+        .Add(new("files", "a build's files; f in :builds opens one", () => new FilesView()))
+        .Add(new("tables", "a current build's tables (enUS): state, schema, rows, references", () => new TablesView()));
 }

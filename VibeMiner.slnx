@@ -30,6 +30,7 @@
     <Project Path="tests/backend/VibeMiner.Files.Tests/VibeMiner.Files.Tests.csproj" />
     <Project Path="tests/backend/VibeMiner.Files.Testing/VibeMiner.Files.Testing.csproj" />
     <Project Path="tests/backend/VibeMiner.Formats.Tests/VibeMiner.Formats.Tests.csproj" />
+    <Project Path="tests/backend/VibeMiner.Formats.Testing/VibeMiner.Formats.Testing.csproj" />
     <Project Path="tests/backend/VibeMiner.Formats.Comparison/VibeMiner.Formats.Comparison.csproj" />
   </Folder>
 </Solution>

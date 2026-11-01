@@ -61,6 +61,20 @@ public sealed class GeneratedTable
         catch (GeneratedStoreException e) when (e.Code == GeneratedStoreCodes.Corrupt) { await DiscardAsync(cancellationToken).ConfigureAwait(false); throw; }
     }
 
+    /// <summary>The row with this id and its 0-based position in the table's order, or null when the table has none.</summary>
+    public async Task<(long Ordinal, Db2Row Row)?> FindWithOrdinalAsync(uint id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var record = await file.FindAsync(id, cancellationToken).ConfigureAwait(false);
+            return record is { } r ? (r.Ordinal, RowCodec.Decode(r.Id, r.Bytes.Span)) : null;
+        }
+        catch (GeneratedStoreException e) when (e.Code == GeneratedStoreCodes.Corrupt) { await DiscardAsync(cancellationToken).ConfigureAwait(false); throw; }
+    }
+
+    /// <summary>The key the table is filed under, as 32 lower hex: it changes with the source identity and the key status.</summary>
+    public string Identity => NodeKey.Hex;
+
     /// <summary>Every row in order, one block at a time.</summary>
     public async IAsyncEnumerable<Db2Row> ReadAllAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

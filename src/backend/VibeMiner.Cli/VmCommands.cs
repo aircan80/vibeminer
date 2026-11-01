@@ -3,6 +3,7 @@ using System.Text.Json;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 using VibeMiner.Builds;
+using VibeMiner.Formats.Tables;
 using VibeMiner.Cli.Browse;
 using VibeMiner.Cli.Profile;
 using VibeMiner.ObjectAccess;
@@ -15,11 +16,16 @@ namespace VibeMiner.Cli;
 /// a progress bar on stderr and red error panels, plain when NO_COLOR is set or output is redirected. <c>--json</c> writes one plain
 /// JSON document to <c>json</c> instead. Exit codes: 0 done, 1 failed (including a scrub that found damage), 2 bad usage, 130 canceled.
 /// <c>browse</c> hands the session to <c>browse</c>, the full-screen browser (#182), which is null when there's no terminal.
+/// <c>tables</c> composes layer 5 over an open store handle (data folder, fetch definitions); by default
+/// <see cref="TablesComposition.LeaseAsync"/>, a test seam otherwise. Its lease closes the handle too.
 /// </summary>
-internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores, IAnsiConsole output, IAnsiConsole error, TextWriter jsonOutput,
-    Func<BrowseSession, CancellationToken, Task<int>>? browse = null, TimeProvider? time = null)
+internal sealed partial class VmCommands(CliEnvironment environment, IStoreOpener stores, IAnsiConsole output, IAnsiConsole error, TextWriter jsonOutput,
+    Func<BrowseSession, CancellationToken, Task<int>>? browse = null, TimeProvider? time = null,
+    Func<IStoreHandle, string, bool, CancellationToken, Task<TablesLease>>? tables = null)
 {
     private readonly TimeProvider clock = time ?? TimeProvider.System;
+    private readonly Func<IStoreHandle, string, bool, CancellationToken, Task<TablesLease>> composeTables = tables ?? TablesComposition.LeaseAsync;
+
     public const int Ok = 0, Failed = 1, Usage = 2, Canceled = 130;
     private const int HistoryPage = 1000, ListedDamage = 20;
 
@@ -28,8 +34,10 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
     public const string UsageText = """
         Usage: vm [--data <dir>] [--json] [--yes] <command>
 
-          browse                  full-screen browser: :store, :history, :builds, :settings; ? lists the keys (read-only;
-                                  r in :builds refreshes under the writer lock)
+          browse                  full-screen browser: :store, :history, :builds, :files, :tables, :settings; ? lists the keys
+                                  (read-only, except: r and a in :builds and m, g and G in :files take the writer lock, and
+                                  the first :tables load holds it until browse exits, or reads only what is stored when the
+                                  app holds it)
           store info              packs, objects and bytes in the object store, and the last scrub (read-only)
           store scrub             full index check and verify of every object; records the outcome in scrub-v1.json
                                   (writes: takes the writer lock)
@@ -42,13 +50,17 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
           builds refresh [product]
                                   fetch versions and cdns for every reviewed product, or one, and the product summary,
                                   then list (writes: takes the writer lock)
+          tables states <product> [--fetch-definitions]
+                                  open the product's current build in enUS and check every table, with timings (writes: takes
+                                  the writer lock and downloads table bytes and the metadata they need; --fetch-definitions
+                                  also fetches newer WoWDBDefs definitions, D081)
 
           --data <dir>   data folder; otherwise VIBEMINER_DATA_DIR, the folder chosen in Settings, then the default
           --json         one JSON document on stdout instead of text
           --yes          confirm reset
         """;
 
-    private bool json, yes;
+    private bool json, yes, fetchDefinitions;
     /// <summary>Entries written so far while a <c>history list --json</c> document is open, so a failure can close it.</summary>
     private long? openHistory;
     private DataFolder folder = new("", DataFolderSource.Default);
@@ -64,6 +76,7 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
             var arg = args[i];
             if (arg == "--json") json = true;
             else if (arg == "--yes") yes = true;
+            else if (arg == "--fetch-definitions") fetchDefinitions = true;
             else if (arg == "--data")
             {
                 if (i + 1 >= args.Count || args[i + 1].Length == 0) return UsageError("--data needs a folder.");
@@ -87,11 +100,13 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
             ["builds", "list", var product] => (folder, token) => BuildsList(folder, product, token),
             ["builds", "refresh"] => (folder, token) => BuildsRefresh(folder, null, token),
             ["builds", "refresh", var product] => (folder, token) => BuildsRefresh(folder, product, token),
+            ["tables", "states", var product] => (folder, token) => TablesStates(folder, product, token),
             _ => null,
         };
         if (command is null) return UsageError(words.Count == 0 ? "No command given." : $"Unknown command: {string.Join(' ', words)}.");
         if (yes && words is not ["reset"]) return UsageError("--yes only applies to reset.");
-        if (words is ["builds", _, var named] && !Products.IsKnown(named))
+        if (fetchDefinitions && words is not ["tables", "states", _]) return UsageError("--fetch-definitions applies only to tables states.");
+        if (words is ["builds" or "tables", _, var named] && !Products.IsKnown(named))
             return UsageError($"{named} isn't a reviewed product. Reviewed: {string.Join(", ", Products.Ids)}.");
 
         try
@@ -103,6 +118,9 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { await Fail("CANCELED", "Canceled."); return Canceled; }
         catch (ObjectStoreException e) { return await Fail(e.Code, Explain(e)); }
+        catch (VibeMiner.Generated.GeneratedStoreException e) { return await Fail(e.Code, e.Code == VibeMiner.Generated.GeneratedStoreCodes.Busy
+            ? "Another writer holds the generated store (is VibeMiner running?). Close it and try again." : e.Message); }
+        catch (TablesBusyException e) { return await Fail(e.Code, $"{e.Message} Wait for it to finish and try again."); }
         // Anything else (a file system or SQLite error, a bad path) is still one named failure with exit code 1, never a stack trace.
         catch (Exception e) when (e is not OperationCanceledException) { return await Fail("CLI_FAILED", $"{e.GetType().Name}: {e.Message}"); }
     }
@@ -113,6 +131,7 @@ internal sealed class VmCommands(CliEnvironment environment, IStoreOpener stores
         if (browse is null) return await Fail("BROWSE_NEEDS_TERMINAL", "vm browse needs a terminal on stdin and stdout. For scripts, use the other commands.");
         // Disposed after the browser returns, so after its navigator has stopped every load: closes the session's files.
         await using var session = new BrowseSession(stores, folder, storeFolder, environment);
+        session.UseTables(composeTables);
         return await browse(session, ct).ConfigureAwait(false);
     }
 

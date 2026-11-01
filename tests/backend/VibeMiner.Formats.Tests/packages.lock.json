@@ -168,6 +168,12 @@
           "VibeMiner.ObjectAccess": "[1.0.0, )"
         }
       },
+      "vibeminer.formats.testing": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Formats": "[1.0.0, )"
+        }
+      },
       "vibeminer.generated": {
         "type": "Project",
         "dependencies": {

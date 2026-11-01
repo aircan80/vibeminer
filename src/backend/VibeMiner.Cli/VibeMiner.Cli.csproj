@@ -6,6 +6,7 @@
   <ProjectReference Include="../VibeMiner.Builds/VibeMiner.Builds.csproj" />
   <!-- Layer 4 files for the browse Files views (#175): one read-only file system per session. -->
   <ProjectReference Include="../VibeMiner.Files/VibeMiner.Files.csproj" />
+  <ProjectReference Include="../VibeMiner.Formats/VibeMiner.Formats.csproj" />
   <!-- Terminal tables, progress and panels for the text output only (D151). Not in the desktop package. -->
   <PackageReference Include="Spectre.Console" Version="0.50.0" />
   <!-- Full-screen terminal browser for vm browse (#182, D165). -->

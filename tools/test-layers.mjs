@@ -56,7 +56,7 @@ export const layers = [
   {
     layer: 5, name: 'Formats',
     src: ['src/backend/VibeMiner.Formats/'],
-    fakes: [],
+    fakes: ['tests/backend/VibeMiner.Formats.Testing/'],
     paths: ['tests/backend/VibeMiner.Formats.Tests/'],
     testProject: 'tests/backend/VibeMiner.Formats.Tests',
   },

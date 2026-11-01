@@ -243,6 +243,11 @@
         "resolved": "4.0.1",
         "contentHash": "PMU8u3pGf9nUkee39KMrB8qqId7u7kyGWaZpOh9E4Mal3xChq+relS/hHQOicGAswyzi7F5DjXjac0mTnRBX8Q=="
       },
+      "ZstdSharp.Port": {
+        "type": "Transitive",
+        "resolved": "0.8.6",
+        "contentHash": "iP4jVLQoQmUjMU88g1WObiNr6YKZGvh4aOXn3yOJsHqZsflwRsxZPcIBvNXgjXO3vQKSLctXGLTpcBPLnWPS8A=="
+      },
       "vibeminer.builds": {
         "type": "Project",
         "dependencies": {
@@ -258,6 +263,21 @@
         "dependencies": {
           "VibeMiner.Builds": "[1.0.0, )",
           "VibeMiner.ObjectAccess": "[1.0.0, )"
+        }
+      },
+      "vibeminer.formats": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Files": "[1.0.0, )",
+          "VibeMiner.Generated": "[1.0.0, )",
+          "VibeMiner.ObjectAccess": "[1.0.0, )"
+        }
+      },
+      "vibeminer.generated": {
+        "type": "Project",
+        "dependencies": {
+          "VibeMiner.Objects": "[1.0.0, )",
+          "ZstdSharp.Port": "[0.8.6, )"
         }
       },
       "vibeminer.objectaccess": {

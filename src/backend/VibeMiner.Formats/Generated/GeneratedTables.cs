@@ -58,6 +58,13 @@ public sealed class GeneratedTables : IGeneratedTables
 
     public async Task<GeneratedTable> StoreAsync(GeneratedTableSource source, ITactKeyStatus keys, GeneratedTableContent content, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(content);
+        try { return await StoreCoreAsync(source, keys, content, cancellationToken).ConfigureAwait(false); }
+        finally { if (content.Owner is { } owner) await owner.DisposeAsync().ConfigureAwait(false); }
+    }
+
+    private async Task<GeneratedTable> StoreCoreAsync(GeneratedTableSource source, ITactKeyStatus keys, GeneratedTableContent content, CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(keys);
         ArgumentNullException.ThrowIfNull(content);

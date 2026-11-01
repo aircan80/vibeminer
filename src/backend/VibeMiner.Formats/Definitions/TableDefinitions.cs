@@ -111,6 +111,9 @@ public sealed class TableDefinitions(BundledDefinitions bundled, FetchedDefiniti
     private readonly BundledDefinitions bundled = bundled ?? throw new ArgumentNullException(nameof(bundled));
     private readonly TimeProvider time = clock ?? TimeProvider.System;
 
+    /// <summary>The pinned manifest's tables, as <see cref="BundledDefinitions.Tables"/> lists them.</summary>
+    public IReadOnlyList<DefinitionTable> Tables => bundled.Tables;
+
     /// <summary>How the switch reads now. Cancellation of <paramref name="token"/> propagates; any other failure reads as off.</summary>
     public async Task<bool> FetchEnabledAsync(CancellationToken token)
     {

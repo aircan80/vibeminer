@@ -9,7 +9,8 @@ public interface IGeneratedTables
     /// <summary>The stored table, or null when there is none for this identity and key status. Damaged pieces are deleted and read as null.</summary>
     Task<GeneratedTable?> OpenAsync(GeneratedTableSource source, ITactKeyStatus keys, CancellationToken cancellationToken = default);
 
-    /// <summary>Stores a decoded table (or returns the one already stored) and opens it. Store failures throw <c>GeneratedStoreException</c>.</summary>
+    /// <summary>Stores a decoded table (or returns the one already stored) and opens it. Store failures throw <c>GeneratedStoreException</c>.
+    /// The content's <see cref="GeneratedTableContent.Owner"/> is disposed when this ends, however it ends.</summary>
     Task<GeneratedTable> StoreAsync(GeneratedTableSource source, ITactKeyStatus keys, GeneratedTableContent content, CancellationToken cancellationToken = default);
 
     /// <summary>

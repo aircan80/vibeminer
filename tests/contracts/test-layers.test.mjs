@@ -58,6 +58,10 @@ test('a change inside layer 5 runs layer 5 and the comparison once it exists', (
     [formats, `${cli} --filter Speed!=Slow`]);
 });
 
+test('a layer 5 fake change also runs the CLI', () => {
+  assert.deepEqual(commands(['tests/backend/VibeMiner.Formats.Testing/InMemoryTables.cs']), [formats, `${cli} --filter Speed!=Slow`]);
+});
+
 test('the comparison runs on its own change and on a legacy Formats.Wow change', () => {
   const exists = () => true;
   assert.deepEqual(commands(['tests/backend/VibeMiner.Formats.Comparison/ReaderComparisonTests.cs'], exists), [comparison]);
