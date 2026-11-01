@@ -50,7 +50,7 @@ packages=(git gh tmux curl tar xz
   gtk3 nss alsa-lib libXScrnSaver libxkbfile at-spi2-atk libdrm mesa-libgbm fontconfig)
 to_install=()
 for p in "${packages[@]}"; do
-  if rpm -q "$p" >/dev/null 2>&1; then ok "$p"; else need "$p"; to_install+=("$p"); fi
+  if rpm -q --whatprovides "$p" >/dev/null 2>&1; then ok "$p"; else need "$p"; to_install+=("$p"); fi
 done
 if ((${#to_install[@]})); then
   run sudo dnf install -y "${to_install[@]}"
