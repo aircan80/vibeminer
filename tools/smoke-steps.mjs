@@ -3,8 +3,10 @@
 import { _electron as electron, expect } from '@playwright/test';
 import path from 'node:path';
 
-/** Products in the engine's registry. The Product filter lists them after "All products". */
+/** Products in the engine's registry, which the old list shows. The Product filter lists them after "All products". */
 export const registeredProducts = 13;
+/** Reviewed products in layer 3's list (D476): the registry's and wow_classic_era_beta. Unreviewed ones follow, from the summary. */
+export const reviewedProducts = 14;
 /** Discovery renders the first page of 50 builds and loads more only on request. */
 const firstPage = 50;
 const blockedProxy = { HTTPS_PROXY: 'http://127.0.0.1:9', HTTP_PROXY: 'http://127.0.0.1:9', ALL_PROXY: 'http://127.0.0.1:9', NO_PROXY: '' };
@@ -32,7 +34,7 @@ const refreshButton = page => page.locator('.dv-pane-head').getByRole('button', 
  * Discovery on a fresh profile (#205): the layer 3 build list, empty, with every reviewed product, Refresh ready and no
  * implicit remote check. The engine's own reply proves the real registry and a writable build store.
  */
-export async function expectEmptyDiscovery(page, { productCount = registeredProducts } = {}) {
+export async function expectEmptyDiscovery(page, { productCount = reviewedProducts } = {}) {
   await expect(page.getByRole('heading', { name: 'Builds', exact: true })).toBeVisible();
   await expect(page.locator('.dv-empty')).toHaveText('No builds stored yetRefresh asks the version service.');
   await expect(page.getByRole('listbox', { name: 'Builds' }).getByRole('option')).toHaveCount(0);
@@ -44,9 +46,15 @@ export async function expectEmptyDiscovery(page, { productCount = registeredProd
   const catalog = await page.evaluate(async () => {
     const reply = await window.discovery.catalogList();
     if (!reply.ok) throw new Error(`${reply.error.message} (${reply.error.code})`);
-    return { access: reply.value.access, products: reply.value.products.length, builds: reply.value.products.reduce((sum, product) => sum + product.buildCount, 0) };
+    const products = reply.value.products, firstOther = products.findIndex(product => !product.reviewed);
+    return {
+      access: reply.value.access, products: products.filter(product => product.reviewed).length,
+      // The summary's unreviewed products, if any, come after every reviewed one and are labelled by their id.
+      othersLast: firstOther < 0 || products.slice(firstOther).every(product => !product.reviewed && product.label === product.productId),
+      builds: products.reduce((sum, product) => sum + product.buildCount, 0),
+    };
   });
-  expect(catalog).toEqual({ access: 'writer', products: productCount, builds: 0 });
+  expect(catalog).toEqual({ access: 'writer', products: productCount, othersLast: true, builds: 0 });
 }
 
 /**

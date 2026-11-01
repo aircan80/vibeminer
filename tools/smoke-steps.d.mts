@@ -3,6 +3,7 @@ import type { WorkspaceSnapshot } from '../contracts/generated/discovery';
 export type SmokeOpening = { productId: string; buildIdentity: string; sourceRegion: string; version: string };
 export type SmokeCatalog = { builds: { productId: string; id: string; version: string }[]; products: { productId: string; lastCheckedAt: string | null; connection: string }[] };
 export const registeredProducts: number;
+export const reviewedProducts: number;
 export function launchApp(options: { executablePath?: string; appPath?: string; directory: string; env: Record<string, string | undefined>; offline?: boolean }): Promise<{ application: ElectronApplication; page: Page }>;
 export function expectEmptyDiscovery(page: Page, options?: { productCount?: number }): Promise<void>;
 export function refreshBuilds(page: Page, options: { timeout: number }): Promise<void>;
