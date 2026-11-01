@@ -11,7 +11,7 @@
 //   removes or changes a line containing "public " counts. It over-triggers; that is the safe side.
 //   A change under a layer's *.Testing fake project always counts.
 // - Callers skip slow tests (--filter "Speed!=Slow"); a layer 1 change runs Primitives.Tests in full.
-// - The cross-layer storage integration project runs whenever layer 1 or 2 changed.
+// - The cross-layer storage integration project runs whenever layer 1, 2, 3, 4 or 5 changed.
 // - The Formats comparison project runs whenever layer 5 or the legacy Formats.Wow reader changed.
 // - Shared foundations (toolchain, packages, project files, CI, this script) run everything.
 // - Legacy projects map to VibeMiner.Backend.Tests. Desktop and contract paths run their npm suites;
@@ -69,8 +69,8 @@ export const layers = [
   },
 ];
 
-// Cross-layer integration tests over the real layers 1 and 2. Runs only once the project exists.
-const integration = { project: 'tests/backend/VibeMiner.Storage.IntegrationTests', layers: [1, 2] };
+// Cross-layer integration tests over the real layers 1 and 2, and the reset chain through layers 3-5 (#195). Runs only once the project exists.
+const integration = { project: 'tests/backend/VibeMiner.Storage.IntegrationTests', layers: [1, 2, 3, 4, 5] };
 
 // Temporary cross-check of the layer 5 reader against the legacy Formats.Wow reader (#177), until slice 9 deletes
 // both. Runs only once the project exists, whenever layer 5, the legacy reader or the project itself changes.

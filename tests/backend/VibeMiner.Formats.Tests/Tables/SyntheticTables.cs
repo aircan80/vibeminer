@@ -247,7 +247,7 @@ public static class SyntheticTables
     private static void Put(byte[] bytes, int at, uint value) => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(at, 4), value);
 
     /// <summary>An authored provider: table ids are the FileDataID as 8 lower hex; tables with a definition text are bundled.</summary>
-    private static Task<BundledDefinitions> ProviderAsync(IReadOnlyList<SyntheticTable> tables)
+    public static Task<BundledDefinitions> ProviderAsync(IReadOnlyList<SyntheticTable> tables)
     {
         var manifest = JsonSerializer.SerializeToUtf8Bytes(tables.Select(t => new Dictionary<string, object>
         {

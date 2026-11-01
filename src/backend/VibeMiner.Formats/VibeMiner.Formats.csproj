@@ -5,6 +5,8 @@
   <ProjectReference Include="../VibeMiner.Generated/VibeMiner.Generated.csproj" />
   <InternalsVisibleTo Include="VibeMiner.Formats.Tests" />
   <InternalsVisibleTo Include="VibeMiner.Formats.Comparison" />
+  <!-- The reset chain test (#195) builds its authored definitions with BundledDefinitions.CreateAsync, through the linked SyntheticTables. -->
+  <InternalsVisibleTo Include="VibeMiner.Storage.IntegrationTests" />
   <!-- The pinned WoWDBDefs files (D120), embedded by link from their one place in the tree; BundledDefinitions opens them by this name. -->
   <EmbeddedResource Include="../VibeMiner.Infrastructure/Tables/Resources/WoWDBDefs/**/*" Link="Definitions/Bundled/WoWDBDefs/%(RecursiveDir)%(Filename)%(Extension)"
     LogicalName="VibeMiner.Formats.Definitions.Bundled.WoWDBDefs.$([System.String]::Copy('%(RecursiveDir)').Replace('\', '.').Replace('/', '.'))%(Filename)%(Extension)" />

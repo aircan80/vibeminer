@@ -1,11 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup>
-  <!-- Cross-layer integration: layer 2 object access over the real layer 1 store and CDN client, against the fake CDN. Never the network. -->
+  <!-- Cross-layer integration: layer 2 object access over the real layer 1 store and CDN client, and layers 3-5 over the real stores (#195), against the fake CDN. Never the network. -->
   <ProjectReference Include="../../../src/backend/VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
+  <!-- The reset chain (#195): layers 3-5 and the generated store over the real layer 1 stores. -->
+  <ProjectReference Include="../../../src/backend/VibeMiner.Formats/VibeMiner.Formats.csproj" />
   <ProjectReference Include="../VibeMiner.Cdn.Testing/VibeMiner.Cdn.Testing.csproj" />
   <ProjectReference Include="../VibeMiner.Objects.CrashWriter/VibeMiner.Objects.CrashWriter.csproj" />
   <!-- Shared scenario helpers, linked from the layer 2 unit project. -->
   <Compile Include="../VibeMiner.ObjectAccess.Tests/Kit.cs" Link="Kit.cs" />
   <Compile Include="../VibeMiner.ObjectAccess.Tests/MemoryStore.cs" Link="MemoryStore.cs" />
+  <!-- Synthetic build metadata and DB2 writers, linked from the layer 3 and layer 5 unit projects. -->
+  <Compile Include="../VibeMiner.Builds.Tests/Formats/BlteWriter.cs" Link="Synthetic/BlteWriter.cs" />
+  <Compile Include="../VibeMiner.Builds.Tests/Formats/EncodingWriter.cs" Link="Synthetic/EncodingWriter.cs" />
+  <Compile Include="../VibeMiner.Builds.Tests/Formats/RootWriter.cs" Link="Synthetic/RootWriter.cs" />
+  <Compile Include="../VibeMiner.Formats.Tests/Tables/SyntheticTables.cs" Link="Synthetic/SyntheticTables.cs" />
+  <Compile Include="../VibeMiner.Formats.Tests/Tables/TableScenario.cs" Link="Synthetic/TableScenario.cs" />
+  <ProjectReference Include="../VibeMiner.Files.Testing/VibeMiner.Files.Testing.csproj" />
+  <ProjectReference Include="../VibeMiner.Generated.Testing/VibeMiner.Generated.Testing.csproj" />
+  <ProjectReference Include="../VibeMiner.ObjectAccess.Testing/VibeMiner.ObjectAccess.Testing.csproj" />
   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
   <PackageReference Include="xunit" Version="2.9.3" />
   <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1"><PrivateAssets>all</PrivateAssets></PackageReference>

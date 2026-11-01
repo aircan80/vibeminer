@@ -53,7 +53,7 @@ test('a layer 4 interface or fake change also runs layer 5 and the CLI', () => {
 test('a change inside layer 5 runs layer 5 and the comparison once it exists', () => {
   assert.deepEqual(commands(['src/backend/VibeMiner.Formats/Definitions/DbdDefinitionReader.cs']), [formats]);
   assert.deepEqual(commands(['src/backend/VibeMiner.Formats/Definitions/DbdDefinitionReader.cs'], () => true),
-    [formats, `${comparison} --filter Speed!=Slow`]);
+    [formats, `${integration} --filter Speed!=Slow`, `${comparison} --filter Speed!=Slow`]);
   assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.Formats/Db2FormatException.cs', publicApi: true }]),
     [formats, `${cli} --filter Speed!=Slow`]);
 });
@@ -75,10 +75,12 @@ test('a change inside the layer 7 CLI runs only its own tests', () => {
   assert.deepEqual(commands([{ path: 'src/backend/VibeMiner.Cli/VmCommands.cs', publicApi: true }, 'tests/backend/VibeMiner.Cli.Tests/CommandTests.cs']), [cli]);
 });
 
-test('the storage integration project runs on layer 1 or 2 changes once it exists', () => {
+test('the storage integration project runs on layer 1 to 5 changes once it exists', () => {
   const exists = () => true;
   assert.deepEqual(commands(['src/backend/VibeMiner.ObjectAccess/ObjectSource.cs'], exists),
     [objectAccess, `${integration} --filter Speed!=Slow`]);
+  assert.deepEqual(commands(['src/backend/VibeMiner.Files/FileSystem.cs'], exists), [files, `${integration} --filter Speed!=Slow`]);
+  assert.deepEqual(commands(['tests/backend/VibeMiner.Builds.Tests/Formats/BlteWriter.cs'], exists), [builds, `${integration} --filter Speed!=Slow`]);
   assert.deepEqual(commands(['tests/backend/VibeMiner.Storage.IntegrationTests/StorageTests.cs'], exists), [integration]);
 });
 
