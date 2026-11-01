@@ -205,7 +205,7 @@ public sealed partial class ObjectStore
     /// <summary>Read-only stores: the same full index check, reported without a rebuild (only the writer can rebuild).</summary>
     internal async Task<ScrubReport> ScrubReadOnlyAsync(bool full, IProgress<ScanProgress>? progress, CancellationToken ct)
     {
-        var (_, problem, _, settled) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring)), ct);
+        var (_, problem, _, settled) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring), immutableIndex), ct);
         VerifyReport verify;
         try { verify = await VerifyAsync(full, progress, ct); }
         catch (ObjectStoreException e) when (problem is not null && e.Code == ObjectStoreCodes.IndexUnreadable) { verify = new(0, 0, 0, 0, [], []); }
@@ -231,7 +231,7 @@ public sealed partial class ObjectStore
         long checkedCount = 0, bytes = 0, corruptCount = 0, lostCount = 0;
         var corrupt = new List<ObjectKey>(); var lost = new List<ObjectKey>();
         byte[] last = [];
-        using var c = ObjectIndex.Open(indexPath, readOnly: true);
+        using var c = ObjectIndex.Open(indexPath, readOnly: true, immutableIndex);
         while (true)
         {
             var rows = new List<(ObjectKey key, IndexRow row)>();

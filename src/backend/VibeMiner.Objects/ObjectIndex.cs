@@ -38,11 +38,41 @@ internal static class ObjectIndex
         CREATE INDEX history_time ON history(observed_at, record);
         """;
 
-    public static SqliteConnection Open(string path, bool readOnly)
+    /// <summary>
+    /// SQLite's name for the index. Immutable (read-only media, 6.10) tells SQLite that nothing changes the file while it is open,
+    /// so it needs no -wal or -shm; it also ignores any -wal, which is why only a cleanly closed index without one is opened that way.
+    /// </summary>
+    private static string Source(string path, bool immutable)
+    {
+        if (!immutable) return path;
+        // A URI filename: every byte but the unreserved ones and '/' is percent-encoded, so '?', '#' and '%' in a folder name stay part of it.
+        var full = Path.GetFullPath(path).Replace('\\', '/');
+        var uri = new System.Text.StringBuilder("file:");
+        if (!full.StartsWith('/')) uri.Append("///");  // a drive letter path
+        foreach (var b in System.Text.Encoding.UTF8.GetBytes(full))
+            if (char.IsAsciiLetterOrDigit((char)b) || b is (byte)'-' or (byte)'.' or (byte)'_' or (byte)'~' or (byte)'/' or (byte)':') uri.Append((char)b);
+            else uri.Append('%').Append(b.ToString("X2", System.Globalization.CultureInfo.InvariantCulture));
+        return uri.Append("?immutable=1").ToString();
+    }
+
+    /// <summary>
+    /// Whether a read-only open that failed can open the index as immutable instead: SQLite couldn't create the -wal or -shm
+    /// (read-only media), the folder really can't be written, so no writer can start there later, and there is no -wal with commits
+    /// in it, so the main file holds everything. A passing CANTOPEN on writable media (out of file handles) never makes a reader immutable.
+    /// </summary>
+    public static bool ReadOnlyMedia(string path, SqliteException e)
+    {
+        if (e.SqliteErrorCode is not (SQLitePCL.raw.SQLITE_CANTOPEN or SQLitePCL.raw.SQLITE_READONLY)) return false;
+        if (!OperatingSystem.IsWindows() && FolderAccess.CanWrite(Path.GetDirectoryName(Path.GetFullPath(path))!)) return false;
+        var wal = new FileInfo(path + "-wal");
+        return !wal.Exists || wal.Length == 0;
+    }
+
+    public static SqliteConnection Open(string path, bool readOnly, bool immutable = false)
     {
         var c = new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            DataSource = path, Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false, DefaultTimeout = 5,
+            DataSource = Source(path, immutable && readOnly), Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false, DefaultTimeout = 5,
         }.ToString());
         c.Open();
         // The rows recovery trusts most (where a pack's committed bytes end, the next sequence number) carry a CRC of their own:
@@ -60,10 +90,10 @@ internal static class ObjectIndex
     }
 
     /// <summary>The schema version of an existing index, read without writing anything; null when the file is missing.</summary>
-    public static int? ReadVersion(string path)
+    public static int? ReadVersion(string path, bool immutable = false)
     {
         if (!File.Exists(path)) return null;
-        using var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        using var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Source(path, immutable), Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         c.Open();
         using var cmd = c.CreateCommand(); cmd.CommandText = "PRAGMA user_version";
         return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
@@ -74,13 +104,13 @@ internal static class ObjectIndex
     /// flipped, or below 1, and the schema in sqlite_master is exactly format 1's. A later index format changes the schema too (spec 6.3),
     /// so this never names a newer index damaged. A schema that can't be read is no evidence either way: false.
     /// </summary>
-    public static bool IsDamagedVersion(string path, int version)
+    public static bool IsDamagedVersion(string path, int version, bool immutable = false)
     {
         if (version == SchemaVersion) return false;
         if (version > SchemaVersion && System.Numerics.BitOperations.PopCount((uint)(version ^ SchemaVersion)) != 1) return false;
         try
         {
-            using var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+            using var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Source(path, immutable), Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
             c.Open();
             return SchemaEntries(c).SequenceEqual(FormatOneSchema.Value);
         }
@@ -125,10 +155,10 @@ internal static class ObjectIndex
     }
 
     /// <summary>The store kind an existing index records (its application_id), read without writing anything; null when the file is missing.</summary>
-    public static long? ReadKind(string path)
+    public static long? ReadKind(string path, bool immutable = false)
     {
         if (!File.Exists(path)) return null;
-        using var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        using var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Source(path, immutable), Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         c.Open();
         using var cmd = c.CreateCommand(); cmd.CommandText = "PRAGMA application_id";
         return Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
@@ -235,10 +265,10 @@ internal static class ObjectIndex
         return new(r.GetInt64(0), new(r.GetInt64(1), r.GetInt64(2), r.GetInt64(3), r.GetInt64(4)), r.GetInt64(5));
     }
 
-    private static (long count, long digest) MeasureObjectsParallel(string path, CancellationToken ct)
+    private static (long count, long digest) MeasureObjectsParallel(string path, CancellationToken ct, bool immutable)
     {
         byte[]? lo, hi;
-        using (var c = Open(path, readOnly: true))
+        using (var c = Open(path, readOnly: true, immutable))
         using (var cmd = c.CreateCommand())
         {
             cmd.CommandText = "SELECT min(k), max(k) FROM objects";
@@ -254,7 +284,7 @@ internal static class ObjectIndex
         var parts = new (long count, long digest)[slices];
         Parallel.For(0, slices, new ParallelOptions { MaxDegreeOfParallelism = slices, CancellationToken = ct }, i =>
         {
-            using var c = Open(path, readOnly: true);
+            using var c = Open(path, readOnly: true, immutable);
             using var interrupt = ct.Register(() => SQLitePCL.raw.sqlite3_interrupt(c.Handle));
             using var cmd = c.CreateCommand();
             cmd.CommandText = "SELECT count(*), vm_object_digest(k, pack, offset, length, sha256) FROM objects WHERE k >= $a" + (bounds[i + 1] is null ? "" : " AND k < $b");
@@ -288,11 +318,11 @@ internal static class ObjectIndex
     /// kept committing comes back <c>settled = false</c> with no problem, never as damaged. <paramref name="measuring"/> runs between
     /// the first stamp and the measure (tests). Cancellation interrupts SQLite's statements.
     /// </remarks>
-    public static (byte[]? storeId, string? problem, bool clean, bool settled) Validate(string path, bool full, CancellationToken ct = default, Action? measuring = null)
+    public static (byte[]? storeId, string? problem, bool clean, bool settled) Validate(string path, bool full, CancellationToken ct = default, Action? measuring = null, bool immutable = false)
     {
         try
         {
-            using var c = Open(path, readOnly: true);
+            using var c = Open(path, readOnly: true, immutable);
             using var interrupt = ct.Register(() => SQLitePCL.raw.sqlite3_interrupt(c.Handle));
             if (full)
             {
@@ -354,7 +384,7 @@ internal static class ObjectIndex
                 ct.ThrowIfCancellationRequested();
                 var before = Stamp(c);
                 measuring?.Invoke();
-                var (count, digest) = MeasureObjectsParallel(path, ct);
+                var (count, digest) = MeasureObjectsParallel(path, ct, immutable);
                 var history = MeasureHistory(c);
                 if (Stamp(c) != before) continue;  // a writer committed meanwhile: the comparison would mix two snapshots
                 if (TotalsMismatch("object", count, digest, before.Totals.Objects, before.Totals.ObjectDigest) is { } objects)
@@ -402,13 +432,14 @@ internal sealed class IndexReaders : IDisposable
 
     private readonly string path;
     private readonly int size;
+    private readonly bool immutable;
     private readonly SemaphoreSlim slots;
     private readonly System.Collections.Concurrent.ConcurrentBag<Reader> idle = [];
     private int retired;
 
-    public IndexReaders(string path, int size)
+    public IndexReaders(string path, int size, bool immutable = false)
     {
-        this.path = path; this.size = size; slots = new SemaphoreSlim(size, size);
+        this.path = path; this.size = size; this.immutable = immutable; slots = new SemaphoreSlim(size, size);
     }
 
     /// <summary>Runs one bounded read on a pooled connection.</summary>
@@ -418,7 +449,7 @@ internal sealed class IndexReaders : IDisposable
         try
         {
             if (Volatile.Read(ref retired) != 0) throw new ObjectStoreException(ObjectStoreCodes.Closed, "The object store is closed.");
-            if (!idle.TryTake(out var r)) r = new Reader(ObjectIndex.Open(path, readOnly: true));
+            if (!idle.TryTake(out var r)) r = new Reader(ObjectIndex.Open(path, readOnly: true, immutable));
             try
             {
                 var value = read(r.Connection, r.Lookup, state);

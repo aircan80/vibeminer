@@ -533,11 +533,13 @@ Cancellation or a failure before the switch deletes the target file and its row.
 - It offers Has, Read, ReadRange, the history read and Verify, and nothing that writes.
 - It never takes the lock, recovers, records reads or writes a byte.
 - It sees exactly what that store's writer has committed.
-- SQLite may create the index's `-wal` and `-shm`.
+- SQLite may create the index's `-wal` and `-shm`, except on read-only media (below).
 
-**Read-only media.** The reference opens the index with SQLite `mode=ro` and never with `immutable=1`. A WAL database opened that way needs its `-wal` and `-shm` to exist already or to be creatable. After a clean close, SQLite deletes both files when the last connection closes, so on read-only media a cleanly closed store fails to open (`OBJECT_STORE_INDEX_UNREADABLE`). It opens when both files were copied along.
+**Read-only media.** The reference opens the index with `SQLITE_OPEN_READONLY` (Microsoft.Data.Sqlite `Mode=ReadOnly`). A WAL database opened that way needs its `-wal` and `-shm` to exist already or to be creatable, and after a clean close SQLite has deleted both. So when that first open fails because SQLite can't create them (`SQLITE_CANTOPEN` or `SQLITE_READONLY`), the folder can't be written (POSIX `access(W_OK)` fails, so a failure from running out of file handles never counts; Windows, parked, skips this check), and `-wal` is missing or empty, the main file holds every commit, and the store opens the index with `immutable=1` (a `file:` URI) for as long as it is open, for reads, Verify and the read-only scrub alike. It then also requires `clean_close` = 1 after the cheap check, else `OBJECT_STORE_INDEX_UNREADABLE`: the last writer checkpointed and closed, and a writer that ran since would have left a `-wal`. With `immutable=1` SQLite neither reads the `-wal` nor sees later commits, which is why:
+- a `-wal` with bytes in it but no creatable `-shm` (a copy taken while a writer ran) is `OBJECT_STORE_INDEX_UNREADABLE`, never read without its commits;
+- the immutable open is taken whenever this process can't create the files, so a writer that can write a folder its readers can't is not supported: those readers wouldn't see its later commits.
 
-Another implementation may open with `immutable=1` only when no writer can change the store while it is open (read-only media, or a copy no writer opens), `clean_close` is 1 and `-wal` is missing or empty. `immutable=1` ignores the WAL, so with a non-empty `-wal` it would read an older index.
+Nothing changes for a reader that can create the files: it opens normally and sees what the running writer commits. A read-only store never touches `writer.lock`, so a lock that can't be taken on read-only media doesn't matter.
 
 A layered reader asks the profile's own store first and the second store only for keys the first reports Absent.
 

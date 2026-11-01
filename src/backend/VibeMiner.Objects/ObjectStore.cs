@@ -26,6 +26,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
     private readonly string directory, packsDirectory, stagingDirectory, indexPath;
     private readonly ObjectStoreOptions options;
     private readonly bool readOnly;
+    private bool immutableIndex;  // a read-only store on read-only media (6.10)
     private readonly PackReaders packReaders;
     private readonly ConcurrentDictionary<(int, long), byte> verified = new();
     private readonly ConcurrentDictionary<ObjectKey, byte> touches = new();
@@ -74,10 +75,10 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
         {
             if (!File.Exists(store.indexPath)) throw new ObjectStoreException(ObjectStoreCodes.Missing, $"No object store at {store.directory}.");
             int version;
-            try { version = ObjectIndex.ReadVersion(store.indexPath) ?? 0; }
+            try { version = store.ReadIndexVersionReadOnly() ?? 0; }
             catch (Exception e) when (e is SqliteException or OverflowException or InvalidCastException or FormatException) { throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index can't be read.", e); }
             // A flipped user_version on a format 1 index is damage, named like any other; anything else above 1 is a newer index.
-            var damagedVersion = ObjectIndex.IsDamagedVersion(store.indexPath, version);
+            var damagedVersion = ObjectIndex.IsDamagedVersion(store.indexPath, version, store.immutableIndex);
             if (!damagedVersion && version > ObjectIndex.SchemaVersion) throw NewerFormat($"index schema {version}");
             if (!damagedVersion && version < ObjectIndex.SchemaVersion) throw new ObjectStoreException(ObjectStoreCodes.Missing, "The object store was never completely created.");
             store.CheckIndexKind();
@@ -91,18 +92,32 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
             var packStore = OnePackStore(valid);
             // A read-only store can't rebuild: a damaged index is a named state, for its writer to repair.
             if (damagedVersion) throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, $"The object index can't be used: its schema version reads {version}. Its writer rebuilds it.");
-            var (indexStore, problem, clean, _) = ObjectIndex.Validate(store.indexPath, full: false, ct);
+            var (indexStore, problem, clean, _) = ObjectIndex.Validate(store.indexPath, full: false, ct, immutable: store.immutableIndex);
             // Unset also while its writer runs (it clears the marker at open): a reader can't tell that from a crash, so it checks fully.
             // A writer that kept committing leaves it unsettled, which is no evidence of damage: the cheap check stands.
-            if (problem is null && !clean) (indexStore, problem, _, _) = ObjectIndex.Validate(store.indexPath, full: true, ct, () => store.At(StorePoint.IndexMeasuring));
+            // Immutable ignores the -wal: only a cleanly closed index, whose writer checkpointed everything into the main file, is read that way.
+            if (problem is null && !clean && store.immutableIndex)
+                throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index is on read-only media but wasn't cleanly closed. Its writer opens and closes it to settle it.");
+            if (problem is null && !clean) (indexStore, problem, _, _) = ObjectIndex.Validate(store.indexPath, full: true, ct, () => store.At(StorePoint.IndexMeasuring), store.immutableIndex);
             if (problem is not null) throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, $"The object index can't be used: {problem}. Its writer rebuilds it.");
             if (packStore is not null && !packStore.AsSpan().SequenceEqual(indexStore))
                 throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The object index names another store than its packs. Its writer rebuilds it.");
             store.storeId = indexStore!;
-            store.readers = new IndexReaders(store.indexPath, store.options.ReadConnections);
+            store.readers = new IndexReaders(store.indexPath, store.options.ReadConnections, store.immutableIndex);
             return Task.FromResult(store);
         }
         catch { store.Abandon(); throw; }
+    }
+
+    /// <summary>
+    /// The index version for a read-only open. On read-only media SQLite can't create the -wal and -shm a WAL index needs; when no
+    /// -wal holds commits, the index is opened as immutable from then on (6.10).
+    /// </summary>
+    private int? ReadIndexVersionReadOnly()
+    {
+        try { return ObjectIndex.ReadVersion(indexPath); }
+        catch (SqliteException e) when (ObjectIndex.ReadOnlyMedia(indexPath, e)) { immutableIndex = true; }
+        return ObjectIndex.ReadVersion(indexPath, immutable: true);
     }
 
     // ---------------------------------------------------------------- reads
@@ -330,7 +345,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
     private void CheckIndexKind()
     {
         long? recorded;
-        try { recorded = ObjectIndex.ReadKind(indexPath); }
+        try { recorded = ObjectIndex.ReadKind(indexPath, immutableIndex); }
         catch (Exception e) when (e is SqliteException or OverflowException or InvalidCastException or FormatException) { return; }  // unreadable: the packs decide
         if (recorded is not { } k) return;
         if (k is < 0 or > (long)ObjectStoreKind.Generated) throw NewerFormat($"index kind {k}");

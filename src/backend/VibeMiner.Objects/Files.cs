@@ -23,6 +23,16 @@ internal static partial class DirectorySync
     }
 }
 
+/// <summary>access(2) with W_OK: false on a read-only mount (EROFS) or a folder this process may not write (EACCES). Unix only.</summary>
+internal static class FolderAccess
+{
+    [DllImport("libc", SetLastError = true, EntryPoint = "access")]
+    private static extern int Access([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int mode);
+    private const int WriteOk = 2;
+
+    public static bool CanWrite(string directory) => Access(directory, WriteOk) == 0;
+}
+
 internal static class PackFiles
 {
     public static string Name(int seq) => $"pack-{seq:D6}.vmp";
