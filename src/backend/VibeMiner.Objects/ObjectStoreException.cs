@@ -70,6 +70,7 @@ internal enum StorePoint
     AfterPackSync,        // pack synced, index batch not committed
     InsideIndexCommit,    // index transaction open, rows written, not committed
     AfterIndexCommit,     // committed, callers not yet told
+    WriteErrorCutting,    // write error: pending batch dropped, pack not yet cut back, callers not yet told
     RecoveryTruncated,    // tail truncated, recovery rows not committed
     CompactTargetListed,
     CompactCopied,        // live entries copied and synced, index not switched

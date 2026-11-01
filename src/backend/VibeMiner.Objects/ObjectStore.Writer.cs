@@ -766,16 +766,18 @@ public sealed partial class ObjectStore
 
     /// <summary>
     /// A write or index error: everything not yet committed is dropped (its callers get the error) and the pack is cut back to its
-    /// last commit. If that cut fails too, the store stops writing until it's reopened.
+    /// last commit. If that cut fails too, the store stops writing until it's reopened. Callers hear of the error only after the
+    /// cut: a failed Put leaves the pack as it was at the last commit.
     /// </summary>
     private void Recover(Exception e, Request? current)
     {
         var error = Error(e);
         var owners = pending.Select(p => p.Owner).Append(current).Where(o => o is not null).Distinct().ToList();
         pending.Clear(); pendingKeys.Clear(); pendingBytes = 0;
-        foreach (var o in owners) o!.Done.TrySetException(error);
+        At(StorePoint.WriteErrorCutting);
         try { if (active is not null) { RandomAccess.SetLength(active, committedLength); RandomAccess.FlushToDisk(active); } activeLength = committedLength; }
         catch (Exception cut) when (cut is IOException or UnauthorizedAccessException) { Fail(error); }
+        foreach (var o in owners) o!.Done.TrySetException(error);
     }
 
     private void Fail(ObjectStoreException error)

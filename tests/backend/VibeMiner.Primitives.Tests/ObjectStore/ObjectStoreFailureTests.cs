@@ -41,6 +41,34 @@ public sealed class ObjectStoreFailureTests
         }
     }
 
+    [Fact]
+    public async Task AFailedPutIsToldOnlyAfterThePackIsCutBack()
+    {
+        // Regression (#184): the caller was failed before the cut, so on a slow runner it saw the uncut pack. The hook holds the
+        // writer where the cut starts until the caller has seen its error and measured the pack. Told first, the caller measures
+        // the uncut pack; told after the cut, it can't be told while the writer is held, so the hold ends at its bound.
+        using var t = new TempDirectory();
+        var dir = StoreDir(t);
+        var armed = 0;
+        using var measured = new ManualResetEventSlim(false);
+        var options = Quick with
+        {
+            Fault = p =>
+            {
+                if (p == StorePoint.InsideIndexCommit && Interlocked.Exchange(ref armed, 0) == 1) throw new IOException("injected", 5);
+                if (p == StorePoint.WriteErrorCutting) measured.Wait(TimeSpan.FromSeconds(1));
+            },
+        };
+        await using var store = await ObjectStore.OpenAsync(dir, options);
+        await store.PutAsync([Synthetic.Headerless(1, 3000)]);
+        var length = new FileInfo(PackFiles(dir).Single()).Length;
+        Volatile.Write(ref armed, 1);
+        await Assert.ThrowsAsync<ObjectStoreException>(() => store.PutAsync([Synthetic.Headerless(2, 3000)]));
+        var seen = new FileInfo(PackFiles(dir).Single()).Length;
+        measured.Set();
+        Assert.Equal(length, seen);
+    }
+
     /// <summary>Holds the writer at its next EntryStarted until released, so the test can queue work behind it.</summary>
     private sealed class Gate : IDisposable
     {

@@ -317,7 +317,7 @@ A table's digest is the XOR of its row values (0 for an empty table). It is upda
 
 Only now are the objects visible to Has and Read, and their Puts complete.
 
-**On a write or SQLite error,** every pending caller fails (`OBJECT_STORE_WRITE_FAILED`, or `OBJECT_STORE_DISK_FULL`) and the pack is cut back to `committed_length` and synced. If that cut fails too, the writer stops until the store is reopened.
+**On a write or SQLite error,** every pending caller fails (`OBJECT_STORE_WRITE_FAILED`, or `OBJECT_STORE_DISK_FULL`) and the pack is cut back to `committed_length` and synced. Callers hear of the error only after the cut, so a failed Put never sees the pack longer than its last commit. If that cut fails too, the writer stops until the store is reopened.
 
 ### 6.2 Pack roll
 
