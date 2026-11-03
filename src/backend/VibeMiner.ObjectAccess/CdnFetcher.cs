@@ -27,6 +27,9 @@ internal interface IFetchSink
     ValueTask<ObjectResult?> AlreadyHaveAsync(ObjectKey key, CancellationToken cancellationToken);
 }
 
+/// <summary>A sink whose live member demand and indexed presence must be rechecked after resource admission.</summary>
+internal interface IAdmissionRecheckingSink : IFetchSink { }
+
 /// <summary>A streamed fetch broke after bytes reached the sink and another host is left: restage and fetch again.</summary>
 internal sealed class StreamBrokeException(CdnException failure) : Exception(failure.Message, failure)
 {
@@ -195,7 +198,7 @@ internal sealed partial class CdnFetcher
     /// caller is already fetching is awaited, not fetched twice; if that caller is canceled, this one fetches it itself.
     /// </summary>
     public async Task<ObjectResult[]> FetchAsync(IReadOnlyList<ObjectRequest> requests, CdnContext context, FetchPriority priority,
-        IFetchSink sink, IProgress<ObjectProgress>? progress, CancellationToken cancellationToken)
+        IFetchSink sink, IProgress<ObjectProgress>? progress, CancellationToken cancellationToken, IReadOnlySet<ObjectKey>? excluded = null)
     {
         var results = new ObjectResult?[requests.Count];
         var index = new Dictionary<ObjectKey, int>();
@@ -212,7 +215,7 @@ internal sealed partial class CdnFetcher
         for (var round = 0; pending.Count > 0; round++)
         {
             var joined = new List<(ObjectKey Key, Task<ObjectResult> Task)>();
-            var work = Plan(pending.Select(i => requests[i]).ToArray(), context, priority, Finish, joined);
+            var work = Plan(pending.Select(i => requests[i]).ToArray(), context, priority, Finish, joined, excluded);
             await RunAsync(work, context, priority, sink, Finish, bytes => Interlocked.Add(ref cdnBytes, bytes), joined, cancellationToken).ConfigureAwait(false);
             pending.Clear();
             foreach (var (key, task) in joined)
@@ -225,7 +228,7 @@ internal sealed partial class CdnFetcher
     }
 
     private List<Work> Plan(IReadOnlyList<ObjectRequest> requests, CdnContext context, FetchPriority priority,
-        Action<ObjectKey, ObjectResult> finish, List<(ObjectKey, Task<ObjectResult>)> joined)
+        Action<ObjectKey, ObjectResult> finish, List<(ObjectKey, Task<ObjectResult>)> joined, IReadOnlySet<ObjectKey>? excluded)
     {
         var work = new List<Work>();
         foreach (var group in requests.GroupBy(r => r.Order).OrderBy(g => g.Key))
@@ -235,6 +238,14 @@ internal sealed partial class CdnFetcher
             var loose = new List<ObjectRequest>();
             foreach (var r in group)
             {
+                if (excluded?.Contains(r.Key) == true)
+                {
+                    finish(r.Key, new(r.Key, ObjectState.StoreFailed, Code: "LIBRARY_ACQUISITION_MEMBER_DEFERRED"));
+                    // Keep its advertised interval solely as a hole, so Runs can cut around another flight's member.
+                    if (r.Locations is { Count: > 0 } excludedLocations && r.Key.Type == ObjectKeyType.Encoded && r.DeclaredLength is not < 1 && excludedLocations.All(l => l.Size <= options.InMemoryObjectBytes))
+                        planned.Add(new(CdnKeyOf(r.Key), r.DeclaredLength, excludedLocations));
+                    continue;
+                }
                 if (Join(r.Key, priority) is { } running)
                 {
                     joined.Add((r.Key, running));
@@ -418,6 +429,32 @@ internal sealed partial class CdnFetcher
         var (lease, units) = await AdmitAsync(ticket, shrunk.Length, cancellationToken).ConfigureAwait(false);
         try
         {
+            if (sink is IAdmissionRecheckingSink)
+            {
+                // A scheduler or byte-budget wait can outlive consumers or a concurrent store commit. Only the admitted
+                // producer can make this last check; planning-time checks cannot establish which intervals are still needed.
+                var changed = false;
+                foreach (var member in kept)
+                {
+                    var request = members[member.EKey];
+                    ObjectResult? have;
+                    try { have = await sink.AlreadyHaveAsync(request.Key, cancellationToken).ConfigureAwait(false); }
+                    catch (ObjectStoreException ex) { have = new(request.Key, ObjectState.StoreFailed, Code: ex.Code, Message: ex.Message); }
+                    if (have is null) continue;
+                    settle(member.EKey, have); members.Remove(member.EKey); changed = true;
+                }
+                if (changed)
+                {
+                    // Replan with the original member intervals so removed interior members remain holes. Release both
+                    // resources before readmission; this did no HTTP and must not count as an adaptive stream success.
+                    lease.Dispose(); lease = null!; units.Release();
+                    if (range.Members.Any(member => members.ContainsKey(member.EKey)))
+                        await RangeAsync(range, members, Streams.NewTicket(ticket), context, sink, settle, transferred,
+                            cancellationToken, badHost, badCode).ConfigureAwait(false);
+                    // Every restart removes at least one member, so even continuing departures bound this by member count.
+                    return;
+                }
+            }
             CdnFailure? outcome = null;
             try
             {

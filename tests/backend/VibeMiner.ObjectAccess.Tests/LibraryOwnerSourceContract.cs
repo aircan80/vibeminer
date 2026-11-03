@@ -15,6 +15,9 @@ public abstract class LibraryOwnerSourceContract : IAsyncLifetime
     protected abstract int FetchCount { get; }
     protected abstract void BeforeFetch(Func<CancellationToken, Task> wait);
     protected abstract void BeforeFetchKey(Func<CdnKey, CancellationToken, Task> wait);
+    protected abstract Task SeedArchiveAsync(CdnKey key, byte[] bytes);
+    protected abstract void BeforeArchive(Func<CancellationToken, Task> wait);
+    protected abstract IReadOnlyList<(CdnKey Key, long Offset, long Length)> ArchiveRequests { get; }
     protected abstract Task CloseAsync();
     protected abstract Task SeedAsync(PutObject item, bool stored, ObjectOrigin origin = ObjectOrigin.Cdn);
     protected abstract Task<bool> OwnsAsync(string owner, LibraryOwnerScope scope, string producer, ObjectKey key, LibraryObjectRole role = LibraryObjectRole.Original);
@@ -107,6 +110,51 @@ public abstract class LibraryOwnerSourceContract : IAsyncLifetime
             Assert.False(await OwnsAsync("a", LibraryOwnerScope.Build, "source", key)); Assert.False(await OwnsAsync("b", LibraryOwnerScope.Build, "source", key));
         }
         finally { release.TrySetResult(); await first; }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MergedArchiveGroupsRetainOnlyRequestedMembersAndCutAroundCommittedMembers(bool committedMiddle)
+    {
+        var items = Enumerable.Range(22780, 4).Select(seed => Synthetic.Headerless(seed, 2000)).ToArray(); var archive = new Scenario().Archive(22780, items);
+        await SeedArchiveAsync(archive.Key, archive.Bytes); if (committedMiddle) await SeedAsync(items[1], true, ObjectOrigin.SharedStore);
+        await using var a = Service.ForOwner("a", LibraryOwnerScope.Build, "archive");
+        var requests = committedMiddle ? items.Take(3).Select(item => archive.Request(item)).ToArray() : new[] { archive.Request(items[2]), archive.Request(items[0]), archive.Request(items[2]) };
+        var results = await a.GetKeysAsync(requests, new(Context.Route, [archive.Key]), FetchPriority.Background, null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(requests.Select(request => request.Key), results.Select(result => result.Key)); Assert.All(results, result => Assert.True(result.IsPresent));
+        if (committedMiddle)
+        {
+            Assert.Equal([(0L, 2000L), (4000L, 2000L)], ArchiveRequests.OrderBy(request => request.Offset).Select(request => (request.Offset, request.Length)));
+            Assert.Equal(ObjectOrigin.SharedStore, results[1].Origin); Assert.Equal(ServedFrom.Store, results[1].ServedFrom);
+        }
+        else
+        {
+            Assert.Equal((archive.Key, 0L, 6000L), Assert.Single(ArchiveRequests)); Assert.Equal([false], await a.HasKeysAsync([items[1].Key], CancellationToken.None));
+            Assert.False(await OwnsAsync("a", LibraryOwnerScope.Build, "archive", items[1].Key));
+        }
+        Assert.Equal([false], await a.HasKeysAsync([items[3].Key], CancellationToken.None));
+        foreach (var request in requests) Assert.True(await OwnsAsync("a", LibraryOwnerScope.Build, "archive", request.Key));
+    }
+
+    [Fact]
+    public async Task CancelingAnArchiveBatchLeavesOnlyTheIndependentlyJoinedMembersLive()
+    {
+        var items = Enumerable.Range(22790, 3).Select(seed => Synthetic.Headerless(seed, 2000)).ToArray(); var archive = new Scenario().Archive(22790, items); await SeedArchiveAsync(archive.Key, archive.Bytes);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var networkCanceled = false;
+        BeforeArchive(async ct => { entered.TrySetResult(); try { await release.Task.WaitAsync(ct); } catch (OperationCanceledException) { networkCanceled = true; throw; } });
+        await using var a = Service.ForOwner("a", LibraryOwnerScope.Build, "archive"); await using var b = Service.ForOwner("b", LibraryOwnerScope.Build, "archive"); using var cancel = new CancellationTokenSource();
+        var batch = a.GetKeysAsync(items.Select(item => archive.Request(item)).ToArray(), new(Context.Route, [archive.Key]), FetchPriority.Background, null, cancel.Token);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); var survivor = b.GetKeyAsync(archive.Request(items[2]), new(Context.Route, [archive.Key]), FetchPriority.Interactive, CancellationToken.None);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10)); while (JoinedConsumers != 1) await Task.Delay(5, deadline.Token);
+            cancel.Cancel(); await Assert.ThrowsAnyAsync<OperationCanceledException>(() => batch).WaitAsync(TimeSpan.FromSeconds(10)); Assert.False(networkCanceled); Assert.False(survivor.IsCompleted);
+            release.TrySetResult(); var result = await survivor.WaitAsync(TimeSpan.FromSeconds(10)); Assert.True(result.IsPresent); Assert.Equal(ServedFrom.Store, result.ServedFrom); Assert.Equal(ObjectOrigin.Cdn, result.Origin);
+            foreach (var item in items) Assert.False(await OwnsAsync("a", LibraryOwnerScope.Build, "archive", item.Key));
+            Assert.True(await OwnsAsync("b", LibraryOwnerScope.Build, "archive", items[2].Key)); Assert.Equal([false, false, true], await b.HasKeysAsync(items.Select(item => item.Key).ToArray(), CancellationToken.None)); Assert.Single(ArchiveRequests);
+        }
+        finally { release.TrySetResult(); }
     }
 
     [Fact]

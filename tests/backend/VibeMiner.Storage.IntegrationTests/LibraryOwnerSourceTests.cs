@@ -15,6 +15,9 @@ public sealed class LibraryOwnerSourceContractOnRealLibrary : LibraryOwnerSource
     protected override int FetchCount => cdn.Requests.Count;
     protected override void BeforeFetch(Func<CancellationToken, Task> wait) => cdn.BeforeAnswer = (_, ct) => wait(ct);
     protected override void BeforeFetchKey(Func<CdnKey, CancellationToken, Task> wait) => cdn.BeforeAnswer = (request, ct) => wait(request.Key, ct);
+    protected override Task SeedArchiveAsync(CdnKey key, byte[] bytes) { cdn.Add(CdnObjectKind.Data, key, bytes); return Task.CompletedTask; }
+    protected override void BeforeArchive(Func<CancellationToken, Task> wait) => cdn.BeforeAnswer = (_, ct) => wait(ct);
+    protected override IReadOnlyList<(CdnKey Key, long Offset, long Length)> ArchiveRequests => cdn.Requests.Where(request => request.Offset is not null).Select(request => (request.Key, request.Offset!.Value, request.Length!.Value)).ToArray();
     protected override async Task OpenAsync()
     { library = await ObjectStore.OpenLibraryAsync(directory, new() { CommitDelay = TimeSpan.FromMilliseconds(5) }); service = new(library, new ScriptedCdnClient(cdn)); }
     protected override async Task CloseAsync() { await service.DisposeAsync(); await library.DisposeAsync(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }

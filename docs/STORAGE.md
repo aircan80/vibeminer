@@ -472,3 +472,6 @@ Issue #225 adds bounded generic inventory source descriptors committed atomicall
 
 
 Issue #226 adds explicit owner-bound consumers over one shared library acquisition service. Successful cache/transfer/batch/range results acquire captured Original ownership, while pure presence remains read-only. Live-owner handoff, independent cancellation, priority promotion and shared physical commit events preserve the existing layer boundaries. Known damage is refused without deleting library data; source evidence never invents an uncontacted route. [Library acquisition](LIBRARY-ACQUISITION.md) defines bounds, provenance, lifetime and the per-key batching limitation tracked in #227. Current app/profile composition remains separate.
+
+
+Issue #227 adds bounded owner-aware archive grouping to that same service. Qualified adjacent members can share one HTTP range while retaining independent demand, owner handoff and attribution. Committed/pending members cut plans, gap bytes are never published, every published member requires verified bytes, and actual wire progress is counted once. Retryable merged failures may recover complete members through independently verified individual requests. The [library acquisition contract](LIBRARY-ACQUISITION.md#owner-aware-merged-archive-batches) records the group/lifetime boundaries; app adoption remains separate.

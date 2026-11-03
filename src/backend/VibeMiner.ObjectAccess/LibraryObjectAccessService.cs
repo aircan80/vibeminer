@@ -5,7 +5,7 @@ namespace VibeMiner.ObjectAccess;
 
 /// <summary>
 /// Isolated owner-bound acquisition over one borrowed library. Per-key flights retain consumers independently; all physical
-/// transfers use one fetcher, scheduler, host ranking and byte budget. Cross-key merged HTTP planning remains the legacy source's path.
+/// transfers use one fetcher, scheduler, host ranking and byte budget. Qualified archive batches reuse bounded merged HTTP planning while retaining each member's live consumers.
 /// </summary>
 public sealed partial class LibraryObjectAccessService : ILibraryObjectAccess, ILibraryDamagePolicy
 {
@@ -35,8 +35,11 @@ public sealed partial class LibraryObjectAccessService : ILibraryObjectAccess, I
         if (this.limits.MaxViews is < 1 or > 32 || this.limits.MaxOperations is < 1 or > 64 || this.limits.MaxBatch is < 1 or > 1024 ||
             this.limits.MaxFlights is < 1 or > 128 || this.limits.MaxKnownDamage is < 1 or > 1024 ||
             this.limits.MaxConsumersPerFlight is < 1 or > 32 || this.limits.MaxSubscriptions is < 1 or > 64 ||
-            this.limits.MaxSubscriptionCapacity is < 1 or > 1024 || this.limits.MaxStageRetargets is < 1 or > 32 ||
-            this.options.InMemoryObjectBytes is < 1 or > (64L << 20) || this.options.InFlightBytes < 1 || this.options.InteractiveInFlightBytes < 1 || this.options.Time is null)
+            this.limits.MaxSubscriptionCapacity is < 1 or > 1024 || this.limits.MaxGroups is < 1 or > 8 ||
+            this.limits.MaxGroupMembers is < 1 or > 64 || this.limits.MaxStageRetargets is < 1 or > 32 ||
+            this.options.InMemoryObjectBytes is < 1 or > (64L << 20) || this.options.InFlightBytes < 1 || this.options.InteractiveInFlightBytes < 1 || this.options.Time is null || this.options.Ranges is null ||
+            this.options.Ranges.TargetBytes < 1 || this.options.Ranges.CapBytes < this.options.Ranges.TargetBytes ||
+            this.options.Ranges.CapBytes > (64L << 20) || this.options.Ranges.GapBytes < 0 || this.options.Ranges.GapBytes > this.options.Ranges.CapBytes)
             throw new ArgumentException("Library acquisition limits are invalid.");
         fetcher = new(cdn, ObjectVerification.Default, this.options, interactiveCdn, OnClaimed);
     }
@@ -162,6 +165,7 @@ public sealed partial class LibraryObjectAccessService : ILibraryObjectAccess, I
         public long CdnBytes;
         public bool StagingOpened;
         public ObjectOrigin StagingOrigin;
+        public TransferGroup? Group;
     }
     private async Task<ObjectResult> EnsureAsync(View view, ObjectRequest request, CdnContext? cdn, FetchPriority priority, CancellationToken ct, Action<long>? transferred = null, RequestedRange? range = null)
     {
@@ -193,37 +197,28 @@ public sealed partial class LibraryObjectAccessService : ILibraryObjectAccess, I
                 try { await flight.Done.Task.WaitAsync(ct).ConfigureAwait(false); } catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
                 continue;
             }
-            try
-            {
-                var result = await flight.Done.Task.WaitAsync(ct).ConfigureAwait(false);
-                if (start) transferred?.Invoke(Interlocked.Read(ref flight.CdnBytes));
-                if (!start)
-                {
-                    if (result.IsPresent) return result with { ServedFrom = ServedFrom.Store, Bytes = null };
-                    if ((result.State is ObjectState.NotFound or ObjectState.Unavailable or ObjectState.Refused or ObjectState.Unsupported) &&
-                        result.Code is not (LibraryObjectAccessCodes.Corrupt or LibraryObjectAccessCodes.Lost or LibraryObjectAccessCodes.DamageLimit) &&
-                        !SameSource(flight, request, cdn))
-                        return new(request.Key, ObjectState.Unavailable, Code: LibraryObjectAccessCodes.ContextUntried,
-                            Message: "The joined request failed under another captured source context; this caller's route was not contacted.");
-                }
-                return result;
-            }
-            finally
-            {
-                var final = false;
-                lock (gate)
-                {
-                    flight.Consumers.Remove(consumer);
-                    if (flight.Consumers.Count == 0 && !flight.Done.Task.IsCompleted)
-                    {
-                        flight.Retiring = true;
-                        if (!flight.Finishing) flight.Canceling ??= flight.Stop.CancelAsync();
-                        final = true;
-                    }
-                }
-                if (final) { try { await flight.Done.Task.ConfigureAwait(false); } catch (OperationCanceledException) { } }
-            }
+            return await AwaitConsumerAsync(flight, consumer, start, request, cdn, ct, transferred).ConfigureAwait(false);
         }
+    }
+    private async Task<ObjectResult> AwaitConsumerAsync(Flight flight, Consumer consumer, bool start, ObjectRequest request,
+        CdnContext? cdn, CancellationToken ct, Action<long>? transferred = null)
+    {
+        try
+        {
+            var result = await flight.Done.Task.WaitAsync(ct).ConfigureAwait(false);
+            if (start) transferred?.Invoke(Interlocked.Read(ref flight.CdnBytes));
+            if (!start)
+            {
+                if (result.IsPresent) return result with { ServedFrom = ServedFrom.Store, Bytes = null };
+                if ((result.State is ObjectState.NotFound or ObjectState.Unavailable or ObjectState.Refused or ObjectState.Unsupported) &&
+                    result.Code is not (LibraryObjectAccessCodes.Corrupt or LibraryObjectAccessCodes.Lost or LibraryObjectAccessCodes.DamageLimit) &&
+                    !SameSource(flight, request, cdn))
+                    return new(request.Key, ObjectState.Unavailable, Code: LibraryObjectAccessCodes.ContextUntried,
+                        Message: "The joined request failed under another captured source context; this caller's route was not contacted.");
+            }
+            return result;
+        }
+        finally { await DetachConsumerAsync(flight, consumer).ConfigureAwait(false); }
     }
     private static bool SameSource(Flight flight, ObjectRequest request, CdnContext? cdn)
     {
@@ -318,17 +313,32 @@ public sealed partial class LibraryObjectAccessService : ILibraryObjectAccess, I
             ct.ThrowIfCancellationRequested();
             var end = start + 1;
             while (end < unique.Count && requests[unique[end]].Order == requests[unique[start]].Order) end++;
-            var next = start - 1; var groupEnd = end;
-            // Complete the lower-order group before admitting any higher-order key. Results still occupy their original
-            // input slots, and a duplicate's first occurrence determines the request and its scheduling group.
-            await Task.WhenAll(Enumerable.Range(0, Math.Min(8, end - start)).Select(_ => Task.Run(async () =>
+            // Preserve an explicit barrier between Order groups. Each archive window reserves only bounded members;
+            // loose requests keep the existing individual-flight path and share the same scheduler and budgets.
+            var archive = unique.GetRange(start, end - start).Where(i => requests[i].Key.Type == ObjectKeyType.Encoded &&
+                requests[i].Key.Namespace == 0 && requests[i].DeclaredLength is not < 1 &&
+                requests[i].Locations is { Count: > 0 } locations && locations.All(l => l.Size <= options.InMemoryObjectBytes)).ToArray();
+            var window = Math.Min(limits.MaxGroupMembers, limits.MaxFlights);
+            for (var at = 0; at < archive.Length; at += window)
+            {
+                ct.ThrowIfCancellationRequested();
+                var slots = archive.Skip(at).Take(window).ToArray();
+                var acquired = await EnsureGroupAsync(view, slots.Select(i => requests[i]).ToArray(), cdn, priority, ct,
+                    bytes => Interlocked.Add(ref cdnBytes, bytes)).ConfigureAwait(false);
+                for (var n = 0; n < slots.Length; n++)
+                    results[slots[n]] = await CheckedAsync(requests[slots[n]], acquired[n], ct).ConfigureAwait(false);
+            }
+            var loose = unique.GetRange(start, end - start).Where(i => results[i] is null).ToArray();
+            var next = -1;
+            await Task.WhenAll(Enumerable.Range(0, Math.Min(Math.Min(8, limits.MaxFlights), loose.Length)).Select(async _ =>
             {
                 int at;
-                while ((at = Interlocked.Increment(ref next)) < groupEnd)
+                while ((at = Interlocked.Increment(ref next)) < loose.Length)
                 {
-                    var i = unique[at]; results[i] = await CheckedAsync(requests[i], await EnsureAsync(view, requests[i], cdn, priority, ct, bytes => Interlocked.Add(ref cdnBytes, bytes)).ConfigureAwait(false), ct).ConfigureAwait(false);
+                    var i = loose[at]; results[i] = await CheckedAsync(requests[i], await EnsureAsync(view, requests[i], cdn, priority, ct,
+                        bytes => Interlocked.Add(ref cdnBytes, bytes)).ConfigureAwait(false), ct).ConfigureAwait(false);
                 }
-            }, CancellationToken.None))).ConfigureAwait(false);
+            })).ConfigureAwait(false);
             start = end;
         }
         for (var i = 0; i < results.Length; i++)

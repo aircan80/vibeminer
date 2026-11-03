@@ -19,6 +19,9 @@ public sealed record LibraryObjectAccessOptions
     public int MaxConsumersPerFlight { get; init; } = 32;
     public int MaxSubscriptions { get; init; } = 64;
     public int MaxSubscriptionCapacity { get; init; } = 1024;
+    public int MaxGroups { get; init; } = 8;
+    public int MaxGroupMembers { get; init; } = 64;
+    internal Action<LibraryGroupPoint>? Fault { get; init; }
     public int MaxStageRetargets { get; init; } = 4;
 }
 public static class LibraryObjectAccessCodes
@@ -36,3 +39,5 @@ internal interface ILibraryDamagePolicy
     ObjectResult? Known(ObjectKey key);
     ObjectResult Mark(ObjectKey key, ReadState state, string? problem);
 }
+
+internal enum LibraryGroupPoint { BeforeAdmission }

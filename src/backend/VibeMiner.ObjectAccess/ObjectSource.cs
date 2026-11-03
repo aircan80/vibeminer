@@ -40,6 +40,8 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
         this.fetcher = fetcher; libraryDamage = damage; this.commits = commits; observations = new([]); sink = new(this);
     }
 
+    internal IFetchSink SharedSink => sink;
+
     /// <summary>The shared streams, so callers and tests can see the background limit and what is in use.</summary>
     public StreamScheduler Streams => fetcher.Streams;
     internal CdnFetcher Fetcher => fetcher;
@@ -249,30 +251,34 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
         }
     }
 
+    internal static async Task<IReadOnlyList<ObjectResult>> DeliverVerifiedAsync(IObjectWriter writer, StoreCommitFeed commits,
+        IReadOnlyList<VerifiedObject> objects, ObjectOrigin origin, ServedFrom servedFrom, CancellationToken ct, bool urgent, bool withBytes)
+    {
+        IReadOnlyList<PutResult> put;
+        try
+        {
+            put = await writer.PutAsync(objects.Select(o => new PutObject(o.Request.Key, o.DeclaredLength, o.Bytes, origin)).ToArray(),
+                commitNow: urgent, ct).ConfigureAwait(false);
+        }
+        catch (ObjectStoreException ex)
+        { return objects.Select(o => new ObjectResult(o.Request.Key, ObjectState.StoreFailed, Code: ex.Code, Message: ex.Message)).ToArray(); }
+        commits.Publish(put.Where(p => p.Outcome == PutOutcome.Stored).Select(p => p.Key).ToArray(), []);
+        return objects.Select((o, i) =>
+        {
+            var result = Sink.FromPut(put[i], servedFrom, o.DeclaredLength);
+            return withBytes && result.IsPresent ? result with { Bytes = o.Bytes.ToArray() } : result;
+        }).ToArray();
+    }
+
     private sealed class Sink(ObjectSource owner) : IFetchSink
     {
         public Task<IReadOnlyList<ObjectResult>> DeliverAsync(IReadOnlyList<VerifiedObject> objects, bool urgent, CancellationToken cancellationToken) =>
             PutAsync(objects, ObjectOrigin.Cdn, ServedFrom.Cdn, cancellationToken, urgent);
 
         /// <summary>Urgent (interactive) batches commit at once; background ones join the store's group commit (D123).</summary>
-        public async Task<IReadOnlyList<ObjectResult>> PutAsync(IReadOnlyList<VerifiedObject> objects, ObjectOrigin origin, ServedFrom servedFrom,
-            CancellationToken cancellationToken, bool urgent = true)
-        {
-            IReadOnlyList<PutResult> put;
-            try
-            {
-                put = await owner.writer.PutAsync(objects.Select(o => new PutObject(o.Request.Key, o.DeclaredLength, o.Bytes, origin)).ToArray(),
-                    commitNow: urgent, cancellationToken).ConfigureAwait(false);
-            }
-            catch (ObjectStoreException ex)
-            { return objects.Select(o => new ObjectResult(o.Request.Key, ObjectState.StoreFailed, Code: ex.Code, Message: ex.Message)).ToArray(); }
-            owner.PublishStored(put);
-            return objects.Select((o, i) =>
-            {
-                var r = FromPut(put[i], servedFrom, o.DeclaredLength);
-                return r.IsPresent ? r with { Bytes = o.Bytes.ToArray() } : r;
-            }).ToArray();
-        }
+        public Task<IReadOnlyList<ObjectResult>> PutAsync(IReadOnlyList<VerifiedObject> objects, ObjectOrigin origin, ServedFrom servedFrom,
+            CancellationToken cancellationToken, bool urgent = true) =>
+            DeliverVerifiedAsync(owner.writer, owner.commits, objects, origin, servedFrom, cancellationToken, urgent, withBytes: true);
 
         internal static ObjectResult FromPut(PutResult put, ServedFrom servedFrom, long length) => put.Outcome switch
         {

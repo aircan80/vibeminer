@@ -4,7 +4,7 @@ using VibeMiner.Objects;
 namespace VibeMiner.ObjectAccess.Testing;
 
 /// <summary>Managed shared-owner acquisition model for upper tests. One transfer, scheduler and immutable claim per view.</summary>
-public sealed class InMemoryLibraryObjectAccess : ILibraryObjectAccess
+public sealed partial class InMemoryLibraryObjectAccess : ILibraryObjectAccess
 {
     private sealed record Claim(string Owner, LibraryOwnerScope Scope, string Producer);
     private sealed class Consumer(Claim claim, long? declaredLength, long minimumLength)
@@ -15,7 +15,7 @@ public sealed class InMemoryLibraryObjectAccess : ILibraryObjectAccess
         public readonly ObjectRequest Request = request; public readonly CdnContext Context = context; public readonly Claim Claim = claim;
         public readonly StreamScheduler.Ticket Ticket = ticket; public readonly CancellationTokenSource Stop = new();
         public readonly TaskCompletionSource<ObjectResult> Done = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public Task Work = Task.CompletedTask; public int Consumers;
+        public Task Work = Task.CompletedTask; public int Consumers; public ArchiveGroup? Group;
         public readonly List<Consumer> LiveConsumers = [];
     }
     private readonly object gate = new();
@@ -38,7 +38,10 @@ public sealed class InMemoryLibraryObjectAccess : ILibraryObjectAccess
         this.limits = limits ?? new(); this.options = options ?? new();
         if (this.limits.MaxViews is < 1 or > 32 || this.limits.MaxOperations is < 1 or > 64 || this.limits.MaxBatch is < 1 or > 1024 ||
             this.limits.MaxFlights is < 1 or > 128 || this.limits.MaxKnownDamage is < 1 or > 1024 || this.limits.MaxConsumersPerFlight is < 1 or > 32 ||
+            this.limits.MaxGroups is < 1 or > 8 || this.limits.MaxGroupMembers is < 1 or > 64 ||
             this.limits.MaxSubscriptions is < 1 or > 64 || this.limits.MaxSubscriptionCapacity is < 1 or > 1024 || this.limits.MaxStageRetargets is < 1 or > 32 ||
+            this.options.Ranges.CapBytes > (64L << 20) || this.options.Ranges.TargetBytes < 1 || this.options.Ranges.CapBytes < this.options.Ranges.TargetBytes ||
+            this.options.Ranges.GapBytes < 0 || this.options.Ranges.GapBytes > this.options.Ranges.CapBytes ||
             this.options.InMemoryObjectBytes is < 1 or > (64L << 20) || this.options.InFlightBytes < 1 || this.options.InteractiveInFlightBytes < 1)
             throw new ArgumentException("Invalid managed acquisition bounds.");
         Streams = new(this.options.Streams);
@@ -93,7 +96,7 @@ public sealed class InMemoryLibraryObjectAccess : ILibraryObjectAccess
             flight.Stop.Token.ThrowIfCancellationRequested(); ObjectResult result; var published = false;
             lock (gate)
             {
-                if (!available.TryGetValue(flight.Request.Key, out var bytes)) result = new(flight.Request.Key, ObjectState.NotFound, Code: "CDN_NOT_FOUND", ObservedAt: DateTimeOffset.UtcNow);
+                if (!TrySourceBytes(flight.Request, flight.Context, out var bytes)) result = new(flight.Request.Key, ObjectState.NotFound, Code: "CDN_NOT_FOUND", ObservedAt: DateTimeOffset.UtcNow);
                 else if (flight.Request.DeclaredLength is { } length && length != bytes.Length) result = new(flight.Request.Key, ObjectState.Refused, Code: ObjectRefusalCodes.SizeMismatch);
                 else if (ObjectVerification.Default.Check(flight.Request.Key, bytes, flight.Request.DeclaredLength ?? bytes.Length) is { } refusal)
                     result = new(flight.Request.Key, ObjectState.Refused, Code: refusal.Code, Message: refusal.Message);
@@ -144,7 +147,7 @@ public sealed class InMemoryLibraryObjectAccess : ILibraryObjectAccess
                     var created = new Flight(request with { Locations = request.Locations?.ToArray() }, captured, claim, Streams.NewTicket(priority));
                     flight = created; flights.Add(request.Key, created); created.Work = Task.Run(() => ProduceAsync(created));
                 }
-                else { joined = true; Interlocked.Increment(ref joins); }
+                else if (flight.Consumers > 0 || flight.Group is null || flight.Group.Claim != claim) { joined = true; Interlocked.Increment(ref joins); }
                 if (flight.Consumers >= limits.MaxConsumersPerFlight) return new(request.Key, ObjectState.StoreFailed, Code: LibraryObjectAccessCodes.Busy);
                 if (request.DeclaredLength is { } expected && flight.Request.DeclaredLength is { } declared && expected != declared)
                     return new(request.Key, ObjectState.Refused, Code: ObjectRefusalCodes.SizeMismatch);
@@ -164,9 +167,10 @@ public sealed class InMemoryLibraryObjectAccess : ILibraryObjectAccess
             finally
             {
                 var stop = false; lock (gate) { flight.Consumers--; flight.LiveConsumers.Remove(consumer); stop = flight.Consumers == 0 && !flight.Done.Task.IsCompleted; }
-                if (stop) { try { await flight.Stop.CancelAsync(); } catch (Exception) { } await flight.Work; }
+                if (stop) await StopFlightAsync(flight);
             }
         }
+        if (flight?.Group is { } retiredGroup) await retiredGroup.Retired.Task;
         if (result!.IsPresent)
         {
             if (request.DeclaredLength is { } expected && expected != result.Length) return new(request.Key, ObjectState.Refused, Code: ObjectRefusalCodes.SizeMismatch);
@@ -213,16 +217,27 @@ public sealed class InMemoryLibraryObjectAccess : ILibraryObjectAccess
             var frozen = requests.Select(Freeze).ToArray(); var context = Freeze(cdn);
             return Run<IReadOnlyList<ObjectResult>>(async ct =>
         {
-            var unique = new Dictionary<ObjectKey, ObjectResult>(); var results = new ObjectResult[frozen.Length];
-            foreach (var request in frozen.DistinctBy(request => request.Key).OrderBy(request => request.Order))
-                if (!unique.ContainsKey(request.Key)) unique[request.Key] = await owner.GetAsync(claim, request, context, priority, false, ct);
+            var unique = new Dictionary<ObjectKey, ObjectResult>(); var results = new ObjectResult[frozen.Length]; long transferred = 0;
+            foreach (var order in frozen.DistinctBy(request => request.Key).GroupBy(request => request.Order).OrderBy(group => group.Key))
+            {
+                foreach (var requestsInGroup in order.Chunk(owner.limits.MaxGroupMembers))
+                {
+                    if (owner.BeforeArchiveAdmission is { } admission) await admission(ct);
+                    ct.ThrowIfCancellationRequested(); ArchiveGroup[] groups;
+                    lock (owner.gate) groups = owner.PrepareArchiveGroups(claim, requestsInGroup, context, priority);
+                    var pending = requestsInGroup.Select(async request => (request.Key, Result: await owner.GetPreparedBatchAsync(claim, request, context, priority, ct))).ToArray();
+                    foreach (var group in groups) _ = Task.Run(() => owner.ProduceArchiveAsync(group));
+                    foreach (var (key, result) in await Task.WhenAll(pending)) unique[key] = result;
+                    transferred += groups.Sum(group => group.Transferred);
+                }
+            }
             for (var i = 0; i < frozen.Length; i++)
             {
                 var result = unique[frozen[i].Key];
                 if (result.IsPresent && frozen[i].DeclaredLength is { } declared && declared != result.Length) result = new(frozen[i].Key, ObjectState.Refused, Code: ObjectRefusalCodes.SizeMismatch);
                 results[i] = result with { Bytes = null };
             }
-            progress?.Report(new(results.LongLength, results.LongLength, 0)); return results;
+            progress?.Report(new(results.LongLength, results.LongLength, transferred)); return results;
         }, cancellationToken);
         }
         public Task<ObjectResult> GetRangeAsync(ObjectRequest request, long offset, Memory<byte> destination, CdnContext? cdn, FetchPriority priority, CancellationToken cancellationToken)

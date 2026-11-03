@@ -32,6 +32,18 @@ View disposal rejects new calls and retires its accepted consumers and subscript
 
 Default/hard admission limits are 32 views, 64 operations, 1024 keys per batch, 128 physical flights, 32 consumers per flight, 1024 known-damage entries, and 64 subscriptions with capacity at most 1024 each. Staging retargets default to four, capped at 32. Request snapshots bound locations at 64, hosts at 16 and archives at 8192. Batch workers and the existing HTTP/staging byte budgets bound execution; options may lower the admission limits.
 
+## Owner-aware merged archive batches
+
+Issue #227 extends the same service with bounded archive groups. Qualified adjacent members use the existing CdnFetcher planner, range validation, scheduler and byte budgets. Loose or unsuitable requests retain the bounded individual path. Lower Order groups finish before higher groups are admitted, and results retain input positions and duplicate semantics.
+
+Groups reserve individual member consumers before scheduling. Stored, already-pending and abandoned members are rechecked at admission; retained location metadata lets the planner cut around excluded members. Receiving gap bytes is not permission to publish an unrequested object. A merged response must pass its range/length checks, and every published member must pass its own key check.
+
+The synthetic integration fixture requests two members around an unrequested middle member in one HTTP range, publishes only the requested keys and counts the range bytes once. Retryable merged failures retain the existing individual retry policy: a truncated archive can still yield independently verified complete members, while the truncated member remains absent.
+
+Each member retains independent owner/cancellation state. A departure removes only that member's demand; network cancellation occurs only when no live group demand remains. Interactive joins promote existing work. Publication chooses each member's actual live, valid captured owner and attributes surviving consumers before success. Group and member retirement precede shutdown resource release.
+
+Group wire-byte progress is charged once, including actual transferred gaps, rather than copied into every member's logical total. Joined routes, stored Origin, untried-context failures and first-committed bytes retain the #226 evidence rules. Group limits add at most eight groups and 64 members per group; admission also respects remaining flight capacity and existing bounded range bytes.
+
 ## Remaining S10 work
 
-The isolated owner path uses bounded per-key batches. Cross-key merged archive planning is tracked in #227 and must be demonstrated before bulk/app adoption. Existing legacy merging is not evidence that the new owner path already provides it. Automatic scheduling, current profile cutover, import mapping, generated raw staging, cleanup/GC and retention/source-policy changes are outside this slice.
+Both individual and qualified merged archive acquisition are explicit headless services. Current app/bulk adoption remains separate; request-count and cancellation evidence for this path comes from #227, rather than legacy planner results. Automatic scheduling, current profile cutover, import mapping, generated raw staging, cleanup/GC and retention/source-policy changes are outside this slice.

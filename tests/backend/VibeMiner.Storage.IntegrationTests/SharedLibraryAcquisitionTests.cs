@@ -8,7 +8,7 @@ using Xunit;
 
 namespace VibeMiner.Storage.IntegrationTests;
 
-public sealed class SharedLibraryAcquisitionTests
+public sealed partial class SharedLibraryAcquisitionTests
 {
     private static readonly CdnContext RouteA = new(new CdnRoute(["level3.blizzard.com"], "tpr/wow"));
     private static readonly CdnContext RouteB = new(new CdnRoute(["us.cdn.blizzard.com"], "tpr/wow"));
