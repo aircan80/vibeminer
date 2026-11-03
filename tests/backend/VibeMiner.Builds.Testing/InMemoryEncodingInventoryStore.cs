@@ -2,7 +2,7 @@ using VibeMiner.Cdn;
 
 namespace VibeMiner.Builds.Testing;
 
-public sealed record InMemoryEncodingInventorySnapshot(long Generation, EncodingInventoryContext Context, IReadOnlyList<CdnKey> Keys);
+public sealed record InMemoryEncodingInventorySnapshot(long Generation, EncodingInventoryContext Context, IReadOnlyList<CdnKey> Keys, EncodingInventorySourceDescriptor? Descriptor = null);
 
 /// <summary>Independent generation/fencing model for publisher tests and upper consumers; no SQL, files or payloads.</summary>
 public sealed class InMemoryEncodingInventoryStore : IEncodingInventoryStore
@@ -12,15 +12,35 @@ public sealed class InMemoryEncodingInventoryStore : IEncodingInventoryStore
     private readonly Dictionary<string, InMemoryEncodingInventorySnapshot> active = [];
     private readonly List<int> appendSizes = [];
     private long next;
-    private int begins, abandons;
+    private int begins, abandons, reuseLookups;
+    public int ReuseLookups => Volatile.Read(ref reuseLookups);
     public int BeginCalls => Volatile.Read(ref begins);
     public int AbandonCalls => Volatile.Read(ref abandons);
     public IReadOnlyList<int> AppendSizes { get { lock (gate) return appendSizes.ToArray(); } }
     public Func<EncodingInventoryContext, IReadOnlyList<CdnKey>, CancellationToken, Task>? BeforeAppend { get; set; }
     public Func<EncodingInventoryContext, CancellationToken, Task>? BeforePublish { get; set; }
+    /// <summary>Entered publication fence: validation/cancellation have finished; held work commits its real outcome.</summary>
+    public Func<EncodingInventoryContext, Task>? InsidePublication { get; set; }
+    public Func<EncodingInventoryContext, EncodingInventorySourceDescriptor, CancellationToken, Task>? BeforeReuse { get; set; }
+    public Func<EncodingInventoryContext, long?, Task>? AfterReuse { get; set; }
     /// <summary>Runs after the real in-memory commit. Cancellation while held cannot roll it back.</summary>
     public Func<EncodingInventoryContext, long, Task>? AfterPublish { get; set; }
     public InMemoryEncodingInventorySnapshot? ReadActive(string buildId) { lock (gate) return active.GetValueOrDefault(buildId); }
+    private static void SourceContext(EncodingInventoryContext context, EncodingInventorySourceDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(context); ArgumentNullException.ThrowIfNull(descriptor);
+        if (context.EncodingCKey != descriptor.EncodingCKey || context.TotalEKeys != descriptor.ExpectedEKeys)
+            throw new EncodingInventoryException(EncodingInventoryCodes.Validation, "The descriptor disagrees with the captured source context.");
+    }
+    public async Task<long?> TryReuseAsync(EncodingInventoryContext context, EncodingInventorySourceDescriptor descriptor, CancellationToken ct = default)
+    {
+        SourceContext(context, descriptor); ct.ThrowIfCancellationRequested(); Interlocked.Increment(ref reuseLookups);
+        if (BeforeReuse is { } before) await before(context, descriptor, ct); ct.ThrowIfCancellationRequested();
+        long? generation;
+        lock (gate) generation = active.TryGetValue(context.Identity.Id, out var saved) && saved.Descriptor == descriptor && saved.Keys.Count == descriptor.ExpectedEKeys ? saved.Generation : null;
+        if (AfterReuse is { } after) await after(context, generation);
+        return generation;
+    }
     public Task<IEncodingInventoryWrite> BeginAsync(EncodingInventoryContext context, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested(); ArgumentNullException.ThrowIfNull(context);
@@ -47,12 +67,24 @@ public sealed class InMemoryEncodingInventoryStore : IEncodingInventoryStore
             }
             catch { lock (store.gate) poisoned = true; throw; }
         }
-        public async Task<long> PublishAsync(CancellationToken ct = default)
+        public Task<long> PublishAsync(CancellationToken ct = default) => PublishCoreAsync(null, ct);
+        public Task<long> PublishSourceAsync(EncodingInventorySourceDescriptor descriptor, CancellationToken ct = default)
+        { SourceContext(context, descriptor); return PublishCoreAsync(descriptor, ct); }
+        private async Task<long> PublishCoreAsync(EncodingInventorySourceDescriptor? descriptor, CancellationToken ct)
         {
             try
             {
                 ct.ThrowIfCancellationRequested(); if (store.BeforePublish is { } before) await before(context, ct); ct.ThrowIfCancellationRequested();
-                lock (store.gate) { Current(); store.active[context.Identity.Id] = new(generation, context, Array.AsReadOnly(keys.ToArray())); finished = true; }
+                InMemoryEncodingInventorySnapshot committed;
+                lock (store.gate)
+                {
+                    Current();
+                    if (descriptor is not null && descriptor.ExpectedEKeys != keys.Count)
+                    { poisoned = true; throw new EncodingInventoryException(EncodingInventoryCodes.Corrupt, "Source count does not match staged keys."); }
+                    committed = new(generation, context, Array.AsReadOnly(keys.ToArray()), descriptor);
+                }
+                if (store.InsidePublication is { } inside) await inside(context);
+                lock (store.gate) { store.active[context.Identity.Id] = committed; finished = true; }
                 if (store.AfterPublish is { } after) await after(context, generation);
                 return generation;
             }
@@ -74,5 +106,6 @@ public sealed class InMemoryEncodingInventoryPublisher : IEncodingInventoryPubli
     { Store = store ?? new(); publisher = new(Store, options); }
     public InMemoryEncodingInventoryStore Store { get; }
     public EncodingInventoryPublication Start(BuildIdentity identity, IBuild opened, CancellationToken ct = default) => publisher.Start(identity, opened, ct);
+    public EncodingInventoryPublication StartReuse(BuildIdentity identity, IBuild opened, CancellationToken ct = default) => publisher.StartReuse(identity, opened, ct);
     public ValueTask DisposeAsync() => publisher.DisposeAsync();
 }

@@ -3,6 +3,7 @@ namespace VibeMiner.Objects;
 /// <summary>Named store-level failures. Per-object Put refusals and read states are results, not exceptions.</summary>
 public static class ObjectStoreCodes
 {
+    public const string InventorySourceMismatch = "OBJECT_LIBRARY_INVENTORY_SOURCE_MISMATCH";
     public const string InventoryStale = "OBJECT_LIBRARY_INVENTORY_STALE";
     public const string InventoryCursorStale = "OBJECT_LIBRARY_INVENTORY_CURSOR_STALE";
     public const string InventoryUpgradeRequired = "OBJECT_LIBRARY_INVENTORY_UPGRADE_REQUIRED";
@@ -68,6 +69,8 @@ internal sealed class SimulatedCrashException(StorePoint point) : Exception($"Si
 /// <summary>Points the fault hook can stop at. Each is a place where a real process kill can land.</summary>
 internal enum StorePoint
 {
+    InventorySourceSnapshot,     // active proof validated in a pinned read before comparison
+    InventorySourceInsidePublish, // source proof inserted in the same uncommitted generation publication
     InventoryAccountingSnapshot, // all inventory identities resolved in a pinned library-wide snapshot
     InventoryAccountingIndexRow, // one committed index row reached before independent accounting
     InventoryAccountingRow,      // one producer input row reached before library-wide deduplication

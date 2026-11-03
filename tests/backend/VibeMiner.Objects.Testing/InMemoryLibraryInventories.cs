@@ -24,6 +24,7 @@ public sealed class InMemoryLibraryInventories : IAsyncDisposable
         public readonly Identity Identity = identity;
         public readonly SortedSet<ObjectKey> Keys = [];
         public int State;
+        public LibraryInventorySourceDescriptor? Source;
     }
 
     public ILibraryInventory ForOwner(string owner, LibraryOwnerScope scope, string producer, LibraryObjectRole role)
@@ -361,6 +362,33 @@ public sealed class InMemoryLibraryInventories : IAsyncDisposable
                     return Task.CompletedTask;
                 }
                 catch { Poison(generation); throw; }
+            }
+        }
+
+        public Task PublishSourceAsync(LibraryInventoryGeneration generation, LibraryInventorySourceDescriptor descriptor, CancellationToken ct = default)
+        {
+            lock (store.gate)
+            {
+                store.EnsureOpen();
+                try
+                {
+                    var staged = Match(generation); ct.ThrowIfCancellationRequested(); ArgumentNullException.ThrowIfNull(descriptor);
+                    if (staged.Keys.Count != descriptor.ExpectedKeys)
+                        throw new ObjectStoreException(ObjectStoreCodes.InventorySourceMismatch, "The source count does not equal the complete unique inventory.");
+                    staged.Source = descriptor; staged.State = 1; identity.Active = generation.Value; return Task.CompletedTask;
+                }
+                catch { Poison(generation); throw; }
+            }
+        }
+
+        public ValueTask<long?> MatchSourceAsync(LibraryInventorySourceDescriptor descriptor, CancellationToken ct = default)
+        {
+            lock (store.gate)
+            {
+                store.EnsureOpen(); ct.ThrowIfCancellationRequested(); ArgumentNullException.ThrowIfNull(descriptor);
+                if (identity.Active is not { } active) return ValueTask.FromResult<long?>(null);
+                var generation = store.generations[active];
+                return ValueTask.FromResult<long?>(generation.State == 1 && generation.Source == descriptor && generation.Keys.Count == descriptor.ExpectedKeys ? active : null);
             }
         }
 

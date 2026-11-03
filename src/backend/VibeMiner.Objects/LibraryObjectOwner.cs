@@ -80,7 +80,7 @@ internal static class LibraryOwnership
 {
     private const string Schema = """
         CREATE TABLE library_format(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL);
-        INSERT INTO library_format VALUES(1,2);
+        INSERT INTO library_format VALUES(1,3);
         CREATE TABLE library_membership(owner TEXT NOT NULL, scope INTEGER NOT NULL CHECK(scope IN (0,1)),
             producer TEXT NOT NULL, role INTEGER NOT NULL CHECK(role IN (0,1)), k BLOB NOT NULL CHECK(length(k)=18),
             PRIMARY KEY(owner,scope,producer,role,k)) WITHOUT ROWID;
@@ -91,6 +91,7 @@ internal static class LibraryOwnership
     {
         ObjectIndex.Exec(c, Schema, tx);
         ObjectIndex.Exec(c, LibraryInventoryMetadata.Schema, tx);
+        ObjectIndex.Exec(c, LibraryInventorySourceMetadata.Schema, tx);
     }
 
     public static void Validate(string path, bool immutable = false, CancellationToken ct = default)
@@ -107,16 +108,23 @@ internal static class LibraryOwnership
             using var formatRows = c.CreateCommand(); formatRows.Transaction = snapshot;
             formatRows.CommandText = "SELECT COUNT(*) FROM library_format";
             if ((long)formatRows.ExecuteScalar()! != 1) throw new ArgumentException("Malformed library format metadata.");
-            if (found is not long v || v is < 1 or > 2)
-                throw new ObjectStoreException(found is long newer && newer > 2 ? ObjectStoreCodes.NewerFormat : ObjectStoreCodes.IndexUnreadable,
+            if (found is not long v || v is < 1 or > 3)
+                throw new ObjectStoreException(found is long newer && newer > 3 ? ObjectStoreCodes.NewerFormat : ObjectStoreCodes.IndexUnreadable,
                     "The authoritative library metadata format is unsupported or missing; it cannot be rebuilt from packs.");
-            if (v == 2) LibraryInventoryMetadata.Validate(c, snapshot, ct);
+            if (v >= 2) LibraryInventoryMetadata.Validate(c, snapshot, ct);
             else
             {
                 // A v1 library may be upgraded only from a clean absence of v2 tables, never from damaged/partially missing metadata.
                 using var leftovers = c.CreateCommand(); leftovers.Transaction = snapshot;
                 leftovers.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('library_inventory_identity','library_inventory_generation','library_inventory_key'))";
                 if ((long)leftovers.ExecuteScalar()! != 0) throw new ArgumentException("Unexpected inventory metadata in a v1 library.");
+            }
+            if (v == 3) LibraryInventorySourceMetadata.Validate(c, snapshot, ct);
+            else
+            {
+                using var proof = c.CreateCommand(); proof.Transaction = snapshot;
+                proof.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='library_inventory_source')";
+                if ((long)proof.ExecuteScalar()! != 0) throw new ArgumentException("Unexpected source proof in older library metadata.");
             }
             using var membership = c.CreateCommand();
             membership.Transaction = snapshot;

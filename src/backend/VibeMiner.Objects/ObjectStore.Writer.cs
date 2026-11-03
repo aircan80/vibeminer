@@ -146,16 +146,21 @@ public sealed partial class ObjectStore
         try
         {
             OpenWriterConnection();
-            if (Kind == ObjectStoreKind.Library && options.UpgradeLibraryInventory && LibraryInventoryMetadata.Version(wconn!) == 1)
+            if (Kind == ObjectStoreKind.Library)
             {
-                ct.ThrowIfCancellationRequested();
-                Durably(tx =>
+                var inventoryVersion = LibraryInventoryMetadata.Version(wconn!);
+                if (inventoryVersion == 1 && (options.UpgradeLibraryInventory || options.UpgradeLibraryInventorySources) || inventoryVersion == 2 && options.UpgradeLibraryInventorySources)
                 {
-                    ObjectIndex.Exec(wconn!, LibraryInventoryMetadata.Schema, tx);
-                    ObjectIndex.Exec(wconn!, "UPDATE library_format SET version=2 WHERE id=1", tx);
-                });
+                    ct.ThrowIfCancellationRequested();
+                    Durably(tx =>
+                    {
+                        if (inventoryVersion == 1) ObjectIndex.Exec(wconn!, LibraryInventoryMetadata.Schema, tx);
+                        if (options.UpgradeLibraryInventorySources) ObjectIndex.Exec(wconn!, LibraryInventorySourceMetadata.Schema, tx);
+                        ObjectIndex.Exec(wconn!, $"UPDATE library_format SET version={(options.UpgradeLibraryInventorySources ? 3 : 2)} WHERE id=1", tx);
+                    });
+                }
             }
-            if (Kind == ObjectStoreKind.Library && LibraryInventoryMetadata.Version(wconn!) == 2)
+            if (Kind == ObjectStoreKind.Library && LibraryInventoryMetadata.Version(wconn!) is 2 or 3)
             {
                 // Staging is not resumable. A failed append may have committed a prefix before its caller saw the failure,
                 // or cancellation poisoning may have lost a race to close. Fence every retained token before admitting work.

@@ -20,6 +20,7 @@ public sealed class LibraryInventoryFormatTests
         await using (var store = await ObjectStore.OpenLibraryAsync(directory, Quick)) await Owner(store).PutAsync([item], true);
         // Author a genuine S03/S04 schema: version 1 and no inventory tables. Existing payload/index rows are untouched.
         MutateIndex(directory, """
+            DROP TABLE library_inventory_source;
             DROP TABLE library_inventory_key;
             DROP TABLE library_inventory_generation;
             DROP TABLE library_inventory_identity;

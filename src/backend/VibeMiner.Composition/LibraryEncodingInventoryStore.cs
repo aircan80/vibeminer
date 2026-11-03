@@ -4,7 +4,7 @@ using VibeMiner.Objects;
 
 namespace VibeMiner.Composition;
 
-/// <summary>Explicit mixed-library binding. Borrows the library; creates no profile, acquisition, registry work or reusable source receipt.</summary>
+/// <summary>Explicit mixed-library binding. Borrows the library; creates no profile, acquisition, registry work or separately committed source receipt.</summary>
 public sealed class LibraryEncodingInventoryStore : IEncodingInventoryStore
 {
     private readonly ObjectStore library;
@@ -21,11 +21,28 @@ public sealed class LibraryEncodingInventoryStore : IEncodingInventoryStore
         {
             var inventory = library.ForOwner(context.Identity.Id, LibraryOwnerScope.Build, EncodingInventoryPublisher.Producer, LibraryObjectRole.Original).Inventory;
             var generation = await inventory.BeginAsync(ct).ConfigureAwait(false);
-            return new Write(inventory, generation);
+            return new Write(inventory, generation, context);
         }
         catch (ObjectStoreException e) { throw Map(e); }
     }
-    private sealed class Write(ILibraryInventory inventory, LibraryInventoryGeneration generation) : IEncodingInventoryWrite
+    public async Task<long?> TryReuseAsync(EncodingInventoryContext context, EncodingInventorySourceDescriptor descriptor, CancellationToken ct = default)
+    {
+        var source = Source(context, descriptor);
+        try
+        {
+            var inventory = library.ForOwner(context.Identity.Id, LibraryOwnerScope.Build, EncodingInventoryPublisher.Producer, LibraryObjectRole.Original).Inventory;
+            return await inventory.MatchSourceAsync(source, ct).ConfigureAwait(false);
+        }
+        catch (ObjectStoreException e) { throw Map(e); }
+    }
+    private static LibraryInventorySourceDescriptor Source(EncodingInventoryContext context, EncodingInventorySourceDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(context); ArgumentNullException.ThrowIfNull(descriptor);
+        if (descriptor.EncodingCKey != context.EncodingCKey || descriptor.ExpectedEKeys != context.TotalEKeys)
+            throw new EncodingInventoryException(EncodingInventoryCodes.Validation, "The reusable source descriptor disagrees with the opened context.");
+        return new(descriptor.Format, descriptor.Revision, Convert.ToHexStringLower(descriptor.EncodingCKey.ToBytes()), descriptor.ExpectedEKeys);
+    }
+    private sealed class Write(ILibraryInventory inventory, LibraryInventoryGeneration generation, EncodingInventoryContext context) : IEncodingInventoryWrite
     {
         private bool finished;
         public async Task AppendAsync(IReadOnlyList<CdnKey> keys, CancellationToken ct = default)
@@ -48,6 +65,33 @@ public sealed class LibraryEncodingInventoryStore : IEncodingInventoryStore
             try { await inventory.PublishAsync(generation, ct).ConfigureAwait(false); finished = true; return generation.Value; }
             catch (ObjectStoreException e) { throw Map(e); }
         }
+        public async Task<long> PublishSourceAsync(EncodingInventorySourceDescriptor descriptor, CancellationToken ct = default)
+        {
+            if (finished) throw new EncodingInventoryException(EncodingInventoryCodes.Closed, "The inventory write is closed.");
+            var source = Source(context, descriptor);
+            try
+            {
+                await inventory.PublishSourceAsync(generation, source, ct).ConfigureAwait(false);
+                finished = true; return generation.Value;
+            }
+            catch (ObjectStoreException e) when (e.Code is ObjectStoreCodes.WriteFailed or ObjectStoreCodes.DiskFull)
+            {
+                // An acknowledgement can fail after the authoritative transaction committed. Only this exact generation's
+                // active, checked proof confirms our result; an older or newer matching descriptor cannot acknowledge it.
+                try
+                {
+                    if (await inventory.MatchSourceAsync(source, CancellationToken.None).ConfigureAwait(false) == generation.Value)
+                    { finished = true; return generation.Value; }
+                }
+                catch (Exception readback) when (readback is ObjectStoreException or ArgumentException)
+                {
+                    throw new EncodingInventoryException(EncodingInventoryCodes.Storage,
+                        "Source publication could not be reconciled; its outcome may be committed. Reopen and inspect the active generation.", e);
+                }
+                throw Map(e);
+            }
+            catch (ObjectStoreException e) { throw Map(e); }
+        }
         public async Task AbandonAsync(CancellationToken ct = default)
         {
             if (finished) return;
@@ -63,6 +107,7 @@ public sealed class LibraryEncodingInventoryStore : IEncodingInventoryStore
     }
     private static EncodingInventoryException Map(ObjectStoreException e) => new(e.Code switch
     {
+        ObjectStoreCodes.InventorySourceMismatch => EncodingInventoryCodes.Corrupt,
         ObjectStoreCodes.InventoryStale => EncodingInventoryCodes.Superseded,
         ObjectStoreCodes.InventoryUpgradeRequired => EncodingInventoryCodes.Unsupported,
         ObjectStoreCodes.Limit => EncodingInventoryCodes.Validation,

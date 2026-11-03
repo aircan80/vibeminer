@@ -36,7 +36,7 @@ internal static class LibraryInventoryMetadata
         var version = Version(c, tx);
         if (version == 1) throw new ObjectStoreException(ObjectStoreCodes.InventoryUpgradeRequired,
             "Expected inventories require an explicit metadata upgrade. Reopen the library with UpgradeLibraryInventory=true; preserve its index and packs.");
-        if (version != 2) throw new ObjectStoreException(version > 2 ? ObjectStoreCodes.NewerFormat : ObjectStoreCodes.IndexUnreadable,
+        if (version is not (2 or 3)) throw new ObjectStoreException(version > 3 ? ObjectStoreCodes.NewerFormat : ObjectStoreCodes.IndexUnreadable,
             "The authoritative inventory format is unsupported; preserve the library.");
     }
 

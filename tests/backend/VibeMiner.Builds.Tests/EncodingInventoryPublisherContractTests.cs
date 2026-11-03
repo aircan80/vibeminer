@@ -185,6 +185,146 @@ public abstract class EncodingInventoryPublisherContractTests
         using var canceled = new CancellationTokenSource(); canceled.Cancel();
         Assert.ThrowsAny<OperationCanceledException>(() => publisher.Start(identity, new EncodingSourceBuild(source), canceled.Token)); Assert.Equal(0, source.OpenedLeases); Assert.Equal(0, store.BeginCalls);
     }
+    [Fact]
+    public async Task ExplicitReuseHitNeedsNoLeaseOrReadAndKeepsRequestedRouteLocaleAndSourceProvenance()
+    {
+        var store = new InMemoryEncodingInventoryStore(); await using var publisher = Publisher(store); var identity = Identity();
+        var firstSource = Source(identity, 3507); var completed = await publisher.StartReuse(identity, new EncodingSourceBuild(firstSource)).Completion;
+        Assert.Equal(EncodingInventoryState.Published, completed.State); Assert.NotNull(completed.SourceDescriptor);
+        var reopenedSource = new InMemoryEncodingRows(Route(identity, "eu", 'd'), firstSource.EncodingCKey, Rows(3507));
+        reopenedSource.BeforeRead = (_, _, _) => throw new InvalidOperationException("A reuse hit must not enumerate ENCODING.");
+        var routed = new EncodingSourceBuild(reopenedSource); routed.Metadata = routed.Metadata with { Locales = ["koKR", "deDE"] };
+        var publication = publisher.StartReuse(identity, routed); var reused = await publication.Completion;
+        Assert.Equal(EncodingInventoryState.Reused, reused.State); Assert.Equal(completed.Generation, reused.Generation);
+        Assert.Equal(3507, reused.Processed); Assert.Equal("eu", reused.Context.Build.Region); Assert.Equal(routed.Build, reused.Context.Build);
+        Assert.Equal(completed.SourceDescriptor, reused.SourceDescriptor); Assert.Equal(firstSource.EncodingCKey, reused.Context.EncodingCKey);
+        Assert.Equal(new EncodingInventoryProgress(EncodingInventoryState.Reused, 3507, 3507), publication.Progress);
+        Assert.Equal(0, reopenedSource.OpenedLeases); Assert.Equal(0, reopenedSource.ReadCalls); Assert.Equal(1, store.BeginCalls);
+    }
+    [Fact]
+    public async Task FreshRequestsStayFreshAndTheirUnversionedPublicationInvalidatesOldSourceProof()
+    {
+        var store = new InMemoryEncodingInventoryStore(); await using var publisher = Publisher(store); var identity = Identity(); var source = Source(identity, 2);
+        var first = await publisher.StartReuse(identity, new EncodingSourceBuild(source)).Completion;
+        Assert.Equal(EncodingInventoryState.Published, first.State); Assert.NotNull(store.ReadActive(identity.Id)!.Descriptor);
+        var fresh = await publisher.Start(identity, new EncodingSourceBuild(source)).Completion;
+        Assert.Equal(EncodingInventoryState.Published, fresh.State); Assert.Null(fresh.SourceDescriptor); Assert.Null(store.ReadActive(identity.Id)!.Descriptor);
+        Assert.NotEqual(first.Generation, fresh.Generation);
+        var reuseMiss = await publisher.StartReuse(identity, new EncodingSourceBuild(source)).Completion;
+        Assert.Equal(EncodingInventoryState.Published, reuseMiss.State); Assert.NotEqual(fresh.Generation, reuseMiss.Generation);
+        Assert.Equal(3, store.BeginCalls);
+    }
+    [Theory]
+    [InlineData("format")]
+    [InlineData("revision")]
+    [InlineData("ckey")]
+    [InlineData("count")]
+    [InlineData("missing")]
+    public async Task EachMissingOrChangedSourceDescriptorTakesTheCompleteFreshPath(string mismatch)
+    {
+        var store = new InMemoryEncodingInventoryStore(); await using var publisher = Publisher(store); var identity = Identity();
+        var context = Context(count: 2); await using var seeded = await store.BeginAsync(context); await seeded.AppendAsync([Key(1), Key(2)]);
+        if (mismatch == "missing") await seeded.PublishAsync();
+        else await seeded.PublishSourceAsync(new(mismatch == "format" ? "older-format" : EncodingInventoryPublisher.SourceFormat,
+            mismatch == "revision" ? "older-revision" : EncodingInventoryPublisher.SourceRevision, context.EncodingCKey, 2));
+        var source = mismatch == "ckey" ? new InMemoryEncodingRows(Route(identity), Key(999_999), Rows(2)) : Source(identity, mismatch == "count" ? 3 : 2);
+        var old = store.ReadActive(identity.Id)!.Generation; var result = await publisher.StartReuse(identity, new EncodingSourceBuild(source)).Completion;
+        Assert.Equal(EncodingInventoryState.Published, result.State); Assert.NotEqual(old, result.Generation); Assert.Equal(1, source.OpenedLeases);
+        Assert.Equal(source.EncodedCount, result.Processed); Assert.Equal(source.EncodingCKey, result.SourceDescriptor!.EncodingCKey);
+    }
+    [Fact]
+    public async Task FailedRefreshKeepsPriorSourceProofAndTheNextMatchingRequestCanReuseIt()
+    {
+        var store = new InMemoryEncodingInventoryStore(); await using var publisher = Publisher(store); var identity = Identity(); var source = Source(identity, 2);
+        var previous = await publisher.StartReuse(identity, new EncodingSourceBuild(source)).Completion;
+        var changed = new InMemoryEncodingRows(Route(identity), Key(999_999), Rows(2000));
+        changed.BeforeRead = (after, _, _) => after is null ? ValueTask.CompletedTask : throw new EncodingInventoryException(EncodingInventoryCodes.Corrupt, "authored refresh corruption");
+        var failed = await publisher.StartReuse(identity, new EncodingSourceBuild(changed)).Completion; Assert.Equal(EncodingInventoryState.Failed, failed.State);
+        Assert.Equal(previous.Generation, store.ReadActive(identity.Id)!.Generation); Assert.Equal(previous.SourceDescriptor, store.ReadActive(identity.Id)!.Descriptor);
+        var noRead = Source(identity, 2); noRead.BeforeRead = (_, _, _) => throw new InvalidOperationException("Expected reuse.");
+        Assert.Equal(EncodingInventoryState.Reused, (await publisher.StartReuse(identity, new EncodingSourceBuild(noRead)).Completion).State); Assert.Equal(0, noRead.OpenedLeases);
+    }
+    [Fact]
+    public async Task SupersessionAfterMatchButBeforeAcceptanceCannotCompleteAnOlderHitAsCurrentWork()
+    {
+        var store = new InMemoryEncodingInventoryStore(); await using var publisher = Publisher(store); var identity = Identity();
+        await publisher.StartReuse(identity, new EncodingSourceBuild(Source(identity, 2))).Completion;
+        var matched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var unblock = new ReleaseSignal(release); store.AfterReuse = async (_, generation) => { if (generation is not null) { matched.TrySetResult(); await release.Task; } };
+        var oldSource = Source(identity, 2); var older = publisher.StartReuse(identity, new EncodingSourceBuild(oldSource));
+        await matched.Task.WaitAsync(TimeSpan.FromSeconds(10)); var newer = publisher.Start(identity, new EncodingSourceBuild(Source(identity, 1, 5000)));
+        release.TrySetResult(); var old = await older.Completion.WaitAsync(TimeSpan.FromSeconds(10)); var current = await newer.Completion;
+        Assert.Equal(EncodingInventoryState.Superseded, old.State); Assert.Null(old.Generation); Assert.Equal(0, oldSource.OpenedLeases);
+        Assert.Equal(EncodingInventoryState.Published, current.State); Assert.Equal(current.Generation, store.ReadActive(identity.Id)!.Generation); Assert.Null(store.ReadActive(identity.Id)!.Descriptor);
+    }
+    [Fact]
+    public async Task CancellationAndCloseWhileMatchingDrainAcceptedReuseWithoutOpeningASource()
+    {
+        var store = new InMemoryEncodingInventoryStore(); var publisher = Publisher(store); var identity = Identity();
+        await publisher.StartReuse(identity, new EncodingSourceBuild(Source(identity, 2))).Completion;
+        var matched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        store.AfterReuse = async (_, _) => { matched.TrySetResult(); await release.Task; };
+        var source = Source(identity, 2); var reuse = publisher.StartReuse(identity, new EncodingSourceBuild(source));
+        try
+        {
+            await matched.Task.WaitAsync(TimeSpan.FromSeconds(10)); var closing = publisher.DisposeAsync().AsTask(); Assert.False(closing.IsCompleted);
+            Assert.Equal(EncodingInventoryCodes.Closed, Assert.Throws<EncodingInventoryException>(() => publisher.StartReuse(identity, new EncodingSourceBuild(source))).Code);
+            release.TrySetResult(); await closing.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(EncodingInventoryState.Canceled, (await reuse.Completion).State); Assert.Equal(0, source.OpenedLeases);
+        }
+        finally { release.TrySetResult(); await publisher.DisposeAsync(); }
+    }
+
+    [Fact]
+    public async Task EmptyCompletedInventoryCanBeReusedAndPreCanceledReuseDoesNoLookupOrLease()
+    {
+        var store = new InMemoryEncodingInventoryStore(); await using var publisher = Publisher(store); var identity = Identity(); var empty = Source(identity, 0);
+        var first = await publisher.StartReuse(identity, new EncodingSourceBuild(empty)).Completion; Assert.Equal(EncodingInventoryState.Published, first.State);
+        var noRead = Source(identity, 0); var reused = await publisher.StartReuse(identity, new EncodingSourceBuild(noRead)).Completion;
+        Assert.Equal(EncodingInventoryState.Reused, reused.State); Assert.Equal(first.Generation, reused.Generation); Assert.Equal(0, reused.Processed); Assert.Equal(0, noRead.OpenedLeases);
+        using var canceled = new CancellationTokenSource(); canceled.Cancel(); var lookups = store.ReuseLookups;
+        Assert.ThrowsAny<OperationCanceledException>(() => publisher.StartReuse(identity, new EncodingSourceBuild(noRead), canceled.Token));
+        Assert.Equal(lookups, store.ReuseLookups); Assert.Equal(0, noRead.OpenedLeases);
+    }
+
+    [Fact]
+    public void NewSourceDescriptorTextRequiresExactUtf8WithoutLoneSurrogates()
+    {
+        foreach (var invalid in new[] { "\ud800", "\udc00" })
+        {
+            Assert.Equal(EncodingInventoryCodes.Validation, Assert.Throws<EncodingInventoryException>(() => new EncodingInventorySourceDescriptor(invalid, "revision", Key(1), 1)).Code);
+            Assert.Equal(EncodingInventoryCodes.Validation, Assert.Throws<EncodingInventoryException>(() => new EncodingInventorySourceDescriptor("format", invalid, Key(1), 1)).Code);
+        }
+    }
+
+    [Fact]
+    public async Task NewestReuseWaitsForAnOlderEnteredPublicationAndThenRestoresItsOwnSource()
+    {
+        var store = new InMemoryEncodingInventoryStore(); await using var publisher = Publisher(store, new() { MaxConcurrent = 2, MaxAdmitted = 16 });
+        var identity = Identity(); var a = Source(identity, 2);
+        var seed = await publisher.StartReuse(identity, new EncodingSourceBuild(a)).Completion; Assert.Equal(EncodingInventoryState.Published, seed.State);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var unblock = new ReleaseSignal(release); var bKey = Key(999_999);
+        store.InsidePublication = async context =>
+        {
+            if (context.EncodingCKey != bKey) return;
+            entered.TrySetResult(); await release.Task;
+        };
+        var b = new InMemoryEncodingRows(Route(identity), bKey, Rows(3, 100));
+        var older = publisher.StartReuse(identity, new EncodingSourceBuild(b)); await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var newestSource = Source(identity, 2); var newest = publisher.StartReuse(identity, new EncodingSourceBuild(newestSource));
+        var unrelatedIdentity = Identity(2); var unrelated = publisher.StartReuse(unrelatedIdentity, new EncodingSourceBuild(Source(unrelatedIdentity, 1, 5000)));
+        Assert.Equal(EncodingInventoryState.Published, (await unrelated.Completion.WaitAsync(TimeSpan.FromSeconds(10))).State);
+        Assert.False(newest.Completion.IsCompleted);
+        Assert.Equal(seed.Generation, store.ReadActive(identity.Id)!.Generation);
+        release.TrySetResult(); var retired = await older.Completion.WaitAsync(TimeSpan.FromSeconds(10)); var restored = await newest.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(EncodingInventoryState.Published, retired.State); Assert.NotNull(retired.Generation);
+        Assert.Equal(EncodingInventoryState.Published, restored.State); Assert.NotEqual(retired.Generation, restored.Generation);
+        Assert.Equal(1, newestSource.OpenedLeases); Assert.Equal(0, newestSource.ActiveLeases); Assert.Equal(0, b.ActiveLeases);
+        var active = store.ReadActive(identity.Id)!; Assert.Equal(restored.Generation, active.Generation); Assert.Equal(a.EncodingCKey, active.Descriptor!.EncodingCKey);
+        Assert.Equal(Rows(2).Select(row => row.EKey), active.Keys);
+    }
+
     private sealed class ReleaseSignal(TaskCompletionSource signal) : IDisposable
     { public void Dispose() => signal.TrySetResult(); }
     private sealed class WithoutRows(EncodingSourceBuild build) : IBuild

@@ -35,24 +35,50 @@ public sealed record EncodingInventoryContext
         Build = build; EncodingCKey = encodingCKey; TotalEKeys = totalEKeys;
     }
 }
+/// <summary>Versioned ENCODING source provenance. Only explicit reuse requests publish this descriptor.</summary>
+public sealed record EncodingInventorySourceDescriptor
+{
+    public string Format { get; }
+    public string Revision { get; }
+    public CdnKey EncodingCKey { get; }
+    public long ExpectedEKeys { get; }
+    public EncodingInventorySourceDescriptor(string format, string revision, CdnKey encodingCKey, long expectedEKeys)
+    {
+        try
+        {
+            var utf8 = new System.Text.UTF8Encoding(false, true);
+            if (string.IsNullOrWhiteSpace(format) || format.Contains('\0') || utf8.GetByteCount(format) > 64 ||
+                string.IsNullOrWhiteSpace(revision) || revision.Contains('\0') || utf8.GetByteCount(revision) > 128 || expectedEKeys < 0)
+                throw new EncodingInventoryException(EncodingInventoryCodes.Validation, "The ENCODING source descriptor is invalid.");
+        }
+        catch (System.Text.EncoderFallbackException e)
+        { throw new EncodingInventoryException(EncodingInventoryCodes.Validation, "The ENCODING source descriptor has malformed Unicode.", e); }
+        Format = format; Revision = revision; EncodingCKey = encodingCKey; ExpectedEKeys = expectedEKeys;
+    }
+    internal static EncodingInventorySourceDescriptor For(EncodingInventoryContext context) =>
+        new(EncodingInventoryPublisher.SourceFormat, EncodingInventoryPublisher.SourceRevision, context.EncodingCKey, context.TotalEKeys);
+}
 public interface IEncodingInventoryStore
 {
+    Task<long?> TryReuseAsync(EncodingInventoryContext context, EncodingInventorySourceDescriptor descriptor, CancellationToken ct = default);
     Task<IEncodingInventoryWrite> BeginAsync(EncodingInventoryContext context, CancellationToken ct = default);
 }
 public interface IEncodingInventoryWrite : IAsyncDisposable
 {
     Task AppendAsync(IReadOnlyList<CdnKey> keys, CancellationToken ct = default);
     Task<long> PublishAsync(CancellationToken ct = default);
+    Task<long> PublishSourceAsync(EncodingInventorySourceDescriptor descriptor, CancellationToken ct = default);
     Task AbandonAsync(CancellationToken ct = default);
 }
 public interface IEncodingInventoryPublisher : IAsyncDisposable
 {
     EncodingInventoryPublication Start(BuildIdentity identity, IBuild opened, CancellationToken ct = default);
+    EncodingInventoryPublication StartReuse(BuildIdentity identity, IBuild opened, CancellationToken ct = default);
 }
-public enum EncodingInventoryState { Queued, Running, Published, Canceled, Superseded, Failed }
+public enum EncodingInventoryState { Queued, Running, Published, Reused, Canceled, Superseded, Failed }
 public sealed record EncodingInventoryProgress(EncodingInventoryState State, long Processed, long Total);
 public sealed record EncodingInventoryResult(EncodingInventoryContext Context, EncodingInventoryState State, long Processed,
-    long? Generation, string? Code = null, string? Message = null);
+    long? Generation, string? Code = null, string? Message = null, EncodingInventorySourceDescriptor? SourceDescriptor = null);
 public sealed class EncodingInventoryPublication
 {
     private readonly TaskCompletionSource<EncodingInventoryResult> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -80,4 +106,4 @@ public sealed record EncodingInventoryPublisherOptions
     public int MaxAdmitted { get; init; } = 16;
     internal Action<EncodingInventoryPoint>? Fault { get; init; }
 }
-internal enum EncodingInventoryPoint { BeforeReadPage, AfterAppend, BeforePublish, AfterPublish }
+internal enum EncodingInventoryPoint { BeforeReuse, AfterReuse, BeforeReadPage, AfterAppend, BeforePublish, AfterPublish }

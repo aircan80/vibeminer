@@ -37,6 +37,18 @@ internal sealed class LibraryInventory(ObjectStore store, LibraryClaim claim) : 
         }
     }
 
+    public async Task PublishSourceAsync(LibraryInventoryGeneration generation, LibraryInventorySourceDescriptor descriptor, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(generation); ArgumentNullException.ThrowIfNull(descriptor);
+        try { await store.PublishInventoryAsync(claim, generation, ct, descriptor); }
+        catch (OperationCanceledException) { await store.PoisonInventoryAsync(claim, generation); throw; }
+    }
+    public ValueTask<long?> MatchSourceAsync(LibraryInventorySourceDescriptor descriptor, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        return store.MatchInventorySourceAsync(claim, descriptor, ct);
+    }
+
     public Task AbandonAsync(LibraryInventoryGeneration generation, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(generation);
@@ -155,7 +167,7 @@ public sealed partial class ObjectStore
         return Task.FromResult(true);
     }, ct);
 
-    internal Task PublishInventoryAsync(LibraryClaim claim, LibraryInventoryGeneration generation, CancellationToken ct) => MaintainAsync(() =>
+    internal Task PublishInventoryAsync(LibraryClaim claim, LibraryInventoryGeneration generation, CancellationToken ct, LibraryInventorySourceDescriptor? descriptor = null) => MaintainAsync(() =>
     {
         LibraryInventoryMetadata.Require(wconn!);
         try
@@ -165,6 +177,11 @@ public sealed partial class ObjectStore
             Durably(tx =>
             {
                 RequireInventoryStage(claim, generation, tx);
+                if (descriptor is not null)
+                {
+                    LibraryInventorySourceMetadata.Insert(wconn!, tx, claim, generation.Value, descriptor);
+                    At(StorePoint.InventorySourceInsidePublish);
+                }
                 using var cmd = LibraryInventoryMetadata.Command(wconn!, tx, claim, """
                     UPDATE library_inventory_generation SET state=1 WHERE id=$g;
                     UPDATE library_inventory_identity SET active=$g WHERE owner=$o AND scope=$s AND producer=$p AND role=$r;
@@ -174,6 +191,7 @@ public sealed partial class ObjectStore
             });
         }
         catch (OperationCanceledException) { PoisonInventoryStage(claim, generation); throw; }
+        catch (ObjectStoreException e) when (e.Code == ObjectStoreCodes.InventorySourceMismatch) { PoisonInventoryStage(claim, generation); throw; }
         At(StorePoint.InventoryPublished);
         return Task.FromResult(true);
     }, ct);

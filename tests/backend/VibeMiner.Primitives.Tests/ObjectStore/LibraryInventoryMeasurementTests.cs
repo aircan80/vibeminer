@@ -226,6 +226,7 @@ public sealed class LibraryInventoryMeasurementTests
         var directory = DirectoryPath(temp);
         await using (var library = await ObjectStore.OpenLibraryAsync(directory, Quick)) { }
         MutateIndex(directory, """
+            DROP TABLE library_inventory_source;
             DROP TABLE library_inventory_key;
             DROP TABLE library_inventory_generation;
             DROP TABLE library_inventory_identity;

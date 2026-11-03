@@ -76,6 +76,8 @@ public sealed record ObjectStoreOptions
     public ObjectStoreKind Kind { get; init; } = ObjectStoreKind.Cdn;
     /// <summary>Explicitly upgrade a validated mixed library's v1 metadata to v2 expected inventories. Other store kinds are unchanged.</summary>
     public bool UpgradeLibraryInventory { get; init; }
+    /// <summary>Explicitly upgrade validated v1/v2 authoritative metadata to v3 atomic inventory source proof.</summary>
+    public bool UpgradeLibraryInventorySources { get; init; }
     public long MaxPackBytes { get; init; } = 2L << 30;
     public int CommitObjects { get; init; } = 128;
     public long CommitBytes { get; init; } = 16L << 20;

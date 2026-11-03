@@ -18,10 +18,20 @@ Each explicit request starts a fresh generation. Failed refresh, cancellation, s
 
 ## Resources and lifecycle
 
-The publisher bounds active work at two and admitted work at sixteen; options can lower these limits. Declared encoded counts must be between zero and 50 million. Full admission fails explicitly. Each publication exposes a completion task and bounded latest-only progress with processed/total EKeys; it does not queue callbacks or retain an unbounded progress history. Results distinguish Published, Canceled, Superseded and Failed and retain their exact context.
+The publisher bounds active work at two and admitted work at sixteen; options can lower these limits. Declared encoded counts must be between zero and 50 million. Full admission fails explicitly. Each publication exposes a completion task and bounded latest-only progress with processed/total EKeys; it does not queue callbacks or retain an unbounded progress history. Results distinguish Published, Reused, Canceled, Superseded and Failed and retain their exact context. Explicit reuse results also carry their bounded source descriptor.
 
 New work for a canonical build supersedes older work. Completion waits for source, write and cancellation cleanup. Cancellation callbacks run outside publisher locks, with at most one observed cancellation task per admitted request; a callback failure cannot discard a replacement request’s handle. Shutdown rejects new requests and drains accepted work without closing the borrowed mixed library or unrelated consumers. Progress reports ENCODING key work only, never downloaded bytes or full-build readiness.
 
+## Explicit completed-source reuse
+
+Issue #225 adds `StartReuse` without changing the fresh `Start` path. Its descriptor uses format `encoding-ekeys-source-v1`, revision `encoding-ekeys-r1`, the exact ENCODING CKey and expected EKey count. Composition maps it to the generic source descriptor for the same canonical Build/Original/encoding producer. Descriptor, generation completion and active pointer commit together; no separate cache receipt is written.
+
+A matching active descriptor returns Reused with the actual generation before opening a source lease or enumerating rows. Missing proof or changed CKey/revision/count publishes a new complete generation with its descriptor. Route and locale differences do not invalidate an all-locale ENCODING inventory for the same canonical owner/source. Older inventory metadata requires the explicit source-format upgrade; it is never silently migrated by the publisher.
+
+Before matching, reuse drains all older still-live requests for the same canonical build. This wait is bounded by admitted requests and holds neither a worker permit nor the coordinator/Begin gate; unrelated builds can proceed. An older entered commit reports its real result before the newer request decides whether its source still matches. The match has a read-snapshot linearization point. Cancellation and the latest-request fence reject a superseded response before accepting it; a later independent publication may replace a generation already returned. If publication acknowledgement fails, the adapter may reconcile only an active matching descriptor whose generation equals its own attempted generation. Another matching generation cannot confirm that attempt.
+
+[Object-store section 17](formats/object-store-v1.md#17-atomic-inventory-source-descriptors-225) defines generic bounds, checksum and refusal. Reuse says nothing about current payload verification, complete producer discovery or physical retention.
+
 ## Remaining B03 scope
 
-This slice provides explicit fresh publication. Completed-source-version reuse after reopen is deferred: the source identity would need to be committed atomically with its generation before it could justify skipping work. No separate receipt, schema widening, automatic scheduling, app cutover, preservation/import, retention policy or garbage collection is introduced.
+This slice provides explicit fresh publication. Fresh publication and explicit completed-source reuse are available headlessly. Automatic inventory scheduling, preparation composition and app adoption remain separate. No separate receipt, preservation/import, retention policy or garbage collection is introduced.

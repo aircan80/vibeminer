@@ -138,10 +138,12 @@ public sealed class EncodingInventoryCompositionTests : IDisposable
         private int commits;
         private readonly TaskCompletionSource committedSignal = committed;
         private readonly TaskCompletionSource releaseSignal = release;
+        public Task<long?> TryReuseAsync(EncodingInventoryContext context, EncodingInventorySourceDescriptor descriptor, CancellationToken ct = default) => inner.TryReuseAsync(context, descriptor, ct);
         public async Task<IEncodingInventoryWrite> BeginAsync(EncodingInventoryContext context, CancellationToken ct = default) => new Write(this, await inner.BeginAsync(context, ct));
         private sealed class Write(HeldCommittedStore owner, IEncodingInventoryWrite inner) : IEncodingInventoryWrite
         {
             public Task AppendAsync(IReadOnlyList<CdnKey> keys, CancellationToken ct = default) => inner.AppendAsync(keys, ct);
+            public Task<long> PublishSourceAsync(EncodingInventorySourceDescriptor descriptor, CancellationToken ct = default) => inner.PublishSourceAsync(descriptor, ct);
             public async Task<long> PublishAsync(CancellationToken ct = default)
             {
                 var generation = await inner.PublishAsync(ct);

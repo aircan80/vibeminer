@@ -11,6 +11,8 @@ public interface ILibraryInventory
     Task<LibraryInventoryGeneration> BeginAsync(CancellationToken ct = default);
     Task AppendAsync(LibraryInventoryGeneration generation, IReadOnlyList<ObjectKey> keys, CancellationToken ct = default);
     Task PublishAsync(LibraryInventoryGeneration generation, CancellationToken ct = default);
+    Task PublishSourceAsync(LibraryInventoryGeneration generation, LibraryInventorySourceDescriptor descriptor, CancellationToken ct = default);
+    ValueTask<long?> MatchSourceAsync(LibraryInventorySourceDescriptor descriptor, CancellationToken ct = default);
     Task AbandonAsync(LibraryInventoryGeneration generation, CancellationToken ct = default);
     ValueTask<LibraryInventoryLookup> LookupAsync(ObjectKey key, CancellationToken ct = default);
     /// <summary>
