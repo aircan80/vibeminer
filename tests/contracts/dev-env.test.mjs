@@ -12,7 +12,9 @@ const skip = process.platform === 'win32' ? 'tools/dev-env.sh is a bash and zsh 
 const which = tool => execFileSync('bash', ['-c', `command -v ${tool} || true`], { encoding: 'utf8' }).trim();
 const zsh = skip ? '' : which('zsh');
 const systemPath = skip ? [] : [...new Set([path.dirname(which('git')), '/usr/bin', '/bin'])];
-const nodeBin = '.local/toolchains/node-v24.22.0-linux-x64/bin';
+const hostCpu = skip ? '' : execFileSync('uname', ['-m'], { encoding: 'utf8' }).trim();
+const nodeArch = ['aarch64', 'arm64'].includes(hostCpu) ? 'arm64' : 'x64';
+const nodeBin = `.local/toolchains/node-v24.22.0-linux-${nodeArch}/bin`;
 const dotnetRoot = '.local/toolchains/dotnet';
 
 function env(base, extra = {}) {
