@@ -152,6 +152,13 @@ public abstract class ObjectStoreContractTests : IAsyncLifetime
     public async Task StagingResumesFromTheLastProvenChunkAndRefusesABadOne() =>
         await ObjectStagingContract.AssertChunkResumeAsync(Reader, Writer);
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task FinishedStagingSessionsCannotAbandonNewerResumableBytes(int terminal) =>
+        await ObjectStagingContract.AssertFinishedSessionCannotAbandonNewerAsync(Reader, Writer, Writer, Writer, terminal);
+
     [Fact]
     public async Task TheHistoryLogReadsBackFilteredOldestFirstAndPaged()
     {

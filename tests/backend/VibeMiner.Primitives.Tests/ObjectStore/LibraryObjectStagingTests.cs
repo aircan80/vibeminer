@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using VibeMiner.Objects;
 using VibeMiner.Objects.Testing;
 using Xunit;
@@ -20,6 +21,20 @@ public sealed class LibraryObjectStagingTests
         await ObjectStagingContract.AssertChunkResumeAsync(library, owner);
         Assert.True(await owner.OwnsAsync(Synthetic.Chunked(1, Enumerable.Repeat(65_536, 6).ToArray()).Key));
         Assert.True(await owner.OwnsAsync(Synthetic.Headerless(9, 1000).Key));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task FinishedOwnerStagingCannotDeleteAnotherOwnersSessionOrPublishedPayload(int terminal)
+    {
+        using var temp = new TempDirectory();
+        await using var library = await ObjectStore.OpenLibraryAsync(Folder(temp), Quick);
+        var a = Owner(library); var b = Owner(library, "build-b"); var c = Owner(library, "build-c");
+        var key = await ObjectStagingContract.AssertFinishedSessionCannotAbandonNewerAsync(library, a, b, c, terminal);
+        Assert.Equal(terminal == 2, await a.OwnsAsync(key));
+        Assert.False(await b.OwnsAsync(key)); Assert.True(await c.OwnsAsync(key));
     }
 
     [Fact]
@@ -243,6 +258,90 @@ public sealed class LibraryObjectStagingTests
         finally { release.Set(); await committing; await library.DisposeAsync(); }
         await using var reopened = await ObjectStore.OpenLibraryAsync(directory, Quick);
         Assert.True(await Owner(reopened).OwnsAsync(item.Key)); Assert.Equal(item.Bytes.ToArray(), (await reopened.ReadAsync(item.Key)).Bytes);
+    }
+
+    [Fact]
+    public async Task LateCommittedStagingCleanupAfterLibraryCloseCannotDeleteANewStoresSession()
+    {
+        using var temp = new TempDirectory(); var directory = Folder(temp);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var armed = false;
+        var options = Quick with { Fault = point =>
+        {
+            if (!armed || point != StorePoint.InsideIndexCommit) return;
+            entered.TrySetResult();
+            if (!release.Wait(TimeSpan.FromSeconds(15))) throw new TimeoutException("Late cleanup test was not released.");
+        } };
+        var item = Synthetic.Chunked(2299, 65_536, 65_536, 65_536);
+        var oldStore = await ObjectStore.OpenLibraryAsync(directory, options);
+        var staging = await Owner(oldStore).StageAsync(item.Key, item.DeclaredLength);
+        await staging.AppendAsync(item.Bytes); armed = true;
+        var context = new QueuedCommitContext();
+        Task<PutResult> committing;
+        var previous = SynchronizationContext.Current;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+            committing = staging.CommitAsync();
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(previous); }
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var closing = oldStore.DisposeAsync().AsTask();
+            release.Set();
+            await context.Posted.WaitAsync(TimeSpan.FromSeconds(10));
+            await closing.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(committing.IsCompleted);
+            await using var reopened = await ObjectStore.OpenLibraryAsync(directory, Quick);
+            var b = Owner(reopened, "build-b");
+            // A's physically committed staging file may remain until its held continuation runs.
+            // B owns this current session and may abandon it before starting fresh bytes.
+            await using (var inherited = await b.StageAsync(item.Key, item.DeclaredLength)) await inherited.AbandonAsync();
+            const int header = 12 + 24 * 3;
+            await using (var fresh = await b.StageAsync(item.Key, item.DeclaredLength))
+            {
+                await fresh.AppendAsync(item.Bytes[..(header + 2 * 65_536 + 73)]);
+                await context.PumpUntilAsync(committing);
+                Assert.Equal(PutOutcome.Stored, (await committing).Outcome);
+            }
+            var c = Owner(reopened, "build-c");
+            await using var resumed = await c.StageAsync(item.Key, item.DeclaredLength);
+            Assert.Equal(header + 2 * 65_536, resumed.Length);
+            await resumed.AppendAsync(item.Bytes[(int)resumed.Length..]);
+            Assert.Equal(PutOutcome.AlreadyPresent, (await resumed.CommitAsync()).Outcome);
+            Assert.True(await Owner(reopened).OwnsAsync(item.Key)); Assert.False(await b.OwnsAsync(item.Key)); Assert.True(await c.OwnsAsync(item.Key));
+            Assert.Equal(item.Bytes.ToArray(), (await reopened.ReadAsync(item.Key)).Bytes);
+        }
+        finally
+        {
+            release.Set(); await oldStore.DisposeAsync();
+            await context.PumpUntilAsync(committing);
+        }
+    }
+
+    private sealed class QueuedCommitContext : SynchronizationContext
+    {
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> callbacks = new();
+        private readonly SemaphoreSlim available = new(0);
+        private readonly TaskCompletionSource posted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Posted => posted.Task;
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            callbacks.Enqueue((callback, state)); available.Release(); posted.TrySetResult();
+        }
+        public async Task PumpUntilAsync(Task task)
+        {
+            while (!task.IsCompleted)
+            {
+                if (!await available.WaitAsync(TimeSpan.FromSeconds(10))) throw new TimeoutException("Held commit continuation did not complete.");
+                if (!callbacks.TryDequeue(out var next)) throw new InvalidOperationException("Queued context lost a callback.");
+                var previous = Current;
+                try { SetSynchronizationContext(this); next.Callback(next.State); }
+                finally { SetSynchronizationContext(previous); }
+            }
+        }
     }
 
     [Theory]

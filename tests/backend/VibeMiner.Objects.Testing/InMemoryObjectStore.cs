@@ -205,16 +205,28 @@ public sealed class InMemoryObjectStore : IObjectReader, IObjectWriter, IHistory
             if (broken || Length != DeclaredLength) throw new InvalidOperationException("Only a complete, unrefused staging can be committed.");
             finished = true;
             owner.staged.TryRemove(Key, out _);
-            if (check.Complete() is { } refusal) return Task.FromResult(new PutResult(Key, PutOutcome.Refused, refusal.Code, refusal.Message));
-            lock (owner.writes)
+            try
             {
-                if (owner.objects.ContainsKey(Key)) return Task.FromResult(new PutResult(Key, PutOutcome.AlreadyPresent));
-                owner.objects[Key] = new(bytes.ToArray(), origin, owner.time.GetUtcNow());
+                if (check.Complete() is { } refusal) return Task.FromResult(new PutResult(Key, PutOutcome.Refused, refusal.Code, refusal.Message));
+                lock (owner.writes)
+                {
+                    if (owner.objects.ContainsKey(Key)) return Task.FromResult(new PutResult(Key, PutOutcome.AlreadyPresent));
+                    owner.objects[Key] = new(bytes.ToArray(), origin, owner.time.GetUtcNow());
+                }
+                return Task.FromResult(new PutResult(Key, PutOutcome.Stored));
             }
-            return Task.FromResult(new PutResult(Key, PutOutcome.Stored));
+            finally { check.Dispose(); }
         }
 
-        public ValueTask AbandonAsync() { finished = true; owner.staged.TryRemove(Key, out _); check.Dispose(); return ValueTask.CompletedTask; }
-        public ValueTask DisposeAsync() { finished = true; check.Dispose(); return ValueTask.CompletedTask; }
+        public ValueTask AbandonAsync()
+        {
+            if (finished) return ValueTask.CompletedTask;
+            finished = true; owner.staged.TryRemove(Key, out _); check.Dispose(); return ValueTask.CompletedTask;
+        }
+        public ValueTask DisposeAsync()
+        {
+            if (finished) return ValueTask.CompletedTask;
+            finished = true; check.Dispose(); return ValueTask.CompletedTask;
+        }
     }
 }

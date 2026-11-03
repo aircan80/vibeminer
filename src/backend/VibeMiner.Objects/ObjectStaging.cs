@@ -62,20 +62,24 @@ internal sealed class ObjectStaging : IObjectStaging
         try
         {
             var result = await store.CommitStagedAsync(Key, Path, DeclaredLength, Origin, claim, ct);
-            if (result.Outcome != PutOutcome.Canceled) File.Delete(Path);
+            if (result.Outcome != PutOutcome.Canceled) store.DeleteStagingFile(this);
             return result;
         }
         finally { finished = true; store.ReleaseStaging(this); verifier.Dispose(); }
     }
 
-    /// <summary>Removes the staged bytes for good.</summary>
+    /// <summary>Removes this active staging's unpublished bytes. A finished handle never touches a path another staging may have resumed.</summary>
     public ValueTask AbandonAsync()
     {
-        handle?.Dispose(); handle = null;
-        File.Delete(Path);
-        finished = true;
-        store.ReleaseStaging(this);
-        verifier.Dispose();
+        if (finished || handle is null) return ValueTask.CompletedTask;
+        handle.Dispose(); handle = null;
+        try { store.DeleteStagingFile(this); }
+        finally
+        {
+            finished = true;
+            store.ReleaseStaging(this);
+            verifier.Dispose();
+        }
         return ValueTask.CompletedTask;
     }
 
@@ -189,6 +193,16 @@ public sealed partial class ObjectStore
             }
         }
         finally { ArrayPool<byte>.Shared.Return(buffer); }
+    }
+
+    internal void DeleteStagingFile(ObjectStaging staging)
+    {
+        lock (stagings)
+        {
+            // Close can release a staging while its caller's commit continuation is still queued. A new store/session may
+            // already have resumed this path: only the instance holding this store's current reservation may remove it.
+            if (stagings.TryGetValue(staging.Key, out var current) && ReferenceEquals(current, staging)) File.Delete(staging.Path);
+        }
     }
 
     internal void ReleaseStaging(ObjectStaging staging)

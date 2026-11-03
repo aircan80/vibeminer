@@ -40,6 +40,7 @@ public interface IObjectStaging : IAsyncDisposable
     /// the real committed outcome completes despite cancellation. Legacy CDN accepted copies retain their existing completion semantics.
     /// </summary>
     Task<PutResult> CommitAsync(CancellationToken ct = default);
+    /// <summary>Removes this active session's unpublished bytes. A finished or disposed session cannot remove a newer session's partial.</summary>
     ValueTask AbandonAsync();
 }
 
