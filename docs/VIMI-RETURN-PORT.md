@@ -31,14 +31,22 @@ The first implementation tranche should cover milestones 1–3. This produces a 
 
 ## Baselines and scope
 
-- Java checkout: `/Users/aircan/Development/vimi`, HEAD `767ec16311bc6d66f0dfde7c53237473d65f7ef4`. The requested `~/vimi` path was absent. An untracked `md` file was left untouched and is outside the baseline.
+- Frozen Java baseline: `/Users/aircan/Development/vimi`, commit `767ec16311bc6d66f0dfde7c53237473d65f7ef4`. The requested `~/vimi` path was absent. An untracked `md` file was left untouched and is outside the baseline.
 - C# checkout: this repository, HEAD `1d6632e94107eb3f295a1a7b3463ed69af6dc71c`, initially clean.
 - The older baseline in [MIGRATION.md](MIGRATION.md) is a different Java source checkpoint. It does not describe these later changes. Keep its provenance rather than silently replacing it.
 - Review perspectives: Java lower-layer expert, Java/C# software architect, backend developers covering formats/concepts/rendering, and the coordinating repository review. This is source and test inspection, not a passing-test or performance certification. Neither application's tests or live providers were run.
 
 “Backend complete” means every implemented, in-scope Java capability has a C# service and a headless acceptance path, with exact identity, bounded resource use, cancellation, durable reopen and explicit unsupported states. It includes preparation, provider policy, migration and lifecycle behavior currently inside Java's `gui` module. It excludes JavaFX widgets, screen layouts, camera controls and desktop playback controls. Renderer-independent composition/geometry and terrain preparation remain in scope; interactive GPU presentation can follow later.
 
-Do not absorb unfinished Java roadmap work into parity. In particular, the native comparison text-issue certificates are incomplete on separate recovery branches; the Java handoff explicitly warns that branch names and reviewed designs do not establish completed implementation.
+Do not absorb unfinished Java roadmap work into parity. At the frozen baseline, native comparison text-issue certificates were incomplete on separate recovery branches. The newer reference below supersedes that specific limitation with implemented source and authored tests; branch names and reviewed designs alone still do not establish implementation.
+
+### Current reference and upstream checks
+
+The latest reviewed Java reference is `f1b5413d58d3f6082b96553f5c228c31ced13a10` (2026-11-03), 40 commits after the frozen baseline. Source/test inspection found completed graph-bound native row-issue certificates and publication failure handling, browser loading/history fixes, and an isolated inline bgfx preview implementation. The [capability delta](migration/vimi-return-capabilities.md#reviewed-upstream-delta) maps these changes and their limits. Java tests were not executed during this review. Storage and `BuildRegistry` source did not change in this delta, so B02/#223 keeps its current scope.
+
+During the return port, check Java upstream at the start of a resumed work session, before scoping a dependent capability, and at milestone gates. Fetch first; fast-forward the reference checkout only when tracked state is clean and the update is safe. Preserve local/untracked work; never reset, clean or force-update it. Compare fetched changes against the last reviewed reference and the frozen baseline, inspect implemented behavior and tests, and update the current reference/capability qualifications without replacing baseline provenance. If fetching fails, retain the last reviewed reference and report the gap. This is a work-session cadence, not a scheduled background task.
+
+Keep Java source/runtime excluded. Native certificates add backend acceptance work; JavaFX loading layouts and bgfx presentation do not authorize adopting a C# GPU runtime, changing Electron presentation, or adding dependencies. Those choices remain separate from renderer-neutral asset services.
 
 ## Layer review
 
@@ -116,7 +124,7 @@ Slices 8–9, 10–11 and 12–14 can advance independently once their prerequis
 
 ## Limits to preserve
 
-Java's completed comparison scope is narrower than its roadmap: inventory comparisons, compatible raw tables and the first Items increment. Additional concept adapters, general comparison persistence/resume and native text-issue certificates are separate work. See `docs/mac-handoff-2026-11-03.md` and `docs/comparison/` in Java.
+Java's completed comparison scope is narrower than its roadmap: inventory comparisons, compatible raw tables and the first Items increment. At the current reviewed reference, native text-issue certificates are also implemented and belong in the table-capture/comparison acceptance work. They certify decoder issue-channel provenance, not complete membership or universally issue-free cells. Additional concept adapters and general comparison persistence/resume remain separate work. See `docs/mac-handoff-2026-11-03.md` and `docs/comparison/` in Java.
 
 The new game concepts are implemented services with authored tests, not universal coverage of every WoW era. Keep profile refusal, provider disagreement, unavailable translations, protected files and unsupported model bindings visible. Java measurements and historical live checks choose workloads; repeat relevant evidence in C# before making readiness or performance claims.
 

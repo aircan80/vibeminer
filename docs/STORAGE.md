@@ -152,6 +152,10 @@ The catalog store is a SQLite cache (`user_version` 1, application_id `0x564D637
 
 `InMemoryCatalog` in `VibeMiner.Builds.Testing` is the fake for layers 4 and up: no SQLite, no files, the same list rules. `CatalogContractTests` runs one suite against it and the real `Catalog`.
 
+### Layer 3: isolated metadata-load registry
+
+`IBuildRegistry` (#223, D485) persists caller-reported metadata-load attempts in explicitly supplied storage, separate from discovery's rebuildable catalog. Canonical BuildIdentity v2 owns the entry; observed route selection and the immutable attempt selection are separate. Fenced generations prevent stale completions, and writer reopen marks abandoned Loading attempts Interrupted. Loaded proves metadata only. The registry is not wired into the current app or BuildOpener; [build-registry-v1](formats/build-registry-v1.md) defines format, limits and lifecycle.
+
 ### Layer 3: opening a build
 
 `IBuilds.OpenAsync(BuildRef)` opens one build ([D140](DECISIONS.md)): product, build config, CDN config and the `cdns` region whose route fetches what isn't stored (default `us`). Everything comes through layer 2 at interactive priority, in this order:

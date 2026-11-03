@@ -30,6 +30,7 @@ Permanent docs for the Electron + C# VibeMiner. Work in progress lives in GitHub
 | Document | Purpose |
 | --- | --- |
 | [TACT](formats/tact.md), [ROOT](formats/root.md), [WDC5](formats/wdc5.md), [BLP](formats/blp.md), [M2/SKIN](formats/m2-skin.md), [listfile delta](formats/listfile-delta.md) | Format notes for our own readers |
+| [Metadata-load registry](formats/build-registry-v1.md) | Isolated authoritative build-load identity, format and lifecycle |
 | [Artifact formats](ARTIFACT-FORMATS.md) | Our derived binary artifacts |
 | [WoW data reference](WOW-DATA-REFERENCE.md) | Tables, joins and interpretation rules |
 | [research/](research/) | Investigations of specific data questions |
