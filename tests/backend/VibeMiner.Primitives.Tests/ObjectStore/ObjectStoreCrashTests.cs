@@ -103,7 +103,7 @@ public sealed class ObjectStoreCrashTests
         }
     }
 
-    /// <summary>Starts the crash writer, waits until it reports the point (or for the delay), SIGKILLs it and returns what it confirmed.</summary>
+    /// <summary>Starts the crash writer, waits for the target point or a random interval after its first confirmed commit, then SIGKILLs it.</summary>
     private static async Task<(List<string> lines, bool reachedPoint)> RunChildAsync(string dir, string point, int occurrence, int iterations, TimeSpan? killAfter)
     {
         var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
@@ -113,7 +113,7 @@ public sealed class ObjectStoreCrashTests
             start.ArgumentList.Add(a);
         using var process = Process.Start(start)!;
         var lines = new List<string>();
-        var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var randomKill = new RandomCrashGate();
         var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stderr = process.StandardError.ReadToEndAsync();
         var reader = Task.Run(async () =>
@@ -121,16 +121,16 @@ public sealed class ObjectStoreCrashTests
             while (await process.StandardOutput.ReadLineAsync() is { } line)
             {
                 lock (lines) lines.Add(line);
-                if (line == "OPEN") opened.TrySetResult();
+                randomKill.Observe(line);
                 if (line.StartsWith("AT ", StringComparison.Ordinal)) reached.TrySetResult();
                 if (line == "DONE") reached.TrySetCanceled();
             }
-            opened.TrySetCanceled(); reached.TrySetCanceled();
+            randomKill.Complete(); reached.TrySetCanceled();
         });
         var hit = false;
         try
         {
-            if (killAfter is { } delay) { await opened.Task.WaitAsync(TimeSpan.FromSeconds(60)); await Task.Delay(delay); }
+            if (killAfter is { } delay) await randomKill.WaitAsync(delay, TimeSpan.FromSeconds(60));
             else { await reached.Task.WaitAsync(TimeSpan.FromSeconds(120)); hit = true; }
         }
         catch (TaskCanceledException) { }
