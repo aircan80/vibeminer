@@ -15,8 +15,9 @@ public sealed partial class ObjectStore
         public void TryFinish() { if (Processed && Outstanding == 0) Done.TrySetResult(); }
     }
     private sealed record Prepared(ObjectKey Key, ReadOnlyMemory<byte> Bytes, byte[] Sha256, byte[] Table, ObjectOrigin Origin, ObjectKey? Document);
-    private sealed class PutRequest(Prepared?[] items, PutResult[] results, bool commitNow, CancellationToken ct) : Request
+    private sealed class PutRequest(Prepared?[] items, PutResult[] results, bool commitNow, CancellationToken ct, LibraryClaim? claim) : Request
     {
+        public readonly LibraryClaim? Claim = claim;
         public readonly Prepared?[] Items = items; public readonly PutResult[] Results = results; public readonly bool CommitNow = commitNow; public readonly CancellationToken Token = ct;
     }
     private sealed class DeleteRequest(ObjectKey[] keys, DeleteResult[] results) : Request
@@ -35,7 +36,7 @@ public sealed partial class ObjectStore
     private sealed class Pending
     {
         public ObjectKey Key; public long Offset, Length; public byte[] Sha256 = []; public bool Tombstone; public ObjectOrigin Origin;
-        public IndexRow? Removed; public HistoryRecordFormat.Parsed? History; public Request? Owner;
+        public IndexRow? Removed; public HistoryRecordFormat.Parsed? History; public Request? Owner; public LibraryClaim? Claim;
     }
 
     private FileStream? writerLock;
@@ -97,6 +98,13 @@ public sealed partial class ObjectStore
             else if (packStore is not null && !packStore.AsSpan().SequenceEqual(indexStore)) { unreadable = true; problems.Add("the index names another store than its packs; rebuilt from the packs"); }
         }
 
+        if (Kind == ObjectStoreKind.Library)
+        {
+            // The library index owns durable intent. Packs cannot reconstruct ownership.
+            if (unreadable || version is < 1 || version is null && (disk.Count != 0 || File.Exists(Path.Combine(directory, "library-v1"))))
+                throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The authoritative library index is missing or damaged; preserve the library for repair.");
+            if (version == ObjectIndex.SchemaVersion) LibraryOwnership.Validate(indexPath, ct: ct);
+        }
         var rebuilt = false;
         if (unreadable || version is null or < 1)
         {
@@ -110,7 +118,17 @@ public sealed partial class ObjectStore
                 }
                 storeId = RandomNumberGenerator.GetBytes(16);
                 using var c = ObjectIndex.Open(indexPath, readOnly: false);
+                if (Kind == ObjectStoreKind.Library) ObjectIndex.Exec(c, "PRAGMA synchronous=FULL");
                 ObjectIndex.Create(c, storeId, NowMs, 1, Kind);
+                if (Kind == ObjectStoreKind.Library)
+                {
+                    // An empty established library must also refuse a missing authoritative index.
+                    ObjectIndex.Exec(c, "PRAGMA wal_checkpoint(TRUNCATE)");
+                    using var marker = new FileStream(Path.Combine(directory, "library-v1"), FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                    marker.Write(storeId);
+                    marker.Flush(flushToDisk: true);
+                    DirectorySync.Sync(directory);
+                }
             }
             else
             {
@@ -131,7 +149,7 @@ public sealed partial class ObjectStore
             SetCleanClose(false);
             await LoadAndRecoverAsync(disk, ct);
         }
-        catch (Exception e) when (!rebuilt && valid.Count > 0 && e is SqliteException or InvalidCastException or InvalidOperationException or FormatException or OverflowException)
+        catch (Exception e) when (Kind != ObjectStoreKind.Library && !rebuilt && valid.Count > 0 && e is SqliteException or InvalidCastException or InvalidOperationException or FormatException or OverflowException)
         {
             // Damage the checks didn't see shows up in use: start again from the packs, once.
             problems.Add($"the object index failed while opening ({e.Message}); rebuilt from the packs");
@@ -194,6 +212,7 @@ public sealed partial class ObjectStore
     private void OpenWriterConnection()
     {
         wconn = ObjectIndex.Open(indexPath, readOnly: false);
+        if (Kind == ObjectStoreKind.Library) ObjectIndex.Exec(wconn, "PRAGMA synchronous=FULL");
         wlookup = ObjectIndex.LookupCommand(wconn);
         LoadStoreRow();
     }
@@ -257,6 +276,16 @@ public sealed partial class ObjectStore
     /// </summary>
     private async Task RecoverTailAsync(long length, CancellationToken ct)
     {
+        if (Kind == ObjectStoreKind.Library)
+        {
+            // Even a sound fsynced tail has no committed owner. Discard it; never invent ownership by replay.
+            ct.ThrowIfCancellationRequested();
+            RandomAccess.SetLength(active!, committedLength);
+            RandomAccess.FlushToDisk(active!);
+            At(StorePoint.RecoveryTruncated);
+            OpenReport = OpenReport with { TruncatedBytes = OpenReport.TruncatedBytes + length - committedLength };
+            return;
+        }
         using var read = PackFiles.OpenRead(PackPath(activeSeq));
         var walker = new PackWalker(read, activeSeq, committedLength, length, Kind);
         var recovered = 0; var end = committedLength;
@@ -345,8 +374,16 @@ public sealed partial class ObjectStore
     /// </summary>
     public async Task<IReadOnlyList<PutResult>> PutAsync(IReadOnlyList<PutObject> batch, bool commitNow = false, CancellationToken ct = default)
     {
+        EnsureWriter();
+        if (Kind == ObjectStoreKind.Library) throw new ObjectStoreException(ObjectStoreCodes.OwnerRequired, "Use an immutable owner-bound library view.");
+        return await PutOwnedAsync(null, batch, commitNow, ct);
+    }
+
+    internal async Task<IReadOnlyList<PutResult>> PutOwnedAsync(LibraryClaim? claim, IReadOnlyList<PutObject> batch, bool commitNow, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(batch);
         EnsureWriter();
+        if (Kind == ObjectStoreKind.Library && claim is null) throw new ObjectStoreException(ObjectStoreCodes.OwnerRequired, "A library publication requires an owner.");
         if (batch.Count > MaxBatchObjects || batch.Sum(o => (long)o.Bytes.Length) > MaxBatchBytes)
             throw new ObjectStoreException(ObjectStoreCodes.Limit, "A Put batch is at most 4,096 objects and 256 MiB.");
         var results = new PutResult[batch.Count];
@@ -368,7 +405,7 @@ public sealed partial class ObjectStore
         }
         finally { verifyGate.Release(); }
         if (items.All(p => p is null)) return results;
-        var request = new PutRequest(items, results, commitNow, ct);
+        var request = new PutRequest(items, results, commitNow, ct, claim);
         await Enqueue(request, ct);
         await request.Done.Task;
         return results;
@@ -383,6 +420,7 @@ public sealed partial class ObjectStore
     {
         ArgumentNullException.ThrowIfNull(keys);
         EnsureWriter();
+        if (Kind == ObjectStoreKind.Library) throw LibraryUnsupported();
         if (keys.Count > MaxBatchObjects) throw new ObjectStoreException(ObjectStoreCodes.Limit, "A Delete batch is at most 4,096 keys.");
         var request = new DeleteRequest(keys.ToArray(), new DeleteResult[keys.Count]);
         await Enqueue(request, ct);
@@ -500,11 +538,12 @@ public sealed partial class ObjectStore
 
     private async Task ProcessPutAsync(PutRequest put)
     {
+        List<ObjectKey>? existing = put.Claim is null ? null : [];
         for (var i = 0; i < put.Items.Length; i++)
         {
             if (put.Items[i] is not { } p) continue;
             if (put.Token.IsCancellationRequested) { put.Results[i] = new(p.Key, PutOutcome.Canceled); continue; }
-            if (Present(p.Key)) { put.Results[i] = new(p.Key, PutOutcome.AlreadyPresent); continue; }
+            if (Present(p.Key)) { put.Results[i] = new(p.Key, PutOutcome.AlreadyPresent); existing?.Add(p.Key); continue; }
             if (p.Document is { } doc && !Present(doc))
             { put.Results[i] = new(p.Key, PutOutcome.Refused, ObjectRefusalCodes.HistoryDocumentMissing, "Put the reply document before (or with) its record."); continue; }
             HistoryRecordFormat.Parsed? history = null;
@@ -512,6 +551,15 @@ public sealed partial class ObjectStore
             await AppendAsync(p, put, history);
             put.Results[i] = new(p.Key, PutOutcome.Stored);
             if (pending.Count >= options.CommitObjects || pendingBytes >= options.CommitBytes) await CommitAsync();
+        }
+        if (existing is { Count: > 0 })
+        {
+            // One metadata transaction per duplicate batch, never one fsync per object.
+            if (pending.Count > 0) await CommitAsync();
+            Durably(tx =>
+            {
+                foreach (var key in existing) LibraryOwnership.Attach(wconn!, tx, put.Claim!, key);
+            });
         }
         if (put.CommitNow && pending.Count > 0) await CommitAsync();
     }
@@ -570,7 +618,7 @@ public sealed partial class ObjectStore
         }
         At(StorePoint.EntryWritten);
         activeLength += size;
-        AddPending(new Pending { Key = p.Key, Offset = offset, Length = p.Bytes.Length, Sha256 = p.Sha256, History = history, Owner = owner }, size);
+        AddPending(new Pending { Key = p.Key, Offset = offset, Length = p.Bytes.Length, Sha256 = p.Sha256, History = history, Owner = owner, Claim = (owner as PutRequest)?.Claim }, size);
     }
 
     private void AddPending(Pending p, long bytes)
@@ -666,6 +714,7 @@ public sealed partial class ObjectStore
             }
             insert.Parameters[0].Value = p.Key.ToIndexKey(); insert.Parameters[1].Value = activeSeq; insert.Parameters[2].Value = p.Offset;
             insert.Parameters[3].Value = p.Length; insert.Parameters[4].Value = p.Sha256; insert.ExecuteNonQuery();
+            if (p.Claim is not null) LibraryOwnership.Attach(wconn!, tx, p.Claim, p.Key);
             t = t with { Objects = t.Objects + 1, ObjectDigest = t.ObjectDigest ^ ObjectIndex.ObjectDigest(p.Key.ToIndexKey(), activeSeq, p.Offset, p.Length, p.Sha256) };
             added += PackFormat.EntryBytes(p.Length);
             if (p.History is { } h)
@@ -736,7 +785,7 @@ public sealed partial class ObjectStore
             work(tx);
             tx.Commit();
         }
-        finally { ObjectIndex.Exec(wconn!, "PRAGMA synchronous=NORMAL"); }
+        finally { ObjectIndex.Exec(wconn!, Kind == ObjectStoreKind.Library ? "PRAGMA synchronous=FULL" : "PRAGMA synchronous=NORMAL"); }
     }
 
     /// <summary>The next pack number; file names hold six digits, so the store refuses to go past pack 999,999 (about 2 PB at 2 GiB).</summary>
@@ -777,6 +826,16 @@ public sealed partial class ObjectStore
     private void Recover(Exception e, Request? current)
     {
         var error = Error(e);
+        if (Kind == ObjectStoreKind.Library)
+        {
+            // A failed commit can have an uncertain outcome. Leave pack bytes intact and stop writes;
+            // reopening resolves the authoritative transaction boundary without truncating committed data.
+            var failed = pending.Select(p => p.Owner).Append(current).Where(o => o is not null).Distinct().ToList();
+            pending.Clear(); pendingKeys.Clear(); pendingBytes = 0;
+            Fail(new ObjectStoreException(error.Code, "Library publication failed; its outcome may be committed. Reopen and retry by key.", e));
+            foreach (var request in failed) request!.Done.TrySetException(fault!);
+            return;
+        }
         var owners = pending.Select(p => p.Owner).Append(current).Where(o => o is not null).Distinct().ToList();
         pending.Clear(); pendingKeys.Clear(); pendingBytes = 0;
         At(StorePoint.WriteErrorCutting);

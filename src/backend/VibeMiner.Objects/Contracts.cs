@@ -103,7 +103,13 @@ public sealed class ObjectVerification : IObjectVerifier
     public static ObjectVerification Default { get; } = new(ObjectStoreKind.Cdn);
     /// <summary>A generated store's Put: type 7 only, length bound only.</summary>
     internal static ObjectVerification Generated { get; } = new(ObjectStoreKind.Generated);
-    internal static ObjectVerification For(ObjectStoreKind kind) => kind == ObjectStoreKind.Generated ? Generated : Default;
+    private static ObjectVerification Library { get; } = new(ObjectStoreKind.Library);
+    internal static ObjectVerification For(ObjectStoreKind kind) => kind switch
+    {
+        ObjectStoreKind.Generated => Generated,
+        ObjectStoreKind.Library => Library,
+        _ => Default,
+    };
     private readonly ObjectStoreKind kind;
     private ObjectVerification(ObjectStoreKind kind) => this.kind = kind;
 

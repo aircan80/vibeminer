@@ -143,6 +143,7 @@ internal static class ObjectIndex
     {
         using var tx = c.BeginTransaction();
         Exec(c, Schema, tx);
+        if (kind == ObjectStoreKind.Library) LibraryOwnership.Create(c, tx);
         using (var cmd = c.CreateCommand())
         {
             cmd.Transaction = tx;

@@ -67,7 +67,7 @@ public sealed record StoreStats(int Packs, long Objects, long HistoryRecords, lo
 /// data, key type 7 only, no history log and no staging. The kind is written in every pack header and the index; a folder of one
 /// kind never opens as the other.
 /// </summary>
-public enum ObjectStoreKind { Cdn = 0, Generated = 1 }
+public enum ObjectStoreKind { Cdn = 0, Generated = 1, Library = 2 }
 
 /// <summary>Bounds and timing. The defaults are the D123 group-commit rule and pack size.</summary>
 public sealed record ObjectStoreOptions

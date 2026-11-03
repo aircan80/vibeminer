@@ -2,6 +2,8 @@
 
 This is a language and presentation port of VibeMiner, with unfinished product work continuing afterward. Keep the Java source available as a behavioral reference while establishing independent C# and Electron tests.
 
+The backend must be C#. Never import Java source, Java test code, bytecode, JARs, JVM workers or a Java runtime into this repository. The sibling Java project is a read-only behavioral reference; implement the required behavior and test scenarios independently in C#. Building, testing, packaging and running this app must not depend on Java or its checkout. See the [return-port roadmap](VIMI-RETURN-PORT.md) for the later Java capabilities and phased delivery gates.
+
 ## Source checkpoint
 
 The inspected Java checkout is `vibeminer_java`, commit `8f353d046d961108f7acc86bfe1381004467afd5`, with no tracked modifications reported at foundation import. The selected browser assets are copied byte for byte and recorded in [the reference manifest](migration/java-reference.json). This repository must remain buildable without that sibling checkout.

@@ -285,7 +285,7 @@ public sealed class GeneratedKindTests
         await using (var store = await ObjectStore.OpenAsync(dir, Generated)) await store.PutAsync([Gen(1)]);
         var pack = PackFiles(dir).Single();
         var header = File.ReadAllBytes(pack).AsSpan(0, 64).ToArray();
-        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(12), 3);
         BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(60), PackFormat.Crc32C(header.AsSpan(0, 60)));
         Write(pack, 0, header);
         var before = HashFolder(dir);

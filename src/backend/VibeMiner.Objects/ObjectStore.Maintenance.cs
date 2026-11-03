@@ -18,6 +18,7 @@ public sealed partial class ObjectStore
 
     private async Task<ScanReport> ScanCoreAsync(IProgress<ScanProgress>? progress, CancellationToken ct)
     {
+        if (Kind == ObjectStoreKind.Library) throw LibraryUnsupported();
         {
             // Seal the active pack first, durably, so a Scan that fails leaves no pack marked active without a handle.
             if (active is not null) Durably(tx => SetPackState(tx, activeSeq, PackState.Sealed));
@@ -218,6 +219,11 @@ public sealed partial class ObjectStore
         // Measure on reader connections in one pinned snapshot, so writes go on meanwhile and none of them passes for damage.
         var (_, problem, _, _) = await Task.Run(() => ObjectIndex.Validate(indexPath, full: true, ct, () => At(StorePoint.IndexMeasuring), measured: m => LastIndexMeasure = m), ct);
         var rebuilt = false;
+        if (Kind == ObjectStoreKind.Library)
+        {
+            if (problem is not null) throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "The authoritative library index is damaged; it cannot be rebuilt from packs.");
+            LibraryOwnership.Validate(indexPath, ct: ct);
+        }
         if (problem is not null)
             (problem, rebuilt) = await MaintainAsync(async () =>
             {
@@ -330,6 +336,7 @@ public sealed partial class ObjectStore
     public Task<CompactReport> CompactAsync(CompactOptions? compact = null, CancellationToken ct = default) =>
         MaintainAsync(async () =>
         {
+            if (Kind == ObjectStoreKind.Library) throw LibraryUnsupported();
             compact ??= new();
             var candidates = new List<(int seq, long committed, long live)>();
             using (var cmd = wconn!.CreateCommand())

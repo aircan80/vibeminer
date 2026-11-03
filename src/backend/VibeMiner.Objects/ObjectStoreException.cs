@@ -3,6 +3,8 @@ namespace VibeMiner.Objects;
 /// <summary>Named store-level failures. Per-object Put refusals and read states are results, not exceptions.</summary>
 public static class ObjectStoreCodes
 {
+    public const string OwnerRequired = "OBJECT_STORE_OWNER_REQUIRED";
+    public const string LibraryOperationUnsupported = "OBJECT_LIBRARY_OPERATION_UNSUPPORTED";
     /// <summary>A pack, entry or index was written by a newer format than this engine knows. Nothing was changed.</summary>
     public const string NewerFormat = "OBJECT_STORE_NEWER_FORMAT";
     /// <summary>A pack belongs to another store (its store id differs). Nothing was changed.</summary>

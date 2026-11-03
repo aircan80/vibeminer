@@ -84,6 +84,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
             if (!damagedVersion && version > ObjectIndex.SchemaVersion) throw NewerFormat($"index schema {version}");
             if (!damagedVersion && version < ObjectIndex.SchemaVersion) throw new ObjectStoreException(ObjectStoreCodes.Missing, "The object store was never completely created.");
             store.CheckIndexKind();
+            if (store.Kind == ObjectStoreKind.Library) LibraryOwnership.Validate(store.indexPath, store.immutableIndex, ct);
             var valid = new List<(int seq, string path)>();
             foreach (var (seq, path) in store.DiskPacks())
             {
@@ -353,7 +354,7 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
         try { recorded = ObjectIndex.ReadKind(indexPath, immutableIndex); }
         catch (Exception e) when (e is SqliteException or OverflowException or InvalidCastException or FormatException) { return; }  // unreadable: the packs decide
         if (recorded is not { } k) return;
-        if (k is < 0 or > (long)ObjectStoreKind.Generated) throw NewerFormat($"index kind {k}");
+        if (k is < 0 or > (long)ObjectStoreKind.Library) throw NewerFormat($"index kind {k}");
         if ((ObjectStoreKind)k != Kind) throw KindMismatch("index", (ObjectStoreKind)k, Kind);
     }
 

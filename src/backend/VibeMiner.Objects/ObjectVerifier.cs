@@ -11,6 +11,7 @@ internal static class ObjectFormats
     {
         ObjectStoreKind.Cdn => t is >= ObjectKeyType.Config and <= ObjectKeyType.HistoryRecord,
         ObjectStoreKind.Generated => t == ObjectKeyType.Generated,
+        ObjectStoreKind.Library => t is >= ObjectKeyType.Config and <= ObjectKeyType.Generated,
         _ => false,
     };
     public static long MaxBytes(ObjectKeyType t) => t switch

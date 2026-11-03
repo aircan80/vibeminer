@@ -434,3 +434,7 @@ Two things are deleted: one build's file catalog when it is freed ([D085](DECISI
 Start from correctness-preserving durable settings; don't disable synchronization, foreign keys or verification to hit a benchmark. Measure transaction size, redundant indexes, compact keys and query plans before blaming the language.
 
 The Java authored EN benchmark exceeded one million inserts and showed material batching/index effects. Its numbers shape workloads; they are not .NET performance claims. See [MIGRATION.md](MIGRATION.md).
+
+## Isolated mixed-library primitive
+
+Issue #213 adds an explicitly selected C# pack library for original and generated objects with durable immutable ownership. It does not change application profiles or current store composition. Its authoritative index, refusal/recovery rules and deferred mutation paths are specified in [object-store-v1 section 10](formats/object-store-v1.md#10-isolated-c-mixed-library-213); the return-port capability baseline is in [migration/vimi-return-capabilities](migration/vimi-return-capabilities.md).

@@ -52,14 +52,14 @@ internal static class PackFormat
 
     public enum HeaderCheck { Valid, Torn, Newer }
 
-    /// <summary>A kind other than 0 or 1 at offset 12 is Newer; which of the two it is, the caller checks.</summary>
+    /// <summary>An unknown kind at offset 12 is Newer; the caller checks the requested known kind.</summary>
     public static HeaderCheck ReadPackHeader(ReadOnlySpan<byte> h, out int seq, out byte[] storeId, out ObjectStoreKind kind)
     {
         seq = 0; storeId = []; kind = ObjectStoreKind.Cdn;
         if (h.Length < PackHeaderBytes || !h[..4].SequenceEqual(PackMagic) ||
             BinaryPrimitives.ReadUInt32LittleEndian(h[60..]) != Crc32C(h[..60])) return HeaderCheck.Torn;
         if (BinaryPrimitives.ReadUInt16LittleEndian(h[4..]) != Version || BinaryPrimitives.ReadUInt16LittleEndian(h[6..]) != PackHeaderBytes ||
-            BinaryPrimitives.ReadUInt32LittleEndian(h[12..]) > (uint)ObjectStoreKind.Generated || h[40..60].IndexOfAnyExcept((byte)0) >= 0) return HeaderCheck.Newer;
+            BinaryPrimitives.ReadUInt32LittleEndian(h[12..]) > (uint)ObjectStoreKind.Library || h[40..60].IndexOfAnyExcept((byte)0) >= 0) return HeaderCheck.Newer;
         seq = (int)BinaryPrimitives.ReadUInt32LittleEndian(h[8..]);
         kind = (ObjectStoreKind)BinaryPrimitives.ReadUInt32LittleEndian(h[12..]);
         storeId = h.Slice(16, 16).ToArray();
