@@ -95,6 +95,90 @@ public sealed class InMemoryLibraryInventories : IAsyncDisposable
         }
     }
 
+    public ILibraryInventoryPair ForInventoryPair(LibraryInventorySelection left, LibraryInventorySelection right)
+    {
+        ArgumentNullException.ThrowIfNull(left); ArgumentNullException.ThrowIfNull(right);
+        lock (gate) { EnsureOpen(); return new PairView(this, left, right); }
+    }
+
+    private sealed class PairView(InMemoryLibraryInventories store, LibraryInventorySelection left, LibraryInventorySelection right) : ILibraryInventoryPair
+    {
+        private sealed class Totals
+        {
+            private long expected, present, bytes;
+            public void Add(long? length)
+            {
+                expected = checked(expected + 1);
+                if (length is not { } value) return;
+                present = checked(present + 1); bytes = checked(bytes + value);
+            }
+            public LibraryInventoryCoverage Coverage() => new(expected, present, checked(expected - present), bytes);
+            public LibraryInventoryUnionMeasurement Side(long published, long unpublished) => published == 0
+                ? new(0, unpublished, null, null, null, null)
+                : new(published, unpublished, expected, present, checked(expected - present), bytes);
+        }
+
+        private (long Published, long Unpublished) Resolve(LibraryInventorySelection selection, int mask,
+            List<(SortedSet<ObjectKey> Keys, int Mask)> streams, CancellationToken ct)
+        {
+            long published = 0, unpublished = 0;
+            foreach (var (claim, identity) in store.identities)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (claim.Owner != selection.Owner || claim.Scope != selection.Scope || claim.Role != selection.Role || identity.Latest == 0) continue;
+                if (identity.Active is not { } active) { unpublished = checked(unpublished + 1); continue; }
+                published = checked(published + 1);
+                if (published > LibraryInventoryUnionLimits.MaxPublishedProducers)
+                    throw new ObjectStoreException(ObjectStoreCodes.Limit, "Too many published producers for an inventory pair side.");
+                streams.Add((store.generations[active].Keys, mask));
+            }
+            return (published, unpublished);
+        }
+
+        public ValueTask<LibraryInventoryPairMeasurement> MeasureAsync(CancellationToken ct = default)
+        {
+            lock (store.gate)
+            {
+                store.EnsureOpen(); ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var streams = new List<(SortedSet<ObjectKey> Keys, int Mask)>(2 * LibraryInventoryUnionLimits.MaxPublishedProducers);
+                    var l = Resolve(left, 1, streams, ct); var r = Resolve(right, 2, streams, ct);
+                    var leftTotals = new Totals(); var rightTotals = new Totals(); var union = new Totals();
+                    var intersection = new Totals(); var leftOnly = new Totals(); var rightOnly = new Totals();
+                    var cursors = streams.Select(stream => ((IEnumerable<ObjectKey>)stream.Keys).GetEnumerator()).ToArray();
+                    try
+                    {
+                        var heads = new PriorityQueue<int, ObjectKey>();
+                        for (var i = 0; i < cursors.Length; i++) if (cursors[i].MoveNext()) heads.Enqueue(i, cursors[i].Current);
+                        while (heads.TryPeek(out _, out var key))
+                        {
+                            var mask = 0;
+                            while (heads.TryPeek(out var cursor, out var current) && current == key)
+                            {
+                                ct.ThrowIfCancellationRequested(); heads.Dequeue(); mask |= streams[cursor].Mask;
+                                if (cursors[cursor].MoveNext()) heads.Enqueue(cursor, cursors[cursor].Current);
+                            }
+                            long? length = store.indexedObjects.TryGetValue(key, out var indexed) ? indexed : null;
+                            if ((mask & 1) != 0) leftTotals.Add(length);
+                            if ((mask & 2) != 0) rightTotals.Add(length);
+                            union.Add(length);
+                            if (mask == 3) intersection.Add(length);
+                            else if (mask == 1) leftOnly.Add(length);
+                            else rightOnly.Add(length);
+                        }
+                    }
+                    finally { foreach (var cursor in cursors) cursor.Dispose(); }
+                    ct.ThrowIfCancellationRequested();
+                    var known = l.Published > 0 && r.Published > 0;
+                    return ValueTask.FromResult(new LibraryInventoryPairMeasurement(leftTotals.Side(l.Published, l.Unpublished), rightTotals.Side(r.Published, r.Unpublished),
+                        known ? union.Coverage() : null, known ? intersection.Coverage() : null, known ? leftOnly.Coverage() : null, known ? rightOnly.Coverage() : null));
+                }
+                catch (OverflowException e) { throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "Indexed pair measurement overflowed.", e); }
+            }
+        }
+    }
+
     /// <summary>Tests only: records committed index presence/length without acquiring or storing payload bytes.</summary>
     public void SetIndexedObject(ObjectKey key, long length)
     {

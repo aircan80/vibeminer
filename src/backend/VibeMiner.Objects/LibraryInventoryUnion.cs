@@ -25,81 +25,119 @@ public sealed partial class ObjectStore
 
     private readonly record struct InventoryUnionGeneration(long Id, long KeyCount);
 
+    private sealed record InventoryUnionResolution(List<InventoryUnionGeneration> Generations, long Published, long Unpublished)
+    {
+        public LibraryInventoryUnionMeasurement Measurement(InventoryCoverageCounter totals) => Published == 0
+            ? new(0, Unpublished, null, null, null, null)
+            : new(Published, Unpublished, totals.Expected, totals.Present, checked(totals.Expected - totals.Present), totals.Bytes);
+    }
+
+    private sealed class InventoryCoverageCounter
+    {
+        public long Expected { get; private set; }
+        public long Present { get; private set; }
+        public long Bytes { get; private set; }
+        public void Add(long? length)
+        {
+            Expected = checked(Expected + 1);
+            if (length is not { } bytes) return;
+            Present = checked(Present + 1); Bytes = checked(Bytes + bytes);
+        }
+        public LibraryInventoryCoverage Coverage() => new(Expected, Present, checked(Expected - Present), Bytes);
+    }
+
+    private static InventoryUnionResolution ResolveInventoryUnion(SqliteConnection c, SqliteTransaction tx,
+        string owner, LibraryOwnerScope scope, LibraryObjectRole role, CancellationToken ct)
+    {
+        var generations = new List<InventoryUnionGeneration>(LibraryInventoryUnionLimits.MaxPublishedProducers);
+        long published = 0, unpublished = 0;
+        using var identities = c.CreateCommand(); identities.Transaction = tx;
+        identities.CommandText = """
+            SELECT i.active,g.id,g.state,g.key_count FROM library_inventory_identity i
+            LEFT JOIN library_inventory_generation g ON g.id=i.active AND g.owner=i.owner
+                AND g.scope=i.scope AND g.producer=i.producer AND g.role=i.role
+            WHERE i.owner=$o AND i.scope=$s AND i.role=$r
+            """;
+        identities.Parameters.AddWithValue("$o", owner);
+        identities.Parameters.AddWithValue("$s", (int)scope);
+        identities.Parameters.AddWithValue("$r", (int)role);
+        using var rows = identities.ExecuteReader();
+        while (rows.Read())
+        {
+            ct.ThrowIfCancellationRequested();
+            var active = LibraryInventoryMetadata.ParseActive(rows.GetValue(0));
+            if (active is null) { unpublished = checked(unpublished + 1); continue; }
+            if (rows.GetValue(1) is not long id || id != active || rows.GetValue(2) is not long state || state != 1 ||
+                rows.GetValue(3) is not long count || count < 0)
+                throw new InvalidOperationException("An active producer inventory or its committed key count is unreadable.");
+            published = checked(published + 1);
+            if (published > LibraryInventoryUnionLimits.MaxPublishedProducers)
+                throw new ObjectStoreException(ObjectStoreCodes.Limit,
+                    $"An inventory union supports at most {LibraryInventoryUnionLimits.MaxPublishedProducers} active published producers.");
+            generations.Add(new(id, count));
+        }
+        return new(generations, published, unpublished);
+    }
+
     internal ValueTask<LibraryInventoryUnionMeasurement> MeasureInventoryUnionAsync(string owner, LibraryOwnerScope scope, LibraryObjectRole role, CancellationToken ct)
     {
         ThrowIfClosed();
         return readers.Use((owner, scope, role), (c, _, identity) => InventoryRead(c, ct, tx =>
         {
-            var generations = new List<InventoryUnionGeneration>(LibraryInventoryUnionLimits.MaxPublishedProducers);
-            long published = 0, unpublished = 0;
-            using (var identities = c.CreateCommand())
-            {
-                identities.Transaction = tx;
-                identities.CommandText = """
-                    SELECT i.active,g.id,g.state,g.key_count FROM library_inventory_identity i
-                    LEFT JOIN library_inventory_generation g ON g.id=i.active AND g.owner=i.owner
-                        AND g.scope=i.scope AND g.producer=i.producer AND g.role=i.role
-                    WHERE i.owner=$o AND i.scope=$s AND i.role=$r
-                    """;
-                identities.Parameters.AddWithValue("$o", identity.owner);
-                identities.Parameters.AddWithValue("$s", (int)identity.scope);
-                identities.Parameters.AddWithValue("$r", (int)identity.role);
-                using var rows = identities.ExecuteReader();
-                while (rows.Read())
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var active = LibraryInventoryMetadata.ParseActive(rows.GetValue(0));
-                    if (active is null) { unpublished = checked(unpublished + 1); continue; }
-                    if (rows.GetValue(1) is not long id || id != active || rows.GetValue(2) is not long state || state != 1 ||
-                        rows.GetValue(3) is not long count || count < 0)
-                        throw new InvalidOperationException("An active producer inventory or its committed key count is unreadable.");
-                    published = checked(published + 1);
-                    if (published > LibraryInventoryUnionLimits.MaxPublishedProducers)
-                        throw new ObjectStoreException(ObjectStoreCodes.Limit,
-                            $"An inventory union supports at most {LibraryInventoryUnionLimits.MaxPublishedProducers} active published producers.");
-                    generations.Add(new(id, count));
-                }
-            }
-            // The identity SELECT pins the inventory generations and committed object index before concurrent writer work.
+            var resolved = ResolveInventoryUnion(c, tx, identity.owner, identity.scope, identity.role, ct);
+            // The identity SELECT pins both generations and object index before concurrent writer work.
             At(StorePoint.InventoryUnionSnapshot);
             ct.ThrowIfCancellationRequested();
-            if (published == 0) return new LibraryInventoryUnionMeasurement(0, unpublished, null, null, null, null);
-
-            // At most 256 sorted PK streams: bounded SQLite statement state and managed heads, no DISTINCT or temporary sort.
-            var streams = new List<InventoryUnionCursor>(generations.Count);
-            var heads = new PriorityQueue<InventoryUnionCursor, ObjectKey>(generations.Count);
-            try
-            {
-                foreach (var generation in generations)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var stream = new InventoryUnionCursor(c, tx, generation);
-                    streams.Add(stream);
-                    if (stream.MoveNext(ct)) heads.Enqueue(stream, stream.Key);
-                }
-                long expected = 0, present = 0, bytes = 0;
-                ObjectKey previous = default; var havePrevious = false;
-                while (heads.TryDequeue(out var stream, out var key))
-                {
-                    At(StorePoint.InventoryUnionRow);
-                    ct.ThrowIfCancellationRequested();
-                    if (!havePrevious || key != previous)
-                    {
-                        expected = checked(expected + 1);
-                        if (stream.IndexedLength is { } length)
-                        {
-                            present = checked(present + 1);
-                            bytes = checked(bytes + length);
-                        }
-                        previous = key; havePrevious = true;
-                    }
-                    if (stream.MoveNext(ct)) heads.Enqueue(stream, stream.Key);
-                }
-                ct.ThrowIfCancellationRequested();
-                return new LibraryInventoryUnionMeasurement(published, unpublished, expected, present, checked(expected - present), bytes);
-            }
-            finally { foreach (var stream in streams) stream.Dispose(); }
+            var totals = new InventoryCoverageCounter();
+            MergeInventoryStreams(c, tx, resolved.Generations, null, StorePoint.InventoryUnionRow,
+                (sides, length) => totals.Add(length), ct);
+            return resolved.Measurement(totals);
         }), ct);
+    }
+
+    // A fixed cap bounds both SQL statement state and managed heads. Each SQL cursor follows the expected-key PK, without
+    // DISTINCT or temporary sorting; side bits on equal keys support the pair-local intersection without a second traversal.
+    private void MergeInventoryStreams(SqliteConnection c, SqliteTransaction tx, List<InventoryUnionGeneration> left,
+        List<InventoryUnionGeneration>? right, StorePoint rowPoint, Action<int, long?> accept, CancellationToken ct)
+    {
+        var capacity = left.Count + (right?.Count ?? 0);
+        if (capacity > LibraryInventoryPairLimits.MaxStreamHeads)
+            throw new ObjectStoreException(ObjectStoreCodes.Limit, "Too many inventory stream heads.");
+        var streams = new List<InventoryUnionCursor>(capacity);
+        var heads = new PriorityQueue<InventoryUnionCursor, ObjectKey>(capacity);
+        try
+        {
+            AddStreams(left, 1);
+            if (right is not null) AddStreams(right, 2);
+            ObjectKey previous = default; var havePrevious = false; var sides = 0; long? length = null;
+            while (heads.TryDequeue(out var stream, out var key))
+            {
+                At(rowPoint);
+                ct.ThrowIfCancellationRequested();
+                if (havePrevious && key != previous)
+                {
+                    accept(sides, length);
+                    sides = 0; length = null;
+                }
+                previous = key; havePrevious = true;
+                sides |= stream.Side; length = stream.IndexedLength;
+                if (stream.MoveNext(ct)) heads.Enqueue(stream, stream.Key);
+            }
+            if (havePrevious) accept(sides, length);
+            ct.ThrowIfCancellationRequested();
+        }
+        finally { foreach (var stream in streams) stream.Dispose(); }
+
+        void AddStreams(List<InventoryUnionGeneration> generations, int side)
+        {
+            foreach (var generation in generations)
+            {
+                ct.ThrowIfCancellationRequested();
+                var stream = new InventoryUnionCursor(c, tx, generation, side);
+                streams.Add(stream);
+                if (stream.MoveNext(ct)) heads.Enqueue(stream, stream.Key);
+            }
+        }
     }
 
     private sealed class InventoryUnionCursor : IDisposable
@@ -108,11 +146,13 @@ public sealed partial class ObjectStore
         private readonly SqliteDataReader rows;
         private readonly long recordedCount;
         private long count;
+        public int Side { get; }
         public ObjectKey Key { get; private set; }
         public long? IndexedLength { get; private set; }
 
-        public InventoryUnionCursor(SqliteConnection c, SqliteTransaction tx, InventoryUnionGeneration generation)
+        public InventoryUnionCursor(SqliteConnection c, SqliteTransaction tx, InventoryUnionGeneration generation, int side)
         {
+            Side = side;
             recordedCount = generation.KeyCount;
             command = c.CreateCommand(); command.Transaction = tx;
             command.CommandText = """
