@@ -420,6 +420,8 @@ Every transaction that can change the rule above appends the EKey to `stored_cha
 
 ## Accounting and cleanup
 
+Issue #228 adds an explicit metadata-only [library file-footprint sample](LIBRARY-FOOTPRINT.md). Pack, database/sidecar, staging and other file lengths are disjoint observations during an interval, with incomplete states and bounded work. These lengths do not establish allocated blocks, verified retention, overhead by subtraction or reclaimable bytes.
+
 Report logical build scope, retained encoded coverage, unique physical payload bytes, shared bytes, additional download bytes, database/temporary overhead and reclaimable bytes separately. A complete denominator is required for a retained percentage. Shared bytes are a subset of physical bytes, not an extra copy.
 
 Two things are deleted: one build's file catalog when it is freed ([D085](DECISIONS.md)), which no other build uses, and superseded Creature appearances with the VMA1 files no remaining appearance names ([below](#superseded-creature-appearances)). There is no garbage collection of other shared objects yet ([#65](https://github.com/aircan80/vibeminer/issues/65)). That includes what profiles gathered before [D112](DECISIONS.md): one Creatures projection, its admission and the table admissions, and a geometry locator and appearance per viewed model, for every launch, all bound to references no longer current. When it arrives, release references first and reclaim only objects unreachable from every retained build, artifact, pin, active job and read lease. No naive per-build directory delete, and freed SQLite pages are not returned filesystem space.

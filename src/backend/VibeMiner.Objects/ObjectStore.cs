@@ -58,7 +58,13 @@ public sealed partial class ObjectStore : IObjectReader, IObjectWriter, IHistory
     public static async Task<ObjectStore> OpenAsync(string directory, ObjectStoreOptions? options = null, CancellationToken ct = default)
     {
         var store = new ObjectStore(directory, options ?? new(), readOnly: false);
-        try { await store.OpenWriterAsync(ct); return store; }
+        try
+        {
+            await store.OpenWriterAsync(ct);
+            if (store.Kind == ObjectStoreKind.Library)
+                await store.MaintainAsync(() => { store.CaptureFootprintRoot(); return Task.FromResult(true); }, ct);
+            return store;
+        }
         catch { store.Abandon(); throw; }
     }
 
