@@ -89,6 +89,44 @@ public sealed class LibraryObjectStagingTests
     }
 
     [Fact]
+    public async Task ACompleteVerifiedHeaderlessPartCanHandOffWithoutPublishingThePreviousOwner()
+    {
+        using var temp = new TempDirectory(); await using var library = await ObjectStore.OpenLibraryAsync(Folder(temp), Quick);
+        var item = Synthetic.Headerless(22601, 3 << 20);
+        await using (var a = await Owner(library).StageAsync(item.Key, item.DeclaredLength)) await a.AppendAsync(item.Bytes);
+        Assert.False(await library.HasAsync(item.Key)); Assert.False(await Owner(library).OwnsAsync(item.Key));
+        await using var b = await Owner(library, "build-b").StageAsync(item.Key, item.DeclaredLength);
+        Assert.Equal(item.DeclaredLength, b.Length); Assert.Equal(PutOutcome.Stored, (await b.CommitAsync()).Outcome);
+        Assert.False(await Owner(library).OwnsAsync(item.Key)); Assert.True(await Owner(library, "build-b").OwnsAsync(item.Key));
+        Assert.Equal(item.Bytes.ToArray(), (await library.ReadAsync(item.Key)).Bytes);
+    }
+    [Fact]
+    public async Task ACorruptCompleteHeaderlessPartIsDiscardedWithoutAClaimOrReadyPayload()
+    {
+        using var temp = new TempDirectory(); var directory = Folder(temp); await using var library = await ObjectStore.OpenLibraryAsync(directory, Quick);
+        var item = Synthetic.Headerless(22602, 200_000);
+        await using (var a = await Owner(library).StageAsync(item.Key, item.DeclaredLength)) await a.AppendAsync(item.Bytes);
+        Flip(Assert.Single(Directory.GetFiles(Path.Combine(directory, "staging"))), 100);
+        await using var b = await Owner(library, "build-b").StageAsync(item.Key, item.DeclaredLength);
+        Assert.Equal(0, b.Length); Assert.False(await library.HasAsync(item.Key)); Assert.False(await Owner(library).OwnsAsync(item.Key)); Assert.False(await Owner(library, "build-b").OwnsAsync(item.Key));
+        await b.AppendAsync(item.Bytes); Assert.Equal(PutOutcome.Stored, (await b.CommitAsync()).Outcome);
+    }
+    [Fact]
+    public async Task CancelingBoundedHeaderlessResumeKeepsTheCompletePartAndReleasesAdmissionForRetry()
+    {
+        using var temp = new TempDirectory(); using var canceled = new CancellationTokenSource(); var armed = false; var reads = 0;
+        var options = Quick with { MaxStagings = 1, Fault = point => { if (armed && point == StorePoint.StagingResumeRead && ++reads == 2) canceled.Cancel(); } };
+        await using var library = await ObjectStore.OpenLibraryAsync(Folder(temp), options); var item = Synthetic.Headerless(22603, 4 << 20);
+        await using (var a = await Owner(library).StageAsync(item.Key, item.DeclaredLength)) await a.AppendAsync(item.Bytes);
+        armed = true;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Owner(library, "build-b").StageAsync(item.Key, item.DeclaredLength, ct: canceled.Token));
+        Assert.Equal(2, reads); Assert.False(await library.HasAsync(item.Key)); Assert.False(await Owner(library, "build-b").OwnsAsync(item.Key));
+        armed = false; await using var retry = await Owner(library, "build-c").StageAsync(item.Key, item.DeclaredLength);
+        Assert.Equal(item.DeclaredLength, retry.Length); Assert.Equal(PutOutcome.Stored, (await retry.CommitAsync()).Outcome);
+        Assert.True(await Owner(library, "build-c").OwnsAsync(item.Key)); Assert.False(await Owner(library).OwnsAsync(item.Key));
+    }
+
+    [Fact]
     public async Task StagingBudgetsAndOneActiveKeyAreSharedAcrossOwnersButDisposingNeverClosesTheLibrary()
     {
         using var temp = new TempDirectory();

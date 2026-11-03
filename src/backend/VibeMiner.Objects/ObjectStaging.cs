@@ -138,14 +138,26 @@ public sealed partial class ObjectStore
             try
             {
                 var length = RandomAccess.GetLength(h);
-                // Trust only what chunk checks prove again: anything after the last whole chunk may be unsynced garbage.
+                // Trust chunk-proven bytes, or a complete library handoff reverified against its whole key below.
+                // Other trailing bytes may be unsynced garbage; partial headerless data has no resume proof.
                 verifier = new BlteVerifier(key, declaredLength);
                 long keep = 0;
                 if (length > 0 && length <= declaredLength)
                 {
                     await FeedAsync(h, verifier, length, ct);
                     keep = verifier.VerifiedPrefix;
+                    if (Kind == ObjectStoreKind.Library && length == declaredLength)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        try
+                        {
+                            verifier.Complete();
+                            keep = length;
+                        }
+                        catch (VerificationFailure) { /* retain only the independently proven chunks, if any */ }
+                    }
                     verifier.Dispose();
+                    // Complete consumes the headerless digest. Rebuild it for normal append/commit validation.
                     verifier = new BlteVerifier(key, declaredLength);
                     await FeedAsync(h, verifier, keep, ct);
                 }
@@ -179,13 +191,16 @@ public sealed partial class ObjectStore
     }
 
     /// <summary>Feeds the first <paramref name="upTo"/> staged bytes to a verifier; stops quietly at the first failed check.</summary>
-    private static async Task FeedAsync(SafeFileHandle h, BlteVerifier verifier, long upTo, CancellationToken ct)
+    private async Task FeedAsync(SafeFileHandle h, BlteVerifier verifier, long upTo, CancellationToken ct)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(1 << 20);
         try
         {
             for (long at = 0; at < upTo;)
             {
+                ct.ThrowIfCancellationRequested();
+                if (Kind == ObjectStoreKind.Library) At(StorePoint.StagingResumeRead);
+                ct.ThrowIfCancellationRequested();
                 var n = (int)Math.Min(1 << 20, upTo - at);
                 if (await PackFiles.ReadFullyAsync(h, buffer.AsMemory(0, n), at, ct) != n) return;
                 try { verifier.Append(buffer.AsSpan(0, n)); } catch (VerificationFailure) { return; }

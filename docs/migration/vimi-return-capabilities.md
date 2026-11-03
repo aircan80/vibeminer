@@ -155,3 +155,6 @@ These are implementation/acceptance references, not cross-runtime format, import
 
 
 **B03 (explicit source reuse) — #225:** v3 inventory metadata binds bounded source descriptors to completed generations atomically. Opt-in ENCODING reuse returns the active generation without source enumeration; ordinary misses publish fresh proof, and the original fresh request stays fresh. Shared real/fake and disposable persistence/integration cases cover reopen, descriptor/count/revision changes, unversioned invalidation, failures, corruption/refusal, explicit upgrade and concurrent publication/cancellation. Automatic scheduling and headless preparation composition remain separate B03/integration work; reuse proves expected-source intent, never physical retention.
+
+
+**S10 (isolated owner-consumer path) — #226:** immutable Original views share one physical fetcher/scheduler and independently acquire durable ownership before successful completion. Shared contracts and fake-CDN/library integration cover cache/batch/range/duplicate/joined claims, live-owner handoff, cancellation/promotion, source evidence, staging/reopen, typed damage refusal and shared physical commit subscriptions. The new path currently uses bounded per-key batches; merged archive planning remains #227. App adoption and a complete per-URL receipt ledger are not implied.

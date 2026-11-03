@@ -94,6 +94,16 @@ public sealed class ObjectStoreStagingTests
     }
 
     [Fact]
+    public async Task LegacyCdnCompleteHeaderlessStagingStillRestartsWithoutAChunkPrefix()
+    {
+        using var temp = new TempDirectory(); await using var store = await ObjectStore.OpenAsync(StoreDir(temp), Quick);
+        var item = Synthetic.Headerless(22604, 200_000);
+        await using (var first = await store.StageAsync(item.Key, item.DeclaredLength)) await first.AppendAsync(item.Bytes);
+        await using var next = await store.StageAsync(item.Key, item.DeclaredLength); Assert.Equal(0, next.Length);
+        await next.AppendAsync(item.Bytes); Assert.Equal(PutOutcome.Stored, (await next.CommitAsync()).Outcome);
+    }
+
+    [Fact]
     public async Task StagingIsBounded()
     {
         using var t = new TempDirectory();

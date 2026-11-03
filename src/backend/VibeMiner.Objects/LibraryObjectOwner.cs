@@ -9,6 +9,8 @@ public enum LibraryObjectRole { Original = 0, Derived = 1 }
 /// <summary>An immutable, borrowed view of one library. Disposing a consumer never closes the shared store.</summary>
 public sealed class LibraryObjectOwner : IObjectReader, IObjectWriter, IHistoryLog
 {
+    /// <summary>The largest indexed-attribution batch; each result follows its input key, including duplicates.</summary>
+    public const int MaxIndexedClaimKeys = 1024;
     private readonly ObjectStore store;
     private readonly LibraryClaim claim;
 
@@ -24,6 +26,36 @@ public sealed class LibraryObjectOwner : IObjectReader, IObjectWriter, IHistoryL
     public ValueTask<bool> HasAsync(ObjectKey key, CancellationToken ct = default) => store.HasAsync(key, ct);
     /// <summary>Whether this exact owner/scope/producer/role has a durable association with the stored key.</summary>
     public ValueTask<bool> OwnsAsync(ObjectKey key, CancellationToken ct = default) => store.OwnsAsync(claim, key, ct);
+
+    /// <summary>
+    /// Durably attributes committed indexed objects to this captured owner, returning true for present keys and false for absent
+    /// keys in input order. Reads no payloads: true is index evidence, not verified retention, and does not clear known damage.
+    /// The whole batch is validated before publication. Cancellation before the transaction publishes nothing; once the transaction
+    /// starts it finishes with its actual outcome. The view borrows this particular store session and cannot rebind after close.
+    /// </summary>
+    public Task<IReadOnlyList<bool>> ClaimIndexedAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        ct.ThrowIfCancellationRequested();
+        var count = keys.Count;
+        if (count is < 0 or > MaxIndexedClaimKeys)
+            throw new ObjectStoreException(ObjectStoreCodes.Limit, "An indexed-attribution batch is at most 1024 keys.");
+        for (var i = 0; i < count; i++) ValidateClaimKey(keys[i]);
+        var copy = new ObjectKey[count];
+        for (var i = 0; i < count; i++)
+        {
+            var key = keys[i];
+            ValidateClaimKey(key);
+            copy[i] = key;
+        }
+        return store.ClaimIndexedAsync(claim, copy, ct);
+    }
+
+    private static void ValidateClaimKey(ObjectKey key)
+    {
+        if (key.Namespace != 0 || !ObjectFormats.Known(ObjectStoreKind.Library, key.Type))
+            throw new ArgumentException("An attributed key must have a known library key type and namespace zero.", nameof(key));
+    }
 
     public async ValueTask<ObjectRead> ReadAsync(ObjectKey key, CancellationToken ct = default)
     {
@@ -187,6 +219,26 @@ internal static class LibraryOwnership
             "INSERT OR IGNORE INTO library_membership(owner,scope,producer,role,k) SELECT $o,$s,$p,$r,k FROM objects WHERE k=$k");
         cmd.ExecuteNonQuery();
     }
+
+    public static IReadOnlyList<bool> AttachIndexed(SqliteConnection c, SqliteTransaction tx, LibraryClaim claim, ObjectKey[] keys)
+    {
+        var present = new bool[keys.Length];
+        using var lookup = c.CreateCommand(); lookup.Transaction = tx;
+        lookup.CommandText = "SELECT EXISTS(SELECT 1 FROM objects WHERE k=$k)";
+        var lookupKey = lookup.Parameters.Add("$k", SqliteType.Blob);
+        using var attach = Command(c, tx, claim, default,
+            "INSERT OR IGNORE INTO library_membership(owner,scope,producer,role,k) SELECT $o,$s,$p,$r,k FROM objects WHERE k=$k");
+        for (var i = 0; i < keys.Length; i++)
+        {
+            var encoded = keys[i].ToIndexKey();
+            lookupKey.Value = encoded;
+            present[i] = (long)lookup.ExecuteScalar()! != 0;
+            if (!present[i]) continue;
+            attach.Parameters["$k"].Value = encoded;
+            attach.ExecuteNonQuery();
+        }
+        return present;
+    }
 }
 
 public sealed partial class ObjectStore
@@ -220,6 +272,24 @@ public sealed partial class ObjectStore
             ct.ThrowIfCancellationRequested();
             Durably(tx => LibraryOwnership.Attach(wconn!, tx, claim, key));
             return Task.FromResult(true);
+        }, ct);
+    }
+
+    internal Task<IReadOnlyList<bool>> ClaimIndexedAsync(LibraryClaim claim, ObjectKey[] keys, CancellationToken ct)
+    {
+        EnsureWriter();
+        return MaintainAsync(() =>
+        {
+            At(StorePoint.LibraryClaimBeforeCommit);
+            ct.ThrowIfCancellationRequested();
+            IReadOnlyList<bool> present = [];
+            Durably(tx =>
+            {
+                present = LibraryOwnership.AttachIndexed(wconn!, tx, claim, keys);
+                At(StorePoint.LibraryClaimInsideCommit);
+            });
+            At(StorePoint.LibraryClaimPublished);
+            return Task.FromResult(present);
         }, ct);
     }
 }

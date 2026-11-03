@@ -13,6 +13,7 @@
   <ProjectReference Include="../VibeMiner.Objects.CrashWriter/VibeMiner.Objects.CrashWriter.csproj" />
   <!-- Shared scenario helpers, linked from the layer 2 unit project. -->
   <Compile Include="../VibeMiner.ObjectAccess.Tests/Kit.cs" Link="Kit.cs" />
+  <Compile Include="../VibeMiner.ObjectAccess.Tests/LibraryOwnerSourceContract.cs" Link="LibraryOwnerSourceContract.cs" />
   <!-- Synthetic build metadata and DB2 writers, linked from the layer 3 and layer 5 unit projects. -->
   <Compile Include="../VibeMiner.Builds.Tests/Formats/BlteWriter.cs" Link="Synthetic/BlteWriter.cs" />
   <Compile Include="../VibeMiner.Builds.Tests/Formats/EncodingWriter.cs" Link="Synthetic/EncodingWriter.cs" />

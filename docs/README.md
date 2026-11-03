@@ -20,6 +20,7 @@ Permanent docs for the Electron + C# VibeMiner. Work in progress lives in GitHub
 | [Engine contracts](../contracts/README.md) | Versioned engine protocol, schemas and message rules |
 | [Async work and jobs](ASYNC-AND-JOBS.md) | Resource budgets, lock order, cancellation, progress, priority scenarios |
 | [Storage](STORAGE.md) | SQLite catalog, object store, provenance, readiness and durability |
+| [Library acquisition](LIBRARY-ACQUISITION.md) | Captured owners over one shared pipeline, evidence and lifecycle |
 | [ENCODING inventories](ENCODING-INVENTORIES.md) | Explicit bounded headless publication of build expected keys |
 | [Size-first and on-demand storage](SIZE-AND-DEMAND-ARCHITECTURE.md) | Why opening is size-first and research data is fetched on demand |
 | [Formats and assets](FORMATS-AND-ASSETS.md) | Original parsers, admission, model viewing and portraits |

@@ -290,7 +290,8 @@ public interface IObjectSource
 
     /// <summary>
     /// Makes every object present and returns one result per request, in request order, without bytes. Missing objects are
-    /// planned into merged ranges by index membership; one bad object fails only itself.
+    /// eligible for merged ranges by index membership; one bad object fails only itself. The legacy ObjectSource uses merged
+    /// planning; isolated library owner views currently use bounded per-key batches until the owner-aware grouping slice.
     /// </summary>
     Task<IReadOnlyList<ObjectResult>> GetKeysAsync(IReadOnlyList<ObjectRequest> requests, CdnContext? cdn, FetchPriority priority,
         IProgress<ObjectProgress>? progress, CancellationToken cancellationToken);

@@ -88,12 +88,15 @@ internal sealed partial class CdnFetcher
     private readonly IObjectVerifier verifier;
     private readonly ObjectSourceOptions options;
     private readonly ByteBudget background, interactive;
+    private readonly Action<ObjectKey, StreamScheduler.Ticket>? claimed;
     private readonly ConcurrentDictionary<ObjectKey, InFlight> inFlight = new();
 
     /// <param name="interactiveCdn">A client over its own connections for interactive work, so a screen's request never queues
     /// behind bulk transfers on a shared HTTP/2 connection. Null uses <paramref name="cdn"/> for both.</param>
-    public CdnFetcher(ICdnClient cdn, IObjectVerifier verifier, ObjectSourceOptions options, ICdnClient? interactiveCdn = null)
+    public CdnFetcher(ICdnClient cdn, IObjectVerifier verifier, ObjectSourceOptions options, ICdnClient? interactiveCdn = null,
+        Action<ObjectKey, StreamScheduler.Ticket>? claimed = null)
     {
+        this.claimed = claimed;
         this.cdn = cdn; this.interactiveCdn = interactiveCdn ?? cdn; this.verifier = verifier; this.options = options;
         Streams = new StreamScheduler(options.Streams);
         Hosts = new HostRanking(options.HostCooldown, options.Time);
@@ -311,6 +314,7 @@ internal sealed partial class CdnFetcher
                 }
                 // Claimed before the store check, so a throw or cancellation there still releases the flight in the finally.
                 claimed[key] = (request, flight);
+                this.claimed?.Invoke(request.Key, ticket);
                 // Checked again here: an interactive caller may have stored it since this plan was made. A store that fails
                 // the check fails only this object.
                 ObjectResult? have;

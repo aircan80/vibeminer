@@ -69,6 +69,9 @@ internal sealed class SimulatedCrashException(StorePoint point) : Exception($"Si
 /// <summary>Points the fault hook can stop at. Each is a place where a real process kill can land.</summary>
 internal enum StorePoint
 {
+    LibraryClaimBeforeCommit, // bounded indexed attribution, before cancellation/publication fence
+    LibraryClaimInsideCommit, // all membership rows staged, transaction not committed
+    LibraryClaimPublished,    // attribution committed; late cancellation cannot imply rollback
     InventorySourceSnapshot,     // active proof validated in a pinned read before comparison
     InventorySourceInsidePublish, // source proof inserted in the same uncommitted generation publication
     InventoryAccountingSnapshot, // all inventory identities resolved in a pinned library-wide snapshot
@@ -103,6 +106,7 @@ internal enum StorePoint
     RebuildBuilt,         // rebuilt index complete, not yet swapped in
     RebuildSwapped,
     StagedBeforePublish,    // verified library staged copy (or duplicate claim) before its final cancellation/publication fence
+    StagingResumeRead,    // library resume replay, before each bounded 1 MiB read
     StagingAppended,      // staged bytes written to the staging file
     IndexMeasuring,       // full index check: after the store row is pinned, before the measure
 }

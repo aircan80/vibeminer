@@ -25,11 +25,12 @@ public sealed class StoreCommitSubscription : IDisposable
 {
     private readonly StoreCommitFeed feed;
     private readonly Channel<StoreCommit> channel;
-    private int missed;
+    private int missed, disposed;
+    private readonly Action<StoreCommitSubscription>? onDisposed;
 
-    internal StoreCommitSubscription(StoreCommitFeed feed, int capacity)
+    internal StoreCommitSubscription(StoreCommitFeed feed, int capacity, Action<StoreCommitSubscription>? onDisposed = null)
     {
-        this.feed = feed;
+        this.feed = feed; this.onDisposed = onDisposed;
         channel = Channel.CreateBounded<StoreCommit>(new BoundedChannelOptions(capacity)
         { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.Wait });
     }
@@ -47,8 +48,10 @@ public sealed class StoreCommitSubscription : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         feed.Remove(this);
         channel.Writer.TryComplete();
+        onDisposed?.Invoke(this);
     }
 }
 
@@ -63,6 +66,13 @@ public sealed class StoreCommitFeed : IStoreCommits
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
         var s = new StoreCommitSubscription(this, capacity);
+        lock (gate) subscribers = [.. subscribers, s];
+        return s;
+    }
+
+    internal StoreCommitSubscription Subscribe(int capacity, Action<StoreCommitSubscription> onDisposed)
+    {
+        var s = new StoreCommitSubscription(this, capacity, onDisposed);
         lock (gate) subscribers = [.. subscribers, s];
         return s;
     }

@@ -19,7 +19,8 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
     private readonly ObjectSourceOptions options;
     private readonly CdnFetcher fetcher;
     private readonly Sink sink;
-    private readonly StoreCommitFeed commits = new();
+    private readonly ILibraryDamagePolicy? libraryDamage;
+    private readonly StoreCommitFeed commits;
 
     public ObjectSource(IObjectReader store, IObjectWriter writer, IHistoryLog history, IObjectReader? sharedStore, ICdnClient cdn,
         IReadOnlyList<IObservationSource> observationSources, IObjectVerifier verifier, ObjectSourceOptions? options = null, ICdnClient? interactiveCdn = null)
@@ -27,7 +28,16 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
         this.store = store; this.writer = writer; this.history = history; shared = sharedStore;
         observations = new(observationSources); this.verifier = verifier; this.options = options ?? new();
         fetcher = new CdnFetcher(cdn, verifier, this.options, interactiveCdn);
-        sink = new Sink(this);
+        commits = new(); sink = new Sink(this);
+    }
+
+    // A library service supplies ONE fetcher, a raw reader, and a live-consumer handoff writer. This adapter owns no
+    // scheduler, clients or library lifetime; legacy constructors and damaged-entry repair remain unchanged.
+    internal ObjectSource(IObjectReader store, IObjectWriter writer, IHistoryLog history, IObjectVerifier verifier,
+        ObjectSourceOptions options, CdnFetcher fetcher, ILibraryDamagePolicy damage, StoreCommitFeed commits)
+    {
+        this.store = store; this.writer = writer; this.history = history; this.verifier = verifier; this.options = options;
+        this.fetcher = fetcher; libraryDamage = damage; this.commits = commits; observations = new([]); sink = new(this);
     }
 
     /// <summary>The shared streams, so callers and tests can see the background limit and what is in use.</summary>
@@ -66,7 +76,8 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
             cancellationToken.ThrowIfCancellationRequested();
             if (first.ContainsKey(requests[i].Key)) continue;
             first[requests[i].Key] = i;
-            if (await store.HasAsync(requests[i].Key, cancellationToken).ConfigureAwait(false))
+            if (libraryDamage?.Known(requests[i].Key) is { } damaged) results[i] = damaged;
+            else if (await store.HasAsync(requests[i].Key, cancellationToken).ConfigureAwait(false))
                 results[i] = new(requests[i].Key, ObjectState.Present, ServedFrom.Store);
             else if (await CopySharedAsync(requests[i], withBytes: false, priority, cancellationToken).ConfigureAwait(false) is { } copied)
                 results[i] = copied;
@@ -86,14 +97,19 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (libraryDamage?.Known(request.Key) is { } damaged) return damaged;
         for (var attempt = 0; ; attempt++)
         {
             var read = await store.ReadRangeAsync(request.Key, offset, destination, cancellationToken).ConfigureAwait(false);
             if (read.State == ReadState.Present) return new(request.Key, ObjectState.Present, attempt == 0 ? ServedFrom.Store : ServedFrom.Cdn, read.Info?.Origin, read.Info?.Length);
             if (attempt > 0) return new(request.Key, ObjectState.Refused, Code: "OBJECT_ACCESS_" + read.State.ToString().ToUpperInvariant(), Message: read.Problem);
-            if (read.State != ReadState.Absent) await DropDamagedAsync(request.Key, cancellationToken).ConfigureAwait(false);
+            if (read.State != ReadState.Absent)
+            {
+                if (libraryDamage is not null) return libraryDamage.Mark(request.Key, read.State, read.Problem);
+                await DropDamagedAsync(request.Key, cancellationToken).ConfigureAwait(false);
+            }
             // A big loose object with no local copy: fetch and prove only the chunks under the range, storing nothing (D340).
-            if (cdn is not null && fetcher.CanFetchRange(request)
+            if (libraryDamage is null && cdn is not null && fetcher.CanFetchRange(request)
                 && (shared is null || !await shared.HasAsync(request.Key, cancellationToken).ConfigureAwait(false))
                 && await fetcher.FetchRangeAsync(request, offset, destination, cdn, priority, cancellationToken).ConfigureAwait(false) is { } ranged)
                 return ranged;
@@ -147,6 +163,7 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
     /// <summary>The own store's copy with its bytes, or null when it has none. A damaged copy is deleted so it can be fetched again.</summary>
     private async Task<ObjectResult?> ReadStoredAsync(ObjectRequest request, CancellationToken cancellationToken)
     {
+        if (libraryDamage?.Known(request.Key) is { } damaged) return damaged;
         if (request.DeclaredLength > options.InMemoryObjectBytes)
             return await store.HasAsync(request.Key, cancellationToken).ConfigureAwait(false)
                 ? new ObjectResult(request.Key, ObjectState.Present, ServedFrom.Store, Length: request.DeclaredLength) : null;
@@ -158,7 +175,9 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
         {
             case ReadState.Present: return new(request.Key, ObjectState.Present, ServedFrom.Store, read.Info?.Origin, read.Bytes!.Length, read.Bytes);
             case ReadState.Absent: return null;
-            default: await DropDamagedAsync(request.Key, cancellationToken).ConfigureAwait(false); return null;
+            default:
+                if (libraryDamage is not null) return libraryDamage.Mark(request.Key, read.State, read.Problem);
+                await DropDamagedAsync(request.Key, cancellationToken).ConfigureAwait(false); return null;
         }
     }
 
@@ -276,10 +295,12 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
                 while (true)
                 {
                     await using var staging = await owner.writer.StageAsync(request.Key, declaredLength, ObjectOrigin.Cdn, cancellationToken).ConfigureAwait(false);
+                    var completeLocal = owner.libraryDamage is not null && staging.Length == declaredLength;
                     try
                     {
-                        // A resumed staging keeps only chunk-proven bytes: fetch the rest as one range.
-                        if (await fetch(staging.Length, (bytes, token) => new ValueTask(staging.AppendAsync(bytes, token)), cancellationToken).ConfigureAwait(false) is null)
+                        // A complete library staging is already re-proven; do not fabricate a zero-length CDN range.
+                        // Legacy staging retains its existing fetch behavior.
+                        if (!completeLocal && await fetch(staging.Length, (bytes, token) => new ValueTask(staging.AppendAsync(bytes, token)), cancellationToken).ConfigureAwait(false) is null)
                             return new(request.Key, ObjectState.Refused, Code: rejected.Code ?? ObjectStoreCodes.StagingRejected,
                                 Message: rejected.Message ?? "Every host's bytes were refused.");
                     }
@@ -289,7 +310,7 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
                     var put = await staging.CommitAsync(cancellationToken).ConfigureAwait(false);
                     owner.PublishStored([put]);
                     if (put.Outcome == PutOutcome.Refused) { rejected = (put.Code, put.Message); continue; }
-                    return FromPut(put, ServedFrom.Cdn, declaredLength);
+                    return FromPut(put, completeLocal ? ServedFrom.Store : ServedFrom.Cdn, declaredLength);
                 }
             }
             catch (ObjectStoreException ex) when (ex.Code == ObjectStoreCodes.StagingRejected)
@@ -299,6 +320,6 @@ public sealed class ObjectSource : IObjectSource, IStoreCommits
         }
 
         public async ValueTask<ObjectResult?> AlreadyHaveAsync(ObjectKey key, CancellationToken cancellationToken) =>
-            await owner.store.HasAsync(key, cancellationToken).ConfigureAwait(false) ? new ObjectResult(key, ObjectState.Present, ServedFrom.Store) : null;
+            owner.libraryDamage?.Known(key) ?? (await owner.store.HasAsync(key, cancellationToken).ConfigureAwait(false) ? new ObjectResult(key, ObjectState.Present, ServedFrom.Store) : null);
     }
 }
