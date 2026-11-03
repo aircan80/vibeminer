@@ -187,6 +187,38 @@ public sealed class LibraryInventoryMeasurementTests
         Assert.Equal(ObjectStoreCodes.IndexUnreadable, (await Assert.ThrowsAsync<ObjectStoreException>(async () => await inventory.MeasureAsync())).Code);
     }
 
+    [Theory]
+    [InlineData(0)] // another owner
+    [InlineData(1)] // another scope
+    [InlineData(2)] // another producer
+    [InlineData(3)] // another role
+    [InlineData(4)] // this identity's unpublished staging generation
+    public async Task ActivePointerToForeignOrUnpublishedGenerationCannotFabricateMeasuredZeros(int mismatch)
+    {
+        using var temp = new TempDirectory();
+        var directory = DirectoryPath(temp);
+        await using var library = await ObjectStore.OpenLibraryAsync(directory, Quick);
+        var inventory = Owner(library).Inventory;
+        await PublishAsync(inventory, Key(1));
+        LibraryInventoryGeneration invalidActive;
+        if (mismatch == 4) invalidActive = await inventory.BeginAsync();
+        else
+        {
+            var other = mismatch switch
+            {
+                0 => Owner(library, id: "other"),
+                1 => Owner(library, scope: LibraryOwnerScope.Global),
+                2 => Owner(library, producer: "other"),
+                _ => Owner(library, role: LibraryObjectRole.Derived),
+            };
+            invalidActive = await PublishAsync(other.Inventory);
+        }
+        MutateIndex(directory, $"UPDATE library_inventory_identity SET active={invalidActive.Value} WHERE owner='build-a' AND scope=0 AND producer='metadata' AND role=0");
+        Assert.Equal(ObjectStoreCodes.IndexUnreadable, (await Assert.ThrowsAsync<ObjectStoreException>(async () => await inventory.MeasureAsync())).Code);
+        Assert.Equal(ObjectStoreCodes.IndexUnreadable, (await Assert.ThrowsAsync<ObjectStoreException>(async () => await inventory.LookupAsync(Key(1)))).Code);
+        Assert.Equal(ObjectStoreCodes.IndexUnreadable, (await Assert.ThrowsAsync<ObjectStoreException>(async () => await inventory.ReadPageAsync())).Code);
+    }
+
     [Fact]
     public async Task V1LibraryMeasurementRequiresTheExplicitInventoryUpgrade()
     {
