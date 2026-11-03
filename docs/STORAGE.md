@@ -443,3 +443,7 @@ The Java authored EN benchmark exceeded one million inserts and showed material 
 ## Isolated mixed-library primitive
 
 Issue #213 adds an explicitly selected C# pack library for original and generated objects with durable immutable ownership. It does not change application profiles or current store composition. Its authoritative index, refusal/recovery rules and deferred mutation paths are specified in [object-store-v1 section 10](formats/object-store-v1.md#10-isolated-c-mixed-library-213); the return-port capability baseline is in [migration/vimi-return-capabilities](migration/vimi-return-capabilities.md).
+
+## Expected-object inventories
+
+Issue #215 adds `LibraryObjectOwner.Inventory` on the isolated mixed library. It stages keys in batches of at most 1024 and atomically publishes a complete generation for one exact owner/scope/producer/role, retaining the previous active set while a refresh runs. Expected keys may be absent physically; they do not change Has, Read or physical Owns. Bounded lookup/pages retain an explicit generation and reject stale continuations. Failed/canceled staging cannot publish a partial set. [Format section 11](formats/object-store-v1.md#11-expected-object-inventory-generations-215) defines the additive opt-in upgrade, token/cursor boundaries and recovery rules. This is an inventory primitive, not accounting, build status, acquisition or app cutover.

@@ -74,6 +74,8 @@ public sealed record ObjectStoreOptions
 {
     /// <summary>The store's kind; opening a folder of the other kind throws OBJECT_STORE_KIND_MISMATCH.</summary>
     public ObjectStoreKind Kind { get; init; } = ObjectStoreKind.Cdn;
+    /// <summary>Explicitly upgrade a validated mixed library's v1 metadata to v2 expected inventories. Other store kinds are unchanged.</summary>
+    public bool UpgradeLibraryInventory { get; init; }
     public long MaxPackBytes { get; init; } = 2L << 30;
     public int CommitObjects { get; init; } = 128;
     public long CommitBytes { get; init; } = 16L << 20;

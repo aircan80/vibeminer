@@ -213,6 +213,9 @@ internal static class ObjectIndex
         return (long)(x ^ (x >> 31));
     }
 
+    /// <summary>Mixed 64-bit checksum for an encoded expected key; XOR combines unique keys without depending on append order.</summary>
+    internal static long InventoryKeyDigest(ReadOnlySpan<byte> key) => Mix(key);
+
     public static long ObjectDigest(byte[] k, long pack, long offset, long length, byte[] sha)
     {
         Span<byte> b = stackalloc byte[(k?.Length ?? 0) + 24 + (sha?.Length ?? 0)];

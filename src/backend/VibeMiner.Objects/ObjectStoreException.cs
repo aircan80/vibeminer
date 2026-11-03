@@ -3,6 +3,9 @@ namespace VibeMiner.Objects;
 /// <summary>Named store-level failures. Per-object Put refusals and read states are results, not exceptions.</summary>
 public static class ObjectStoreCodes
 {
+    public const string InventoryStale = "OBJECT_LIBRARY_INVENTORY_STALE";
+    public const string InventoryCursorStale = "OBJECT_LIBRARY_INVENTORY_CURSOR_STALE";
+    public const string InventoryUpgradeRequired = "OBJECT_LIBRARY_INVENTORY_UPGRADE_REQUIRED";
     public const string OwnerRequired = "OBJECT_STORE_OWNER_REQUIRED";
     public const string LibraryOperationUnsupported = "OBJECT_LIBRARY_OPERATION_UNSUPPORTED";
     /// <summary>A pack, entry or index was written by a newer format than this engine knows. Nothing was changed.</summary>
@@ -65,6 +68,10 @@ internal sealed class SimulatedCrashException(StorePoint point) : Exception($"Si
 /// <summary>Points the fault hook can stop at. Each is a place where a real process kill can land.</summary>
 internal enum StorePoint
 {
+    InventoryStaged,       // staged keys committed, not active
+    InventoryBeforePublish, // before the publication transaction
+    InventoryInsidePublish, // active pointer switched, transaction not committed
+    InventoryPublished,    // publication transaction committed
     PackFileWritten,      // new pack file written, not yet synced or listed
     PackListed,           // new pack's row committed
     EntryStarted,         // before any byte of an entry

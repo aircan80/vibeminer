@@ -18,6 +18,9 @@ public sealed class LibraryObjectOwner : IObjectReader, IObjectWriter, IHistoryL
     /// <summary>The role captured when the immutable view was created.</summary>
     public LibraryObjectRole Role => claim.Role;
 
+    /// <summary>Expected-object generations for this exact immutable identity; independent of physical membership.</summary>
+    public ILibraryInventory Inventory => new LibraryInventory(store, claim);
+
     public ValueTask<bool> HasAsync(ObjectKey key, CancellationToken ct = default) => store.HasAsync(key, ct);
     /// <summary>Whether this exact owner/scope/producer/role has a durable association with the stored key.</summary>
     public ValueTask<bool> OwnsAsync(ObjectKey key, CancellationToken ct = default) => store.OwnsAsync(claim, key, ct);
@@ -76,14 +79,18 @@ internal static class LibraryOwnership
 {
     private const string Schema = """
         CREATE TABLE library_format(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL);
-        INSERT INTO library_format VALUES(1,1);
+        INSERT INTO library_format VALUES(1,2);
         CREATE TABLE library_membership(owner TEXT NOT NULL, scope INTEGER NOT NULL CHECK(scope IN (0,1)),
             producer TEXT NOT NULL, role INTEGER NOT NULL CHECK(role IN (0,1)), k BLOB NOT NULL CHECK(length(k)=18),
             PRIMARY KEY(owner,scope,producer,role,k)) WITHOUT ROWID;
         CREATE INDEX library_membership_key ON library_membership(k);
         """;
 
-    public static void Create(SqliteConnection c, SqliteTransaction tx) => ObjectIndex.Exec(c, Schema, tx);
+    public static void Create(SqliteConnection c, SqliteTransaction tx)
+    {
+        ObjectIndex.Exec(c, Schema, tx);
+        ObjectIndex.Exec(c, LibraryInventoryMetadata.Schema, tx);
+    }
 
     public static void Validate(string path, bool immutable = false, CancellationToken ct = default)
     {
@@ -96,9 +103,20 @@ internal static class LibraryOwnership
             version.Transaction = snapshot;
             version.CommandText = "SELECT version FROM library_format WHERE id=1";
             var found = version.ExecuteScalar();
-            if (found is not long v || v != 1)
-                throw new ObjectStoreException(found is long newer && newer > 1 ? ObjectStoreCodes.NewerFormat : ObjectStoreCodes.IndexUnreadable,
+            using var formatRows = c.CreateCommand(); formatRows.Transaction = snapshot;
+            formatRows.CommandText = "SELECT COUNT(*) FROM library_format";
+            if ((long)formatRows.ExecuteScalar()! != 1) throw new ArgumentException("Malformed library format metadata.");
+            if (found is not long v || v is < 1 or > 2)
+                throw new ObjectStoreException(found is long newer && newer > 2 ? ObjectStoreCodes.NewerFormat : ObjectStoreCodes.IndexUnreadable,
                     "The authoritative library metadata format is unsupported or missing; it cannot be rebuilt from packs.");
+            if (v == 2) LibraryInventoryMetadata.Validate(c, snapshot, ct);
+            else
+            {
+                // A v1 library may be upgraded only from a clean absence of v2 tables, never from damaged/partially missing metadata.
+                using var leftovers = c.CreateCommand(); leftovers.Transaction = snapshot;
+                leftovers.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('library_inventory_identity','library_inventory_generation','library_inventory_key'))";
+                if ((long)leftovers.ExecuteScalar()! != 0) throw new ArgumentException("Unexpected inventory metadata in a v1 library.");
+            }
             using var membership = c.CreateCommand();
             membership.Transaction = snapshot;
             using var bounds = c.CreateCommand();

@@ -144,6 +144,31 @@ public sealed partial class ObjectStore
         try
         {
             OpenWriterConnection();
+            if (Kind == ObjectStoreKind.Library && options.UpgradeLibraryInventory && LibraryInventoryMetadata.Version(wconn!) == 1)
+            {
+                ct.ThrowIfCancellationRequested();
+                Durably(tx =>
+                {
+                    ObjectIndex.Exec(wconn!, LibraryInventoryMetadata.Schema, tx);
+                    ObjectIndex.Exec(wconn!, "UPDATE library_format SET version=2 WHERE id=1", tx);
+                });
+            }
+            if (Kind == ObjectStoreKind.Library && LibraryInventoryMetadata.Version(wconn!) == 2)
+            {
+                // Staging is not resumable. A failed append may have committed a prefix before its caller saw the failure,
+                // or cancellation poisoning may have lost a race to close. Fence every retained token before admitting work.
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    Durably(tx =>
+                    {
+                        using var interrupt = ct.Register(() => SQLitePCL.raw.sqlite3_interrupt(wconn!.Handle));
+                        ObjectIndex.Exec(wconn!, "UPDATE library_inventory_generation SET state=2 WHERE state=0", tx);
+                        ct.ThrowIfCancellationRequested();
+                    });
+                }
+                catch (SqliteException) when (ct.IsCancellationRequested) { throw new OperationCanceledException(ct); }
+            }
             storeId = ReadStoreId(wconn!);
             // Unset the clean-close marker first, durably: from here on a crash leaves it unset, so the next open runs the full check.
             SetCleanClose(false);
