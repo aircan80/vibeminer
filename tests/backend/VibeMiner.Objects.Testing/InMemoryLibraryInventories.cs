@@ -37,6 +37,64 @@ public sealed class InMemoryLibraryInventories : IAsyncDisposable
         }
     }
 
+    public ILibraryInventoryUnion ForInventoryOwner(string owner, LibraryOwnerScope scope, LibraryObjectRole role)
+    {
+        _ = new LibraryClaim(owner, scope, "union", role);
+        lock (gate) { EnsureOpen(); return new UnionView(this, owner, scope, role); }
+    }
+
+    private sealed class UnionView(InMemoryLibraryInventories store, string owner, LibraryOwnerScope scope, LibraryObjectRole role) : ILibraryInventoryUnion
+    {
+        public ValueTask<LibraryInventoryUnionMeasurement> MeasureAsync(CancellationToken ct = default)
+        {
+            lock (store.gate)
+            {
+                store.EnsureOpen(); ct.ThrowIfCancellationRequested();
+                try
+                {
+                    long published = 0, unpublished = 0, expected = 0, present = 0, bytes = 0;
+                    var activeSets = new List<SortedSet<ObjectKey>>(LibraryInventoryUnionLimits.MaxPublishedProducers);
+                    foreach (var (claim, identity) in store.identities)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (claim.Owner != owner || claim.Scope != scope || claim.Role != role || identity.Latest == 0) continue;
+                        if (identity.Active is not { } active) { unpublished = checked(unpublished + 1); continue; }
+                        published = checked(published + 1);
+                        if (published > LibraryInventoryUnionLimits.MaxPublishedProducers)
+                            throw new ObjectStoreException(ObjectStoreCodes.Limit, "Too many published producers for an inventory union.");
+                        activeSets.Add(store.generations[active].Keys);
+                    }
+                    if (published == 0) return ValueTask.FromResult(new LibraryInventoryUnionMeasurement(0, unpublished, null, null, null, null));
+                    var cursors = activeSets.Select(set => ((IEnumerable<ObjectKey>)set).GetEnumerator()).ToArray();
+                    try
+                    {
+                        var heads = new PriorityQueue<int, ObjectKey>();
+                        for (var i = 0; i < cursors.Length; i++) if (cursors[i].MoveNext()) heads.Enqueue(i, cursors[i].Current);
+                        ObjectKey? previous = null;
+                        while (heads.TryDequeue(out var cursor, out var key))
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            if (previous is null || previous.Value != key)
+                            {
+                                expected = checked(expected + 1);
+                                if (store.indexedObjects.TryGetValue(key, out var length))
+                                {
+                                    present = checked(present + 1); bytes = checked(bytes + length);
+                                }
+                                previous = key;
+                            }
+                            if (cursors[cursor].MoveNext()) heads.Enqueue(cursor, cursors[cursor].Current);
+                        }
+                    }
+                    finally { foreach (var cursor in cursors) cursor.Dispose(); }
+                    ct.ThrowIfCancellationRequested();
+                    return ValueTask.FromResult(new LibraryInventoryUnionMeasurement(published, unpublished, expected, present, checked(expected - present), bytes));
+                }
+                catch (OverflowException e) { throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "Indexed union measurement overflowed.", e); }
+            }
+        }
+    }
+
     /// <summary>Tests only: records committed index presence/length without acquiring or storing payload bytes.</summary>
     public void SetIndexedObject(ObjectKey key, long length)
     {

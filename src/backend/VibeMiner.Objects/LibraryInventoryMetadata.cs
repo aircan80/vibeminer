@@ -49,10 +49,20 @@ internal static class LibraryInventoryMetadata
             WHERE i.owner=$o AND i.scope=$s AND i.producer=$p AND i.role=$r
             """);
         using var row = cmd.ExecuteReader();
-        if (!row.Read() || row.IsDBNull(0)) return null;
-        if (row.GetValue(0) is long id && id > 0 && row.GetValue(1) is long matched && matched == id) return id;
+        if (!row.Read()) return null;
+        var id = ParseActive(row.GetValue(0));
+        if (id is null) return null;
+        if (row.GetValue(1) is long matched && matched == id) return id;
         throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable,
             "The authoritative inventory's active generation is malformed or does not match its published identity; preserve the library for repair.");
+    }
+
+    internal static long? ParseActive(object? active)
+    {
+        if (active is null or DBNull) return null;
+        if (active is long id && id > 0) return id;
+        throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable,
+            "The authoritative inventory's active generation is malformed; preserve the library for repair.");
     }
 
     private static void CheckTotals(long count, long digest, long recordedCount, long recordedDigest)
