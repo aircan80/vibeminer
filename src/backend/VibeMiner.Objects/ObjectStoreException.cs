@@ -68,6 +68,9 @@ internal sealed class SimulatedCrashException(StorePoint point) : Exception($"Si
 /// <summary>Points the fault hook can stop at. Each is a place where a real process kill can land.</summary>
 internal enum StorePoint
 {
+    InventoryAccountingSnapshot, // all inventory identities resolved in a pinned library-wide snapshot
+    InventoryAccountingIndexRow, // one committed index row reached before independent accounting
+    InventoryAccountingRow,      // one producer input row reached before library-wide deduplication
     InventoryPairSnapshot,    // both selections resolved in the pair measurement's pinned snapshot
     InventoryPairRow,         // one sorted producer input row reached before pair deduplication
     InventoryUnionSnapshot,   // matching producer identities resolved in a pinned union snapshot

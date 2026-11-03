@@ -179,6 +179,90 @@ public sealed class InMemoryLibraryInventories : IAsyncDisposable
         }
     }
 
+    public ILibraryInventoryAccounting ForInventoryAccounting()
+    {
+        lock (gate) { EnsureOpen(); return new AccountingView(this); }
+    }
+
+    private sealed class AccountingView(InMemoryLibraryInventories store) : ILibraryInventoryAccounting
+    {
+        private sealed class Bucket
+        {
+            public long Expected, Present, Bytes;
+            public void Add(long? length)
+            {
+                Expected = checked(Expected + 1);
+                if (length is not { } value) return;
+                Present = checked(Present + 1); Bytes = checked(Bytes + value);
+            }
+            public LibraryInventoryCoverage Coverage() => new(Expected, Present, checked(Expected - Present), Bytes);
+        }
+
+        public ValueTask<LibraryInventoryAccountingMeasurement> MeasureAsync(CancellationToken ct = default)
+        {
+            lock (store.gate)
+            {
+                store.EnsureOpen(); ct.ThrowIfCancellationRequested();
+                try
+                {
+                    long published = 0, unpublished = 0, indexedObjects = 0, indexedBytes = 0;
+                    var streams = new List<(SortedSet<ObjectKey> Keys, LibraryClaim Claim)>(LibraryInventoryAccountingLimits.MaxPublishedInventories);
+                    foreach (var (claim, identity) in store.identities)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (identity.Latest == 0) continue;
+                        if (identity.Active is not { } active) { unpublished = checked(unpublished + 1); continue; }
+                        published = checked(published + 1);
+                        if (published > LibraryInventoryAccountingLimits.MaxPublishedInventories)
+                            throw new ObjectStoreException(ObjectStoreCodes.Limit, "Too many published inventories for library accounting.");
+                        streams.Add((store.generations[active].Keys, claim));
+                    }
+                    foreach (var length in store.indexedObjects.Values)
+                    {
+                        ct.ThrowIfCancellationRequested(); indexedObjects = checked(indexedObjects + 1); indexedBytes = checked(indexedBytes + length);
+                    }
+                    if (published == 0) return ValueTask.FromResult(new LibraryInventoryAccountingMeasurement(0, unpublished, indexedObjects, indexedBytes,
+                        null, null, null, null, null, null, null, null, null, null, null, null, null, null));
+                    var union = new Bucket(); var single = new Bucket(); var multiple = new Bucket();
+                    var original = new Bucket(); var derived = new Bucket(); var bothRoles = new Bucket();
+                    var build = new Bucket(); var global = new Bucket(); var bothScopes = new Bucket();
+                    long ownerReferences = 0, indexedOwnerReferences = 0, creditedBytes = 0;
+                    var cursors = streams.Select(stream => ((IEnumerable<ObjectKey>)stream.Keys).GetEnumerator()).ToArray();
+                    try
+                    {
+                        var heads = new PriorityQueue<int, ObjectKey>();
+                        for (var i = 0; i < cursors.Length; i++) if (cursors[i].MoveNext()) heads.Enqueue(i, cursors[i].Current);
+                        var owners = new HashSet<(string Owner, LibraryOwnerScope Scope)>();
+                        while (heads.TryPeek(out _, out var key))
+                        {
+                            owners.Clear(); var roles = 0; var scopes = 0;
+                            while (heads.TryPeek(out var cursor, out var current) && current == key)
+                            {
+                                ct.ThrowIfCancellationRequested(); heads.Dequeue(); var claim = streams[cursor].Claim;
+                                owners.Add((claim.Owner, claim.Scope)); roles |= 1 << (int)claim.Role; scopes |= 1 << (int)claim.Scope;
+                                if (cursors[cursor].MoveNext()) heads.Enqueue(cursor, cursors[cursor].Current);
+                            }
+                            long? length = store.indexedObjects.TryGetValue(key, out var indexed) ? indexed : null;
+                            union.Add(length); (owners.Count == 1 ? single : multiple).Add(length);
+                            (roles == 1 ? original : roles == 2 ? derived : bothRoles).Add(length);
+                            (scopes == 1 ? build : scopes == 2 ? global : bothScopes).Add(length);
+                            ownerReferences = checked(ownerReferences + owners.Count);
+                            if (length is not { } value) continue;
+                            indexedOwnerReferences = checked(indexedOwnerReferences + owners.Count);
+                            creditedBytes = checked(creditedBytes + checked(value * owners.Count));
+                        }
+                    }
+                    finally { foreach (var cursor in cursors) cursor.Dispose(); }
+                    ct.ThrowIfCancellationRequested();
+                    return ValueTask.FromResult(new LibraryInventoryAccountingMeasurement(published, unpublished, indexedObjects, indexedBytes, union.Coverage(),
+                        checked(indexedObjects - union.Present), checked(indexedBytes - union.Bytes), ownerReferences, indexedOwnerReferences, creditedBytes,
+                        single.Coverage(), multiple.Coverage(), original.Coverage(), derived.Coverage(), bothRoles.Coverage(), build.Coverage(), global.Coverage(), bothScopes.Coverage()));
+                }
+                catch (OverflowException e) { throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "Indexed library accounting overflowed.", e); }
+            }
+        }
+    }
+
     /// <summary>Tests only: records committed index presence/length without acquiring or storing payload bytes.</summary>
     public void SetIndexedObject(ObjectKey key, long length)
     {

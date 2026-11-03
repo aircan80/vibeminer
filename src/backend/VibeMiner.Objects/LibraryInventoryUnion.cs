@@ -23,7 +23,9 @@ public sealed partial class ObjectStore
         return new LibraryInventoryUnion(this, owner, scope, role);
     }
 
-    private readonly record struct InventoryUnionGeneration(long Id, long KeyCount);
+    private readonly record struct InventoryOwnerReference(string Owner, LibraryOwnerScope Scope);
+    private readonly record struct InventoryUnionGeneration(long Id, long KeyCount,
+        InventoryOwnerReference? Owner = null, LibraryObjectRole Role = default);
 
     private sealed record InventoryUnionResolution(List<InventoryUnionGeneration> Generations, long Published, long Unpublished)
     {
@@ -53,7 +55,9 @@ public sealed partial class ObjectStore
         long published = 0, unpublished = 0;
         using var identities = c.CreateCommand(); identities.Transaction = tx;
         identities.CommandText = """
-            SELECT i.active,g.id,g.state,g.key_count FROM library_inventory_identity i
+            SELECT CASE WHEN typeof(i.active)='integer' OR i.active IS NULL THEN i.active ELSE 0 END,g.id,
+                CASE WHEN typeof(g.state)='integer' THEN g.state ELSE NULL END,
+                CASE WHEN typeof(g.key_count)='integer' THEN g.key_count ELSE NULL END FROM library_inventory_identity i
             LEFT JOIN library_inventory_generation g ON g.id=i.active AND g.owner=i.owner
                 AND g.scope=i.scope AND g.producer=i.producer AND g.role=i.role
             WHERE i.owner=$o AND i.scope=$s AND i.role=$r
@@ -65,18 +69,27 @@ public sealed partial class ObjectStore
         while (rows.Read())
         {
             ct.ThrowIfCancellationRequested();
-            var active = LibraryInventoryMetadata.ParseActive(rows.GetValue(0));
-            if (active is null) { unpublished = checked(unpublished + 1); continue; }
-            if (rows.GetValue(1) is not long id || id != active || rows.GetValue(2) is not long state || state != 1 ||
-                rows.GetValue(3) is not long count || count < 0)
-                throw new InvalidOperationException("An active producer inventory or its committed key count is unreadable.");
+            var generation = ReadActiveInventoryGeneration(rows);
+            if (generation is null) { unpublished = checked(unpublished + 1); continue; }
             published = checked(published + 1);
             if (published > LibraryInventoryUnionLimits.MaxPublishedProducers)
                 throw new ObjectStoreException(ObjectStoreCodes.Limit,
                     $"An inventory union supports at most {LibraryInventoryUnionLimits.MaxPublishedProducers} active published producers.");
-            generations.Add(new(id, count));
+            generations.Add(generation.Value);
         }
         return new(generations, published, unpublished);
+    }
+
+    // The first four columns are shared by selected and library-wide identity resolution. The SQL join must bind
+    // generation identity exactly; a positive pointer into another identity must never become a plausible empty result.
+    private static InventoryUnionGeneration? ReadActiveInventoryGeneration(SqliteDataReader rows)
+    {
+        var active = LibraryInventoryMetadata.ParseActive(rows.GetValue(0));
+        if (active is null) return null;
+        if (rows.GetValue(1) is not long id || id != active || rows.GetValue(2) is not long state || state != 1 ||
+            rows.GetValue(3) is not long count || count < 0)
+            throw new InvalidOperationException("An active producer inventory or its committed key count is unreadable.");
+        return new(id, count);
     }
 
     internal ValueTask<LibraryInventoryUnionMeasurement> MeasureInventoryUnionAsync(string owner, LibraryOwnerScope scope, LibraryObjectRole role, CancellationToken ct)
@@ -98,7 +111,7 @@ public sealed partial class ObjectStore
     // A fixed cap bounds both SQL statement state and managed heads. Each SQL cursor follows the expected-key PK, without
     // DISTINCT or temporary sorting; side bits on equal keys support the pair-local intersection without a second traversal.
     private void MergeInventoryStreams(SqliteConnection c, SqliteTransaction tx, List<InventoryUnionGeneration> left,
-        List<InventoryUnionGeneration>? right, StorePoint rowPoint, Action<int, long?> accept, CancellationToken ct)
+        List<InventoryUnionGeneration>? right, StorePoint rowPoint, Action<int, long?> accept, CancellationToken ct, Action<InventoryUnionGeneration>? reference = null)
     {
         var capacity = left.Count + (right?.Count ?? 0);
         if (capacity > LibraryInventoryPairLimits.MaxStreamHeads)
@@ -121,6 +134,7 @@ public sealed partial class ObjectStore
                 }
                 previous = key; havePrevious = true;
                 sides |= stream.Side; length = stream.IndexedLength;
+                reference?.Invoke(stream.Generation);
                 if (stream.MoveNext(ct)) heads.Enqueue(stream, stream.Key);
             }
             if (havePrevious) accept(sides, length);
@@ -146,13 +160,14 @@ public sealed partial class ObjectStore
         private readonly SqliteDataReader rows;
         private readonly long recordedCount;
         private long count;
+        public InventoryUnionGeneration Generation { get; }
         public int Side { get; }
         public ObjectKey Key { get; private set; }
         public long? IndexedLength { get; private set; }
 
         public InventoryUnionCursor(SqliteConnection c, SqliteTransaction tx, InventoryUnionGeneration generation, int side)
         {
-            Side = side;
+            Side = side; Generation = generation;
             recordedCount = generation.KeyCount;
             command = c.CreateCommand(); command.Transaction = tx;
             command.CommandText = """

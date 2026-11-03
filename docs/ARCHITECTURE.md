@@ -43,7 +43,7 @@ flowchart TB
 - **The generated store is private to layers 4–6.** It reuses the pack-store code as a separate instance for prepared data, a second store of kind Generated behind `IGeneratedStore` ([D210](DECISIONS.md)). It never reads the CDN object store directly: the Files layer gets its inputs through layers 3 and 2, and layers 5 and 6 through the Files layer.
 - **Async.** Every I/O operation is async and takes a `CancellationToken`. Pure CPU helpers on in-memory bytes, such as key parsing and small-object verification, are synchronous. SQLite's driver is synchronous inside, so the store runs index work on its own reader pool and writer task.
 
-The explicitly selected mixed-library primitive (#213, D477) also has a borrowed generated facade (#214, D478). `GeneratedStore.Borrow` uses a captured Derived owner and the existing `IGeneratedStore` read/put boundary without a second physical store. It is not yet wired into application composition. Mutation and accounting operations remain explicitly unsupported; current standalone generated consumers retain their behavior.
+The explicitly selected mixed-library primitive (#213, D477) also has a borrowed generated facade (#214, D478). `GeneratedStore.Borrow` uses a captured Derived owner and the existing `IGeneratedStore` read/put boundary without a second physical store. It is not yet wired into application composition. The borrowed facade still refuses Delete, Compact and Stats; current standalone generated consumers retain their behavior. Separate library inventory interfaces provide expected-key publication, union/pair measurements and library-wide index accounting (#215, #218–#220, #222).
 
 ### Stores
 
