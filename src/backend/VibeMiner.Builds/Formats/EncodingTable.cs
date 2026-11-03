@@ -168,6 +168,30 @@ internal sealed class EncodingTable
         }
     }
 
+    internal EncodingRowPage ReadEncodedPage(CdnKey? after, int limit, CancellationToken ct)
+    {
+        if (limit is < 1 or > 1024) throw new EncodingInventoryException(EncodingInventoryCodes.Validation, "An ENCODING page is 1 to 1024 rows.");
+        ct.ThrowIfCancellationRequested();
+        var rows = new List<EncodingRow>(limit);
+        var page = new byte[encoded.PageBytes];
+        var first = after is { } key ? Math.Max(0, encoded.PageFor(key)) : 0;
+        for (var ordinal = first; ordinal < encoded.Firsts.Length; ordinal++)
+        {
+            ct.ThrowIfCancellationRequested();
+            ReadPage(encoded, ordinal, page);
+            for (var at = 0; page.Length - at >= EncodedRecordBytes && !IsZero(page.AsSpan(at, 16)); at += EncodedRecordBytes)
+            {
+                ct.ThrowIfCancellationRequested();
+                var row = EncodedAt(page, at);
+                if (after is { } previous && row.EKey <= previous) continue;
+                if (rows.Count == limit) return new(Array.AsReadOnly(rows.ToArray()), true);
+                rows.Add(new(row.EKey, row.EncodedSize));
+            }
+        }
+        ct.ThrowIfCancellationRequested();
+        return new(Array.AsReadOnly(rows.ToArray()), false);
+    }
+
     private static EncodingEncoded EncodedAt(byte[] page, int at) =>
         new(new CdnKey(page.AsSpan(at, 16)), U40(page.AsSpan(at + 20)), (int)BinaryPrimitives.ReadUInt32BigEndian(page.AsSpan(at + 16)));
 

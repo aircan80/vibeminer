@@ -218,11 +218,14 @@ public sealed class BuildOpener : IBuilds
 
 /// <summary>An opened build over its parsed ENCODING, ROOT and archive locations. Read only after construction.</summary>
 internal sealed class OpenedBuild(BuildRef build, BuildMetadata metadata, CdnContext? cdn, EncodingTable encoding, RootTable root,
-    ArchiveLocations locations) : IBuild, ILedgerSource
+    ArchiveLocations locations) : IBuild, ILedgerSource, IEncodingRowSource
 {
     private readonly Lazy<ObjectLedger> ledger = new(() => ObjectLedger.From(encoding), LazyThreadSafetyMode.ExecutionAndPublication);
 
     public BuildRef Build { get; } = build;
+    public CdnKey EncodingCKey => Metadata.EncodingCKey;
+    public long EncodedCount => encoding.EncodedCount;
+    public IEncodingRowLease OpenEncodingRows() => new OpenedEncodingRows(this, encoding);
     public BuildMetadata Metadata { get; } = metadata;
     public CdnContext? Cdn { get; } = cdn;
     /// <summary>The build's object ledger, built from ENCODING on first use.</summary>

@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup><ItemGroup>
   <!-- Cross-layer integration: layer 2 object access over the real layer 1 store and CDN client, and layers 3-5 over the real stores (#195), against the fake CDN. Never the network. -->
   <ProjectReference Include="../../../src/backend/VibeMiner.ObjectAccess/VibeMiner.ObjectAccess.csproj" />
+  <!-- Explicit headless ENCODING inventory composition (#224), with managed row-source/port fakes. -->
+  <ProjectReference Include="../../../src/backend/VibeMiner.Composition/VibeMiner.Composition.csproj" />
+  <ProjectReference Include="../VibeMiner.Builds.Testing/VibeMiner.Builds.Testing.csproj" />
+  <Compile Include="../VibeMiner.Builds.Tests/EncodingInventoryTestKit.cs" Link="EncodingInventoryTestKit.cs" />
+  <Compile Include="../VibeMiner.Builds.Tests/EncodingInventoryStoreContract.cs" Link="EncodingInventoryStoreContract.cs" />
   <!-- The reset chain (#195): layers 3-5 and the generated store over the real layer 1 stores. -->
   <ProjectReference Include="../../../src/backend/VibeMiner.Formats/VibeMiner.Formats.csproj" />
   <ProjectReference Include="../VibeMiner.Cdn.Testing/VibeMiner.Cdn.Testing.csproj" />

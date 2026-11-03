@@ -15,7 +15,7 @@ public sealed partial class BuildRegistry
     {
         if (id is not { Length: 64 } || !id.All(c => char.IsAsciiDigit(c) || c is >= 'a' and <= 'f')) throw Invalid("A build id is 64 lowercase hexadecimal digits.");
     }
-    private static BuildIdentity Identity(BuildIdentity identity)
+    internal static BuildIdentity Identity(BuildIdentity identity)
     {
         if (identity is null || identity.Fields is null) throw Invalid("A canonical identity is required.");
         Id(identity.Id); Text(identity.Canonical, BuildRegistryLimits.MaxIdentityBytes, "canonical identity");

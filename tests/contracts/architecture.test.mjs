@@ -102,8 +102,8 @@ test('backend projects reference only their own code layer or lower ones', async
   // for the Host's build catalog (#205).
   assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Backend.Tests/VibeMiner.Backend.Tests.csproj')).sort(), ['Builds.Testing', 'Host', 'Infrastructure', 'ObjectAccess.Testing'],
     'Backend.Tests references only the Host, Infrastructure and the layer 2 and 3 fakes');
-  // Storage.IntegrationTests drives real layers 1-5 (D137, #195) against the fakes, never a legacy project or the CLI.
+  // Storage.IntegrationTests drives real layers 1-5 and explicit headless Composition (#224), never legacy projects or the CLI.
   assert.deepEqual((await referencesOf('tests/backend/VibeMiner.Storage.IntegrationTests/VibeMiner.Storage.IntegrationTests.csproj')).sort(),
-    ['Cdn.Testing', 'Files.Testing', 'Formats', 'Generated.Testing', 'ObjectAccess', 'ObjectAccess.Testing', 'Objects.CrashWriter', 'Objects.Testing'],
-    'Storage.IntegrationTests references only layers 1-5 and their fakes');
+    ['Builds.Testing', 'Cdn.Testing', 'Composition', 'Files.Testing', 'Formats', 'Generated.Testing', 'ObjectAccess', 'ObjectAccess.Testing', 'Objects.CrashWriter', 'Objects.Testing'],
+    'Storage.IntegrationTests references layers 1-5, their fakes and explicit Composition');
 });
