@@ -28,7 +28,7 @@ public abstract class GeneratedStoreContractTests : IAsyncLifetime
         return b;
     }
 
-    private static GeneratedPut Put(int seed, int length = 1000) => new(Key(seed), Bytes(seed, length));
+    protected static GeneratedPut Put(int seed, int length = 1000) => new(Key(seed), Bytes(seed, length));
 
     [Fact]
     public async Task AnUnknownKeyIsAbsentEverywhere()
@@ -124,22 +124,6 @@ public abstract class GeneratedStoreContractTests : IAsyncLifetime
         Assert.Equal(new byte[200_000], destination);
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () => await Store.ReadRangeAsync(Key(7), 199_999, new byte[2]));
         Assert.True(await Store.HasAsync(Key(7)));
-        await Store.DeleteAsync([Key(7)]);
-        Assert.Equal([GeneratedPutOutcome.Stored], await Store.PutAsync([new GeneratedPut(Key(7), bytes)]));
-        Assert.Equal(bytes, (await Store.ReadAsync(Key(7))).Bytes);
-    }
-
-    [Fact]
-    public async Task DeleteRemovesIgnoresUnknownKeysAndAllowsAPutAgain()
-    {
-        await Store.PutAsync([Put(1), Put(2)]);
-        await Store.DeleteAsync([Key(1), Key(3)]);
-        Assert.False(await Store.HasAsync(Key(1)));
-        Assert.Equal(GeneratedReadState.Absent, (await Store.ReadAsync(Key(1))).State);
-        Assert.True(await Store.HasAsync(Key(2)));
-        await Store.DeleteAsync([]);
-        Assert.Equal([GeneratedPutOutcome.Stored], await Store.PutAsync([Put(1)]));
-        Assert.Equal(Bytes(1, 1000), (await Store.ReadAsync(Key(1))).Bytes);
     }
 
     [Theory]
@@ -186,8 +170,54 @@ public abstract class GeneratedStoreContractTests : IAsyncLifetime
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await Store.ReadAsync(Key(1), cts.Token));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await Store.ReadRangeAsync(Key(1), 0, new byte[1], cts.Token));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Store.PutAsync([Put(2)], cts.Token));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Store.DeleteAsync([Key(1)], cts.Token));
         Assert.False(await Store.HasAsync(Key(2)));
+        Assert.True(await Store.HasAsync(Key(1)));
+    }
+
+    [Fact]
+    public async Task ConcurrentPutsAndReadsAgree()
+    {
+        await Task.WhenAll(Enumerable.Range(0, 16).Select(i => Store.PutAsync([Put(i), Put(100 + i % 4)])));
+        var reads = await Task.WhenAll(Enumerable.Range(0, 16).Select(async i => (await Store.ReadAsync(Key(i))).Bytes));
+        for (var i = 0; i < 16; i++) Assert.Equal(Bytes(i, 1000), reads[i]);
+        for (var i = 0; i < 4; i++) Assert.Equal(Bytes(100 + i, 1000), (await Store.ReadAsync(Key(100 + i))).Bytes);
+    }
+}
+
+/// <summary>The standalone/fake lifecycle contract; borrowed libraries explicitly refuse these operations.</summary>
+public abstract class GeneratedMutableStoreContractTests : GeneratedStoreContractTests
+{
+    [Fact]
+    public async Task DeleteRemovesIgnoresUnknownKeysAndAllowsAPutAgain()
+    {
+        await Store.PutAsync([Put(1), Put(2)]);
+        await Store.DeleteAsync([Key(1), Key(3)]);
+        Assert.False(await Store.HasAsync(Key(1)));
+        Assert.Equal(GeneratedReadState.Absent, (await Store.ReadAsync(Key(1))).State);
+        Assert.True(await Store.HasAsync(Key(2)));
+        await Store.DeleteAsync([]);
+        Assert.Equal([GeneratedPutOutcome.Stored], await Store.PutAsync([Put(1)]));
+        Assert.Equal(Bytes(1, 1000), (await Store.ReadAsync(Key(1))).Bytes);
+    }
+
+    [Fact]
+    public async Task DeletingADamagedObjectAllowsRepair()
+    {
+        var bytes = Bytes(7, 200_000);
+        await Store.PutAsync([new GeneratedPut(Key(7), bytes)]);
+        await DamageAsync(Key(7), bytes);
+        await Store.DeleteAsync([Key(7)]);
+        Assert.Equal([GeneratedPutOutcome.Stored], await Store.PutAsync([new GeneratedPut(Key(7), bytes)]));
+        Assert.Equal(bytes, (await Store.ReadAsync(Key(7))).Bytes);
+    }
+
+    [Fact]
+    public async Task ACanceledDeleteLeavesTheObjectPresent()
+    {
+        await Store.PutAsync([Put(1)]);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Store.DeleteAsync([Key(1)], cts.Token));
         Assert.True(await Store.HasAsync(Key(1)));
     }
 
@@ -202,17 +232,9 @@ public abstract class GeneratedStoreContractTests : IAsyncLifetime
         Assert.Equal(GeneratedReadState.Absent, (await Store.ReadAsync(Key(2))).State);
     }
 
-    [Fact]
-    public async Task ConcurrentPutsAndReadsAgree()
-    {
-        await Task.WhenAll(Enumerable.Range(0, 16).Select(i => Store.PutAsync([Put(i), Put(100 + i % 4)])));
-        var reads = await Task.WhenAll(Enumerable.Range(0, 16).Select(async i => (await Store.ReadAsync(Key(i))).Bytes));
-        for (var i = 0; i < 16; i++) Assert.Equal(Bytes(i, 1000), reads[i]);
-        for (var i = 0; i < 4; i++) Assert.Equal(Bytes(100 + i, 1000), (await Store.ReadAsync(Key(100 + i))).Bytes);
-    }
 }
 
-public sealed class GeneratedStoreContractOnRealStore : GeneratedStoreContractTests
+public sealed class GeneratedStoreContractOnRealStore : GeneratedMutableStoreContractTests
 {
     private readonly TempDirectory temp = new();
 
@@ -240,7 +262,7 @@ public sealed class GeneratedStoreContractOnRealStore : GeneratedStoreContractTe
     }
 }
 
-public sealed class GeneratedStoreContractOnFake : GeneratedStoreContractTests
+public sealed class GeneratedStoreContractOnFake : GeneratedMutableStoreContractTests
 {
     protected override Task<IGeneratedStore> CreateAsync() => Task.FromResult<IGeneratedStore>(new InMemoryGeneratedStore());
     protected override Task DamageAsync(GeneratedKey key, byte[] bytes) { ((InMemoryGeneratedStore)Store).Damage(key); return Task.CompletedTask; }

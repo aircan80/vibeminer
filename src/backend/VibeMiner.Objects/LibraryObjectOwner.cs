@@ -13,6 +13,11 @@ public sealed class LibraryObjectOwner : IObjectReader, IObjectWriter, IHistoryL
     private readonly LibraryClaim claim;
 
     internal LibraryObjectOwner(ObjectStore store, LibraryClaim claim) { this.store = store; this.claim = claim; }
+    /// <summary>The library folder this immutable view borrows.</summary>
+    public string Folder => store.Folder;
+    /// <summary>The role captured when the immutable view was created.</summary>
+    public LibraryObjectRole Role => claim.Role;
+
     public ValueTask<bool> HasAsync(ObjectKey key, CancellationToken ct = default) => store.HasAsync(key, ct);
     /// <summary>Whether this exact owner/scope/producer/role has a durable association with the stored key.</summary>
     public ValueTask<bool> OwnsAsync(ObjectKey key, CancellationToken ct = default) => store.OwnsAsync(claim, key, ct);

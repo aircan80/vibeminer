@@ -4,9 +4,10 @@ using System.Security.Cryptography;
 namespace VibeMiner.Generated;
 
 /// <summary>
-/// The generated store (D210): what layers 4-6 prepare, kept in packs of layer 1's format in their own folder and rebuilt from the
-/// object store when lost. Reset is to wipe it (not wired yet). Implementations: <c>GeneratedStore</c> and the in-memory fake in
-/// <c>VibeMiner.Generated.Testing</c>; one contract suite runs against both. Calls may run concurrently.
+/// What layers 4-6 prepare, kept in layer 1 packs. GeneratedStore opens a standalone generated folder or explicitly borrows
+/// an immutable Derived owner of a shared library. Only a standalone folder may be rebuilt by wiping it; a shared library's
+/// authoritative ownership must be preserved. The in-memory fake in VibeMiner.Generated.Testing shares the read/write contract.
+/// Calls may run concurrently.
 /// </summary>
 public interface IGeneratedStore
 {
@@ -28,12 +29,13 @@ public interface IGeneratedStore
     /// </summary>
     Task<IReadOnlyList<GeneratedPutOutcome>> PutAsync(IReadOnlyList<GeneratedPut> batch, CancellationToken cancellationToken = default);
 
-    /// <summary>Removes objects; a key that isn't stored is ignored.</summary>
+    /// <summary>Removes objects; a key that isn't stored is ignored. Borrowed library facades throw GeneratedStoreCodes.LibraryOperationUnsupported.</summary>
     Task DeleteAsync(IReadOnlyList<GeneratedKey> keys, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Reclaims the space of deleted objects: rewrites up to <paramref name="maxPacks"/> sealed packs whose dead share is at least
     /// <paramref name="minDeadFraction"/>. Live objects read the same before and after; bounded by <paramref name="maxPacks"/>.
+    /// Borrowed library facades throw GeneratedStoreCodes.LibraryOperationUnsupported.
     /// </summary>
     Task<GeneratedCompactReport> CompactAsync(double minDeadFraction = 0.25, int maxPacks = 1, CancellationToken cancellationToken = default);
 }
@@ -99,7 +101,7 @@ public enum GeneratedReadState
     Present,
     /// <summary>No committed object has the key.</summary>
     Absent,
-    /// <summary>The object is indexed but its bytes are damaged or gone. No bytes were returned; delete it and generate it again.</summary>
+    /// <summary>The object is indexed but its bytes are damaged or gone. No bytes were returned. Standalone stores can delete it and generate it again; borrowed libraries cannot delete it.</summary>
     Corrupt,
 }
 
@@ -125,15 +127,17 @@ public static class GeneratedStoreCodes
     public const string Closed = "GENERATED_STORE_CLOSED";
     /// <summary>A call was over a fixed bound (<see cref="GeneratedLimits"/>), or an object was empty.</summary>
     public const string Limit = "GENERATED_STORE_LIMIT";
-    /// <summary>Generated data read back damaged or not in the shape its writer gave it. Delete it and generate it again.</summary>
+    /// <summary>Generated data read back damaged or not in the shape its writer gave it. Only standalone stores support deletion and regeneration.</summary>
     public const string Corrupt = "GENERATED_CORRUPT";
     /// <summary>Another writer holds the folder. Transient: try again later; never a reason to wipe the folder.</summary>
     public const string Busy = "GENERATED_STORE_BUSY";
     /// <summary>
     /// The folder holds a store this engine can't use (another kind, a newer format, an index its writer can't rebuild). Deleting the
-    /// folder and generating its contents again is the remedy.
+    /// standalone folder and generating its contents again is the remedy. Borrowed libraries must instead be preserved for repair.
     /// </summary>
     public const string Unusable = "GENERATED_STORE_UNUSABLE";
+    /// <summary>Borrowed libraries do not support deletion, compaction or owner-scoped statistics. Preserve the library and its ownership metadata.</summary>
+    public const string LibraryOperationUnsupported = "GENERATED_LIBRARY_OPERATION_UNSUPPORTED";
 }
 
 public sealed class GeneratedStoreException(string code, string message, Exception? inner = null) : Exception(message, inner)

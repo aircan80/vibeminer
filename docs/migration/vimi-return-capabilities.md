@@ -108,3 +108,10 @@ These sources are outside the current repository's official-CDN/WoWDBDefs/listfi
 | E02 | Engine adapters and existing desktop cutover — Delta | Java use-case contracts are behavioral reference only | Host/contracts and existing Electron adapters. Use bounded validated request/reply/progress and approved binary leases; preserve current desktop behavior. Retire legacy C# projects only after consumers move and equivalent behavior passes. New screen layouts are deferred. |
 
 Completion is capability-based, not class-count parity. Update acceptance evidence against actual C# tests and engine/CLI scenarios as slices land; an uncalled implementation or passing Java test does not complete a row. No authoritative mixed library, current C# profile or Java user profile may be opened for destructive migration without the owner's separate explicit instruction.
+
+## Delivered C# storage slices
+
+- **S02/S03/S06 — #213:** mixed kind 2 and immutable owner views; atomic durable location/membership publication, duplicate and cache-hit claims, authoritative-index refusal and committed-tail recovery. `LibraryStoreTests` uses authored temporary stores for mixed bytes, concurrent owners, reopen, malformed ownership, cancellation and simulated commit crashes. No app/profile adoption or Java-library compatibility is implied.
+- **S04 — #214:** `GeneratedStore.Borrow` reuses generated key/read/put and record-file encodings over one captured Derived owner. `GeneratedStoreContractOnBorrowedLibrary` shares the read/write contract; `BorrowedGeneratedStoreTests` adds ownership, first-committed bytes, concurrent sharing, cancellation between commits, lifecycle refusal, draining disposal and byte-identical synthetic record-file evidence. Delete, compaction and statistics refuse explicitly. Standalone/fake mutation contracts remain separate and intact. Generated consumers and app composition are not switched by this slice.
+
+These are implementation/acceptance references, not cross-runtime format, import or performance certifications. S05/S07 inventory/accounting and S08 preservation/import remain follow-ups.
