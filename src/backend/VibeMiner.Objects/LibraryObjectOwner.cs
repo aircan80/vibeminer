@@ -45,11 +45,12 @@ public sealed class LibraryObjectOwner : IObjectReader, IObjectWriter, IHistoryL
         PutAsync(HistoryRecordFormat.Objects(observation), commitNow: true, ct);
     public ValueTask<IReadOnlyList<HistoryEntry>> ReadHistoryAsync(HistoryQuery query, CancellationToken ct = default) => store.ReadHistoryAsync(query, ct);
 
-    // Physical removal and owner-bound staging require their own lifecycle contracts; do not expose ownerless fallbacks.
+    // Physical removal requires its own lifecycle contract; never fall back to ownerless deletion.
     public Task<IReadOnlyList<DeleteResult>> DeleteAsync(IReadOnlyList<ObjectKey> keys, CancellationToken ct = default) =>
         throw ObjectStore.LibraryUnsupported();
+    /// <summary>Stages an encoded object with this immutable claim; only the owner that commits gains physical membership.</summary>
     public Task<IObjectStaging> StageAsync(ObjectKey key, long declaredLength, ObjectOrigin origin = ObjectOrigin.Cdn, CancellationToken ct = default) =>
-        throw ObjectStore.LibraryUnsupported();
+        store.StageOwnedAsync(claim, key, declaredLength, origin, ct);
 }
 
 internal sealed record LibraryClaim

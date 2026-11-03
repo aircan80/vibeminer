@@ -24,9 +24,11 @@ public sealed partial class ObjectStore
     {
         public readonly ObjectKey[] Keys = keys; public readonly DeleteResult[] Results = results;
     }
-    private sealed class StagedRequest(ObjectKey key, string path, long length, ObjectOrigin origin) : Request
+    private sealed class StagedRequest(ObjectKey key, string path, long length, ObjectOrigin origin, LibraryClaim? claim, CancellationToken ct) : Request
     {
         public readonly ObjectKey Key = key; public readonly string Path = path; public readonly long Length = length; public readonly ObjectOrigin Origin = origin;
+        public readonly LibraryClaim? Claim = claim;
+        public readonly CancellationToken Token = claim is null ? CancellationToken.None : ct;
         public PutResult? Result;
     }
     private sealed class MaintenanceRequest(Func<Task<object?>> work) : Request
@@ -453,10 +455,11 @@ public sealed partial class ObjectStore
         return request.Results;
     }
 
-    internal async Task<PutResult> CommitStagedAsync(ObjectKey key, string path, long length, ObjectOrigin origin, CancellationToken ct)
+    internal async Task<PutResult> CommitStagedAsync(ObjectKey key, string path, long length, ObjectOrigin origin, LibraryClaim? claim, CancellationToken ct)
     {
         EnsureWriter();
-        var request = new StagedRequest(key, path, length, origin);
+        if (Kind == ObjectStoreKind.Library && claim is null) throw LibraryUnsupported();
+        var request = new StagedRequest(key, path, length, origin, claim, ct);
         await Enqueue(request, ct);
         await request.Done.Task;
         return request.Result!;
@@ -901,6 +904,7 @@ public sealed partial class ObjectStore
     {
         requests?.Writer.TryComplete();
         if (loop is not null) await loop;
+        await DrainStagingOpensAsync();
         foreach (var s in stagings.Values.Where(v => v is not null).ToList()) await s.DisposeAsync();
         if (wconn is not null && fault is null && !killed)
         {

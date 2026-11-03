@@ -22,7 +22,10 @@ public interface IObjectWriter
     Task<IObjectStaging> StageAsync(ObjectKey key, long declaredLength, ObjectOrigin origin = ObjectOrigin.Cdn, CancellationToken ct = default);
 }
 
-/// <summary>One large object arriving in pieces. Disposing keeps the proven bytes for a later resume; Abandon removes them.</summary>
+/// <summary>
+/// One large object arriving in pieces. Calls on one staging are sequential. Disposing keeps bytes for a later proven resume;
+/// Abandon removes only this unpublished staging. A borrowed library staging captures its owner's immutable claim and never closes the library.
+/// </summary>
 public interface IObjectStaging : IAsyncDisposable
 {
     ObjectKey Key { get; }
@@ -31,7 +34,11 @@ public interface IObjectStaging : IAsyncDisposable
     long Length { get; }
     /// <summary>Appends the next bytes; a failed chunk check cuts back to the proven bytes and throws OBJECT_STAGING_REJECTED.</summary>
     Task AppendAsync(ReadOnlyMemory<byte> bytes, CancellationToken ct = default);
-    /// <summary>Verifies the whole object again, stores it and removes the staged bytes.</summary>
+    /// <summary>
+    /// Verifies the whole object again, stores it and removes the staged bytes. Pre-admission cancellation throws; a library copy
+    /// canceled before publication returns Canceled and retains resumable staging. Once its publication boundary is entered,
+    /// the real committed outcome completes despite cancellation. Legacy CDN accepted copies retain their existing completion semantics.
+    /// </summary>
     Task<PutResult> CommitAsync(CancellationToken ct = default);
     ValueTask AbandonAsync();
 }

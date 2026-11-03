@@ -96,6 +96,7 @@ internal enum StorePoint
     CompactOldDeleted,    // old file deleted, its row not yet removed
     RebuildBuilt,         // rebuilt index complete, not yet swapped in
     RebuildSwapped,
+    StagedBeforePublish,    // verified library staged copy (or duplicate claim) before its final cancellation/publication fence
     StagingAppended,      // staged bytes written to the staging file
     IndexMeasuring,       // full index check: after the store row is pinned, before the measure
 }

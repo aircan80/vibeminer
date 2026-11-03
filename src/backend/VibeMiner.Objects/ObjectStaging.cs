@@ -14,12 +14,14 @@ namespace VibeMiner.Objects;
 internal sealed class ObjectStaging : IObjectStaging
 {
     private readonly ObjectStore store;
+    private readonly LibraryClaim? claim;
     private SafeFileHandle? handle;
     private BlteVerifier verifier;
     private bool broken, finished;
 
-    internal ObjectStaging(ObjectStore store, ObjectKey key, long declared, ObjectOrigin origin, string path, SafeFileHandle handle, BlteVerifier verifier, long length)
+    internal ObjectStaging(ObjectStore store, ObjectKey key, long declared, ObjectOrigin origin, string path, SafeFileHandle handle, BlteVerifier verifier, long length, LibraryClaim? claim)
     {
+        this.claim = claim;
         this.store = store; Key = key; DeclaredLength = declared; Origin = origin; Path = path; this.handle = handle; this.verifier = verifier; Length = length;
     }
 
@@ -53,16 +55,17 @@ internal sealed class ObjectStaging : IObjectStaging
     {
         ObjectDisposedException.ThrowIf(handle is null || finished, this);
         if (broken || Length != DeclaredLength) throw new InvalidOperationException("Only a complete, unrefused staging can be committed.");
+        ct.ThrowIfCancellationRequested();
         try { verifier.Complete(); }
         catch (VerificationFailure f) { await AbandonAsync(); return new(Key, PutOutcome.Refused, f.Code, f.Message); }
         handle.Dispose(); handle = null;
         try
         {
-            var result = await store.CommitStagedAsync(Key, Path, DeclaredLength, Origin, ct);
+            var result = await store.CommitStagedAsync(Key, Path, DeclaredLength, Origin, claim, ct);
             if (result.Outcome != PutOutcome.Canceled) File.Delete(Path);
             return result;
         }
-        finally { finished = true; store.ReleaseStaging(this); }
+        finally { finished = true; store.ReleaseStaging(this); verifier.Dispose(); }
     }
 
     /// <summary>Removes the staged bytes for good.</summary>
@@ -90,6 +93,8 @@ public sealed partial class ObjectStore
 {
     private readonly ConcurrentDictionary<ObjectKey, ObjectStaging> stagings = new();
     private long stagingBytes;
+    private int stagingOpens;
+    private TaskCompletionSource? stagingOpensDrained;
 
     /// <summary>
     /// Starts or resumes staging an encoded object larger than a Put can hold. At most <see cref="ObjectStoreOptions.MaxStagings"/>
@@ -99,26 +104,38 @@ public sealed partial class ObjectStore
     {
         EnsureWriter();
         if (Kind == ObjectStoreKind.Library) throw LibraryUnsupported();
+        return await StageOwnedAsync(null, key, declaredLength, origin, ct);
+    }
+
+    internal async Task<IObjectStaging> StageOwnedAsync(LibraryClaim? claim, ObjectKey key, long declaredLength, ObjectOrigin origin, CancellationToken ct)
+    {
+        EnsureWriter();
+        ct.ThrowIfCancellationRequested();
+        if (Kind == ObjectStoreKind.Library && claim is null) throw LibraryUnsupported();
         if (Kind == ObjectStoreKind.Generated) throw new ArgumentException("A generated store has no staging; Put objects whole.", nameof(key));
+        if (!Enum.IsDefined(origin)) throw new ArgumentOutOfRangeException(nameof(origin));
         if (key.Type != ObjectKeyType.Encoded) throw new ArgumentException("Only encoded objects are staged; Put the others whole.", nameof(key));
         if (ObjectFormats.Refusal(key, declaredLength) is { } refusal) throw new ArgumentException($"Can't stage this object ({refusal}).", nameof(key));
         lock (stagings)
         {
+            EnsureWriter();
             if (stagings.ContainsKey(key)) throw new InvalidOperationException($"{key} is already being staged.");
             if (stagings.Count >= options.MaxStagings || stagingBytes + declaredLength > options.MaxStagingBytes)
                 throw new ObjectStoreException(ObjectStoreCodes.Limit, "The staging budget is in use; finish or dispose another staging first.");
             stagingBytes += declaredLength;
+            stagingOpens++;
             stagings[key] = null!;  // reserved
         }
         try
         {
             var path = Path.Combine(stagingDirectory, $"{(byte)key.Type:x2}{key.Namespace:x2}{key.KeyHex}.part");
             var h = File.OpenHandle(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, FileOptions.Asynchronous);
+            BlteVerifier? verifier = null;
             try
             {
                 var length = RandomAccess.GetLength(h);
                 // Trust only what chunk checks prove again: anything after the last whole chunk may be unsynced garbage.
-                var verifier = new BlteVerifier(key, declaredLength);
+                verifier = new BlteVerifier(key, declaredLength);
                 long keep = 0;
                 if (length > 0 && length <= declaredLength)
                 {
@@ -129,13 +146,32 @@ public sealed partial class ObjectStore
                     await FeedAsync(h, verifier, keep, ct);
                 }
                 if (keep != length) RandomAccess.SetLength(h, keep);
-                var staging = new ObjectStaging(this, key, declaredLength, origin, path, h, verifier, keep);
-                stagings[key] = staging;
+                var staging = new ObjectStaging(this, key, declaredLength, origin, path, h, verifier, keep, claim);
+                lock (stagings) { EnsureWriter(); stagings[key] = staging; }
+                verifier = null; // transferred to the returned staging
                 return staging;
             }
-            catch { h.Dispose(); throw; }
+            catch { verifier?.Dispose(); h.Dispose(); throw; }
         }
         catch { lock (stagings) { stagings.TryRemove(key, out _); stagingBytes -= declaredLength; } throw; }
+        finally
+        {
+            lock (stagings)
+            {
+                stagingOpens--;
+                if (stagingOpens == 0) stagingOpensDrained?.TrySetResult();
+            }
+        }
+    }
+
+    private Task DrainStagingOpensAsync()
+    {
+        lock (stagings)
+        {
+            if (stagingOpens == 0) return Task.CompletedTask;
+            stagingOpensDrained ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
+            return stagingOpensDrained.Task;
+        }
     }
 
     /// <summary>Feeds the first <paramref name="upTo"/> staged bytes to a verifier; stops quietly at the first failed check.</summary>
@@ -163,7 +199,20 @@ public sealed partial class ObjectStore
     /// <summary>Copies a staged file into the pack in one pass that verifies the key type, hashes and builds the block table.</summary>
     private async Task ProcessStagedAsync(StagedRequest r)
     {
-        if (Present(r.Key)) { r.Result = new(r.Key, PutOutcome.AlreadyPresent); return; }
+        if (r.Token.IsCancellationRequested) { r.Result = new(r.Key, PutOutcome.Canceled); return; }
+        if (Present(r.Key))
+        {
+            if (r.Claim is not null)
+            {
+                // A different request may only have appended this key. Publish that value first, then durably attach this owner.
+                if (pending.Count > 0) await CommitAsync();
+                At(StorePoint.StagedBeforePublish);
+                if (r.Token.IsCancellationRequested) { r.Result = new(r.Key, PutOutcome.Canceled); return; }
+                Durably(tx => LibraryOwnership.Attach(wconn!, tx, r.Claim, r.Key));
+            }
+            r.Result = new(r.Key, PutOutcome.AlreadyPresent);
+            return;
+        }
         var size = PackFormat.EntryBytes(r.Length);
         await EnsureRoomAsync(size);
         var offset = activeLength;
@@ -172,9 +221,11 @@ public sealed partial class ObjectStore
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         using var verifier = ObjectVerifier.For(r.Key, r.Length);
         var buffer = ArrayPool<byte>.Shared.Rent(1 << 20);
-        At(StorePoint.EntryStarted);
+        byte[] digest;
         try
         {
+            r.Token.ThrowIfCancellationRequested();
+            At(StorePoint.EntryStarted);
             SafeFileHandle source;
             try { source = File.OpenHandle(r.Path, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.Asynchronous | FileOptions.SequentialScan); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { throw new VerificationFailure(ObjectStoreCodes.StagingRejected, $"The staged file can't be read: {e.Message}"); }
@@ -182,9 +233,10 @@ public sealed partial class ObjectStore
             if (RandomAccess.GetLength(source) != r.Length) throw new VerificationFailure(ObjectRefusalCodes.SizeMismatch, "The staged file changed length.");
             for (long at = 0; at < r.Length;)
             {
+                r.Token.ThrowIfCancellationRequested();
                 var n = (int)Math.Min(1 << 20, r.Length - at);
                 int got;
-                try { got = await PackFiles.ReadFullyAsync(source, buffer.AsMemory(0, n), at, default); }
+                try { got = await PackFiles.ReadFullyAsync(source, buffer.AsMemory(0, n), at, r.Token); }
                 catch (IOException e) { throw new VerificationFailure(ObjectStoreCodes.StagingRejected, $"The staged file can't be read: {e.Message}"); }
                 if (got != n) throw new VerificationFailure(ObjectRefusalCodes.SizeMismatch, "The staged file is short.");
                 var span = buffer.AsSpan(0, n);
@@ -192,11 +244,27 @@ public sealed partial class ObjectStore
                 sha.AppendData(span);
                 for (var b = 0; b < n; b += PackFormat.BlockBytes)
                     BinaryPrimitives.WriteUInt32LittleEndian(table.AsSpan((int)((at + b) >> PackFormat.BlockShift) * 4), PackFormat.Crc32C(span.Slice(b, Math.Min(PackFormat.BlockBytes, n - b))));
-                await RandomAccess.WriteAsync(active!, buffer.AsMemory(0, n), payloadAt + at);
+                await RandomAccess.WriteAsync(active!, buffer.AsMemory(0, n), payloadAt + at, r.Token);
                 if (at == 0) At(StorePoint.EntryHalfWritten);
                 at += n;
             }
+            r.Token.ThrowIfCancellationRequested();
             verifier.Complete();
+            digest = sha.GetHashAndReset();
+            var header = new byte[PackFormat.EntryHeaderBytes];
+            PackFormat.WriteEntryHeader(header, new EntryHeader(r.Key, r.Length, digest, NowMs, r.Origin, nextSeq, false));
+            await RandomAccess.WriteAsync(active!, table, payloadAt + r.Length, r.Token);
+            await RandomAccess.WriteAsync(active!, header, offset, r.Token);
+            At(StorePoint.EntryWritten);
+            if (r.Claim is not null) At(StorePoint.StagedBeforePublish);
+            r.Token.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException) when (r.Claim is not null && r.Token.IsCancellationRequested)
+        {
+            // activeLength still names this copy's start, including any earlier pending entries. Never cut back to committedLength.
+            RandomAccess.SetLength(active!, offset);
+            r.Result = new(r.Key, PutOutcome.Canceled);
+            return;
         }
         catch (VerificationFailure f)
         {
@@ -206,14 +274,10 @@ public sealed partial class ObjectStore
             return;
         }
         finally { ArrayPool<byte>.Shared.Return(buffer); }
-        var digest = sha.GetHashAndReset();
-        var header = new byte[PackFormat.EntryHeaderBytes];
-        PackFormat.WriteEntryHeader(header, new EntryHeader(r.Key, r.Length, digest, NowMs, r.Origin, nextSeq++, false));
-        await RandomAccess.WriteAsync(active!, table, payloadAt + r.Length);
-        await RandomAccess.WriteAsync(active!, header, offset);
-        At(StorePoint.EntryWritten);
+        // The publication boundary: from this point cancellation cannot describe a committed value as rolled back.
+        nextSeq++;
         activeLength += size;
-        AddPending(new Pending { Key = r.Key, Offset = offset, Length = r.Length, Sha256 = digest, Owner = r }, size);
+        AddPending(new Pending { Key = r.Key, Offset = offset, Length = r.Length, Sha256 = digest, Owner = r, Claim = r.Claim }, size);
         r.Result = new(r.Key, PutOutcome.Stored);
         await CommitAsync();
     }

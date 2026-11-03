@@ -110,8 +110,10 @@ public sealed class ObjectStoreStagingTests
         await Assert.ThrowsAsync<ArgumentException>(() => store.StageAsync(Synthetic.Headerless(9).Key, (512L << 20) + 1));
     }
 
-    [Fact, Trait("Speed", "Slow")]
-    public async Task A512MiBObjectStagesCommitsAndReadsByRange()
+    [Theory, Trait("Speed", "Slow")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A512MiBObjectStagesCommitsAndReadsByRange(bool mixedLibrary)
     {
         using var t = new TempDirectory();
         var dir = StoreDir(t);
@@ -130,13 +132,15 @@ public sealed class ObjectStoreStagingTests
             MD5.HashData(Chunk(i)).CopyTo(head, 12 + i * 24 + 8);
         }
         var key = new ObjectKey(ObjectKeyType.Encoded, MD5.HashData(head));
-        await using var store = await ObjectStore.OpenAsync(dir, Quick);
-        await using (var s = await store.StageAsync(key, total))
+        await using var store = mixedLibrary ? await ObjectStore.OpenLibraryAsync(dir, Quick) : await ObjectStore.OpenAsync(dir, Quick);
+        var owner = mixedLibrary ? store.ForOwner("large", LibraryOwnerScope.Build, "streaming", LibraryObjectRole.Original) : null;
+        IObjectWriter writer = owner is null ? store : owner;
+        await using (var s = await writer.StageAsync(key, total))
         {
             await s.AppendAsync(head);
             for (var i = 0; i < count / 2; i++) await s.AppendAsync(Chunk(i));
         }
-        await using (var s = await store.StageAsync(key, total))
+        await using (var s = await writer.StageAsync(key, total))
         {
             Assert.Equal(header + sizes.Take(count / 2).Sum(x => (long)x), s.Length);
             for (var i = count / 2; i < count; i++) await s.AppendAsync(Chunk(i));
@@ -152,5 +156,6 @@ public sealed class ObjectStoreStagingTests
         Assert.Equal(ReadState.Present, (await store.ReadRangeAsync(key, at, middle)).State);
         Assert.Equal(Chunk(300).AsSpan(0, 100).ToArray(), middle);
         Assert.Equal(0, (await store.VerifyAsync()).CorruptCount);
+        if (owner is not null) Assert.True(await owner.OwnsAsync(key));
     }
 }

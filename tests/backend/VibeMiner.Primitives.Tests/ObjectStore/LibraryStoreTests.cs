@@ -153,7 +153,6 @@ public sealed class LibraryStoreTests
         Assert.Equal(ObjectStoreCodes.LibraryOperationUnsupported, (await Assert.ThrowsAsync<ObjectStoreException>(() => store.DeleteAsync([item.Key]))).Code);
         Assert.Equal(ObjectStoreCodes.LibraryOperationUnsupported, (await Assert.ThrowsAsync<ObjectStoreException>(() => owner.DeleteAsync([item.Key]))).Code);
         Assert.Equal(ObjectStoreCodes.LibraryOperationUnsupported, (await Assert.ThrowsAsync<ObjectStoreException>(() => store.StageAsync(item.Key, item.DeclaredLength))).Code);
-        Assert.Equal(ObjectStoreCodes.LibraryOperationUnsupported, (await Assert.ThrowsAsync<ObjectStoreException>(() => owner.StageAsync(item.Key, item.DeclaredLength))).Code);
         Assert.Equal(ObjectStoreCodes.LibraryOperationUnsupported, (await Assert.ThrowsAsync<ObjectStoreException>(() => store.ScanAsync())).Code);
         Assert.Equal(ObjectStoreCodes.LibraryOperationUnsupported, (await Assert.ThrowsAsync<ObjectStoreException>(() => store.CompactAsync())).Code);
         Assert.Equal(ReadState.Present, (await store.ReadAsync(item.Key)).State);
