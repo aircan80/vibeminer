@@ -441,10 +441,25 @@ public sealed class SettingsTests
     {
         using var directory = new TempDirectory(); Directory.CreateDirectory(directory.Path);
         await File.WriteAllBytesAsync(Path.Combine(directory.Path, "small"), new byte[5]);
-        // The host runs each request inline until its first await, so a walk that starts synchronously stalls the dispatch loop.
-        var walk = new DataDirectoryMeasurer(directory.Path).MeasureAsync(CancellationToken.None);
-        Assert.False(walk.IsCompleted);
-        Assert.Equal(5, (await walk).Bytes);
+        // Hold Task.Yield's posted continuation: a thread-pool continuation can otherwise finish before IsCompleted is checked.
+        var context = new QueuedMeasurementContext();
+        var previous = SynchronizationContext.Current;
+        Task<StorageMeasurement> walk;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+            walk = new DataDirectoryMeasurer(directory.Path).MeasureAsync(CancellationToken.None);
+            Assert.Equal(1, context.Pending);
+            Assert.False(walk.IsCompleted);
+            // The first batch must start after the caller regains control, so it must include this later file.
+            File.WriteAllBytes(Path.Combine(directory.Path, "after-yield"), new byte[7]);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+            context.Drain();
+        }
+        Assert.Equal(12, (await walk).Bytes);
     }
 
     [Fact]
@@ -563,6 +578,21 @@ public sealed class SettingsTests
         await completion.WaitAsync(TimeSpan.FromSeconds(10));
         return replies;
     }
+    private sealed class QueuedMeasurementContext : SynchronizationContext
+    {
+        private readonly Queue<(SendOrPostCallback Callback, object? State)> pending = new();
+        public int Pending => pending.Count;
+        public override void Post(SendOrPostCallback callback, object? state) => pending.Enqueue((callback, state));
+
+        public void Drain()
+        {
+            var previous = Current;
+            SetSynchronizationContext(this);
+            try { while (pending.TryDequeue(out var work)) work.Callback(work.State); }
+            finally { SetSynchronizationContext(previous); }
+        }
+    }
+
     private sealed class SlowMeasurer(string location) : IStorageMeasurer
     {
         public string Location { get; } = location;
