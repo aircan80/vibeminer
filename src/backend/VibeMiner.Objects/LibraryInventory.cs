@@ -49,6 +49,8 @@ internal sealed class LibraryInventory(ObjectStore store, LibraryClaim claim) : 
         return store.LookupInventoryAsync(claim, key, ct);
     }
 
+    public ValueTask<LibraryInventoryMeasurement> MeasureAsync(CancellationToken ct = default) => store.MeasureInventoryAsync(claim, ct);
+
     public ValueTask<LibraryInventoryPage> ReadPageAsync(int limit = 1024, LibraryInventoryCursor? after = null, CancellationToken ct = default)
     {
         if (limit is < 1 or > 1024) throw new ArgumentOutOfRangeException(nameof(limit));
@@ -255,6 +257,52 @@ public sealed partial class ObjectStore
             var more = keys.Count == state.limit && rows.Read();
             return new LibraryInventoryPage(generation, keys,
                 more ? new LibraryInventoryCursor(generation.Value, keys[^1]) { Binding = state.binding } : null);
+        }), ct);
+    }
+
+    internal ValueTask<LibraryInventoryMeasurement> MeasureInventoryAsync(LibraryClaim claim, CancellationToken ct)
+    {
+        ThrowIfClosed();
+        return readers.Use(claim, (c, _, identity) => InventoryRead(c, ct, tx =>
+        {
+            var generation = LibraryInventoryMetadata.Active(c, tx, identity);
+            // Active's SELECT pins both inventory and object-index reads, before any concurrent publication/acquisition.
+            At(StorePoint.InventoryMeasureSnapshot);
+            ct.ThrowIfCancellationRequested();
+            if (generation is null) return new LibraryInventoryMeasurement(null, null, null, null, null);
+            long recordedCount;
+            using (var metadata = c.CreateCommand())
+            {
+                metadata.Transaction = tx;
+                metadata.CommandText = "SELECT key_count FROM library_inventory_generation WHERE id=$g AND state=1";
+                metadata.Parameters.AddWithValue("$g", generation.Value);
+                if (metadata.ExecuteScalar() is not long count || count < 0)
+                    throw new InvalidOperationException("The active inventory generation or its committed key count is unreadable.");
+                recordedCount = count;
+            }
+            using var cmd = c.CreateCommand(); cmd.Transaction = tx;
+            cmd.CommandText = """
+                SELECT o.k IS NOT NULL,o.length FROM library_inventory_key k
+                LEFT JOIN objects o ON o.k=k.k WHERE k.generation=$g
+                """;
+            cmd.Parameters.AddWithValue("$g", generation.Value);
+            long expected = 0, present = 0, bytes = 0;
+            using var rows = cmd.ExecuteReader();
+            while (rows.Read())
+            {
+                At(StorePoint.InventoryMeasureRow);
+                ct.ThrowIfCancellationRequested();
+                expected = checked(expected + 1);
+                if (rows.GetInt64(0) == 0) continue;
+                if (rows.GetValue(1) is not long length || length <= 0)
+                    throw new InvalidOperationException("An expected object's indexed payload length is unreadable.");
+                present = checked(present + 1);
+                bytes = checked(bytes + length);
+            }
+            ct.ThrowIfCancellationRequested();
+            if (expected != recordedCount)
+                throw new InvalidOperationException("The active inventory's keys do not match its committed key count.");
+            return new LibraryInventoryMeasurement(generation, expected, present, checked(expected - present), bytes);
         }), ct);
     }
 

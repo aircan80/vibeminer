@@ -8,6 +8,7 @@ public sealed class InMemoryLibraryInventories : IAsyncDisposable
     private readonly object gate = new();
     private readonly Dictionary<LibraryClaim, Identity> identities = [];
     private readonly Dictionary<long, Generation> generations = [];
+    private readonly Dictionary<ObjectKey, long> indexedObjects = [];
     private long next;
     private bool closed;
 
@@ -34,6 +35,23 @@ public sealed class InMemoryLibraryInventories : IAsyncDisposable
             if (!identities.TryGetValue(claim, out var identity)) identities.Add(claim, identity = new());
             return new View(this, identity);
         }
+    }
+
+    /// <summary>Tests only: records committed index presence/length without acquiring or storing payload bytes.</summary>
+    public void SetIndexedObject(ObjectKey key, long length)
+    {
+        lock (gate)
+        {
+            EnsureOpen(); ValidateKey(key);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(length);
+            indexedObjects[key] = length;
+        }
+    }
+
+    /// <summary>Tests only: removes committed index presence without changing any expected inventory.</summary>
+    public void RemoveIndexedObject(ObjectKey key)
+    {
+        lock (gate) { EnsureOpen(); ValidateKey(key); indexedObjects.Remove(key); }
     }
 
     public ValueTask DisposeAsync()
@@ -139,6 +157,33 @@ public sealed class InMemoryLibraryInventories : IAsyncDisposable
                 store.EnsureOpen(); ct.ThrowIfCancellationRequested(); ValidateKey(key);
                 return ValueTask.FromResult(new LibraryInventoryLookup(identity.Active,
                     identity.Active is { } id && store.generations[id].Keys.Contains(key)));
+            }
+        }
+
+        public ValueTask<LibraryInventoryMeasurement> MeasureAsync(CancellationToken ct = default)
+        {
+            lock (store.gate)
+            {
+                store.EnsureOpen(); ct.ThrowIfCancellationRequested();
+                if (identity.Active is not { } active) return ValueTask.FromResult(new LibraryInventoryMeasurement(null, null, null, null, null));
+                try
+                {
+                    long expected = 0, present = 0, bytes = 0;
+                    foreach (var key in store.generations[active].Keys)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        expected = checked(expected + 1);
+                        if (!store.indexedObjects.TryGetValue(key, out var length)) continue;
+                        present = checked(present + 1);
+                        bytes = checked(bytes + length);
+                    }
+                    ct.ThrowIfCancellationRequested();
+                    return ValueTask.FromResult(new LibraryInventoryMeasurement(active, expected, present, checked(expected - present), bytes));
+                }
+                catch (OverflowException e)
+                {
+                    throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable, "Indexed inventory measurement overflowed.", e);
+                }
             }
         }
 

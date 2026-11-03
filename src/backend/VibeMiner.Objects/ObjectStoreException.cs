@@ -68,6 +68,8 @@ internal sealed class SimulatedCrashException(StorePoint point) : Exception($"Si
 /// <summary>Points the fault hook can stop at. Each is a place where a real process kill can land.</summary>
 internal enum StorePoint
 {
+    InventoryMeasureSnapshot, // active generation read in the measurement's pinned snapshot
+    InventoryMeasureRow,      // one expected-key/object-index join row reached, before counting it
     InventoryStaged,       // staged keys committed, not active
     InventoryBeforePublish, // before the publication transaction
     InventoryInsidePublish, // active pointer switched, transaction not committed

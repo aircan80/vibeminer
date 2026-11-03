@@ -43,7 +43,11 @@ internal static class LibraryInventoryMetadata
     internal static long? Active(SqliteConnection c, SqliteTransaction tx, LibraryClaim claim)
     {
         using var cmd = Command(c, tx, claim, "SELECT active FROM library_inventory_identity WHERE owner=$o AND scope=$s AND producer=$p AND role=$r");
-        return cmd.ExecuteScalar() is long id ? id : null;
+        var active = cmd.ExecuteScalar();
+        if (active is null or DBNull) return null;
+        if (active is long id && id > 0) return id;
+        throw new ObjectStoreException(ObjectStoreCodes.IndexUnreadable,
+            "The authoritative inventory's active generation is malformed; preserve the library for repair.");
     }
 
     private static void CheckTotals(long count, long digest, long recordedCount, long recordedDigest)
